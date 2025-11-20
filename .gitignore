@@ -1,0 +1,206 @@
+# ====================
+# Python / Flask 后端
+# ====================
+
+# Python 虚拟环境
+backend/venv/
+backend/env/
+backend/.venv/
+venv/
+env/
+.venv/
+
+# Python 缓存文件
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Python 分发/打包
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+wheels/
+*.whl
+
+# Python 环境变量
+.env
+.env.local
+.env.*.local
+
+# Python 日志
+*.log
+backend/logs/
+logs/
+*.log.*
+
+# Python 临时文件
+*.tmp
+*.temp
+backend/temp/
+backend/downloads/
+temp/
+downloads/
+
+# Python 备份文件
+*.bak
+*.backup
+*.swp
+*.swo
+*~
+
+# ====================
+# Node.js / Electron 前端
+# ====================
+
+# Node 依赖
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# 构建产物
+dist/
+dist-electron/
+build/
+out/
+*.tsbuildinfo
+
+# Electron 构建产物
+electron/dist/
+electron/out/
+*.app
+*.dmg
+*.exe
+*.deb
+*.rpm
+*.pkg
+
+# ====================
+# TypeScript
+# ====================
+
+# TypeScript 编译输出
+*.js.map
+*.d.ts.map
+
+# ====================
+# IDE / 编辑器
+# ====================
+
+# VSCode
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# IntelliJ IDEA / WebStorm
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# ====================
+# 操作系统
+# ====================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# ====================
+# 配置文件（敏感信息）
+# ====================
+
+# 后端配置文件（如果包含敏感信息，取消注释）
+# backend/config.yaml
+
+# 环境变量文件
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# API 密钥和令牌
+*.key
+*.pem
+*.cert
+secrets/
+.secrets
+
+# ====================
+# 测试和覆盖率
+# ====================
+
+# 测试覆盖率
+coverage/
+*.lcov
+.nyc_output/
+
+# Jest
+.jest/
+
+# ====================
+# 其他
+# ====================
+
+# 临时文件
+*.tmp
+*.temp
+.cache/
+
+# 数据库文件（如果使用 SQLite）
+*.db
+*.sqlite
+*.sqlite3
+
+# 压缩文件
+*.zip
+*.tar
+*.tar.gz
+*.rar
+
+# 锁文件（可选，根据团队偏好决定是否提交）
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+
