@@ -600,31 +600,8 @@ const Workflow: React.FC = () => {
           componentMessageId = latestComponentMessage.id;
         }
         
-        // 添加提示消息给大模型（显示动画）
-        const instructionMessageId = `instruction-${Date.now()}`;
-        const instructionMessage: Message = {
-          id: instructionMessageId,
-          role: 'assistant',
-          content: '',
-          isThinking: true,
-        };
-        setMessages(prev => [...prev, instructionMessage]);
-        
-        // 更新提示消息内容（带动画效果）
-        setTimeout(() => {
-          setMessages(prev => prev.map(msg =>
-            msg.id === instructionMessageId
-              ? {
-                  ...msg,
-                  content: `📋 收到感知组件指令：${matchedComponent.name} (${matchedComponent.type === 'workflow' ? '工作流' : 'MCP服务器'})，正在执行该步骤...`,
-                  isThinking: false,
-                }
-              : msg
-          ));
-        }, 500);
-        
-        // 执行感知组件
-        await handleExecuteWorkflow(componentMessageId);
+        // 执行感知组件，传递用户输入
+        await handleExecuteWorkflow(componentMessageId, userInput, sessionId);
         
         // 清空已选择的组件（执行后清空，方便下次使用）
         setSelectedComponents([]);
@@ -1147,24 +1124,19 @@ const Workflow: React.FC = () => {
       // 添加到已选定的组件列表
       setSelectedComponents(prev => [...prev, component]);
       
-      // 如果是MCP服务器，自动激活它（添加到selectedMcpServerIds）
+      // 如果是MCP服务器，检查是否已连接
       if (component.type === 'mcp') {
-        // 确保MCP服务器已连接
-        if (connectedMcpServerIds.has(component.id)) {
-          setSelectedMcpServerIds(prev => {
-            const newSet = new Set(prev);
-            newSet.add(component.id);
-            return newSet;
-          });
-          console.log('[Workflow] Auto-activated MCP server:', component.name);
-          
-          // 如果是MCP，也在聊天框中添加感知元件消息（方便后续重放）
-          addWorkflowMessage(component);
-        } else {
-          console.warn('[Workflow] MCP server not connected, cannot activate:', component.name);
+        if (!connectedMcpServerIds.has(component.id)) {
+          console.warn('[Workflow] MCP server not connected:', component.name);
           alert(`MCP服务器 "${component.name}" 未连接，请先连接后再使用`);
+          // 移除未连接的组件
+          setSelectedComponents(prev => prev.filter(c => !(c.id === component.id && c.type === component.type)));
+          return;
         }
       }
+      
+      // 注意：感知元件消息会在发送消息时添加，方便在聊天框中展示执行过程和重放
+      console.log('[Workflow] Selected component:', component.name, component.type);
     }
     
     // 移除输入框中的 @ 符号及其后的内容
@@ -1279,7 +1251,7 @@ const Workflow: React.FC = () => {
   };
   
   // 执行工作流
-  const handleExecuteWorkflow = async (messageId: string) => {
+  const handleExecuteWorkflow = async (messageId: string, providedInput?: string, sessionId?: string | null) => {
     const message = messages.find(m => m.id === messageId);
     if (!message || !message.workflowId) {
       console.error('[Workflow] Cannot execute workflow: message not found or missing workflowId', { messageId, message });
@@ -1293,22 +1265,32 @@ const Workflow: React.FC = () => {
       return;
     }
     
-    // 获取上一条消息作为输入（跳过其他工作流消息，找到用户或助手消息）
-    const messageIndex = messages.findIndex(m => m.id === messageId);
-    let previousMessage: Message | null = null;
-    for (let i = messageIndex - 1; i >= 0; i--) {
-      const msg = messages[i];
-      // 跳过工作流消息，找到用户或助手消息
-      if (msg.role === 'user' || msg.role === 'assistant') {
-        previousMessage = msg;
-        break;
-      }
-    }
-    
-    const input = previousMessage?.content || '';
+    // 优先使用提供的输入，否则从消息历史中查找
+    let input = providedInput || '';
     
     if (!input) {
-      alert('上一条消息为空，无法执行工作流');
+      // 获取上一条消息作为输入（跳过其他工作流消息，找到用户消息）
+      const messageIndex = messages.findIndex(m => m.id === messageId);
+      let previousUserMessage: Message | null = null;
+      for (let i = messageIndex - 1; i >= 0; i--) {
+        const msg = messages[i];
+        // 优先找用户消息，如果没有再找助手消息
+        if (msg.role === 'user') {
+          previousUserMessage = msg;
+          break;
+        } else if (msg.role === 'assistant' && !previousUserMessage) {
+          // 如果助手消息不是提示消息，也可以作为输入
+          if (!msg.content.includes('收到感知组件指令')) {
+            previousUserMessage = msg;
+          }
+        }
+      }
+      
+      input = previousUserMessage?.content || '';
+    }
+    
+    if (!input) {
+      alert('缺少输入内容，无法执行感知组件');
       return;
     }
     
@@ -1356,36 +1338,126 @@ const Workflow: React.FC = () => {
       
       addExecutionLog(`执行状态: ${execution.status}`);
       
-      // 更新消息状态和结果
-      const result = execution.result || execution.error_message || '执行完成';
+      // 获取完整结果
+      const fullResult = execution.result || execution.error_message || '执行完成';
       const status = execution.status === 'completed' ? 'completed' : 'error';
       
-      // 解析结果中的日志并添加到实时日志
-      if (result && typeof result === 'string') {
-        const logMatch = result.match(/执行日志:\s*\n(.*)/s);
+      // 从结果中分离出纯结果内容和日志
+      let resultContent = fullResult;
+      let componentLogs: string[] = [];
+      
+      if (fullResult && typeof fullResult === 'string') {
+        // 查找"执行日志:"分隔符
+        const logMatch = fullResult.match(/执行日志:\s*\n(.*)/s);
         if (logMatch) {
-          const logs = logMatch[1].trim().split('\n');
-          logs.forEach(log => {
-            if (log.trim()) {
-              addExecutionLog(log.trim());
+          // 分离结果内容和日志
+          resultContent = fullResult.substring(0, logMatch.index).trim();
+          const logsText = logMatch[1].trim();
+          componentLogs = logsText.split('\n').filter(log => log.trim());
+          
+          // 只添加组件相关的日志到执行日志中（过滤掉执行结果内容）
+          componentLogs.forEach(log => {
+            const trimmedLog = log.trim();
+            // 过滤掉执行结果相关的内容，只保留组件执行过程的日志
+            if (trimmedLog && 
+                !trimmedLog.includes('MCP服务器') && 
+                !trimmedLog.includes('执行完成') && 
+                !trimmedLog.includes('输入:') &&
+                !trimmedLog.includes('执行了') &&
+                !trimmedLog.includes('工具:') &&
+                !trimmedLog.includes('结果:') &&
+                !trimmedLog.includes('错误:') &&
+                trimmedLog.startsWith('[')) { // 只保留带时间戳的日志
+              addExecutionLog(trimmedLog);
             }
           });
+        } else {
+          // 如果没有日志分隔符，尝试从结果中提取组件日志
+          // 查找类似 "[时间] 消息" 格式的日志
+          const logPattern = /\[\d{2}:\d{2}:\d{2}\]\s*(.+)/g;
+          let match;
+          while ((match = logPattern.exec(fullResult)) !== null) {
+            const logMsg = match[1].trim();
+            if (logMsg && !logMsg.includes('MCP服务器') && !logMsg.includes('执行完成')) {
+              componentLogs.push(logMsg);
+              addExecutionLog(logMsg);
+            }
+          }
         }
       }
       
       addExecutionLog(status === 'completed' ? '✅ 执行完成' : '❌ 执行失败');
       
+      // 更新感知组件消息状态（不包含结果内容，只显示状态）
       setMessages(prev => prev.map(msg =>
         msg.id === messageId
           ? { 
               ...msg, 
               workflowStatus: status,
-              content: result,
             }
           : msg
       ));
       
-      // 注意：不再直接保存消息到数据库，执行结果已通过 message_execution 表管理
+      // 将执行结果作为独立的assistant消息输出（支持流式）
+      if (resultContent && resultContent.trim()) {
+        const assistantMessageId = `assistant-${Date.now()}`;
+        const assistantMessage: Message = {
+          id: assistantMessageId,
+          role: 'assistant',
+          content: '',
+          isStreaming: streamEnabled,
+        };
+        
+        setMessages(prev => [...prev, assistantMessage]);
+        
+        if (streamEnabled) {
+          // 流式输出结果
+          let displayedContent = '';
+          const words = resultContent.split('');
+          
+          for (let i = 0; i < words.length; i++) {
+            displayedContent += words[i];
+            setMessages(prev => prev.map(msg =>
+              msg.id === assistantMessageId
+                ? { ...msg, content: displayedContent, isStreaming: true }
+                : msg
+            ));
+            
+            // 控制流式输出速度
+            await new Promise(resolve => setTimeout(resolve, 10));
+          }
+          
+          // 完成流式输出
+          setMessages(prev => prev.map(msg =>
+            msg.id === assistantMessageId
+              ? { ...msg, content: displayedContent, isStreaming: false }
+              : msg
+          ));
+        } else {
+          // 非流式输出，直接显示完整内容
+          setMessages(prev => prev.map(msg =>
+            msg.id === assistantMessageId
+              ? { ...msg, content: resultContent, isStreaming: false }
+              : msg
+          ));
+        }
+        
+        // 保存assistant消息到数据库
+        if (sessionId) {
+          try {
+            await saveMessage(sessionId, {
+              message_id: assistantMessageId,
+              role: 'assistant',
+              content: resultContent,
+              model: selectedLLMConfig.model || 'gpt-4',
+            });
+            console.log('[Workflow] Saved component execution result as assistant message:', assistantMessageId);
+          } catch (error) {
+            console.error('[Workflow] Failed to save assistant message:', error);
+          }
+        }
+      }
+      
       console.log('[Workflow] Execution completed:', execution);
       
     } catch (error) {
@@ -1394,17 +1466,41 @@ const Workflow: React.FC = () => {
       
       addExecutionLog(`❌ 执行出错: ${errorMsg}`);
       
+      // 更新感知组件消息状态
       setMessages(prev => prev.map(msg =>
         msg.id === messageId
           ? { 
               ...msg, 
               workflowStatus: 'error',
-              content: `❌ 执行失败: ${errorMsg}`,
             }
           : msg
       ));
       
-      // 注意：错误信息已通过 message_execution 表记录
+      // 将错误信息作为独立的assistant消息输出
+      const assistantMessageId = `assistant-error-${Date.now()}`;
+      const errorMessage: Message = {
+        id: assistantMessageId,
+        role: 'assistant',
+        content: `❌ 执行失败: ${errorMsg}`,
+        isStreaming: false,
+      };
+      
+      setMessages(prev => [...prev, errorMessage]);
+      
+      // 保存错误消息到数据库
+      if (sessionId) {
+        try {
+          await saveMessage(sessionId, {
+            message_id: assistantMessageId,
+            role: 'assistant',
+            content: `❌ 执行失败: ${errorMsg}`,
+            model: selectedLLMConfig.model || 'gpt-4',
+          });
+        } catch (saveError) {
+          console.error('[Workflow] Failed to save error message:', saveError);
+        }
+      }
+      
       console.error('[Workflow] Execution error:', errorMsg);
     }
   };
@@ -1718,7 +1814,7 @@ const Workflow: React.FC = () => {
                   {/* 执行/重新执行按钮 */}
                   {message.workflowStatus === 'pending' ? (
                     <button
-                      onClick={() => handleExecuteWorkflow(message.id)}
+                      onClick={() => handleExecuteWorkflow(message.id, undefined, currentSessionId)}
                       className="flex items-center space-x-1.5 px-3 py-1.5 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-200 rounded text-xs font-medium transition-colors"
                     >
                       <Play className="w-3 h-3" />
@@ -1731,7 +1827,7 @@ const Workflow: React.FC = () => {
                     </div>
                   ) : (
                     <button
-                      onClick={() => handleExecuteWorkflow(message.id)}
+                      onClick={() => handleExecuteWorkflow(message.id, undefined, currentSessionId)}
                       className="flex items-center space-x-1.5 px-3 py-1.5 bg-gray-800 dark:bg-gray-200 text-white dark:text-gray-900 hover:bg-gray-700 dark:hover:bg-gray-300 rounded text-xs font-medium transition-colors"
                     >
                       <Play className="w-3 h-3" />

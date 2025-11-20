@@ -5361,7 +5361,19 @@ def call_llm_api(llm_config: dict, system_prompt: str, user_input: str, add_log=
     
     if provider == 'openai':
         default_url = 'https://api.openai.com/v1/chat/completions'
-        url = api_url or default_url
+        # 处理api_url格式，确保包含完整的路径
+        if not api_url or '/chat/completions' not in api_url:
+            if api_url and not api_url.endswith('/'):
+                api_url = api_url.rstrip('/')
+            if not api_url.endswith('/v1/chat/completions'):
+                url = f"{api_url}/v1/chat/completions" if api_url else default_url
+            else:
+                url = api_url
+        else:
+            url = api_url
+        
+        if add_log:
+            add_log(f"使用API URL: {url}")
         
         payload = {
             'model': model,
@@ -5384,6 +5396,8 @@ def call_llm_api(llm_config: dict, system_prompt: str, user_input: str, add_log=
         else:
             if add_log:
                 add_log(f"❌ LLM API调用失败: {response.status_code} - {response.text}")
+                add_log(f"请求URL: {url}")
+                add_log(f"请求头: {headers}")
             return None
             
     elif provider == 'anthropic':
