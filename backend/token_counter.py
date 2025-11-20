@@ -1,0 +1,115 @@
+"""
+Token 计数工具
+支持多种模型的 Token 计数
+"""
+
+def estimate_tokens(text: str, model: str = 'gpt-4') -> int:
+    """
+    估算文本的 Token 数量
+    
+    Args:
+        text: 要计数的文本
+        model: 模型名称（用于选择编码方式）
+    
+    Returns:
+        估算的 Token 数量
+    """
+    if not text:
+        return 0
+    
+    # 对于中文和英文混合文本，使用简化的估算方法
+    # 一般规则：
+    # - 英文：1 token ≈ 4 字符
+    # - 中文：1 token ≈ 1.5 字符
+    # - 代码/特殊字符：1 token ≈ 3 字符
+    
+    # 统计中文字符数
+    chinese_chars = sum(1 for char in text if '\u4e00' <= char <= '\u9fff')
+    # 统计其他字符数
+    other_chars = len(text) - chinese_chars
+    
+    # 估算：中文按 1.5 字符/token，其他按 4 字符/token
+    estimated_tokens = int(chinese_chars / 1.5 + other_chars / 4)
+    
+    # 至少返回 1（即使是空字符串，系统消息也会占用一些 token）
+    return max(1, estimated_tokens)
+
+def estimate_messages_tokens(messages: list, model: str = 'gpt-4') -> int:
+    """
+    估算消息列表的总 Token 数量
+    
+    Args:
+        messages: 消息列表，每个消息包含 role 和 content
+        model: 模型名称
+    
+    Returns:
+        估算的总 Token 数量
+    """
+    total_tokens = 0
+    
+    # 每个消息的开销（role + 格式等）约 4 tokens
+    message_overhead = 4
+    
+    for msg in messages:
+        content = msg.get('content', '') or ''
+        thinking = msg.get('thinking', '') or ''
+        
+        # 内容 token
+        total_tokens += estimate_tokens(content, model)
+        
+        # 思考过程 token（如果有）
+        if thinking:
+            total_tokens += estimate_tokens(thinking, model)
+        
+        # 消息开销
+        total_tokens += message_overhead
+        
+        # 工具调用（如果有）
+        if msg.get('tool_calls'):
+            # 每个工具调用约 50 tokens
+            total_tokens += len(msg.get('tool_calls', [])) * 50
+    
+    # 系统提示词开销（如果有）
+    # 通常系统提示词会在第一条消息中，这里不重复计算
+    
+    return total_tokens
+
+def get_model_max_tokens(model: str) -> int:
+    """
+    获取模型的最大 Token 限制
+    
+    Args:
+        model: 模型名称
+    
+    Returns:
+        最大 Token 数量
+    """
+    # 常见模型的最大 token 限制
+    model_limits = {
+        # OpenAI
+        'gpt-4': 8192,
+        'gpt-4-turbo': 128000,
+        'gpt-4-turbo-preview': 128000,
+        'gpt-4-32k': 32768,
+        'gpt-3.5-turbo': 16385,
+        'gpt-3.5-turbo-16k': 16385,
+        'o1-preview': 200000,
+        'o1-mini': 128000,
+        # Anthropic
+        'claude-3-5-sonnet-20241022': 200000,
+        'claude-3-opus-20240229': 200000,
+        'claude-3-sonnet-20240229': 200000,
+        'claude-3-haiku-20240307': 200000,
+        # Ollama (通常较大，默认 32k)
+        'llama2': 4096,
+        'llama3': 8192,
+    }
+    
+    # 检查是否匹配（支持部分匹配）
+    for key, limit in model_limits.items():
+        if key.lower() in model.lower():
+            return limit
+    
+    # 默认值（保守估计）
+    return 8192
+

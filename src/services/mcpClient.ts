@@ -87,16 +87,20 @@ export class MCPClient {
    * 获取后端 API 地址
    */
   private getBackendUrl(): string {
-    return import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+    // 统一使用 3002 端口（后端 Flask 服务器）
+    if (this.isElectron()) {
+      return 'http://localhost:3002';
+    }
+    return import.meta.env.VITE_BACKEND_URL || 'http://localhost:3002';
   }
 
   /**
-   * 构建代理 URL（Electron 环境使用）
+   * 构建代理 URL（所有环境都使用代理，解决 CORS 问题）
    * 使用后端 API 地址，通过后端代理转发
    */
   private buildProxyUrl(serverUrl: string): string {
-    // 在 Electron 环境中，直接使用后端 API 地址
-    // 格式：http://localhost:3001/mcp?url=...&transportType=streamable-http
+    // 所有环境都使用后端代理，避免 CORS 问题
+    // 格式：http://localhost:3002/mcp?url=...&transportType=streamable-http
     // 后端会转发请求到目标 MCP 服务器
     const backendUrl = this.getBackendUrl();
     const encodedUrl = encodeURIComponent(serverUrl);
@@ -115,12 +119,11 @@ export class MCPClient {
     }
 
     try {
-      // 在 Electron 环境中使用代理模式
-      const isElectronEnv = this.isElectron();
-      const targetUrl = isElectronEnv ? this.buildProxyUrl(this.server.url) : this.server.url;
+      // 所有环境都使用代理模式，解决 CORS 问题
+      const targetUrl = this.buildProxyUrl(this.server.url);
       
       console.log(`[MCP] Connecting to ${this.server.name}`);
-      console.log(`[MCP] Environment: ${isElectronEnv ? 'Electron (using proxy)' : 'Browser (direct)'}`);
+      console.log(`[MCP] Using proxy to avoid CORS issues`);
       console.log(`[MCP] Target URL: ${targetUrl}`);
 
       // 创建 StreamableHTTP 传输层（流式 HTTP 传输）
@@ -308,10 +311,8 @@ export class MCPClient {
         console.log(`[MCP] Attempting to get tools list from ${this.server.name} (attempt ${attempt}/${maxRetries})`);
         console.log(`[MCP] Sending direct HTTP POST to bypass SDK validation`);
 
-        // 直接发送 HTTP POST 请求到 MCP 服务器
-        const targetUrl = this.isElectron() 
-          ? this.buildProxyUrl(this.server.url)
-          : this.server.url;
+        // 使用代理发送 HTTP POST 请求，解决 CORS 问题
+        const targetUrl = this.buildProxyUrl(this.server.url);
 
         const requestBody = {
           jsonrpc: '2.0',

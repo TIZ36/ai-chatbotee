@@ -25,6 +25,7 @@ export interface LLMToolCall {
 
 export interface LLMResponse {
   content: string;
+  thinking?: string; // 思考过程（用于 o1 等思考模型）
   tool_calls?: LLMToolCall[];
   finish_reason?: string;
 }
@@ -164,15 +165,32 @@ export class LLMClient {
 
   /**
    * 调用LLM API
+   * @param messages 消息列表
+   * @param tools 工具列表（可选）
+   * @param stream 是否使用流式响应（可选，默认false）
+   * @param onChunk 流式响应回调函数（可选，接收 content chunk）
+   * @param onThinking 思考过程回调函数（可选，用于流式模式下传递 thinking）
    */
-  async chat(messages: LLMMessage[], tools?: any[]): Promise<LLMResponse> {
+  async chat(
+    messages: LLMMessage[], 
+    tools?: any[], 
+    stream: boolean = false,
+    onChunk?: (chunk: string) => void,
+    onThinking?: (thinking: string) => void
+  ): Promise<LLMResponse> {
     switch (this.config.provider) {
       case 'openai':
-        return this.callOpenAI(messages, tools);
+        return stream 
+          ? this.callOpenAIStream(messages, tools, onChunk, onThinking)
+          : this.callOpenAI(messages, tools);
       case 'anthropic':
-        return this.callAnthropic(messages, tools);
+        return stream
+          ? this.callAnthropicStream(messages, tools, onChunk, onThinking)
+          : this.callAnthropic(messages, tools);
       case 'ollama':
-        return this.callOllama(messages, tools);
+        return stream
+          ? this.callOllamaStream(messages, tools, onChunk, onThinking)
+          : this.callOllama(messages, tools);
       case 'local':
         return this.callLocal(messages, tools);
       default:
@@ -181,7 +199,163 @@ export class LLMClient {
   }
 
   /**
-   * 调用OpenAI API
+   * 调用OpenAI API（流式响应）
+   */
+  private async callOpenAIStream(
+    messages: LLMMessage[], 
+    tools?: any[], 
+    onChunk?: (chunk: string) => void,
+    onThinking?: (thinking: string) => void
+  ): Promise<LLMResponse> {
+    if (!this.config.apiKey) {
+      throw new Error('OpenAI API key not configured');
+    }
+
+    const defaultUrl = 'https://api.openai.com/v1/chat/completions';
+    const apiUrl = normalizeOpenAIUrl(this.config.apiUrl, defaultUrl);
+    const model = this.config.model || 'gpt-4';
+
+    console.log(`[LLM] Using OpenAI Stream API URL: ${apiUrl}`);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
+    
+    try {
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.config.apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: messages.map(msg => {
+            const message: any = {
+              role: msg.role,
+              content: msg.content,
+            };
+            if (msg.tool_call_id) message.tool_call_id = msg.tool_call_id;
+            if (msg.name) message.name = msg.name;
+            if (msg.tool_calls) message.tool_calls = msg.tool_calls;
+            return message;
+          }),
+          tools: tools ? tools.map(convertMCPToolToLLMFunction) : undefined,
+          tool_choice: tools ? 'auto' : undefined,
+          stream: true,
+        }),
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
+        throw new Error(`OpenAI API error: ${error.error?.message || response.statusText}`);
+      }
+
+      // 处理流式响应
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let fullContent = '';
+      let fullThinking = ''; // 思考过程
+      let toolCalls: LLMToolCall[] = [];
+      let finishReason: string | undefined;
+
+      if (!reader) {
+        throw new Error('Failed to get response stream');
+      }
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n').filter(line => line.trim() !== '');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') {
+              continue;
+            }
+
+            try {
+              const json = JSON.parse(data);
+              const delta = json.choices?.[0]?.delta;
+              const choice = json.choices?.[0];
+              
+              // 处理思考过程（o1 模型）
+              // reasoning_content 可能在 delta 中流式返回，也可能在 message 中一次性返回
+              if (delta?.reasoning_content) {
+                fullThinking += delta.reasoning_content;
+                // 实时传递思考过程
+                onThinking?.(fullThinking);
+              } else if (choice?.message?.reasoning_content) {
+                // 如果 message 中有完整的 reasoning_content，直接使用
+                fullThinking = choice.message.reasoning_content;
+                onThinking?.(fullThinking);
+              } else if (json.reasoning_content) {
+                // 某些情况下可能在根级别
+                fullThinking = json.reasoning_content;
+                onThinking?.(fullThinking);
+              }
+              
+              if (delta?.content) {
+                fullContent += delta.content;
+                onChunk?.(delta.content);
+              }
+
+              // 处理工具调用
+              if (delta?.tool_calls) {
+                for (const toolCall of delta.tool_calls) {
+                  const index = toolCall.index;
+                  if (!toolCalls[index]) {
+                    toolCalls[index] = {
+                      id: toolCall.id || '',
+                      type: 'function',
+                      function: {
+                        name: '',
+                        arguments: '',
+                      },
+                    };
+                  }
+                  if (toolCall.function?.name) {
+                    toolCalls[index].function.name = toolCall.function.name;
+                  }
+                  if (toolCall.function?.arguments) {
+                    toolCalls[index].function.arguments += toolCall.function.arguments;
+                  }
+                }
+              }
+
+              if (json.choices?.[0]?.finish_reason) {
+                finishReason = json.choices[0].finish_reason;
+              }
+            } catch (e) {
+              // 忽略JSON解析错误
+              console.warn('[LLM] Failed to parse SSE chunk:', e);
+            }
+          }
+        }
+      }
+
+      return {
+        content: fullContent,
+        thinking: fullThinking || undefined,
+        tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+        finish_reason: finishReason,
+      };
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      if (error.name === 'AbortError') {
+        throw new Error('API request timeout (120s)');
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * 调用OpenAI API（非流式响应）
    */
   private async callOpenAI(messages: LLMMessage[], tools?: any[]): Promise<LLMResponse> {
     if (!this.config.apiKey) {
@@ -237,6 +411,7 @@ export class LLMClient {
 
       return {
         content: choice.message.content || '',
+        thinking: choice.message.reasoning_content || undefined, // 思考过程（o1 模型）
         tool_calls: choice.message.tool_calls?.map((tc: any) => ({
           id: tc.id,
           type: tc.type,
@@ -257,7 +432,135 @@ export class LLMClient {
   }
 
   /**
-   * 调用Anthropic API
+   * 调用Anthropic API（流式响应）
+   */
+  private async callAnthropicStream(
+    messages: LLMMessage[], 
+    tools?: any[], 
+    onChunk?: (chunk: string) => void,
+    onThinking?: (thinking: string) => void
+  ): Promise<LLMResponse> {
+    if (!this.config.apiKey) {
+      throw new Error('Anthropic API key not configured');
+    }
+
+    const defaultUrl = 'https://api.anthropic.com/v1/messages';
+    const apiUrl = normalizeOpenAIUrl(this.config.apiUrl, defaultUrl);
+    const model = this.config.model || 'claude-3-5-sonnet-20241022';
+    
+    console.log(`[LLM] Using Anthropic Stream API URL: ${apiUrl}`);
+
+    const systemMessages = messages.filter(m => m.role === 'system');
+    const conversationMessages = messages.filter(m => m.role !== 'system');
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
+    
+    try {
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': this.config.apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 4096,
+          system: systemMessages.map(m => m.content).join('\n'),
+          messages: conversationMessages.map(msg => ({
+            role: msg.role === 'assistant' ? 'assistant' : 'user',
+            content: msg.content,
+          })),
+          tools: tools ? tools.map(convertMCPToolToLLMFunction) : undefined,
+          stream: true,
+        }),
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
+        throw new Error(`Anthropic API error: ${error.error?.message || response.statusText}`);
+      }
+
+      // 处理流式响应
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let fullContent = '';
+      let toolCalls: LLMToolCall[] = [];
+      let finishReason: string | undefined;
+
+      if (!reader) {
+        throw new Error('Failed to get response stream');
+      }
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n').filter(line => line.trim() !== '');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') {
+              continue;
+            }
+
+            try {
+              const json = JSON.parse(data);
+              
+              if (json.type === 'content_block_delta' && json.delta?.text) {
+                fullContent += json.delta.text;
+                onChunk?.(json.delta.text);
+              }
+
+              if (json.type === 'content_block_stop') {
+                finishReason = 'stop';
+              }
+
+              if (json.type === 'message_stop') {
+                finishReason = json.stop_reason || 'stop';
+              }
+
+              // 处理工具调用
+              if (json.type === 'content_block_start' && json.content_block?.type === 'tool_use') {
+                const toolUse = json.content_block;
+                toolCalls.push({
+                  id: toolUse.id,
+                  type: 'function',
+                  function: {
+                    name: toolUse.name,
+                    arguments: JSON.stringify(toolUse.input || {}),
+                  },
+                });
+              }
+            } catch (e) {
+              console.warn('[LLM] Failed to parse SSE chunk:', e);
+            }
+          }
+        }
+      }
+
+      return {
+        content: fullContent,
+        tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+        finish_reason: finishReason,
+      };
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      if (error.name === 'AbortError') {
+        throw new Error('API request timeout (120s)');
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * 调用Anthropic API（非流式响应）
    */
   private async callAnthropic(messages: LLMMessage[], tools?: any[]): Promise<LLMResponse> {
     if (!this.config.apiKey) {
@@ -332,7 +635,143 @@ export class LLMClient {
   }
 
   /**
-   * 调用Ollama API
+   * 调用Ollama API（流式响应）
+   */
+  private async callOllamaStream(
+    messages: LLMMessage[], 
+    tools?: any[], 
+    onChunk?: (chunk: string) => void,
+    onThinking?: (thinking: string) => void
+  ): Promise<LLMResponse> {
+    if (!this.config.apiUrl) {
+      throw new Error('Ollama 服务器地址未配置');
+    }
+
+    let apiUrl: string;
+    try {
+      const userUrl = new URL(this.config.apiUrl);
+      if (userUrl.pathname && userUrl.pathname !== '/' && !userUrl.pathname.includes('/api/chat')) {
+        apiUrl = this.config.apiUrl;
+      } else {
+        userUrl.pathname = '/api/chat';
+        apiUrl = userUrl.toString();
+      }
+    } catch {
+      const baseUrl = this.config.apiUrl.replace(/\/+$/, '');
+      apiUrl = `${baseUrl}/api/chat`;
+    }
+
+    const model = this.config.model || 'llama2';
+    console.log(`[LLM] Using Ollama Stream API URL: ${apiUrl}`);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
+    
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    
+    if (this.config.apiKey) {
+      headers['Authorization'] = `Bearer ${this.config.apiKey}`;
+    }
+    
+    try {
+      const requestBody: any = {
+        model,
+        messages: messages.map(msg => ({
+          role: msg.role,
+          content: msg.content,
+        })),
+        stream: true,
+      };
+
+      if (tools && tools.length > 0) {
+        requestBody.tools = tools.map(convertMCPToolToLLMFunction);
+      }
+
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
+        throw new Error(`Ollama API error: ${error.error?.message || response.statusText}`);
+      }
+
+      // 处理流式响应
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let fullContent = '';
+      let toolCalls: LLMToolCall[] = [];
+      let finishReason: string | undefined;
+
+      if (!reader) {
+        throw new Error('Failed to get response stream');
+      }
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n').filter(line => line.trim() !== '');
+
+        for (const line of lines) {
+          try {
+            const json = JSON.parse(line);
+            
+            if (json.message?.content) {
+              fullContent += json.message.content;
+              onChunk?.(json.message.content);
+            }
+
+            // 处理工具调用
+            if (json.message?.tool_calls) {
+              for (const tc of json.message.tool_calls) {
+                toolCalls.push({
+                  id: tc.id || `call_${Date.now()}_${Math.random()}`,
+                  type: tc.type || 'function',
+                  function: {
+                    name: tc.function?.name || tc.name,
+                    arguments: typeof tc.function?.arguments === 'string' 
+                      ? tc.function.arguments 
+                      : JSON.stringify(tc.function?.arguments || tc.arguments || {}),
+                  },
+                });
+              }
+            }
+
+            if (json.done) {
+              finishReason = json.done_reason || 'stop';
+            }
+          } catch (e) {
+            // 忽略JSON解析错误
+            console.warn('[LLM] Failed to parse Ollama chunk:', e);
+          }
+        }
+      }
+
+      return {
+        content: fullContent,
+        tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+        finish_reason: finishReason,
+      };
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      if (error.name === 'AbortError') {
+        throw new Error('API request timeout (120s)');
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * 调用Ollama API（非流式响应）
    * 使用原生 /api/chat 端点
    */
   private async callOllama(messages: LLMMessage[], tools?: any[]): Promise<LLMResponse> {
@@ -534,8 +973,16 @@ export class LLMClient {
    * @param userInput 用户输入
    * @param systemPrompt 系统提示词（可选）
    * @param tools MCP工具列表（可选，如果不提供则不使用MCP工具）
+   * @param stream 是否使用流式响应（可选，默认false）
+   * @param onChunk 流式响应回调函数（可选，接收 content 和 thinking）
    */
-  async handleUserRequest(userInput: string, systemPrompt?: string, tools?: MCPTool[]): Promise<string> {
+  async handleUserRequest(
+    userInput: string, 
+    systemPrompt?: string, 
+    tools?: MCPTool[],
+    stream: boolean = false,
+    onChunk?: (chunk: string, thinking?: string) => void
+  ): Promise<string> {
     // 只有在明确传入工具列表时才使用MCP工具
     // 如果未传入工具列表，则不获取MCP客户端，避免不必要的连接
     const allTools: MCPTool[] = tools || [];
@@ -571,7 +1018,19 @@ ${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
         console.warn(`[LLM] Request timeout after ${maxDuration}ms (${iteration} iterations)`);
         return '处理超时，请重试。';
       }
-      const response = await this.chat(messages, allTools.length > 0 ? allTools : undefined);
+      
+      // 注意：handleUserRequest 方法不支持 thinking，只返回 content
+      // 如果需要 thinking，请使用 handleUserRequestWithThinking
+      const response = await this.chat(
+        messages, 
+        allTools.length > 0 ? allTools : undefined,
+        stream,
+        stream ? (chunk: string) => {
+          // 流式模式下，onChunk 只接收 content
+          onChunk?.(chunk);
+        } : undefined,
+        undefined // handleUserRequest 不支持 thinking
+      );
 
       if (response.tool_calls && response.tool_calls.length > 0) {
         // 添加 assistant 消息（包含 tool_calls）
@@ -612,11 +1071,131 @@ ${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
         iteration++;
       } else {
         // 没有工具调用，返回最终回复
+        // 注意：这里只返回 content，thinking 需要通过其他方式传递
+        // 由于返回类型是 string，我们需要修改返回类型或使用其他方式
         return response.content;
       }
     }
 
     return '处理超时，请重试。';
+  }
+
+  /**
+   * 处理用户请求（返回完整响应，包括思考过程）
+   * 用于需要获取思考过程的场景
+   */
+  async handleUserRequestWithThinking(
+    userInput: string, 
+    systemPrompt?: string, 
+    tools?: MCPTool[],
+    stream: boolean = false,
+    onChunk?: (content: string, thinking?: string) => void
+  ): Promise<{ content: string; thinking?: string }> {
+    // 设置允许使用的工具列表
+    const allTools: MCPTool[] = tools || [];
+    this.setAllowedTools(allTools);
+
+    const messages: LLMMessage[] = [
+      {
+        role: 'system',
+        content: systemPrompt || (allTools.length > 0 
+          ? `你是一个智能助手，可以使用以下工具帮助用户：
+${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
+
+当用户需要执行操作时，使用相应的工具。`
+          : '你是一个智能助手，可以帮助用户完成各种任务。'),
+      },
+      {
+        role: 'user',
+        content: userInput,
+      },
+    ];
+
+    let maxIterations = 10;
+    let iteration = 0;
+    const startTime = Date.now();
+    const maxDuration = 5 * 60 * 1000;
+
+    let accumulatedThinking = ''; // 移到循环外部，确保在多次迭代中保持
+    
+    while (iteration < maxIterations) {
+      if (Date.now() - startTime > maxDuration) {
+        console.warn(`[LLM] Request timeout after ${maxDuration}ms (${iteration} iterations)`);
+        return { content: '处理超时，请重试。', thinking: accumulatedThinking || undefined };
+      }
+      
+      // 创建一个包装的 onThinking，用于在流式模式下传递 thinking
+      const wrappedOnThinking = stream ? (thinking: string) => {
+        accumulatedThinking = thinking;
+        // 思考过程流式更新时，立即通过 onChunk 传递（传递空 content，只更新 thinking）
+        onChunk?.('', thinking);
+      } : undefined;
+      
+      // 创建一个包装的 onChunk，用于在流式模式下传递 content 和 thinking
+      const wrappedOnChunk = stream ? (chunk: string) => {
+        // 在流式模式下，每次收到 content chunk 时，同时传递当前的 thinking
+        onChunk?.(chunk, accumulatedThinking || undefined);
+      } : undefined;
+      
+      const response = await this.chat(
+        messages, 
+        allTools.length > 0 ? allTools : undefined,
+        stream,
+        wrappedOnChunk,
+        wrappedOnThinking
+      );
+
+      // 收集思考过程（优先使用 response 中的，否则使用流式过程中收集的）
+      if (response.thinking) {
+        accumulatedThinking = response.thinking;
+        // 如果有新的 thinking，也通过 onChunk 通知（传递空 content chunk）
+        if (stream && onChunk) {
+          onChunk('', accumulatedThinking);
+        }
+      }
+
+      if (response.tool_calls && response.tool_calls.length > 0) {
+        messages.push({
+          role: 'assistant',
+          content: response.content || '',
+          tool_calls: response.tool_calls,
+        });
+
+        const toolResults = await Promise.all(
+          response.tool_calls.map(async (toolCall) => {
+            try {
+              console.log(`[LLM] Executing tool: ${toolCall.function.name}`);
+              const result = await this.executeToolCall(toolCall);
+              console.log(`[LLM] Tool result:`, result);
+              return {
+                tool_call_id: toolCall.id,
+                role: 'tool' as const,
+                name: toolCall.function.name,
+                content: JSON.stringify(result),
+              };
+            } catch (error: any) {
+              console.error(`[LLM] Tool execution error:`, error);
+              return {
+                tool_call_id: toolCall.id,
+                role: 'tool' as const,
+                name: toolCall.function.name,
+                content: JSON.stringify({ error: error.message }),
+              };
+            }
+          })
+        );
+
+        messages.push(...toolResults);
+        iteration++;
+      } else {
+        return {
+          content: response.content,
+          thinking: accumulatedThinking || response.thinking,
+        };
+      }
+    }
+
+    return { content: '处理超时，请重试。' };
   }
 }
 

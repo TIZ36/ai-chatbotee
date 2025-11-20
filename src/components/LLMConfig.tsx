@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Plus, Trash2, CheckCircle, XCircle, Edit2, Brain, Key, Save, X, Loader2 } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, XCircle, Edit2, Brain, Key, Save, X, Loader2, Loader } from 'lucide-react';
 import { getLLMConfigs, createLLMConfig, updateLLMConfig, deleteLLMConfig, LLMConfigFromDB, CreateLLMConfigRequest } from '../services/llmApi';
 import { fetchOllamaModels } from '../services/ollamaService';
 
@@ -318,29 +318,46 @@ const LLMConfigPanel: React.FC = () => {
 
             {/* 提供商 */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 提供商 *
               </label>
-              <select
-                value={newConfig.provider || 'openai'}
-                onChange={(e) => {
-                  const provider = e.target.value as CreateLLMConfigRequest['provider'];
-                  setNewConfig({
-                    ...newConfig,
-                    provider,
-                    api_url: getProviderDefaultUrl(provider),
-                    model: getProviderDefaultModel(provider),
-                    api_key: provider === 'ollama' ? '' : newConfig.api_key, // Ollama 清空 API key
-                  });
-                }}
-                className="input-field"
-              >
-                <option value="openai">OpenAI</option>
-                <option value="anthropic">Anthropic (Claude)</option>
-                <option value="ollama">Ollama</option>
-                <option value="local">本地模型</option>
-                <option value="custom">自定义</option>
-              </select>
+              <div className="relative">
+                <select
+                  value={newConfig.provider || 'openai'}
+                  onChange={(e) => {
+                    const provider = e.target.value as CreateLLMConfigRequest['provider'];
+                    setNewConfig({
+                      ...newConfig,
+                      provider,
+                      api_url: getProviderDefaultUrl(provider),
+                      model: getProviderDefaultModel(provider),
+                      api_key: provider === 'ollama' ? '' : newConfig.api_key, // Ollama 清空 API key
+                    });
+                  }}
+                  className="input-field appearance-none pr-8"
+                >
+                  <option value="openai">OpenAI</option>
+                  <option value="anthropic">Anthropic (Claude)</option>
+                  <option value="ollama">Ollama</option>
+                  <option value="local">本地模型</option>
+                  <option value="custom">自定义</option>
+                </select>
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                  {(() => {
+                    const provider = (newConfig.provider || 'openai').toLowerCase();
+                    switch (provider) {
+                      case 'openai':
+                        return <Brain className="w-4 h-4 text-[#10A37F]" />;
+                      case 'anthropic':
+                        return <Brain className="w-4 h-4 text-[#D4A574]" />;
+                      case 'ollama':
+                        return <Brain className="w-4 h-4 text-[#1D4ED8]" />;
+                      default:
+                        return <Brain className="w-4 h-4 text-gray-400" />;
+                    }
+                  })()}
+                </div>
+              </div>
             </div>
 
             {/* API密钥 */}
@@ -519,41 +536,90 @@ const LLMConfigPanel: React.FC = () => {
                   </td>
                 </tr>
         ) : (
-          configs.map((config) => (
-                  <tr key={config.config_id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                    <td className="py-2 px-3">
-                      <div className="font-medium text-gray-900">{config.name}</div>
-                      {config.description && (
-                        <div className="text-xs text-gray-500 mt-1">{config.description}</div>
-                      )}
+          configs.map((config) => {
+            // 获取提供商图标
+            const getProviderIcon = (provider: string) => {
+              switch (provider.toLowerCase()) {
+                case 'openai':
+                  return (
+                    <div className="w-5 h-5 rounded bg-[#10A37F] flex items-center justify-center">
+                      <Brain className="w-3.5 h-3.5 text-white" />
+                    </div>
+                  );
+                case 'anthropic':
+                  return (
+                    <div className="w-5 h-5 rounded bg-[#D4A574] flex items-center justify-center">
+                      <Brain className="w-3.5 h-3.5 text-white" />
+                    </div>
+                  );
+                case 'ollama':
+                  return (
+                    <div className="w-5 h-5 rounded bg-[#1D4ED8] flex items-center justify-center">
+                      <Brain className="w-3.5 h-3.5 text-white" />
+                    </div>
+                  );
+                case 'custom':
+                  return (
+                    <div className="w-5 h-5 rounded bg-gray-500 flex items-center justify-center">
+                      <Brain className="w-3.5 h-3.5 text-white" />
+                    </div>
+                  );
+                default:
+                  return (
+                    <div className="w-5 h-5 rounded bg-gray-400 flex items-center justify-center">
+                      <Brain className="w-3.5 h-3.5 text-white" />
+                    </div>
+                  );
+              }
+            };
+
+            return (
+                  <tr key={config.config_id} className="border-b border-gray-100 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                    <td className="py-2.5 px-3">
+                      <div className="flex items-center space-x-2.5">
+                        {getProviderIcon(config.provider)}
+                        <div>
+                          <div className="font-medium text-sm text-gray-900 dark:text-gray-100">{config.name}</div>
+                          {config.description && (
+                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{config.description}</div>
+                          )}
+                        </div>
+                      </div>
                     </td>
-                    <td className="py-2 px-3 text-sm text-gray-600">{config.provider}</td>
-                    <td className="py-2 px-3 text-sm text-gray-600">{config.model || '-'}</td>
-                    <td className="py-2 px-3">
+                    <td className="py-2.5 px-3">
+                      <div className="flex items-center space-x-1.5">
+                        {getProviderIcon(config.provider)}
+                        <span className="text-sm text-gray-600 dark:text-gray-400 capitalize">{config.provider}</span>
+                      </div>
+                    </td>
+                    <td className="py-2.5 px-3">
+                      <span className="text-sm text-gray-600 dark:text-gray-400">{config.model || '-'}</span>
+                    </td>
+                    <td className="py-2.5 px-3">
                       {config.enabled ? (
-                        <span className="inline-flex items-center space-x-1 px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded">
+                        <span className="inline-flex items-center space-x-1 px-2 py-1 text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400 rounded">
                           <CheckCircle className="w-3 h-3" />
                           <span>已启用</span>
-                      </span>
+                        </span>
                       ) : (
-                        <span className="inline-flex items-center space-x-1 px-2 py-1 text-xs font-medium bg-gray-100 text-gray-600 rounded">
+                        <span className="inline-flex items-center space-x-1 px-2 py-1 text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded">
                           <XCircle className="w-3 h-3" />
                           <span>已禁用</span>
                         </span>
-                  )}
+                      )}
                     </td>
-                    <td className="py-3 px-4">
-                <div className="flex items-center space-x-2">
+                    <td className="py-2.5 px-3">
+                <div className="flex items-center space-x-1.5">
                     <button
                           onClick={() => handleEditConfig(config)}
-                          className="p-1.5 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors"
+                          className="p-1.5 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                     title="编辑"
                   >
                           <Edit2 className="w-4 h-4" />
                   </button>
                   <button
                           onClick={() => handleDeleteConfig(config.config_id)}
-                          className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 transition-colors"
+                          className="p-1.5 rounded-lg text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
                     title="删除"
                   >
                           <Trash2 className="w-4 h-4" />
@@ -561,7 +627,8 @@ const LLMConfigPanel: React.FC = () => {
                 </div>
                     </td>
                   </tr>
-          ))
+            );
+          })
         )}
             </tbody>
           </table>

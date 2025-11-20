@@ -245,6 +245,99 @@ def create_tables():
         cursor.execute(create_workflows_table)
         print("✓ Table 'workflows' created/verified successfully")
         
+        # 会话表
+        create_sessions_table = """
+        CREATE TABLE IF NOT EXISTS `sessions` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `session_id` VARCHAR(100) NOT NULL UNIQUE COMMENT '会话ID',
+            `title` VARCHAR(255) DEFAULT NULL COMMENT '会话标题（自动生成或用户设置）',
+            `llm_config_id` VARCHAR(100) DEFAULT NULL COMMENT '使用的LLM配置ID',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+            `last_message_at` DATETIME DEFAULT NULL COMMENT '最后消息时间',
+            INDEX `idx_session_id` (`session_id`),
+            INDEX `idx_llm_config_id` (`llm_config_id`),
+            INDEX `idx_created_at` (`created_at`),
+            INDEX `idx_last_message_at` (`last_message_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会话表';
+        """
+        
+        cursor.execute(create_sessions_table)
+        print("✓ Table 'sessions' created/verified successfully")
+        
+        # 消息表
+        create_messages_table = """
+        CREATE TABLE IF NOT EXISTS `messages` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `message_id` VARCHAR(100) NOT NULL UNIQUE COMMENT '消息ID',
+            `session_id` VARCHAR(100) NOT NULL COMMENT '会话ID',
+            `role` VARCHAR(20) NOT NULL COMMENT '角色: user, assistant, system, tool',
+            `content` TEXT NOT NULL COMMENT '消息内容',
+            `thinking` TEXT DEFAULT NULL COMMENT '思考过程（用于o1等思考模型）',
+            `tool_calls` JSON DEFAULT NULL COMMENT '工具调用信息',
+            `token_count` INT DEFAULT NULL COMMENT 'Token数量（估算）',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+            INDEX `idx_message_id` (`message_id`),
+            INDEX `idx_session_id` (`session_id`),
+            INDEX `idx_created_at` (`created_at`),
+            INDEX `idx_session_created` (`session_id`, `created_at`),
+            FOREIGN KEY (`session_id`) REFERENCES `sessions`(`session_id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='消息表';
+        """
+        
+        cursor.execute(create_messages_table)
+        print("✓ Table 'messages' created/verified successfully")
+        
+        # 总结表
+        create_summaries_table = """
+        CREATE TABLE IF NOT EXISTS `summaries` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `summary_id` VARCHAR(100) NOT NULL UNIQUE COMMENT '总结ID',
+            `session_id` VARCHAR(100) NOT NULL COMMENT '会话ID',
+            `summary_content` TEXT NOT NULL COMMENT '总结内容',
+            `last_message_id` VARCHAR(100) DEFAULT NULL COMMENT '总结时的最后消息ID',
+            `token_count_before` INT DEFAULT NULL COMMENT '总结前的Token数量',
+            `token_count_after` INT DEFAULT NULL COMMENT '总结后的Token数量',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+            INDEX `idx_summary_id` (`summary_id`),
+            INDEX `idx_session_id` (`session_id`),
+            INDEX `idx_created_at` (`created_at`),
+            FOREIGN KEY (`session_id`) REFERENCES `sessions`(`session_id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='总结表';
+        """
+        
+        cursor.execute(create_summaries_table)
+        print("✓ Table 'summaries' created/verified successfully")
+        
+        # 消息执行记录表
+        create_message_executions_table = """
+        CREATE TABLE IF NOT EXISTS `message_executions` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `execution_id` VARCHAR(100) NOT NULL UNIQUE COMMENT '执行ID',
+            `message_id` VARCHAR(100) NOT NULL COMMENT '消息ID',
+            `component_type` VARCHAR(20) NOT NULL COMMENT '感知组件类型: mcp, workflow',
+            `component_id` VARCHAR(100) NOT NULL COMMENT '感知组件ID',
+            `component_name` VARCHAR(255) DEFAULT NULL COMMENT '感知组件名称',
+            `llm_config_id` VARCHAR(100) DEFAULT NULL COMMENT '使用的LLM配置ID',
+            `input` TEXT DEFAULT NULL COMMENT '输入内容',
+            `result` TEXT DEFAULT NULL COMMENT '执行结果',
+            `status` VARCHAR(20) DEFAULT 'pending' COMMENT '执行状态: pending, running, completed, error',
+            `error_message` TEXT DEFAULT NULL COMMENT '错误信息',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+            INDEX `idx_execution_id` (`execution_id`),
+            INDEX `idx_message_id` (`message_id`),
+            INDEX `idx_component_type` (`component_type`),
+            INDEX `idx_component_id` (`component_id`),
+            INDEX `idx_status` (`status`),
+            INDEX `idx_created_at` (`created_at`),
+            FOREIGN KEY (`message_id`) REFERENCES `messages`(`message_id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='消息执行记录表';
+        """
+        
+        cursor.execute(create_message_executions_table)
+        print("✓ Table 'message_executions' created/verified successfully")
+        
         cursor.close()
         conn.close()  # 归还连接到连接池
         

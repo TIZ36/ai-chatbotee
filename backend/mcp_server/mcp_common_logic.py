@@ -4,6 +4,7 @@ MCP 服务器通用逻辑
 """
 
 import json
+import time
 import requests
 from typing import Optional, Dict, Any
 from database import get_mysql_connection, get_oauth_token, is_token_expired, refresh_oauth_token, get_oauth_config
@@ -324,6 +325,84 @@ def parse_mcp_jsonrpc_response(data: str) -> Optional[Dict[str, Any]]:
         print(f"[MCP Parse] ❌ Error parsing response: {e}")
         return None
 
+
+def call_mcp_tool(target_url: str, headers: Dict[str, str], tool_name: str, tool_args: Dict[str, Any], add_log=None) -> Optional[Any]:
+    """
+    调用 MCP 工具
+    
+    Args:
+        target_url: MCP 服务器 URL
+        headers: 请求头
+        tool_name: 工具名称
+        tool_args: 工具参数
+        add_log: 日志回调函数（可选）
+        
+    Returns:
+        工具执行结果，如果失败则返回 None
+    """
+    try:
+        # 准备请求头（包括OAuth token等）
+        prepared_headers = prepare_mcp_headers(target_url, headers)
+        
+        # 构建工具调用请求
+        tool_request = {
+            'jsonrpc': '2.0',
+            'id': int(time.time() * 1000),
+            'method': 'tools/call',
+            'params': {
+                'name': tool_name,
+                'arguments': tool_args
+            }
+        }
+        
+        if add_log:
+            add_log(f"调用MCP工具: {tool_name}")
+        
+        # 发送请求
+        response = requests.post(target_url, json=tool_request, headers=prepared_headers, timeout=60)
+        
+        if not response.ok:
+            if add_log:
+                add_log(f"❌ MCP工具调用失败: HTTP {response.status_code} - {response.text}")
+            return None
+        
+        # 解析响应
+        response_data = response.json()
+        
+        if 'error' in response_data:
+            error = response_data['error']
+            error_msg = f"{error.get('code', 'unknown')} - {error.get('message', 'unknown error')}"
+            if add_log:
+                add_log(f"❌ MCP工具返回错误: {error_msg}")
+            return None
+        
+        if 'result' not in response_data:
+            if add_log:
+                add_log(f"❌ MCP工具响应格式错误: 缺少result字段")
+            return None
+        
+        result = response_data['result']
+        
+        # 提取内容（可能是content字段）
+        if isinstance(result, dict) and 'content' in result:
+            content = result['content']
+            if isinstance(content, list) and len(content) > 0:
+                # 取第一个content项
+                first_content = content[0]
+                if isinstance(first_content, dict) and 'text' in first_content:
+                    return first_content['text']
+                return first_content
+            return content
+        
+        return result
+        
+    except Exception as e:
+        if add_log:
+            add_log(f"❌ MCP工具调用异常: {str(e)}")
+        print(f"[MCP Common] ❌ Error calling tool {tool_name}: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 def validate_tools_list_response(response_data: Dict[str, Any]) -> bool:
     """

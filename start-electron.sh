@@ -66,9 +66,9 @@ fi
 echo "✅ Electron 代码编译完成"
 
 # 检查编译后的文件是否存在
-if [ ! -f "electron/dist/main.js" ]; then
-    echo "错误: 编译后的 main.js 文件不存在"
-    exit 1
+if [ ! -f "./electron/dist/main.cjs" ]; then
+  echo "错误: 编译后的 main.cjs 文件不存在"
+  exit 1
 fi
 echo "✅ 编译文件检查通过"
 

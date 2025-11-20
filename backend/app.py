@@ -4148,6 +4148,1332 @@ def delete_workflow(workflow_id):
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+# ==================== 会话和消息管理 API ====================
+
+@app.route('/api/sessions', methods=['GET', 'OPTIONS'])
+def list_sessions():
+    """获取会话列表"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'sessions': [], 'total': 0, 'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 获取会话列表，按最后消息时间排序
+            cursor.execute("""
+                SELECT 
+                    s.session_id,
+                    s.title,
+                    s.llm_config_id,
+                    s.created_at,
+                    s.updated_at,
+                    s.last_message_at,
+                    COUNT(m.id) as message_count
+                FROM sessions s
+                LEFT JOIN messages m ON s.session_id = m.session_id
+                GROUP BY s.session_id
+                ORDER BY s.last_message_at DESC, s.created_at DESC
+                LIMIT 100
+            """)
+            
+            sessions = []
+            for row in cursor.fetchall():
+                session = {
+                    'session_id': row['session_id'],
+                    'title': row['title'],
+                    'llm_config_id': row['llm_config_id'],
+                    'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+                    'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
+                    'last_message_at': row['last_message_at'].isoformat() if row['last_message_at'] else None,
+                    'message_count': row['message_count'] or 0,
+                }
+                sessions.append(session)
+            
+            return jsonify({'sessions': sessions, 'total': len(sessions)})
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Session API] Error listing sessions: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'sessions': [], 'total': 0, 'error': str(e)}), 500
+
+@app.route('/api/sessions', methods=['POST', 'OPTIONS'])
+def create_session():
+    """创建新会话"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        data = request.json
+        session_id = data.get('session_id') or f'session-{int(time.time() * 1000)}'
+        title = data.get('title')
+        llm_config_id = data.get('llm_config_id')
+        
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO sessions (session_id, title, llm_config_id)
+                VALUES (%s, %s, %s)
+            """, (session_id, title, llm_config_id))
+            conn.commit()
+            
+            return jsonify({
+                'session_id': session_id,
+                'message': 'Session created successfully'
+            }), 201
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Session API] Error creating session: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/sessions/<session_id>', methods=['DELETE', 'OPTIONS'])
+def delete_session(session_id):
+    """删除会话及其所有消息"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            
+            # 删除会话（由于外键约束，会自动删除关联的消息和总结）
+            cursor.execute("DELETE FROM sessions WHERE session_id = %s", (session_id,))
+            conn.commit()
+            
+            if cursor.rowcount == 0:
+                return jsonify({'error': 'Session not found'}), 404
+            
+            print(f"[Session API] Deleted session: {session_id}")
+            
+            return jsonify({
+                'message': 'Session deleted successfully'
+            })
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Session API] Error deleting session: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/sessions/<session_id>', methods=['GET', 'OPTIONS'])
+def get_session(session_id):
+    """获取会话详情"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT 
+                    s.session_id,
+                    s.title,
+                    s.llm_config_id,
+                    s.created_at,
+                    s.updated_at,
+                    s.last_message_at,
+                    COUNT(m.id) as message_count
+                FROM sessions s
+                LEFT JOIN messages m ON s.session_id = m.session_id
+                WHERE s.session_id = %s
+                GROUP BY s.session_id
+            """, (session_id,))
+            
+            row = cursor.fetchone()
+            if not row:
+                return jsonify({'error': 'Session not found'}), 404
+            
+            session = {
+                'session_id': row['session_id'],
+                'title': row['title'],
+                'llm_config_id': row['llm_config_id'],
+                'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+                'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
+                'last_message_at': row['last_message_at'].isoformat() if row['last_message_at'] else None,
+                'message_count': row['message_count'] or 0,
+            }
+            
+            return jsonify(session)
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Session API] Error getting session: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/sessions/<session_id>/messages', methods=['GET', 'OPTIONS'])
+def get_session_messages(session_id):
+    """获取会话消息（分页）"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'messages': [], 'total': 0, 'error': 'MySQL not available'}), 503
+        
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 50))
+        offset = (page - 1) * page_size
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 获取总数
+            cursor.execute("SELECT COUNT(*) as total FROM messages WHERE session_id = %s", (session_id,))
+            total = cursor.fetchone()['total']
+            
+            # 获取消息（按时间倒序，最新的在前）
+            cursor.execute("""
+                SELECT 
+                    message_id,
+                    session_id,
+                    role,
+                    content,
+                    thinking,
+                    tool_calls,
+                    token_count,
+                    created_at
+                FROM messages
+                WHERE session_id = %s
+                ORDER BY created_at DESC
+                LIMIT %s OFFSET %s
+            """, (session_id, page_size, offset))
+            
+            messages = []
+            invalid_message_ids = []
+            for row in cursor.fetchall():
+                # 过滤掉无效的感知组件消息（pending状态且没有content的workflow消息）
+                if row['role'] == 'tool':
+                    if not row['content'] or row['content'].strip() == '' or row['content'] == '[]':
+                        if row['tool_calls']:
+                            try:
+                                tool_calls = json.loads(row['tool_calls']) if isinstance(row['tool_calls'], str) else row['tool_calls']
+                                if isinstance(tool_calls, dict) and tool_calls.get('workflowStatus') == 'pending':
+                                    invalid_message_ids.append(row['message_id'])
+                                    continue  # 跳过这个无效消息
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+                
+                message = {
+                    'message_id': row['message_id'],
+                    'session_id': row['session_id'],
+                    'role': row['role'],
+                    'content': row['content'],
+                    'thinking': row['thinking'],
+                    'tool_calls': json.loads(row['tool_calls']) if row['tool_calls'] else None,
+                    'token_count': row['token_count'],
+                    'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+                }
+                messages.append(message)
+            
+            # 同时清理无效的感知组件消息（在后台执行，不影响返回）
+            if invalid_message_ids:
+                try:
+                    placeholders = ','.join(['%s'] * len(invalid_message_ids))
+                    cursor.execute(f"""
+                        DELETE FROM messages 
+                        WHERE message_id IN ({placeholders})
+                    """, invalid_message_ids)
+                    deleted_count = cursor.rowcount
+                    if deleted_count > 0:
+                        conn.commit()
+                        print(f"[Session API] Cleaned up {deleted_count} invalid workflow messages from session {session_id}")
+                except Exception as cleanup_error:
+                    # 清理失败不影响主流程
+                    print(f"[Session API] Warning: Failed to cleanup invalid workflow messages: {cleanup_error}")
+            
+            # 反转顺序，使最旧的在前（用于前端显示）
+            messages.reverse()
+            
+            return jsonify({
+                'messages': messages,
+                'total': total,
+                'page': page,
+                'page_size': page_size,
+                'total_pages': (total + page_size - 1) // page_size
+            })
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Session API] Error getting messages: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'messages': [], 'total': 0, 'error': str(e)}), 500
+
+@app.route('/api/sessions/<session_id>/messages', methods=['POST', 'OPTIONS'])
+def save_message(session_id):
+    """保存消息到会话"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        from token_counter import estimate_tokens
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        data = request.json
+        message_id = data.get('message_id') or f'msg-{int(time.time() * 1000)}'
+        role = data.get('role', 'user')
+        content = data.get('content', '')
+        thinking = data.get('thinking')
+        tool_calls = data.get('tool_calls')
+        model = data.get('model', 'gpt-4')  # 用于估算 token
+        
+        # 估算 token 数量
+        token_count = estimate_tokens(content, model)
+        if thinking:
+            token_count += estimate_tokens(thinking, model)
+        
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            
+            # 保存消息
+            cursor.execute("""
+                INSERT INTO messages (message_id, session_id, role, content, thinking, tool_calls, token_count)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (
+                message_id,
+                session_id,
+                role,
+                content,
+                thinking,
+                json.dumps(tool_calls) if tool_calls else None,
+                token_count
+            ))
+            
+            # 更新会话的最后消息时间
+            cursor.execute("""
+                UPDATE sessions 
+                SET last_message_at = NOW(), updated_at = NOW()
+                WHERE session_id = %s
+            """, (session_id,))
+            
+            # 如果会话没有标题，自动生成一个（基于第一条用户消息）
+            if role == 'user' and content:
+                cursor.execute("""
+                    SELECT title FROM sessions WHERE session_id = %s
+                """, (session_id,))
+                row = cursor.fetchone()
+                if row and not row[0]:
+                    # 生成标题（取前50个字符）
+                    title = content[:50].strip()
+                    if len(content) > 50:
+                        title += '...'
+                    cursor.execute("""
+                        UPDATE sessions SET title = %s WHERE session_id = %s
+                    """, (title, session_id))
+            
+            conn.commit()
+            
+            return jsonify({
+                'message_id': message_id,
+                'token_count': token_count,
+                'message': 'Message saved successfully'
+            }), 201
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Session API] Error saving message: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/sessions/<session_id>/messages/<message_id>', methods=['DELETE', 'OPTIONS'])
+def delete_message(session_id, message_id):
+    """删除会话中的消息"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            
+            # 删除消息
+            cursor.execute("""
+                DELETE FROM messages 
+                WHERE session_id = %s AND message_id = %s
+            """, (session_id, message_id))
+            conn.commit()
+            
+            if cursor.rowcount == 0:
+                return jsonify({'error': 'Message not found'}), 404
+            
+            print(f"[Session API] Deleted message: {message_id} from session: {session_id}")
+            
+            # 检查并删除无效的感知组件消息（pending状态且没有content的workflow消息）
+            # 先查询所有workflow消息，然后检查JSON字段
+            cursor.execute("""
+                SELECT message_id, tool_calls 
+                FROM messages 
+                WHERE session_id = %s 
+                AND role = 'tool' 
+                AND (content IS NULL OR content = '' OR content = '[]')
+                AND tool_calls IS NOT NULL
+            """, (session_id,))
+            
+            invalid_messages = []
+            for row in cursor.fetchall():
+                try:
+                    tool_calls = json.loads(row['tool_calls']) if isinstance(row['tool_calls'], str) else row['tool_calls']
+                    if isinstance(tool_calls, dict) and tool_calls.get('workflowStatus') == 'pending':
+                        invalid_messages.append(row['message_id'])
+                except (json.JSONDecodeError, TypeError):
+                    continue
+            
+            if invalid_messages:
+                placeholders = ','.join(['%s'] * len(invalid_messages))
+                cursor.execute(f"""
+                    DELETE FROM messages 
+                    WHERE message_id IN ({placeholders})
+                """, invalid_messages)
+            
+                deleted_invalid = cursor.rowcount
+                if deleted_invalid > 0:
+                    conn.commit()
+                    print(f"[Session API] Deleted {deleted_invalid} invalid workflow messages (pending without output)")
+            else:
+                deleted_invalid = 0
+            
+            return jsonify({
+                'message': 'Message deleted successfully',
+                'deleted_invalid_workflows': deleted_invalid
+            })
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Session API] Error deleting message: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/sessions/<session_id>/summarize', methods=['POST', 'OPTIONS'])
+def summarize_session(session_id):
+    """总结会话内容"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection, get_redis_client
+        from token_counter import estimate_messages_tokens, get_model_max_tokens, estimate_tokens
+        import hashlib
+        
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        data = request.json
+        llm_config_id = data.get('llm_config_id')
+        model = data.get('model', 'gpt-4')
+        messages_to_summarize = data.get('messages', [])  # 要总结的消息列表
+        
+        if not llm_config_id:
+            return jsonify({'error': 'llm_config_id is required'}), 400
+        
+        # 检查 Redis 缓存
+        from database import get_redis_client
+        redis_conn = get_redis_client()
+        cache_key = None
+        if redis_conn and messages_to_summarize:
+            # 生成缓存键（基于消息ID列表）
+            message_ids = [msg.get('message_id') or str(i) for i, msg in enumerate(messages_to_summarize)]
+            cache_key = f"summarize:{session_id}:{hashlib.md5(','.join(sorted(message_ids)).encode()).hexdigest()}"
+            cached_summary = redis_conn.get(cache_key)
+            if cached_summary:
+                print(f"[Summarize] Using cached summary for session {session_id}")
+                return jsonify(json.loads(cached_summary))
+        
+        # 获取 LLM 配置
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT api_key, api_url, model, provider
+                FROM llm_configs
+                WHERE config_id = %s AND enabled = 1
+            """, (llm_config_id,))
+            
+            llm_config = cursor.fetchone()
+            if not llm_config:
+                return jsonify({'error': 'LLM config not found or disabled'}), 404
+            
+            # 构建总结提示词
+            summarize_prompt = """请将以下对话内容进行精简总结，保留关键信息和上下文，去除冗余内容。总结应该：
+1. 保留重要的用户需求和问题
+2. 保留关键的AI回答和解决方案
+3. 保留重要的上下文信息
+4. 去除重复和冗余的内容
+5. 使用简洁清晰的语言
+
+对话内容：
+"""
+            
+            # 构建要总结的消息文本
+            messages_text = []
+            for msg in messages_to_summarize:
+                role = msg.get('role', 'user')
+                content = msg.get('content', '')
+                if content:
+                    messages_text.append(f"{role}: {content}")
+            
+            full_text = summarize_prompt + "\n\n".join(messages_text)
+            
+            # 调用 LLM 进行总结
+            summary_content = None
+            try:
+                # 构建 LLM 请求
+                llm_messages = [
+                    {
+                        'role': 'system',
+                        'content': '你是一个专业的对话总结助手，擅长将长对话精简为关键信息，保留重要上下文。'
+                    },
+                    {
+                        'role': 'user',
+                        'content': summarize_prompt + "\n\n".join(messages_text)
+                    }
+                ]
+                
+                # 根据 provider 调用不同的 API
+                provider = llm_config['provider']
+                api_key = llm_config['api_key']
+                api_url = llm_config.get('api_url') or ''
+                model_name = llm_config.get('model') or model
+                
+                if provider == 'openai':
+                    # OpenAI API
+                    default_url = 'https://api.openai.com/v1/chat/completions'
+                    if not api_url or '/chat/completions' not in api_url:
+                        if api_url and not api_url.endswith('/'):
+                            api_url = api_url.rstrip('/')
+                        if not api_url.endswith('/v1/chat/completions'):
+                            api_url = f"{api_url}/v1/chat/completions" if api_url else default_url
+                    
+                    response = requests.post(
+                        api_url,
+                        headers={
+                            'Content-Type': 'application/json',
+                            'Authorization': f'Bearer {api_key}',
+                        },
+                        json={
+                            'model': model_name,
+                            'messages': llm_messages,
+                            'temperature': 0.3,
+                        },
+                        timeout=60
+                    )
+                    
+                    if response.ok:
+                        result = response.json()
+                        summary_content = result['choices'][0]['message']['content']
+                    else:
+                        error_data = response.json() if response.content else {}
+                        error_msg = error_data.get('error', {}).get('message', response.text)
+                        print(f"[Summarize] LLM API error: {error_msg}")
+                        summary_content = f"[自动总结] 已精简 {len(messages_to_summarize)} 条消息的关键信息"
+                
+                elif provider == 'anthropic':
+                    # Anthropic API
+                    default_url = 'https://api.anthropic.com/v1/messages'
+                    if not api_url or '/messages' not in api_url:
+                        if api_url and not api_url.endswith('/'):
+                            api_url = api_url.rstrip('/')
+                        if not api_url.endswith('/v1/messages'):
+                            api_url = f"{api_url}/v1/messages" if api_url else default_url
+                    
+                    system_msg = llm_messages[0]['content']
+                    user_msg = llm_messages[1]['content']
+                    
+                    response = requests.post(
+                        api_url,
+                        headers={
+                            'Content-Type': 'application/json',
+                            'x-api-key': api_key,
+                            'anthropic-version': '2023-06-01',
+                        },
+                        json={
+                            'model': model_name,
+                            'max_tokens': 2000,
+                            'system': system_msg,
+                            'messages': [{'role': 'user', 'content': user_msg}],
+                            'temperature': 0.3,
+                        },
+                        timeout=60
+                    )
+                    
+                    if response.ok:
+                        result = response.json()
+                        summary_content = result['content'][0]['text']
+                    else:
+                        error_data = response.json() if response.content else {}
+                        error_msg = error_data.get('error', {}).get('message', response.text)
+                        print(f"[Summarize] LLM API error: {error_msg}")
+                        summary_content = f"[自动总结] 已精简 {len(messages_to_summarize)} 条消息的关键信息"
+                
+                else:
+                    print(f"[Summarize] Provider {provider} not fully supported for summarize, using simplified summary")
+                    summary_content = f"[自动总结] 已精简 {len(messages_to_summarize)} 条消息的关键信息"
+                    
+            except Exception as e:
+                print(f"[Summarize] Error calling LLM: {e}")
+                import traceback
+                traceback.print_exc()
+                summary_content = f"[自动总结] 已精简 {len(messages_to_summarize)} 条消息的关键信息"
+            
+            # 估算总结后的 token 数量
+            estimated_tokens = estimate_tokens(summary_content or '', model)
+            
+            # 保存总结到数据库
+            summary_id = f'summary-{int(time.time() * 1000)}'
+            last_message_id = messages_to_summarize[-1].get('message_id') if messages_to_summarize else None
+            
+            token_count_before = sum(msg.get('token_count', 0) for msg in messages_to_summarize)
+            token_count_after = estimated_tokens
+            
+            cursor.execute("""
+                INSERT INTO summaries (summary_id, session_id, summary_content, last_message_id, token_count_before, token_count_after)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (summary_id, session_id, summary_content, last_message_id, token_count_before, token_count_after))
+            
+            # 缓存总结结果
+            if redis_conn and cache_key:
+                summary_data = {
+                    'summary_id': summary_id,
+                    'summary_content': summary_content,
+                    'token_count_before': token_count_before,
+                    'token_count_after': token_count_after,
+                }
+                redis_conn.setex(cache_key, 3600, json.dumps(summary_data))  # 缓存1小时
+            
+            conn.commit()
+            
+            return jsonify({
+                'summary_id': summary_id,
+                'summary_content': summary_content,
+                'token_count_before': token_count_before,
+                'token_count_after': token_count_after,
+            })
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Summarize API] Error summarizing session: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/sessions/<session_id>/summaries', methods=['GET', 'OPTIONS'])
+def get_session_summaries(session_id):
+    """获取会话的所有总结"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'summaries': [], 'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT 
+                    summary_id,
+                    session_id,
+                    summary_content,
+                    last_message_id,
+                    token_count_before,
+                    token_count_after,
+                    created_at
+                FROM summaries
+                WHERE session_id = %s
+                ORDER BY created_at ASC
+            """, (session_id,))
+            
+            summaries = []
+            for row in cursor.fetchall():
+                summary = {
+                    'summary_id': row['summary_id'],
+                    'session_id': row['session_id'],
+                    'summary_content': row['summary_content'],
+                    'last_message_id': row['last_message_id'],
+                    'token_count_before': row['token_count_before'],
+                    'token_count_after': row['token_count_after'],
+                    'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+                }
+                summaries.append(summary)
+            
+            return jsonify({'summaries': summaries})
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Summarize API] Error getting summaries: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'summaries': [], 'error': str(e)}), 500
+
+@app.route('/api/sessions/<session_id>/summaries/cache', methods=['DELETE', 'OPTIONS'])
+def clear_summarize_cache(session_id):
+    """清除会话的总结缓存（Redis）"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_redis_client
+        redis_client = get_redis_client()
+        
+        if not redis_client:
+            # 如果没有Redis，返回成功（可能Redis未配置）
+            return jsonify({'message': 'Redis not available, cache clear skipped'})
+        
+        # 清除该会话的所有总结缓存
+        cache_key_pattern = f'summarize:{session_id}:*'
+        try:
+            # 获取所有匹配的key
+            keys = redis_client.keys(cache_key_pattern)
+            if keys:
+                redis_client.delete(*keys)
+                print(f"[Summarize Cache] Cleared {len(keys)} cache entries for session {session_id}")
+            return jsonify({
+                'message': f'Cleared {len(keys) if keys else 0} cache entries',
+                'cleared_count': len(keys) if keys else 0
+            })
+        except Exception as e:
+            print(f"[Summarize Cache] Error clearing cache: {e}")
+            return jsonify({'error': str(e)}), 500
+            
+    except Exception as e:
+        print(f"[Session API] Error clearing summarize cache: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+# ==================== 消息执行管理 API ====================
+
+@app.route('/api/messages/<message_id>/execute', methods=['POST', 'OPTIONS'])
+def execute_message_component(message_id):
+    """执行消息关联的感知组件（MCP或工作流）"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        data = request.json
+        llm_config_id = data.get('llm_config_id')  # 聊天选择的LLM配置ID
+        input_text = data.get('input', '')
+        
+        if not llm_config_id:
+            return jsonify({'error': 'llm_config_id is required'}), 400
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 获取消息信息
+            cursor.execute("""
+                SELECT message_id, session_id, role, content, tool_calls
+                FROM messages
+                WHERE message_id = %s
+            """, (message_id,))
+            
+            message = cursor.fetchone()
+            if not message:
+                return jsonify({'error': 'Message not found'}), 404
+            
+            # 解析tool_calls获取组件信息
+            tool_calls = None
+            if message['tool_calls']:
+                try:
+                    tool_calls = json.loads(message['tool_calls']) if isinstance(message['tool_calls'], str) else message['tool_calls']
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            
+            if not tool_calls or not isinstance(tool_calls, dict):
+                return jsonify({'error': 'Invalid tool_calls format'}), 400
+            
+            component_type = tool_calls.get('toolType')  # 'mcp' or 'workflow'
+            component_id = tool_calls.get('workflowId')  # MCP server ID or workflow ID
+            component_name = tool_calls.get('workflowName')
+            
+            if not component_type or not component_id:
+                return jsonify({'error': 'Missing component information'}), 400
+            
+            # 检查是否已有执行记录
+            cursor.execute("""
+                SELECT execution_id, status
+                FROM message_executions
+                WHERE message_id = %s
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (message_id,))
+            
+            existing_execution = cursor.fetchone()
+            execution_id = existing_execution['execution_id'] if existing_execution else f'exec-{int(time.time() * 1000)}'
+            
+            # 创建或更新执行记录（状态为running）
+            if existing_execution:
+                cursor.execute("""
+                    UPDATE message_executions
+                    SET status = 'running',
+                        llm_config_id = %s,
+                        input = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE execution_id = %s
+                """, (llm_config_id, input_text, execution_id))
+            else:
+                cursor.execute("""
+                    INSERT INTO message_executions
+                    (execution_id, message_id, component_type, component_id, component_name, 
+                     llm_config_id, input, status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'running')
+                """, (execution_id, message_id, component_type, component_id, component_name, 
+                      llm_config_id, input_text))
+            
+            conn.commit()
+            
+            # 执行感知组件
+            result = None
+            error_message = None
+            status = 'completed'
+            
+            try:
+                if component_type == 'workflow':
+                    # 执行工作流，使用聊天选择的LLM替换工作流中的LLM节点
+                    result = execute_workflow_with_llm(component_id, input_text, llm_config_id)
+                elif component_type == 'mcp':
+                    # 执行MCP，使用聊天选择的LLM驱动MCP工具
+                    result = execute_mcp_with_llm(component_id, input_text, llm_config_id)
+                else:
+                    raise ValueError(f'Unknown component type: {component_type}')
+                
+                if isinstance(result, dict) and result.get('error'):
+                    status = 'error'
+                    error_message = result.get('error')
+                    result = None
+                elif not isinstance(result, str):
+                    result = json.dumps(result, ensure_ascii=False, indent=2)
+                    
+            except Exception as e:
+                status = 'error'
+                error_message = str(e)
+                print(f"[Message Execution] Error executing component: {e}")
+                import traceback
+                traceback.print_exc()
+            
+            # 更新执行记录
+            cursor.execute("""
+                UPDATE message_executions
+                SET status = %s,
+                    result = %s,
+                    error_message = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE execution_id = %s
+            """, (status, result, error_message, execution_id))
+            
+            conn.commit()
+            
+            return jsonify({
+                'execution_id': execution_id,
+                'status': status,
+                'result': result,
+                'error_message': error_message
+            })
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Message Execution API] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+def execute_workflow_with_llm(workflow_id: str, input_text: str, llm_config_id: str):
+    """执行工作流，使用指定的LLM配置替换工作流中的LLM节点"""
+    logs = []
+    
+    def add_log(message: str):
+        logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
+        print(f"[Workflow Execution] {message}")
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return {'error': 'MySQL not available', 'logs': logs}
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 获取工作流配置
+            add_log(f"获取工作流配置: {workflow_id}")
+            cursor.execute("""
+                SELECT workflow_id, name, config
+                FROM workflows
+                WHERE workflow_id = %s
+            """, (workflow_id,))
+            
+            workflow = cursor.fetchone()
+            if not workflow:
+                return {'error': 'Workflow not found', 'logs': logs}
+            
+            add_log(f"工作流配置获取成功: {workflow['name']}")
+            
+            config = json.loads(workflow['config']) if isinstance(workflow['config'], str) else workflow['config']
+            nodes = config.get('nodes', [])
+            connections = config.get('connections', [])
+            
+            add_log(f"工作流包含 {len(nodes)} 个节点，{len(connections)} 个连接")
+            
+            # 替换所有LLM节点的llmConfigId为聊天选择的LLM
+            llm_nodes_replaced = 0
+            for node in nodes:
+                if node.get('type') == 'llm':
+                    node['data'] = node.get('data', {})
+                    old_config_id = node['data'].get('llmConfigId')
+                    node['data']['llmConfigId'] = llm_config_id
+                    llm_nodes_replaced += 1
+                    add_log(f"替换LLM节点 {node.get('id', 'unknown')} 的配置: {old_config_id} -> {llm_config_id}")
+            
+            if llm_nodes_replaced > 0:
+                add_log(f"已替换 {llm_nodes_replaced} 个LLM节点的配置")
+            
+            # 查找输入节点
+            input_nodes = [n for n in nodes if n.get('type') == 'input']
+            if not input_nodes:
+                return {'error': 'No input node found in workflow', 'logs': logs}
+            
+            add_log(f"找到 {len(input_nodes)} 个输入节点")
+            
+            # 查找输出节点
+            output_nodes = [n for n in nodes if n.get('type') == 'output']
+            add_log(f"找到 {len(output_nodes)} 个输出节点")
+            
+            # 执行工作流（简化版本：只执行LLM节点）
+            # 注意：完整的工作流执行逻辑应该在前端WorkflowEditor中实现
+            # 这里提供一个简化版本，主要用于演示
+            result_text = f"工作流 \"{workflow['name']}\" 执行完成\n\n"
+            result_text += f"输入: {input_text}\n\n"
+            result_text += f"工作流配置: {llm_nodes_replaced} 个LLM节点已替换为配置 {llm_config_id}\n\n"
+            result_text += "注意：完整的工作流执行逻辑需要在WorkflowEditor中实现\n\n"
+            result_text += "执行日志:\n" + "\n".join(logs)
+            
+            return result_text
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        error_msg = str(e)
+        add_log(f"❌ 执行出错: {error_msg}")
+        import traceback
+        traceback.print_exc()
+        return {'error': error_msg, 'logs': logs}
+
+def execute_mcp_with_llm(mcp_server_id: str, input_text: str, llm_config_id: str):
+    """执行MCP，使用指定的LLM配置驱动MCP工具"""
+    logs = []
+    
+    def add_log(message: str):
+        logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
+        print(f"[MCP Execution] {message}")
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return {'error': 'MySQL not available', 'logs': logs}
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 获取LLM配置（包括加密的API key）
+            add_log(f"获取LLM配置: {llm_config_id}")
+            cursor.execute("""
+                SELECT config_id, provider, api_key, api_url, model, enabled, metadata
+                FROM llm_configs
+                WHERE config_id = %s AND enabled = 1
+            """, (llm_config_id,))
+            
+            llm_config = cursor.fetchone()
+            if not llm_config:
+                return {'error': 'LLM config not found or disabled', 'logs': logs}
+            
+            # 如果API key是加密的，需要解密（这里假设直接存储，如果需要解密可以添加解密逻辑）
+            # 注意：实际项目中API key应该加密存储，这里简化处理
+            add_log(f"LLM配置获取成功: {llm_config['provider']} - {llm_config['model']}")
+            
+            # 获取MCP服务器配置
+            add_log(f"获取MCP服务器配置: {mcp_server_id}")
+            cursor.execute("""
+                SELECT server_id, name, url, type, enabled, description, metadata, ext
+                FROM mcp_servers
+                WHERE server_id = %s AND enabled = 1
+            """, (mcp_server_id,))
+            
+            mcp_server = cursor.fetchone()
+            if not mcp_server:
+                return {'error': 'MCP server not found or disabled', 'logs': logs}
+            
+            add_log(f"MCP服务器配置获取成功: {mcp_server['name']} ({mcp_server['url']})")
+            
+            # 1. 连接MCP服务器并获取工具列表
+            add_log("连接MCP服务器并获取工具列表...")
+            from mcp_server.mcp_common_logic import get_mcp_tools_list, call_mcp_tool, prepare_mcp_headers
+            
+            # 构建基础请求头
+            base_headers = {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'mcp-protocol-version': '2025-06-18',
+            }
+            
+            # 准备完整的请求头（包括OAuth token等）
+            headers = prepare_mcp_headers(mcp_server['url'], base_headers, base_headers)
+            
+            # 获取工具列表
+            tools_response = get_mcp_tools_list(mcp_server['url'], headers)
+            if not tools_response or 'result' not in tools_response:
+                return {'error': 'Failed to get MCP tools list', 'logs': logs}
+            
+            tools = tools_response['result'].get('tools', [])
+            add_log(f"获取到 {len(tools)} 个可用工具: {', '.join([t.get('name', '') for t in tools])}")
+            
+            if not tools:
+                return {'error': 'No tools available from MCP server', 'logs': logs}
+            
+            # 2. 使用LLM分析输入，决定调用哪些工具
+            add_log("使用LLM分析输入并决定调用的工具...")
+            
+            # 构建工具描述
+            tools_description = '\n'.join([
+                f"- {t.get('name', '')}: {t.get('description', '')}"
+                for t in tools
+            ])
+            
+            # 构建LLM提示词
+            system_prompt = f"""你是一个智能助手，可以使用以下MCP工具帮助用户：
+{tools_description}
+
+请分析用户的输入，决定需要调用哪些工具，并返回JSON格式的工具调用信息。
+格式：
+{{
+  "tool_calls": [
+    {{
+      "name": "工具名称",
+      "arguments": {{"参数名": "参数值"}}
+    }}
+  ]
+}}
+
+只返回JSON，不要其他内容。"""
+            
+            # 调用LLM
+            llm_response = call_llm_api(llm_config, system_prompt, input_text, add_log)
+            if not llm_response:
+                return {'error': 'Failed to call LLM API', 'logs': logs}
+            
+            # 解析LLM返回的工具调用
+            import re
+            json_match = re.search(r'\{.*\}', llm_response, re.DOTALL)
+            if not json_match:
+                return {'error': 'Failed to parse LLM response as JSON', 'logs': logs, 'llm_response': llm_response}
+            
+            try:
+                tool_calls_data = json.loads(json_match.group())
+                tool_calls = tool_calls_data.get('tool_calls', [])
+            except json.JSONDecodeError as e:
+                return {'error': f'Failed to parse JSON: {e}', 'logs': logs, 'llm_response': llm_response}
+            
+            if not tool_calls:
+                return {'error': 'No tool calls found in LLM response', 'logs': logs, 'llm_response': llm_response}
+            
+            add_log(f"LLM决定调用 {len(tool_calls)} 个工具")
+            
+            # 3. 执行工具调用
+            results = []
+            for i, tool_call in enumerate(tool_calls):
+                tool_name = tool_call.get('name')
+                tool_args = tool_call.get('arguments', {})
+                
+                if not tool_name:
+                    add_log(f"⚠️ 工具调用 {i+1} 缺少工具名称，跳过")
+                    continue
+                
+                add_log(f"执行工具调用 {i+1}/{len(tool_calls)}: {tool_name}")
+                add_log(f"工具参数: {json.dumps(tool_args, ensure_ascii=False)}")
+                
+                try:
+                    # 调用MCP工具
+                    tool_result = call_mcp_tool(mcp_server['url'], headers, tool_name, tool_args, add_log)
+                    if tool_result:
+                        results.append({
+                            'tool': tool_name,
+                            'result': tool_result
+                        })
+                        add_log(f"✅ 工具 {tool_name} 执行成功")
+                    else:
+                        add_log(f"❌ 工具 {tool_name} 执行失败")
+                except Exception as e:
+                    add_log(f"❌ 工具 {tool_name} 执行出错: {str(e)}")
+                    results.append({
+                        'tool': tool_name,
+                        'error': str(e)
+                    })
+            
+            # 4. 返回结果
+            result_text = f"MCP服务器 \"{mcp_server['name']}\" 执行完成\n\n"
+            result_text += f"输入: {input_text}\n\n"
+            result_text += f"执行了 {len(results)} 个工具调用:\n\n"
+            
+            for result in results:
+                result_text += f"工具: {result['tool']}\n"
+                if 'result' in result:
+                    result_text += f"结果: {json.dumps(result['result'], ensure_ascii=False, indent=2)}\n"
+                elif 'error' in result:
+                    result_text += f"错误: {result['error']}\n"
+                result_text += "\n"
+            
+            result_text += "\n执行日志:\n" + "\n".join(logs)
+            
+            return result_text
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        error_msg = str(e)
+        add_log(f"❌ 执行出错: {error_msg}")
+        import traceback
+        traceback.print_exc()
+        return {'error': error_msg, 'logs': logs}
+
+def call_llm_api(llm_config: dict, system_prompt: str, user_input: str, add_log=None):
+    """调用LLM API"""
+    if add_log:
+        add_log(f"调用LLM API: {llm_config['provider']} - {llm_config['model']}")
+    
+    provider = llm_config['provider']
+    api_key = llm_config.get('api_key', '')
+    api_url = llm_config.get('api_url', '')
+    model = llm_config.get('model', '')
+    
+    if provider == 'openai':
+        default_url = 'https://api.openai.com/v1/chat/completions'
+        url = api_url or default_url
+        
+        payload = {
+            'model': model,
+            'messages': [
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': user_input}
+            ],
+            'temperature': 0.7,
+        }
+        
+        headers = {
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json',
+        }
+        
+        response = requests.post(url, json=payload, headers=headers, timeout=60)
+        if response.ok:
+            data = response.json()
+            return data['choices'][0]['message']['content']
+        else:
+            if add_log:
+                add_log(f"❌ LLM API调用失败: {response.status_code} - {response.text}")
+            return None
+            
+    elif provider == 'anthropic':
+        default_url = 'https://api.anthropic.com/v1/messages'
+        url = api_url or default_url
+        
+        payload = {
+            'model': model,
+            'max_tokens': 4096,
+            'messages': [
+                {'role': 'user', 'content': f"{system_prompt}\n\n用户输入: {user_input}"}
+            ],
+        }
+        
+        headers = {
+            'x-api-key': api_key,
+            'anthropic-version': '2023-06-01',
+            'Content-Type': 'application/json',
+        }
+        
+        response = requests.post(url, json=payload, headers=headers, timeout=60)
+        if response.ok:
+            data = response.json()
+            return data['content'][0]['text']
+        else:
+            if add_log:
+                add_log(f"❌ LLM API调用失败: {response.status_code} - {response.text}")
+            return None
+    else:
+        if add_log:
+            add_log(f"❌ 不支持的LLM提供商: {provider}")
+        return None
+
+@app.route('/api/messages/<message_id>/execution', methods=['GET', 'OPTIONS'])
+def get_message_execution(message_id):
+    """获取消息的执行记录"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            cursor.execute("""
+                SELECT execution_id, message_id, component_type, component_id, component_name,
+                       llm_config_id, input, result, status, error_message,
+                       created_at, updated_at
+                FROM message_executions
+                WHERE message_id = %s
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (message_id,))
+            
+            execution = cursor.fetchone()
+            if not execution:
+                return jsonify({'error': 'Execution not found'}), 404
+            
+            return jsonify({
+                'execution_id': execution['execution_id'],
+                'message_id': execution['message_id'],
+                'component_type': execution['component_type'],
+                'component_id': execution['component_id'],
+                'component_name': execution['component_name'],
+                'llm_config_id': execution['llm_config_id'],
+                'input': execution['input'],
+                'result': execution['result'],
+                'status': execution['status'],
+                'error_message': execution['error_message'],
+                'created_at': execution['created_at'].isoformat() if execution['created_at'] else None,
+                'updated_at': execution['updated_at'].isoformat() if execution['updated_at'] else None,
+            })
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Message Execution API] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     # 初始化服务
     from database import init_mysql, init_redis
