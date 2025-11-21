@@ -44,12 +44,14 @@ const Workflow: React.FC = () => {
   
   // @ 符号选择器状态
   const [showAtSelector, setShowAtSelector] = useState(false);
-  const [atSelectorPosition, setAtSelectorPosition] = useState({ top: 0, left: 0 });
+  const [atSelectorPosition, setAtSelectorPosition] = useState({ top: 0, left: 0, maxHeight: 256 });
   const [atSelectorQuery, setAtSelectorQuery] = useState('');
   const [atSelectorIndex, setAtSelectorIndex] = useState(-1); // @ 符号在输入中的位置
   const [selectedComponentIndex, setSelectedComponentIndex] = useState(0); // 当前选中的组件索引（用于键盘导航）
   const [selectedComponents, setSelectedComponents] = useState<Array<{ type: 'mcp' | 'workflow'; id: string; name: string }>>([]); // 已选定的组件（tag）
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const selectorRef = useRef<HTMLDivElement>(null);
+  const blurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   // 会话管理
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -122,6 +124,50 @@ const Workflow: React.FC = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSessionId]);
+  
+  // 当弹框显示时，调整位置使底部对齐光标，并滚动到底部
+  useEffect(() => {
+    if (showAtSelector && selectorRef.current && inputRef.current) {
+      // 使用 setTimeout 确保 DOM 已更新
+      setTimeout(() => {
+        if (selectorRef.current && inputRef.current) {
+          const selector = selectorRef.current;
+          const actualHeight = selector.offsetHeight;
+          
+          // 重新获取光标位置
+          const textarea = inputRef.current;
+          const textareaRect = textarea.getBoundingClientRect();
+          const cursorPosition = textarea.selectionStart || 0;
+          const value = textarea.value;
+          const textBeforeCursor = value.substring(0, cursorPosition);
+          
+          // 计算光标位置（简化版本，使用之前的逻辑）
+          const styles = window.getComputedStyle(textarea);
+          const lines = textBeforeCursor.split('\n');
+          const lineIndex = lines.length - 1;
+          
+          // 计算行高和 padding
+          const lineHeight = parseFloat(styles.lineHeight) || parseFloat(styles.fontSize) * 1.2;
+          const paddingTop = parseFloat(styles.paddingTop) || 0;
+          
+          const cursorY = textareaRect.top + paddingTop + (lineIndex * lineHeight) - textarea.scrollTop;
+          
+          // 调整弹框位置，使底部对齐光标
+          const newTop = cursorY - actualHeight;
+          
+          // 如果调整后超出顶部，则限制在顶部
+          if (newTop < 10) {
+            selector.style.top = '10px';
+          } else {
+            selector.style.top = `${newTop}px`;
+          }
+          
+          // 滚动到底部，使最新内容在底部显示
+          selector.scrollTop = selector.scrollHeight;
+        }
+      }, 10); // 稍微延迟以确保内容已渲染
+    }
+  }, [showAtSelector, atSelectorQuery, mcpServers, workflows]);
   
   // 加载会话消息
   const loadSessionMessages = async (session_id: string, page: number = 1) => {
@@ -977,74 +1023,156 @@ const Workflow: React.FC = () => {
         
         console.log('[Workflow] Showing selector with query:', query);
         
-        // 计算选择器位置（精确跟随@符号位置）
+        // 计算选择器位置（跟随光标位置，出现在右上方）
         if (inputRef.current) {
           const textarea = inputRef.current;
           const textareaRect = textarea.getBoundingClientRect();
-          
-          // 使用更精确的方法：创建一个临时div来测量@符号的精确位置
-          const tempDiv = document.createElement('div');
           const styles = window.getComputedStyle(textarea);
           
-          // 复制textarea的所有相关样式
-          tempDiv.style.position = 'absolute';
-          tempDiv.style.visibility = 'hidden';
-          tempDiv.style.whiteSpace = 'pre-wrap';
-          tempDiv.style.wordWrap = 'break-word';
-          tempDiv.style.overflowWrap = 'break-word';
-          tempDiv.style.font = styles.font;
-          tempDiv.style.fontSize = styles.fontSize;
-          tempDiv.style.fontFamily = styles.fontFamily;
-          tempDiv.style.fontWeight = styles.fontWeight;
-          tempDiv.style.fontStyle = styles.fontStyle;
-          tempDiv.style.letterSpacing = styles.letterSpacing;
-          tempDiv.style.textTransform = styles.textTransform;
-          tempDiv.style.padding = styles.padding;
-          tempDiv.style.border = styles.border;
-          tempDiv.style.width = `${textarea.offsetWidth}px`;
-          tempDiv.style.boxSizing = styles.boxSizing;
-          tempDiv.style.lineHeight = styles.lineHeight;
-          tempDiv.style.wordSpacing = styles.wordSpacing;
+          // 使用更可靠的方法：创建一个完全镜像 textarea 的隐藏 div 元素
+          const mirror = document.createElement('div');
           
-          // 设置文本内容到@符号位置（包括换行）
-          const textBeforeAt = value.substring(0, lastAtIndex);
-          // 使用textContent来保持换行
-          tempDiv.textContent = textBeforeAt;
-          document.body.appendChild(tempDiv);
+          // 复制关键样式，确保与 textarea 完全一致
+          mirror.style.position = 'absolute';
+          mirror.style.visibility = 'hidden';
+          mirror.style.whiteSpace = styles.whiteSpace || 'pre-wrap';
+          mirror.style.wordWrap = styles.wordWrap || 'break-word';
+          mirror.style.overflowWrap = styles.overflowWrap || 'break-word';
+          mirror.style.font = styles.font;
+          mirror.style.fontSize = styles.fontSize;
+          mirror.style.fontFamily = styles.fontFamily;
+          mirror.style.fontWeight = styles.fontWeight;
+          mirror.style.fontStyle = styles.fontStyle;
+          mirror.style.letterSpacing = styles.letterSpacing;
+          mirror.style.padding = styles.padding;
+          mirror.style.border = styles.border;
+          mirror.style.width = `${textarea.offsetWidth}px`;
+          mirror.style.boxSizing = styles.boxSizing;
+          mirror.style.lineHeight = styles.lineHeight;
+          mirror.style.wordSpacing = styles.wordSpacing;
+          mirror.style.top = `${textareaRect.top}px`;
+          mirror.style.left = `${textareaRect.left}px`;
           
-          // 创建一个span来测量@符号的位置
-          const atSpan = document.createElement('span');
-          atSpan.textContent = '@';
-          tempDiv.appendChild(atSpan);
+          // 设置文本内容到光标位置
+          const textBeforeCursor = value.substring(0, cursorPosition);
+          mirror.textContent = textBeforeCursor;
           
-          // 获取@符号的位置
-          const atRect = atSpan.getBoundingClientRect();
+          document.body.appendChild(mirror);
+          
+          // 使用 Range API 来获取文本末尾（光标位置）的精确坐标
+          let cursorX: number;
+          let cursorY: number;
+          
+          try {
+            const range = document.createRange();
+            const mirrorTextNode = mirror.firstChild;
+            
+            if (mirrorTextNode && mirrorTextNode.nodeType === Node.TEXT_NODE) {
+              // 设置 range 到文本末尾（光标位置）
+              const textLength = mirrorTextNode.textContent?.length || 0;
+              range.setStart(mirrorTextNode, textLength);
+              range.setEnd(mirrorTextNode, textLength);
+              const rangeRect = range.getBoundingClientRect();
+              
+              // 使用 right 属性来获取光标右侧的位置（更可靠）
+              // 对于空 range（光标位置），right 会指向光标右侧
+              cursorX = rangeRect.right;
+              cursorY = rangeRect.top;
+              
+              // 如果 right 和 left 相同（width 为 0），说明光标在文本末尾
+              // 这种情况下，我们需要测量文本的实际宽度
+              if (rangeRect.width === 0 && textLength > 0) {
+                // 创建一个临时元素来测量文本宽度
+                const measureSpan = document.createElement('span');
+                measureSpan.style.font = styles.font;
+                measureSpan.style.fontSize = styles.fontSize;
+                measureSpan.style.fontFamily = styles.fontFamily;
+                measureSpan.style.fontWeight = styles.fontWeight;
+                measureSpan.style.fontStyle = styles.fontStyle;
+                measureSpan.style.letterSpacing = styles.letterSpacing;
+                measureSpan.style.whiteSpace = 'pre';
+                measureSpan.textContent = textBeforeCursor;
+                measureSpan.style.position = 'absolute';
+                measureSpan.style.visibility = 'hidden';
+                document.body.appendChild(measureSpan);
+                const textWidth = measureSpan.offsetWidth;
+                document.body.removeChild(measureSpan);
+                
+                // 使用 mirror 的位置 + padding + 文本宽度
+                const mirrorRect = mirror.getBoundingClientRect();
+                const paddingLeft = parseFloat(styles.paddingLeft) || 0;
+                cursorX = mirrorRect.left + paddingLeft + textWidth;
+              }
+            } else {
+              throw new Error('No text node found');
+            }
+          } catch (e) {
+            // 如果 Range API 失败，使用备用方法
+            const mirrorRect = mirror.getBoundingClientRect();
+            const lines = textBeforeCursor.split('\n');
+            const lineIndex = lines.length - 1;
+            const lineText = lines[lineIndex] || '';
+            
+            // 计算当前行的宽度
+            const lineMeasure = document.createElement('span');
+            lineMeasure.style.font = styles.font;
+            lineMeasure.style.fontSize = styles.fontSize;
+            lineMeasure.style.fontFamily = styles.fontFamily;
+            lineMeasure.style.fontWeight = styles.fontWeight;
+            lineMeasure.style.fontStyle = styles.fontStyle;
+            lineMeasure.style.letterSpacing = styles.letterSpacing;
+            lineMeasure.style.whiteSpace = 'pre';
+            lineMeasure.textContent = lineText;
+            lineMeasure.style.position = 'absolute';
+            lineMeasure.style.visibility = 'hidden';
+            document.body.appendChild(lineMeasure);
+            const lineWidth = lineMeasure.offsetWidth;
+            document.body.removeChild(lineMeasure);
+            
+            // 计算行高和 padding
+            const lineHeight = parseFloat(styles.lineHeight) || parseFloat(styles.fontSize) * 1.2;
+            const paddingTop = parseFloat(styles.paddingTop) || 0;
+            const paddingLeft = parseFloat(styles.paddingLeft) || 0;
+            
+            cursorX = mirrorRect.left + paddingLeft + lineWidth;
+            cursorY = mirrorRect.top + paddingTop + (lineIndex * lineHeight);
+          }
           
           // 清理临时元素
-          document.body.removeChild(tempDiv);
+          document.body.removeChild(mirror);
           
           // 选择器尺寸
-          const selectorHeight = 256; // max-h-64 = 256px
+          const selectorMaxHeight = 256; // max-h-64 = 256px
           const selectorWidth = 300; // maxWidth
           const viewportHeight = window.innerHeight;
           const viewportWidth = window.innerWidth;
           
-          // 计算选择器位置（在@符号下方，紧跟光标）
-          let top = atRect.bottom + 5;
-          let left = atRect.left;
+          // 计算选择器位置（以光标为锚点，从下往上展开）
+          // 策略：弹框底部对齐光标位置，向上展开
+          // 先计算弹框的理想高度（最大不超过 selectorMaxHeight）
+          const idealHeight = selectorMaxHeight;
           
-          // 如果选择器会超出底部，则显示在@符号上方
-          if (top + selectorHeight > viewportHeight - 10) {
-            top = atRect.top - selectorHeight - 5;
-            // 如果上方也不够，就显示在@符号下方（即使会超出）
-            if (top < 10) {
-              top = atRect.bottom + 5;
-            }
+          // 计算弹框顶部位置：光标位置 - 弹框高度
+          // 这样弹框底部会对齐光标位置
+          let top = cursorY - idealHeight;
+          let left = cursorX + 8; // 光标右侧，加上间距
+          
+          // 如果弹框会超出顶部，调整位置
+          // 确保至少留出 10px 的顶部边距
+          if (top < 10) {
+            // 如果上方空间不足，限制弹框高度，使其顶部对齐到 10px
+            // 这样弹框会从顶部开始，但底部尽量靠近光标
+            // 注意：实际高度会在 CSS 中通过 max-height 限制，位置会在 useEffect 中进一步调整
+            top = 10;
           }
           
-          // 确保选择器不会超出右侧边界
+          // 如果选择器会超出右侧边界，则显示在光标左侧
           if (left + selectorWidth > viewportWidth - 10) {
-            left = viewportWidth - selectorWidth - 10;
+            left = cursorX - selectorWidth - 8; // 显示在光标左侧
+            // 如果左侧也不够，就显示在光标右侧（即使会超出）
+            if (left < 10) {
+              left = cursorX + 8;
+            }
           }
           
           // 确保不会超出左侧
@@ -1052,23 +1180,30 @@ const Workflow: React.FC = () => {
             left = 10;
           }
           
-          // 确保不会超出顶部
-          if (top < 10) {
-            top = atRect.bottom + 5;
-          }
+          // 计算实际可用的最大高度（从 top 到光标位置的距离）
+          const maxAvailableHeight = cursorY - top - 8; // 减去一些间距
           
-          console.log('[Workflow] Selector position calculated:', { 
+          // 如果可用高度小于最大高度，使用可用高度
+          const actualMaxHeight = Math.min(selectorMaxHeight, maxAvailableHeight);
+          
+          console.log('[Workflow] Selector position calculated (cursor):', { 
             top, 
             left, 
-            atRect,
+            cursorX,
+            cursorY,
             textareaRect,
             viewportHeight,
             viewportWidth,
-            lastAtIndex,
-            cursorPosition
+            cursorPosition,
+            actualMaxHeight,
+            maxAvailableHeight
           });
           
-          setAtSelectorPosition({ top, left });
+          setAtSelectorPosition({ 
+            top, 
+            left,
+            maxHeight: actualMaxHeight // 传递最大高度
+          });
           setShowAtSelector(true);
           setSelectedComponentIndex(0); // 重置选中索引
         } else {
@@ -2314,8 +2449,9 @@ const Workflow: React.FC = () => {
           <div 
             className="border-t border-gray-200 p-3 flex-shrink-0 relative"
             onClick={(e) => {
-              // 点击输入框区域外部时关闭选择器
-              if (showAtSelector && !(e.target as HTMLElement).closest('.at-selector-container')) {
+              // 点击输入框区域外部时关闭选择器（但不包括选择器本身）
+              const target = e.target as HTMLElement;
+              if (showAtSelector && !target.closest('.at-selector-container') && !target.closest('textarea')) {
                 setShowAtSelector(false);
               }
             }}
@@ -2381,13 +2517,60 @@ const Workflow: React.FC = () => {
                   }
                 }}
                 onBlur={(e) => {
+                  // 如果选择器未显示，不需要处理
+                  if (!showAtSelector) {
+                    return;
+                  }
+                  
+                  // 清除之前的定时器
+                  if (blurTimeoutRef.current) {
+                    clearTimeout(blurTimeoutRef.current);
+                    blurTimeoutRef.current = null;
+                  }
+                  
                   // 延迟关闭，以便点击选择器时不会立即关闭
-                  setTimeout(() => {
-                    if (showAtSelector && !e.relatedTarget?.closest('.at-selector-container')) {
-                      console.log('[Workflow] Closing selector via blur');
-                      setShowAtSelector(false);
+                  blurTimeoutRef.current = setTimeout(() => {
+                    // 检查当前焦点是否在选择器或其子元素上
+                    const activeElement = document.activeElement;
+                    const isFocusInSelector = activeElement?.closest('.at-selector-container');
+                    
+                    // 检查选择器元素是否仍然存在且显示
+                    const selectorElement = selectorRef.current;
+                    const isSelectorVisible = selectorElement && 
+                                             document.contains(selectorElement) && 
+                                             showAtSelector;
+                    
+                    // 如果焦点不在选择器上，且选择器仍然显示，则关闭
+                    if (isSelectorVisible && !isFocusInSelector) {
+                      // 再次检查relatedTarget（可能为null）
+                      const relatedTarget = e.relatedTarget as HTMLElement;
+                      if (!relatedTarget || !relatedTarget.closest('.at-selector-container')) {
+                        console.log('[Workflow] Closing selector via blur');
+                        setShowAtSelector(false);
+                      }
                     }
-                  }, 200);
+                    
+                    blurTimeoutRef.current = null;
+                  }, 300); // 增加延迟时间
+                }}
+                onFocus={() => {
+                  // 如果输入框获得焦点且当前有@符号，显示选择器
+                  if (inputRef.current) {
+                    const value = inputRef.current.value;
+                    const cursorPosition = inputRef.current.selectionStart || 0;
+                    const textBeforeCursor = value.substring(0, cursorPosition);
+                    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+                    
+                    if (lastAtIndex !== -1) {
+                      const textAfterAt = textBeforeCursor.substring(lastAtIndex + 1);
+                      const hasSpaceOrNewline = textAfterAt.includes(' ') || textAfterAt.includes('\n');
+                      
+                      if (!hasSpaceOrNewline && selectedComponents.length === 0) {
+                        // 触发位置重新计算
+                        handleInputChange({ target: inputRef.current } as React.ChangeEvent<HTMLTextAreaElement>);
+                      }
+                    }
+                  }
                 }}
               placeholder={
                 !selectedLLMConfig
@@ -2404,14 +2587,28 @@ const Workflow: React.FC = () => {
               {/* @ 符号选择器 */}
               {showAtSelector && (
                 <div
-                  className="fixed z-[100] bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-64 overflow-y-auto at-selector-container"
+                  ref={selectorRef}
+                  className="fixed z-[100] bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg overflow-y-auto at-selector-container"
                   style={{
                     top: `${atSelectorPosition.top}px`,
                     left: `${atSelectorPosition.left}px`,
                     minWidth: '200px',
                     maxWidth: '300px',
+                    maxHeight: `${atSelectorPosition.maxHeight || 256}px`, // 使用动态计算的最大高度
                   }}
-                  onMouseDown={(e) => e.preventDefault()} // 防止触发 blur
+                  onMouseDown={(e) => {
+                    e.preventDefault(); // 防止触发 blur
+                    e.stopPropagation(); // 阻止事件冒泡
+                    // 清除blur定时器，防止选择器被关闭
+                    if (blurTimeoutRef.current) {
+                      clearTimeout(blurTimeoutRef.current);
+                      blurTimeoutRef.current = null;
+                    }
+                  }}
+                  onMouseUp={(e) => {
+                    e.preventDefault(); // 防止触发 blur
+                    e.stopPropagation(); // 阻止事件冒泡
+                  }}
                 >
                   <div className="p-2 border-b border-gray-200 dark:border-gray-700">
                     <div className="text-xs font-semibold text-gray-700 dark:text-gray-300">
