@@ -957,11 +957,56 @@ GET /api/crawler/history/<history_id>
 
 ## 更新日志
 
-### v1.0.0 (计划中)
-- 基础爬取功能
-- 静态和动态爬取支持
-- 认证支持
-- 结构化数据提取
+### v1.0.0 (已实现)
+- ✅ 基础爬取功能
+- ✅ 静态和动态爬取支持（Playwright）
+- ✅ 认证支持（Cookie、Headers、User-Agent）
+- ✅ 结构化数据提取
+- ✅ Redis缓存机制
+- ✅ 模块和批次管理
+- ✅ 标准化解析（列表、文章、表格、自定义格式）
+- ✅ 前端测试页面
+- ✅ 聊天中的/模块命令引用
+
+---
+
+## 实现状态
+
+### 后端实现
+- ✅ `backend/web_crawler.py` - 爬虫核心模块
+- ✅ `backend/crawler_normalizer.py` - 标准化解析模块
+- ✅ `backend/database.py` - 数据库表（crawler_modules, crawler_batches）
+- ✅ `backend/app.py` - API接口（/api/crawler/*）
+- ✅ `backend/requirements.txt` - 依赖包
+
+### 前端实现
+- ✅ `src/services/crawlerApi.ts` - API服务
+- ✅ `src/components/CrawlerTestPage.tsx` - 测试页面组件
+- ✅ `src/components/CrawlerModuleSelector.tsx` - 模块选择器组件
+- ✅ `src/components/Workflow.tsx` - /模块命令集成
+
+### 安装说明
+
+#### 后端依赖安装
+```bash
+cd backend
+pip install beautifulsoup4 lxml playwright html2text readability-lxml
+playwright install chromium  # 安装浏览器
+```
+
+#### 使用说明
+1. **配置爬虫模块**：
+   - 点击"爬虫配置"按钮打开测试页面
+   - 输入URL，配置认证信息
+   - 测试爬取，查看结果
+   - 配置标准化规则
+   - 设置模块名称和批次名称
+   - 保存模块
+
+2. **在聊天中引用**：
+   - 输入 `/模块` 触发模块选择器
+   - 选择模块和批次
+   - 数据自动插入到输入框
 
 ---
 

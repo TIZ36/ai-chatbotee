@@ -4,16 +4,19 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Loader, Bot, User, Wrench, AlertCircle, CheckCircle, Brain, Plug, RefreshCw, Power, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Plus, History, Sparkles, Workflow as WorkflowIcon, GripVertical, Play, ArrowRight, Trash2, X, Edit2, RotateCw } from 'lucide-react';
+import { Send, Loader, Bot, User, Wrench, AlertCircle, CheckCircle, Brain, Plug, RefreshCw, Power, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Plus, History, Sparkles, Workflow as WorkflowIcon, GripVertical, Play, ArrowRight, Trash2, X, Edit2, RotateCw, Database, Image as ImageIcon } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { LLMClient, LLMMessage } from '../services/llmClient';
 import { getLLMConfigs, getLLMConfig, getLLMConfigApiKey, LLMConfigFromDB } from '../services/llmApi';
 import { mcpManager, MCPServer, MCPTool } from '../services/mcpClient';
 import { getMCPServers, MCPServerConfig } from '../services/mcpApi';
-import { getSessions, createSession, getSessionMessages, saveMessage, summarizeSession, getSessionSummaries, deleteSession, clearSummarizeCache, deleteMessage, executeMessageComponent, Session, Summary } from '../services/sessionApi';
+import { getSessions, createSession, getSessionMessages, saveMessage, summarizeSession, getSessionSummaries, deleteSession, clearSummarizeCache, deleteMessage, executeMessageComponent, updateSessionAvatar, Session, Summary } from '../services/sessionApi';
 import { estimate_messages_tokens, get_model_max_tokens, estimate_tokens } from '../services/tokenCounter';
 import { getWorkflows, getWorkflow, Workflow as WorkflowType, WorkflowNode, WorkflowConnection } from '../services/workflowApi';
+import { getBatch } from '../services/crawlerApi';
+import CrawlerModuleSelector from './CrawlerModuleSelector';
+import CrawlerBatchItemSelector from './CrawlerBatchItemSelector';
 
 interface Message {
   id: string;
@@ -57,9 +60,27 @@ const Workflow: React.FC = () => {
   const selectorRef = useRef<HTMLDivElement>(null);
   const blurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
+  // /模块 选择器状态
+  const [showModuleSelector, setShowModuleSelector] = useState(false);
+  const [moduleSelectorPosition, setModuleSelectorPosition] = useState({ top: 0, left: 0, maxHeight: 256 });
+  const [moduleSelectorQuery, setModuleSelectorQuery] = useState('');
+  const [moduleSelectorIndex, setModuleSelectorIndex] = useState(-1); // /模块 在输入中的位置
+  
+  // 批次数据项选择器状态
+  const [showBatchItemSelector, setShowBatchItemSelector] = useState(false);
+  const [batchItemSelectorPosition, setBatchItemSelectorPosition] = useState({ top: 0, left: 0, maxHeight: 400 });
+  const [selectedBatch, setSelectedBatch] = useState<any>(null);
+  
+  // 选定的批次数据项（作为系统提示词）
+  const [selectedBatchItem, setSelectedBatchItem] = useState<{ item: any; batchName: string } | null>(null);
+  
+  // 批次数据项选择后的操作选择（临时状态）
+  const [pendingBatchItem, setPendingBatchItem] = useState<{ item: any; batchName: string } | null>(null);
+  
   // 会话管理
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [currentSessionAvatar, setCurrentSessionAvatar] = useState<string | null>(null); // 当前会话的头像
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [messagePage, setMessagePage] = useState(1);
@@ -184,11 +205,18 @@ const Workflow: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   
-  // 当选择会话时，加载历史消息
+  // 当选择会话时，加载历史消息和头像
   useEffect(() => {
     if (currentSessionId) {
       loadSessionMessages(currentSessionId);
       loadSessionSummaries(currentSessionId);
+      // 加载会话头像
+      const session = sessions.find(s => s.session_id === currentSessionId);
+      if (session?.avatar) {
+        setCurrentSessionAvatar(session.avatar);
+      } else {
+        setCurrentSessionAvatar(null);
+      }
     } else {
       // 新会话，清空消息（保留系统消息）
       setMessages([{
@@ -197,9 +225,10 @@ const Workflow: React.FC = () => {
         content: '你好！我是你的 AI 工作流助手。请先选择 LLM 模型，然后开始对话。如果需要使用工具，可以选择 MCP 服务器。',
       }]);
       setSummaries([]);
+      setCurrentSessionAvatar(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSessionId]);
+  }, [currentSessionId, sessions]);
   
   // 当弹框显示时，调整位置使底部对齐光标，并滚动到底部
   useEffect(() => {
@@ -244,6 +273,59 @@ const Workflow: React.FC = () => {
       }, 10); // 稍微延迟以确保内容已渲染
     }
   }, [showAtSelector, atSelectorQuery, mcpServers, workflows]);
+  
+  // 监听点击外部关闭模块选择器
+  useEffect(() => {
+    if (!showModuleSelector) return;
+    
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      
+      // 检查点击是否在选择器外部（不包括输入框和选择器本身）
+      const isClickInsideSelector = target.closest('.at-selector-container');
+      const isClickInsideInput = inputRef.current?.contains(target);
+      
+      if (!isClickInsideSelector && !isClickInsideInput) {
+        console.log('[Workflow] 点击外部，关闭模块选择器');
+        setShowModuleSelector(false);
+        setModuleSelectorIndex(-1);
+      }
+    };
+    
+    // 延迟添加监听器，避免立即触发
+    const timerId = setTimeout(() => {
+      document.addEventListener('mousedown', handleClickOutside);
+    }, 100);
+    
+    return () => {
+      clearTimeout(timerId);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showModuleSelector]);
+  
+  // 监听ESC键关闭模块选择器
+  useEffect(() => {
+    if (!showModuleSelector) return;
+    
+    const handleEscKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        console.log('[Workflow] 按下ESC，关闭模块选择器');
+        setShowModuleSelector(false);
+        setModuleSelectorIndex(-1);
+        
+        // 重新聚焦输入框
+        if (inputRef.current) {
+          inputRef.current.focus();
+        }
+      }
+    };
+    
+    document.addEventListener('keydown', handleEscKey);
+    
+    return () => {
+      document.removeEventListener('keydown', handleEscKey);
+    };
+  }, [showModuleSelector]);
   
   // 加载会话消息
   const loadSessionMessages = async (session_id: string, page: number = 1) => {
@@ -316,6 +398,10 @@ const Workflow: React.FC = () => {
           ? msg.content.replace(/^__SUMMARY__/, '') // 移除前缀，保留实际内容
           : msg.content;
         
+        // 检查是否是系统提示词消息（通过 tool_calls 中的 isSystemPrompt 标识）
+        const toolCalls = msg.tool_calls && typeof msg.tool_calls === 'object' ? msg.tool_calls : null;
+        const isSystemPromptMessage = role === 'system' && toolCalls && (toolCalls as any).isSystemPrompt === true;
+        
         const baseMessage: Message = {
           id: msg.message_id,
           role: role as 'user' | 'assistant' | 'tool' | 'system',
@@ -324,6 +410,18 @@ const Workflow: React.FC = () => {
           toolCalls: msg.tool_calls,
           isSummary: isSummaryMessage, // 标记为总结消息
         };
+        
+        // 如果是系统提示词消息，恢复 selectedBatchItem
+        if (isSystemPromptMessage && toolCalls) {
+          const systemPromptData = toolCalls as any;
+          if (systemPromptData.batchName && systemPromptData.item) {
+            setSelectedBatchItem({
+              batchName: systemPromptData.batchName,
+              item: systemPromptData.item,
+            });
+            console.log('[Workflow] Restored system prompt from message:', msg.message_id);
+          }
+        }
         
         // 如果是工具消息（感知组件），尝试从 content 或 tool_calls 中恢复工作流信息
         if (baseMessage.role === 'tool') {
@@ -522,6 +620,7 @@ const Workflow: React.FC = () => {
           content: '你好！我是你的 AI 工作流助手。请先选择 LLM 模型，然后开始对话。如果需要使用工具，可以选择 MCP 服务器。',
         }]);
         setSummaries([]);
+        setCurrentSessionAvatar(null);
       }
       
       // 重新加载会话列表
@@ -530,6 +629,74 @@ const Workflow: React.FC = () => {
       console.error('[Workflow] Failed to delete session:', error);
       alert('删除会话失败，请重试');
     }
+  };
+  
+  // 处理头像上传
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!currentSessionId) {
+      alert('请先选择一个会话');
+      return;
+    }
+    
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    // 检查文件类型
+    if (!file.type.startsWith('image/')) {
+      alert('请选择图片文件');
+      return;
+    }
+    
+    // 检查文件大小（限制为2MB）
+    if (file.size > 2 * 1024 * 1024) {
+      alert('图片大小不能超过2MB');
+      return;
+    }
+    
+    try {
+      // 将文件转换为base64
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        const base64String = event.target?.result as string;
+        
+        if (!base64String) {
+          alert('图片读取失败');
+          return;
+        }
+        
+        try {
+          // 保存到数据库
+          await updateSessionAvatar(currentSessionId, base64String);
+          
+          // 更新本地状态
+          setCurrentSessionAvatar(base64String);
+          
+          // 更新会话列表中的头像
+          setSessions(prev => prev.map(s => 
+            s.session_id === currentSessionId 
+              ? { ...s, avatar: base64String }
+              : s
+          ));
+          
+          console.log('[Workflow] Avatar updated successfully');
+        } catch (error) {
+          console.error('[Workflow] Failed to update avatar:', error);
+          alert('头像更新失败，请重试');
+        }
+      };
+      
+      reader.onerror = () => {
+        alert('图片读取失败');
+      };
+      
+      reader.readAsDataURL(file);
+    } catch (error) {
+      console.error('[Workflow] Failed to process avatar:', error);
+      alert('头像处理失败，请重试');
+    }
+    
+    // 清空input，允许重复选择同一文件
+    e.target.value = '';
   };
   
   // 处理总结的通用函数
@@ -638,7 +805,21 @@ const Workflow: React.FC = () => {
       setIsSummarizing(true);
       
       // 获取当前会话的所有消息（用于总结）
-      const allMessages = messages.filter(m => m.role !== 'system' && !m.isSummary);
+      // 排除系统消息（包括系统提示词消息）和总结消息
+      const allMessages = messages.filter(m => {
+        if (m.role === 'system' || m.isSummary) {
+          // 检查是否是系统提示词消息
+          const isSystemPrompt = m.toolCalls && 
+            typeof m.toolCalls === 'object' &&
+            (m.toolCalls as any).isSystemPrompt === true;
+          if (isSystemPrompt) {
+            return false; // 排除系统提示词消息
+          }
+          // 排除其他系统消息和总结消息
+          return false;
+        }
+        return true;
+      });
       const messagesToSummarize = allMessages.map(msg => ({
         message_id: msg.id,
         role: msg.role,
@@ -1073,10 +1254,47 @@ const Workflow: React.FC = () => {
       });
 
       // 构建系统提示词
+      // 优先从消息中获取系统提示词（如果已保存）
       let systemPrompt = '你是一个智能工作流助手，可以帮助用户完成各种任务。';
       
-      // 添加历史总结（如果有）
-      if (summaries.length > 0) {
+      // 查找系统提示词消息
+      const systemPromptMessage = messages.find(m => 
+        m.role === 'system' && 
+        m.toolCalls && 
+        typeof m.toolCalls === 'object' &&
+        (m.toolCalls as any).isSystemPrompt === true
+      );
+      
+      if (systemPromptMessage) {
+        // 使用已保存的系统提示词消息内容
+        systemPrompt = systemPromptMessage.content;
+        console.log('[Workflow] Using saved system prompt from message');
+      } else {
+        // 如果没有保存的系统提示词，使用当前选定的批次数据项构建
+        // 添加历史总结（如果有）
+        if (summaries.length > 0) {
+          const summaryTexts = summaries.map(s => s.summary_content).join('\n\n');
+          systemPrompt += `\n\n以下是之前对话的总结，请参考这些上下文：\n\n${summaryTexts}\n\n`;
+        }
+        
+        // 添加选定的批次数据项（如果有）
+        if (selectedBatchItem) {
+          const { item, batchName } = selectedBatchItem;
+          systemPrompt += `\n\n【参考资料 - ${batchName}】\n`;
+          if (item.title) {
+            systemPrompt += `标题: ${item.title}\n`;
+          }
+          if (item.content) {
+            systemPrompt += `内容:\n${item.content}\n`;
+          }
+          systemPrompt += '\n请基于以上参考资料回答用户的问题。';
+          
+          console.log('[Workflow] 添加批次数据项到系统提示词:', { item, batchName });
+        }
+      }
+      
+      // 添加历史总结（如果有，且系统提示词消息中没有）
+      if (summaries.length > 0 && !systemPromptMessage) {
         const summaryTexts = summaries.map(s => s.summary_content).join('\n\n');
         systemPrompt += `\n\n以下是之前对话的总结，请参考这些上下文：\n\n${summaryTexts}\n\n`;
       }
@@ -1110,9 +1328,15 @@ const Workflow: React.FC = () => {
       // 构建用于token计算的消息列表（排除不发送的系统消息）
       const conversationMessages = messagesToCount
         .filter(m => {
-          // 排除系统消息（但包含总结消息，因为总结消息会作为user消息发送）
+          // 排除系统消息（但包含总结消息和系统提示词消息，因为总结消息会作为user消息发送，系统提示词消息已包含在systemPrompt中）
           if (m.role === 'system' && !m.isSummary) {
-            return false;
+            // 检查是否是系统提示词消息
+            const isSystemPrompt = m.toolCalls && 
+              typeof m.toolCalls === 'object' &&
+              (m.toolCalls as any).isSystemPrompt === true;
+            if (!isSystemPrompt) {
+              return false; // 排除普通系统消息
+            }
           }
           return true;
         })
@@ -1152,8 +1376,16 @@ const Workflow: React.FC = () => {
           continue;
         }
         
-        // 排除其他系统消息（通知消息等）
+        // 排除其他系统消息（通知消息等），但保留系统提示词消息（它已包含在systemPrompt中，不需要重复发送）
         if (msg.role === 'system') {
+          // 检查是否是系统提示词消息
+          const isSystemPrompt = msg.toolCalls && 
+            typeof msg.toolCalls === 'object' &&
+            (msg.toolCalls as any).isSystemPrompt === true;
+          if (!isSystemPrompt) {
+            continue; // 排除普通系统消息
+          }
+          // 系统提示词消息也不发送（因为它已包含在systemPrompt中）
           continue;
         }
         
@@ -1439,14 +1671,213 @@ const Workflow: React.FC = () => {
     });
   };
   
-  // 处理输入框变化，检测 @ 符号
+  // 处理输入框变化，检测 @ 符号和 /模块 命令
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
     setInput(value);
     
-    // 检测 @ 符号
     const cursorPosition = e.target.selectionStart || 0;
     const textBeforeCursor = value.substring(0, cursorPosition);
+    
+    // 检测 / 命令（优先于@符号）
+    const lastSlashIndex = textBeforeCursor.lastIndexOf('/');
+    if (lastSlashIndex !== -1) {
+      // 检查 / 后面是否有空格或换行（如果有，说明不是在选择）
+      const textAfterSlash = textBeforeCursor.substring(lastSlashIndex + 1);
+      const hasSpaceOrNewline = textAfterSlash.includes(' ') || textAfterSlash.includes('\n');
+      
+      // 检查是否在行首（/ 前面是行首或空格）
+      const textBeforeSlash = textBeforeCursor.substring(0, lastSlashIndex);
+      const isAtLineStart = textBeforeSlash.length === 0 || textBeforeSlash.endsWith('\n') || textBeforeSlash.endsWith(' ');
+      
+      if (!hasSpaceOrNewline && isAtLineStart) {
+        // 显示模块选择器
+        const query = textAfterSlash.toLowerCase();
+        setModuleSelectorIndex(lastSlashIndex);
+        setModuleSelectorQuery(query);
+        setShowAtSelector(false); // 隐藏@选择器
+        
+        // 计算选择器位置（参考@选择器的逻辑，从下往上展开）
+        if (inputRef.current) {
+          const textarea = inputRef.current;
+          const textareaRect = textarea.getBoundingClientRect();
+          const styles = window.getComputedStyle(textarea);
+          
+          // 使用更可靠的方法：创建一个完全镜像 textarea 的隐藏 div 元素
+          const mirror = document.createElement('div');
+          
+          // 复制关键样式，确保与 textarea 完全一致
+          mirror.style.position = 'absolute';
+          mirror.style.visibility = 'hidden';
+          mirror.style.whiteSpace = styles.whiteSpace || 'pre-wrap';
+          mirror.style.wordWrap = styles.wordWrap || 'break-word';
+          mirror.style.overflowWrap = styles.overflowWrap || 'break-word';
+          mirror.style.font = styles.font;
+          mirror.style.fontSize = styles.fontSize;
+          mirror.style.fontFamily = styles.fontFamily;
+          mirror.style.fontWeight = styles.fontWeight;
+          mirror.style.fontStyle = styles.fontStyle;
+          mirror.style.letterSpacing = styles.letterSpacing;
+          mirror.style.padding = styles.padding;
+          mirror.style.border = styles.border;
+          mirror.style.width = `${textarea.offsetWidth}px`;
+          mirror.style.boxSizing = styles.boxSizing;
+          mirror.style.lineHeight = styles.lineHeight;
+          mirror.style.wordSpacing = styles.wordSpacing;
+          mirror.style.top = `${textareaRect.top}px`;
+          mirror.style.left = `${textareaRect.left}px`;
+          
+          // 设置文本内容到光标位置
+          mirror.textContent = textBeforeCursor;
+          document.body.appendChild(mirror);
+          
+          // 使用 Range API 来获取文本末尾（光标位置）的精确坐标
+          let cursorX: number;
+          let cursorY: number;
+          
+          try {
+            const range = document.createRange();
+            const mirrorTextNode = mirror.firstChild;
+            
+            if (mirrorTextNode && mirrorTextNode.nodeType === Node.TEXT_NODE) {
+              // 设置 range 到文本末尾（光标位置）
+              const textLength = mirrorTextNode.textContent?.length || 0;
+              range.setStart(mirrorTextNode, textLength);
+              range.setEnd(mirrorTextNode, textLength);
+              const rangeRect = range.getBoundingClientRect();
+              
+              // 使用 right 属性来获取光标右侧的位置（更可靠）
+              cursorX = rangeRect.right;
+              cursorY = rangeRect.top;
+              
+              // 如果 right 和 left 相同（width 为 0），说明光标在文本末尾
+              if (rangeRect.width === 0 && textLength > 0) {
+                // 创建一个临时元素来测量文本宽度
+                const measureSpan = document.createElement('span');
+                measureSpan.style.font = styles.font;
+                measureSpan.style.fontSize = styles.fontSize;
+                measureSpan.style.fontFamily = styles.fontFamily;
+                measureSpan.style.fontWeight = styles.fontWeight;
+                measureSpan.style.fontStyle = styles.fontStyle;
+                measureSpan.style.letterSpacing = styles.letterSpacing;
+                measureSpan.style.whiteSpace = 'pre';
+                measureSpan.textContent = textBeforeCursor;
+                measureSpan.style.position = 'absolute';
+                measureSpan.style.visibility = 'hidden';
+                document.body.appendChild(measureSpan);
+                const textWidth = measureSpan.offsetWidth;
+                document.body.removeChild(measureSpan);
+                
+                // 使用 mirror 的位置 + padding + 文本宽度
+                const mirrorRect = mirror.getBoundingClientRect();
+                const paddingLeft = parseFloat(styles.paddingLeft) || 0;
+                cursorX = mirrorRect.left + paddingLeft + textWidth;
+              }
+            } else {
+              throw new Error('No text node found');
+            }
+          } catch (e) {
+            // 如果 Range API 失败，使用备用方法
+            const mirrorRect = mirror.getBoundingClientRect();
+            const lines = textBeforeCursor.split('\n');
+            const lineIndex = lines.length - 1;
+            const lineText = lines[lineIndex] || '';
+            
+            // 计算当前行的宽度
+            const lineMeasure = document.createElement('span');
+            lineMeasure.style.font = styles.font;
+            lineMeasure.style.fontSize = styles.fontSize;
+            lineMeasure.style.fontFamily = styles.fontFamily;
+            lineMeasure.style.fontWeight = styles.fontWeight;
+            lineMeasure.style.fontStyle = styles.fontStyle;
+            lineMeasure.style.letterSpacing = styles.letterSpacing;
+            lineMeasure.style.whiteSpace = 'pre';
+            lineMeasure.textContent = lineText;
+            lineMeasure.style.position = 'absolute';
+            lineMeasure.style.visibility = 'hidden';
+            document.body.appendChild(lineMeasure);
+            const lineWidth = lineMeasure.offsetWidth;
+            document.body.removeChild(lineMeasure);
+            
+            // 计算行高和 padding
+            const lineHeight = parseFloat(styles.lineHeight) || parseFloat(styles.fontSize) * 1.2;
+            const paddingTop = parseFloat(styles.paddingTop) || 0;
+            const paddingLeft = parseFloat(styles.paddingLeft) || 0;
+            
+            cursorX = mirrorRect.left + paddingLeft + lineWidth;
+            cursorY = mirrorRect.top + paddingTop + (lineIndex * lineHeight);
+          }
+          
+          // 清理临时元素
+          document.body.removeChild(mirror);
+          
+          // 选择器尺寸
+          const selectorMaxHeight = 256; // max-h-64 = 256px
+          const selectorWidth = 320; // 与 CrawlerModuleSelector 的宽度一致
+          const viewportWidth = window.innerWidth;
+          
+          // 计算选择器位置（以光标为锚点，从下往上展开）
+          // 策略：弹框底部紧贴光标位置，向上扩展
+          
+          // 左侧位置：光标右侧，加间距
+          let left = cursorX + 8;
+          
+          // 如果选择器会超出右侧边界，则显示在光标左侧
+          if (left + selectorWidth > viewportWidth - 10) {
+            left = cursorX - selectorWidth - 8; // 显示在光标左侧
+            // 如果左侧也不够，就显示在光标右侧（即使会超出）
+            if (left < 10) {
+              left = cursorX + 8;
+            }
+          }
+          
+          // 确保不会超出左侧
+          if (left < 10) {
+            left = 10;
+          }
+          
+          // 使用 bottom 定位：弹框底部紧贴光标，向上扩展
+          // 计算 bottom 值：从窗口底部到光标位置的距离
+          const bottom = window.innerHeight - cursorY + 5; // 5px 间距，让弹框稍微在光标上方
+          
+          // 计算可用的向上高度（从光标到屏幕顶部的空间）
+          const availableHeightAbove = cursorY - 20; // 留20px顶部边距
+          
+          // 最大高度取较小值：配置的最大高度 或 可用空间
+          const actualMaxHeight = Math.min(selectorMaxHeight, availableHeightAbove);
+          
+          console.log('[Workflow] Module selector position:', {
+            cursorY,
+            bottom,
+            availableHeightAbove,
+            actualMaxHeight,
+            windowHeight: window.innerHeight
+          });
+          
+          setModuleSelectorPosition({
+            bottom, // 使用 bottom 定位，从下往上扩展
+            left,
+            maxHeight: actualMaxHeight
+          } as any);
+          setShowModuleSelector(true);
+        }
+        return;
+      } else {
+        // / 后面有空格或换行，或不在行首，关闭选择器
+        console.log('[Workflow] / 字符条件不符合，关闭模块选择器');
+        setShowModuleSelector(false);
+        setModuleSelectorIndex(-1);
+      }
+    } else {
+      // 没有找到 / 字符，关闭选择器
+      if (showModuleSelector) {
+        console.log('[Workflow] 删除了 / 字符，关闭模块选择器');
+        setShowModuleSelector(false);
+        setModuleSelectorIndex(-1);
+      }
+    }
+    
+    // 检测 @ 符号
     const lastAtIndex = textBeforeCursor.lastIndexOf('@');
     
     console.log('[Workflow] Input change:', {
@@ -1695,6 +2126,372 @@ const Workflow: React.FC = () => {
     
     return [...mcpList, ...workflowList];
   }, [mcpServers, connectedMcpServerIds, workflows, atSelectorQuery]);
+  
+  // 处理模块选择（/模块命令）
+  const handleModuleSelect = async (moduleId: string, batchId: string, batchName: string) => {
+    try {
+      // 获取批次数据
+      const batch = await getBatch(moduleId, batchId);
+      
+      // 检查数据是否存在
+      if (!batch || !batch.crawled_data) {
+        alert('该批次没有数据');
+        return;
+      }
+      
+      // 优先使用 parsed_data（用户标记后生成的解析数据），如果没有则使用 crawled_data.normalized
+      // parsed_data 现在是一个简单的数组，每个元素包含 title 和 content
+      let normalizedData: any = null;
+      
+      if (batch.parsed_data && Array.isArray(batch.parsed_data)) {
+        // parsed_data 是数组格式，转换为对象格式
+        normalizedData = {
+          items: batch.parsed_data.map((item, index) => ({
+            id: `item_${index + 1}`,
+            title: item.title || '',
+            content: item.content || ''
+          })),
+          total_count: batch.parsed_data.length,
+          format: 'list'
+        };
+      } else if (batch.parsed_data && typeof batch.parsed_data === 'object') {
+        // parsed_data 是对象格式（兼容旧数据）
+        normalizedData = batch.parsed_data;
+      } else if (batch.crawled_data?.normalized) {
+        // 使用 crawled_data.normalized
+        normalizedData = batch.crawled_data.normalized;
+      }
+      
+      if (!normalizedData || !normalizedData.items || normalizedData.items.length === 0) {
+        alert('该批次没有解析数据，请先在爬虫配置页面标记并生成解析数据');
+        return;
+      }
+      
+      // 如果有多个数据项，显示选择器让用户选择
+      if (normalizedData.items.length > 1) {
+        setSelectedBatch(batch);
+        setShowModuleSelector(false);
+        
+        // 计算批次数据项选择器的位置（使用相同的位置计算逻辑）
+        if (inputRef.current && moduleSelectorIndex !== -1) {
+          const textarea = inputRef.current;
+          const textareaRect = textarea.getBoundingClientRect();
+          const styles = window.getComputedStyle(textarea);
+          const cursorPosition = moduleSelectorIndex + 1 + moduleSelectorQuery.length;
+          const textBeforeCursor = input.substring(0, cursorPosition);
+          
+          // 使用与模块选择器相同的位置计算逻辑
+          const mirror = document.createElement('div');
+          mirror.style.position = 'absolute';
+          mirror.style.visibility = 'hidden';
+          mirror.style.whiteSpace = styles.whiteSpace || 'pre-wrap';
+          mirror.style.wordWrap = styles.wordWrap || 'break-word';
+          mirror.style.overflowWrap = styles.overflowWrap || 'break-word';
+          mirror.style.font = styles.font;
+          mirror.style.fontSize = styles.fontSize;
+          mirror.style.fontFamily = styles.fontFamily;
+          mirror.style.fontWeight = styles.fontWeight;
+          mirror.style.fontStyle = styles.fontStyle;
+          mirror.style.letterSpacing = styles.letterSpacing;
+          mirror.style.padding = styles.padding;
+          mirror.style.border = styles.border;
+          mirror.style.width = `${textarea.offsetWidth}px`;
+          mirror.style.boxSizing = styles.boxSizing;
+          mirror.style.lineHeight = styles.lineHeight;
+          mirror.style.wordSpacing = styles.wordSpacing;
+          mirror.style.top = `${textareaRect.top}px`;
+          mirror.style.left = `${textareaRect.left}px`;
+          mirror.textContent = textBeforeCursor;
+          document.body.appendChild(mirror);
+          
+          let cursorX: number;
+          let cursorY: number;
+          
+          try {
+            const range = document.createRange();
+            const mirrorTextNode = mirror.firstChild;
+            if (mirrorTextNode && mirrorTextNode.nodeType === Node.TEXT_NODE) {
+              const textLength = mirrorTextNode.textContent?.length || 0;
+              range.setStart(mirrorTextNode, textLength);
+              range.setEnd(mirrorTextNode, textLength);
+              const rangeRect = range.getBoundingClientRect();
+              cursorX = rangeRect.right;
+              cursorY = rangeRect.top;
+            } else {
+              throw new Error('No text node found');
+            }
+          } catch (e) {
+            const mirrorRect = mirror.getBoundingClientRect();
+            const lines = textBeforeCursor.split('\n');
+            const lineIndex = lines.length - 1;
+            const lineText = lines[lineIndex] || '';
+            const lineMeasure = document.createElement('span');
+            lineMeasure.style.font = styles.font;
+            lineMeasure.style.fontSize = styles.fontSize;
+            lineMeasure.style.fontFamily = styles.fontFamily;
+            lineMeasure.style.fontWeight = styles.fontWeight;
+            lineMeasure.style.fontStyle = styles.fontStyle;
+            lineMeasure.style.letterSpacing = styles.letterSpacing;
+            lineMeasure.style.whiteSpace = 'pre';
+            lineMeasure.textContent = lineText;
+            lineMeasure.style.position = 'absolute';
+            lineMeasure.style.visibility = 'hidden';
+            document.body.appendChild(lineMeasure);
+            const lineWidth = lineMeasure.offsetWidth;
+            document.body.removeChild(lineMeasure);
+            const lineHeight = parseFloat(styles.lineHeight) || parseFloat(styles.fontSize) * 1.2;
+            const paddingTop = parseFloat(styles.paddingTop) || 0;
+            const paddingLeft = parseFloat(styles.paddingLeft) || 0;
+            cursorX = mirrorRect.left + paddingLeft + lineWidth;
+            cursorY = mirrorRect.top + paddingTop + (lineIndex * lineHeight);
+          }
+          
+          document.body.removeChild(mirror);
+          
+          const selectorMaxHeight = 400;
+          const selectorWidth = 500;
+          const viewportWidth = window.innerWidth;
+          const idealHeight = selectorMaxHeight;
+          let top = cursorY - idealHeight;
+          let left = cursorX + 8;
+          
+          if (top < 10) {
+            top = 10;
+          }
+          
+          if (left + selectorWidth > viewportWidth - 10) {
+            left = cursorX - selectorWidth - 8;
+            if (left < 10) {
+              left = cursorX + 8;
+            }
+          }
+          
+          if (left < 10) {
+            left = 10;
+          }
+          
+          const maxAvailableHeight = cursorY - top - 8;
+          const actualMaxHeight = Math.min(selectorMaxHeight, maxAvailableHeight);
+          
+          setBatchItemSelectorPosition({
+            top,
+            left,
+            maxHeight: actualMaxHeight
+          });
+          setShowBatchItemSelector(true);
+        }
+      } else {
+        // 只有一个数据项，直接插入
+        const item = normalizedData.items[0];
+        handleBatchItemSelect(item, batchName);
+      }
+    } catch (error: any) {
+      console.error('[Workflow] Failed to select module:', error);
+      alert(`获取模块数据失败: ${error.message || '未知错误'}`);
+    }
+  };
+  
+  // 处理批次数据项选择（显示操作选择界面）
+  const handleBatchItemSelect = (item: any, batchName: string) => {
+    console.log('[Workflow] 选定批次数据项，等待用户选择操作:', { item, batchName });
+    
+    // 保存待处理的批次数据项
+    setPendingBatchItem({ item, batchName });
+    
+    // 关闭选择器
+    setShowBatchItemSelector(false);
+    setShowModuleSelector(false);
+    setModuleSelectorIndex(-1);
+    setModuleSelectorQuery('');
+    setSelectedBatch(null);
+    
+    // 如果还在输入框中保留了 /模块 文本，清除它
+    if (inputRef.current && moduleSelectorIndex !== -1) {
+      const textBefore = input.substring(0, moduleSelectorIndex);
+      const textAfter = input.substring(moduleSelectorIndex + 1 + moduleSelectorQuery.length);
+      const newText = textBefore + textAfter;
+      setInput(newText);
+      
+      // 设置光标位置
+      setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.setSelectionRange(textBefore.length, textBefore.length);
+          inputRef.current.focus();
+        }
+      }, 0);
+    }
+  };
+  
+  // 将批次数据项设置为系统提示词
+  const handleSetAsSystemPrompt = async () => {
+    if (!pendingBatchItem) return;
+    
+    const { item, batchName } = pendingBatchItem;
+    console.log('[Workflow] 设置批次数据项为系统提示词:', { item, batchName });
+    
+    // 保存选定的批次数据项
+    setSelectedBatchItem({ item, batchName });
+    setPendingBatchItem(null);
+    
+    
+    // 如果有会话，保存或更新系统提示词消息
+    if (currentSessionId) {
+      try {
+        // 构建系统提示词内容
+        let systemPromptContent = '你是一个智能工作流助手，可以帮助用户完成各种任务。\n\n';
+        systemPromptContent += `【参考资料 - ${batchName}】\n`;
+        if (item.title) {
+          systemPromptContent += `标题: ${item.title}\n`;
+        }
+        if (item.content) {
+          systemPromptContent += `内容:\n${item.content}\n`;
+        }
+        systemPromptContent += '\n请基于以上参考资料回答用户的问题。';
+        
+        // 查找是否已有系统提示词消息
+        const existingSystemPromptMsg = messages.find(m => 
+          m.role === 'system' && 
+          m.toolCalls && 
+          typeof m.toolCalls === 'object' &&
+          (m.toolCalls as any).isSystemPrompt === true
+        );
+        
+        if (existingSystemPromptMsg) {
+          // 更新现有系统提示词消息
+          const systemPromptMessageId = existingSystemPromptMsg.id;
+          
+          // 更新本地消息
+          setMessages(prev => prev.map(msg => 
+            msg.id === systemPromptMessageId
+              ? {
+                  ...msg,
+                  content: systemPromptContent,
+                  toolCalls: {
+                    isSystemPrompt: true,
+                    batchName,
+                    item,
+                  }
+                }
+              : msg
+          ));
+          
+          // 更新数据库中的消息（需要先删除旧消息，再创建新消息，因为消息ID不变）
+          // 注意：这里我们直接更新内容，但数据库可能需要特殊处理
+          // 为了简化，我们可以删除旧消息并创建新消息
+          try {
+            await deleteMessage(currentSessionId, systemPromptMessageId);
+            await saveMessage(currentSessionId, {
+              message_id: systemPromptMessageId,
+              role: 'system',
+              content: systemPromptContent,
+              tool_calls: {
+                isSystemPrompt: true,
+                batchName,
+                item,
+              },
+              model: selectedLLMConfig?.model || 'gpt-4',
+            });
+            console.log('[Workflow] Updated system prompt message:', systemPromptMessageId);
+          } catch (error) {
+            console.error('[Workflow] Failed to update system prompt message:', error);
+          }
+        } else {
+          // 创建新的系统提示词消息
+          const systemPromptMessageId = `system-prompt-${Date.now()}`;
+          const systemPromptMessage: Message = {
+            id: systemPromptMessageId,
+            role: 'system',
+            content: systemPromptContent,
+            toolCalls: {
+              isSystemPrompt: true,
+              batchName,
+              item,
+            },
+          };
+          
+          // 添加到消息列表（插入到第一条用户消息之前，或最前面）
+          setMessages(prev => {
+            const userMessageIndex = prev.findIndex(m => m.role === 'user');
+            if (userMessageIndex >= 0) {
+              // 插入到第一条用户消息之前
+              const newMessages = [...prev];
+              newMessages.splice(userMessageIndex, 0, systemPromptMessage);
+              return newMessages;
+            } else {
+              // 如果没有用户消息，插入到最前面（系统消息之后）
+              const systemMessageIndex = prev.findIndex(m => m.role === 'system' && !m.toolCalls);
+              if (systemMessageIndex >= 0) {
+                const newMessages = [...prev];
+                newMessages.splice(systemMessageIndex + 1, 0, systemPromptMessage);
+                return newMessages;
+              } else {
+                return [systemPromptMessage, ...prev];
+              }
+            }
+          });
+          
+          // 保存到数据库
+          try {
+            await saveMessage(currentSessionId, {
+              message_id: systemPromptMessageId,
+              role: 'system',
+              content: systemPromptContent,
+              tool_calls: {
+                isSystemPrompt: true,
+                batchName,
+                item,
+              },
+              model: selectedLLMConfig?.model || 'gpt-4',
+            });
+            console.log('[Workflow] Saved system prompt message:', systemPromptMessageId);
+          } catch (error) {
+            console.error('[Workflow] Failed to save system prompt message:', error);
+          }
+        }
+      } catch (error) {
+        console.error('[Workflow] Failed to save/update system prompt:', error);
+      }
+    }
+  };
+  
+  // 将批次数据项作为对话内容插入
+  const handleInsertAsMessage = () => {
+    if (!pendingBatchItem) return;
+    
+    const { item, batchName } = pendingBatchItem;
+    console.log('[Workflow] 将批次数据项插入为对话内容:', { item, batchName });
+    
+    // 构建插入的文本
+    let insertText = `[引用: ${batchName}]\n`;
+    if (item.title) {
+      insertText += `标题: ${item.title}\n`;
+    }
+    if (item.content) {
+      insertText += `内容: ${item.content}\n`;
+    }
+    insertText += '\n';
+    
+    // 插入到输入框
+    if (inputRef.current) {
+      const currentValue = input;
+      const cursorPosition = inputRef.current.selectionStart || currentValue.length;
+      const textBefore = currentValue.substring(0, cursorPosition);
+      const textAfter = currentValue.substring(cursorPosition);
+      const newText = textBefore + insertText + textAfter;
+      
+      setInput(newText);
+      setPendingBatchItem(null);
+      
+      // 设置光标位置
+      setTimeout(() => {
+        if (inputRef.current) {
+          const newCursorPos = textBefore.length + insertText.length;
+          inputRef.current.setSelectionRange(newCursorPos, newCursorPos);
+          inputRef.current.focus();
+        }
+      }, 0);
+    }
+  };
   
   // 选择感知组件（添加为 tag）
   const handleSelectComponent = (component: { type: 'mcp' | 'workflow'; id: string; name: string }) => {
@@ -2464,7 +3261,7 @@ const Workflow: React.FC = () => {
   return (
     <div className="h-full flex flex-col">
       {/* 标题栏 */}
-      <div className="flex items-center justify-between mb-3 flex-shrink-0">
+        <div className="flex items-center justify-between mb-3 flex-shrink-0">
         <div className="flex items-center space-x-2">
           <MessageCircle className="w-6 h-6 text-gray-600" />
           <h2 className="text-2xl font-semibold">智能聊天</h2>
@@ -2563,14 +3360,32 @@ const Workflow: React.FC = () => {
                 <History className="w-4 h-4 inline mr-1" />
                 会话列表
             </label>
-              <button
-                onClick={handleCreateNewSession}
-                className="flex items-center space-x-1 px-2 py-1 text-xs text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-colors"
-                title="创建新会话"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>新建</span>
-              </button>
+              <div className="flex items-center space-x-1">
+                {/* 头像上传按钮（仅在有会话时显示） */}
+                {currentSessionId && (
+                  <label
+                    className="flex items-center space-x-1 px-2 py-1 text-xs text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-colors cursor-pointer"
+                    title="更换机器人头像"
+                  >
+                    <ImageIcon className="w-3.5 h-3.5" />
+                    <span>头像</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleAvatarUpload}
+                      className="hidden"
+                    />
+                  </label>
+                )}
+                <button
+                  onClick={handleCreateNewSession}
+                  className="flex items-center space-x-1 px-2 py-1 text-xs text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-colors"
+                  title="创建新会话"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>新建</span>
+                </button>
+              </div>
             </div>
             {/* 会话列表容器：固定高度，显示5个会话项，其他需要滚动 */}
             <div className="space-y-1.5 max-h-[280px] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
@@ -3003,7 +3818,17 @@ const Workflow: React.FC = () => {
               </button>
             </div>
           )}
-          {messages.filter(msg => !msg.isSummary).map((message) => {
+          {messages.filter(msg => {
+            // 过滤掉总结消息和系统提示词消息（系统提示词消息已在输入框上方显示）
+            if (msg.isSummary) return false;
+            if (msg.role === 'system' && 
+                msg.toolCalls && 
+                typeof msg.toolCalls === 'object' &&
+                (msg.toolCalls as any).isSystemPrompt === true) {
+              return false; // 不显示系统提示词消息
+            }
+            return true;
+          }).map((message) => {
             // 如果是总结提示消息，使用特殊的居中显示样式
             const isSummaryNotification = message.role === 'system' && 
               (message.content.includes('总结完成') || message.content.includes('已精简为'));
@@ -3028,7 +3853,7 @@ const Workflow: React.FC = () => {
             >
               <div className="flex-shrink-0 flex items-center space-x-2">
               <div
-                  className={`w-9 h-9 rounded-full flex items-center justify-center shadow-sm ${
+                  className={`w-9 h-9 rounded-full flex items-center justify-center shadow-sm overflow-hidden ${
                   message.role === 'user'
                     ? 'bg-primary-500 text-white'
                     : message.role === 'assistant'
@@ -3045,7 +3870,16 @@ const Workflow: React.FC = () => {
                 {message.role === 'user' ? (
                     <User className="w-5 h-5" />
                 ) : message.role === 'assistant' ? (
-                    <Bot className="w-5 h-5" />
+                    // 如果有头像，显示头像；否则显示Bot图标
+                    currentSessionAvatar ? (
+                      <img 
+                        src={currentSessionAvatar} 
+                        alt="Avatar" 
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <Bot className="w-5 h-5" />
+                    )
                 ) : message.role === 'tool' ? (
                     message.toolType === 'workflow' ? (
                       <WorkflowIcon className="w-5 h-5" />
@@ -3131,7 +3965,7 @@ const Workflow: React.FC = () => {
             onClick={(e) => {
               // 点击输入框区域外部时关闭选择器（但不包括选择器本身）
               const target = e.target as HTMLElement;
-              if (showAtSelector && !target.closest('.at-selector-container') && !target.closest('textarea')) {
+              if ((showAtSelector || showModuleSelector) && !target.closest('.at-selector-container') && !target.closest('textarea')) {
                 setShowAtSelector(false);
               }
             }}
@@ -3164,6 +3998,119 @@ const Workflow: React.FC = () => {
               ))}
             </div>
           )}
+          
+          {/* 显示待处理的批次数据项（选择操作） */}
+          {pendingBatchItem && (
+            <div className="mb-2 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center space-x-2 mb-1">
+                    <Database className="w-4 h-4 text-yellow-600 dark:text-yellow-400 flex-shrink-0" />
+                    <span className="text-sm font-medium text-yellow-900 dark:text-yellow-100">
+                      📋 已选择: {pendingBatchItem.batchName}
+                    </span>
+                  </div>
+                  {pendingBatchItem.item.title && (
+                    <div className="text-sm text-gray-800 dark:text-gray-200 font-medium truncate">
+                      {pendingBatchItem.item.title}
+                    </div>
+                  )}
+                  {pendingBatchItem.item.content && (
+                    <div className="text-xs text-gray-600 dark:text-gray-400 line-clamp-2 mt-1">
+                      {pendingBatchItem.item.content.length > 150 
+                        ? pendingBatchItem.item.content.substring(0, 150) + '...' 
+                        : pendingBatchItem.item.content}
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={() => setPendingBatchItem(null)}
+                  className="ml-2 p-1 text-yellow-400 hover:text-yellow-600 dark:hover:text-yellow-300 transition-colors flex-shrink-0"
+                  title="取消"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={handleSetAsSystemPrompt}
+                  className="flex-1 px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium rounded-lg transition-colors flex items-center justify-center space-x-2"
+                >
+                  <Brain className="w-4 h-4" />
+                  <span>🤖 设置为系统提示词</span>
+                </button>
+                <button
+                  onClick={handleInsertAsMessage}
+                  className="flex-1 px-3 py-2 bg-green-500 hover:bg-green-600 text-white text-sm font-medium rounded-lg transition-colors flex items-center justify-center space-x-2"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  <span>💬 作为对话内容</span>
+                </button>
+              </div>
+            </div>
+          )}
+          
+          {/* 显示选定的批次数据项（系统提示词） */}
+          {selectedBatchItem && (
+            <div className="mb-2 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+              <div className="flex items-start justify-between">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center space-x-2 mb-1">
+                    <Database className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                    <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                      🤖 机器人人设: {selectedBatchItem.batchName}
+                    </span>
+                  </div>
+                  {selectedBatchItem.item.title && (
+                    <div className="text-sm text-gray-800 dark:text-gray-200 font-medium truncate">
+                      {selectedBatchItem.item.title}
+                    </div>
+                  )}
+                  {selectedBatchItem.item.content && (
+                    <div className="text-xs text-gray-600 dark:text-gray-400 line-clamp-2 mt-1">
+                      {selectedBatchItem.item.content.length > 150 
+                        ? selectedBatchItem.item.content.substring(0, 150) + '...' 
+                        : selectedBatchItem.item.content}
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={async () => {
+                    // 清除选定的批次数据项
+                    setSelectedBatchItem(null);
+                    
+                    // 如果有会话，删除系统提示词消息
+                    if (currentSessionId) {
+                      const systemPromptMessage = messages.find(m => 
+                        m.role === 'system' && 
+                        m.toolCalls && 
+                        typeof m.toolCalls === 'object' &&
+                        (m.toolCalls as any).isSystemPrompt === true
+                      );
+                      
+                      if (systemPromptMessage) {
+                        try {
+                          await deleteMessage(currentSessionId, systemPromptMessage.id);
+                          setMessages(prev => prev.filter(m => m.id !== systemPromptMessage.id));
+                          console.log('[Workflow] Deleted system prompt message');
+                        } catch (error) {
+                          console.error('[Workflow] Failed to delete system prompt message:', error);
+                        }
+                      }
+                    }
+                  }}
+                  className="ml-2 p-1 text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 transition-colors flex-shrink-0"
+                  title="取消选择"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="mt-2 text-xs text-blue-600 dark:text-blue-400">
+                💡 此数据已保存为系统提示词，将作为机器人人设持续生效
+              </div>
+            </div>
+          )}
+          
           <div className="flex space-x-2">
             <div className="flex-1 relative at-selector-container">
             <textarea
@@ -3172,7 +4119,17 @@ const Workflow: React.FC = () => {
                 onChange={handleInputChange}
               onKeyPress={handleKeyPress}
                 onKeyDown={(e) => {
-                  // 如果选择器显示，处理上下箭头和回车
+                  // 如果批次数据项选择器显示，不处理键盘事件（由 CrawlerBatchItemSelector 处理）
+                  if (showBatchItemSelector) {
+                    return;
+                  }
+                  
+                  // 如果模块选择器显示，不处理键盘事件（由 CrawlerModuleSelector 处理）
+                  if (showModuleSelector) {
+                    return;
+                  }
+                  
+                  // 如果@选择器显示，处理上下箭头和回车
                   if (showAtSelector) {
                     const selectableComponentsList = getSelectableComponents();
                     
@@ -3197,6 +4154,16 @@ const Workflow: React.FC = () => {
                   }
                 }}
                 onBlur={(e) => {
+                  // 如果批次数据项选择器显示，不处理blur（由组件自己处理）
+                  if (showBatchItemSelector) {
+                    return;
+                  }
+                  
+                  // 如果模块选择器显示，不处理blur（由组件自己处理）
+                  if (showModuleSelector) {
+                    return;
+                  }
+                  
                   // 如果选择器未显示，不需要处理
                   if (!showAtSelector) {
                     return;
@@ -3259,7 +4226,7 @@ const Workflow: React.FC = () => {
                   ? '请先选择 LLM 模型...'
                   : selectedMcpServerIds.size > 0
                     ? `输入你的任务，我可以使用 ${totalTools} 个工具帮助你完成... (输入 @ 选择感知组件)`
-                    : '输入你的问题，我会尽力帮助你... (输入 @ 选择感知组件)'
+                    : '输入你的问题，我会尽力帮助你... (输入 @ 选择感知组件，输入 / 引用爬虫数据)'
               }
                 className="flex-1 input-field resize-none text-sm w-full"
               rows={3}
@@ -3279,11 +4246,45 @@ const Workflow: React.FC = () => {
               </div>
             )}
               
-              {/* @ 符号选择器 */}
-              {showAtSelector && (
-                <div
-                  ref={selectorRef}
-                  className="fixed z-[100] bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg overflow-y-auto at-selector-container"
+          {/* /模块 选择器 */}
+          {showModuleSelector && (
+            <CrawlerModuleSelector
+              query={moduleSelectorQuery}
+              position={moduleSelectorPosition}
+              onSelect={handleModuleSelect}
+              onClose={() => {
+                setShowModuleSelector(false);
+                setModuleSelectorIndex(-1);
+                setModuleSelectorQuery('');
+              }}
+            />
+          )}
+          
+          {/* 批次数据项选择器 */}
+          {showBatchItemSelector && selectedBatch && (
+            <CrawlerBatchItemSelector
+              batch={selectedBatch}
+              position={batchItemSelectorPosition}
+              onSelect={(item) => {
+                const batchName = selectedBatch.batch_name;
+                handleBatchItemSelect(item, batchName);
+              }}
+              onClose={() => {
+                setShowBatchItemSelector(false);
+                setSelectedBatch(null);
+                // 重新显示模块选择器
+                if (moduleSelectorIndex !== -1) {
+                  setShowModuleSelector(true);
+                }
+              }}
+            />
+          )}
+          
+          {/* @ 符号选择器 */}
+          {showAtSelector && (
+            <div
+              ref={selectorRef}
+              className="fixed z-[100] bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg overflow-y-auto at-selector-container"
                   style={{
                     top: `${atSelectorPosition.top}px`,
                     left: `${atSelectorPosition.left}px`,

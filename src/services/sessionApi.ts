@@ -6,6 +6,7 @@ export interface Session {
   session_id: string;
   title?: string;
   llm_config_id?: string;
+  avatar?: string; // base64编码的头像
   created_at?: string;
   updated_at?: string;
   last_message_at?: string;
@@ -313,5 +314,21 @@ export async function getMessageExecution(message_id: string): Promise<MessageEx
   }
   
   return await response.json();
+}
+
+/**
+ * 更新会话的机器人头像
+ */
+export async function updateSessionAvatar(session_id: string, avatar: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/sessions/${session_id}/avatar`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ avatar }),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to update avatar: ${response.statusText}`);
+  }
 }
 

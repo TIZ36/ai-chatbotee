@@ -29,6 +29,9 @@ except ImportError:
     HAS_PSUTIL = False
 
 app = Flask(__name__)
+# 确保JSON响应正确处理中文
+app.config['JSON_AS_ASCII'] = False
+app.config['JSONIFY_MIMETYPE'] = 'application/json; charset=utf-8'
 
 # 加载配置
 def load_config():
@@ -167,7 +170,7 @@ def log_http_response(response):
 # CORS 预检请求处理辅助函数
 def handle_cors_preflight():
     """处理 CORS 预检请求，使用统一的CORS配置"""
-    response = Response()
+    response = Response(status=200)
     response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Methods'] = CORS_ALLOWED_METHODS_STR
     # 允许所有请求头：回显浏览器在 Access-Control-Request-Headers 中请求的所有请求头
@@ -4183,6 +4186,7 @@ def list_sessions():
                     s.session_id,
                     s.title,
                     s.llm_config_id,
+                    s.avatar,
                     s.created_at,
                     s.updated_at,
                     s.last_message_at,
@@ -4200,6 +4204,7 @@ def list_sessions():
                     'session_id': row['session_id'],
                     'title': row['title'],
                     'llm_config_id': row['llm_config_id'],
+                    'avatar': row['avatar'],
                     'created_at': row['created_at'].isoformat() if row['created_at'] else None,
                     'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
                     'last_message_at': row['last_message_at'].isoformat() if row['last_message_at'] else None,
@@ -4325,6 +4330,7 @@ def get_session(session_id):
                     s.session_id,
                     s.title,
                     s.llm_config_id,
+                    s.avatar,
                     s.created_at,
                     s.updated_at,
                     s.last_message_at,
@@ -4343,6 +4349,7 @@ def get_session(session_id):
                 'session_id': row['session_id'],
                 'title': row['title'],
                 'llm_config_id': row['llm_config_id'],
+                'avatar': row['avatar'],
                 'created_at': row['created_at'].isoformat() if row['created_at'] else None,
                 'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
                 'last_message_at': row['last_message_at'].isoformat() if row['last_message_at'] else None,
@@ -4614,7 +4621,7 @@ def save_message(session_id):
                     SELECT title FROM sessions WHERE session_id = %s
                 """, (session_id,))
                 row = cursor.fetchone()
-                if row and not row[0]:
+                if row and not row.get('title'):
                     # 生成标题（取前50个字符）
                     title = content[:50].strip()
                     if len(content) > 50:
@@ -5055,6 +5062,55 @@ def get_session_summaries(session_id):
         import traceback
         traceback.print_exc()
         return jsonify({'summaries': [], 'error': str(e)}), 500
+
+@app.route('/api/sessions/<session_id>/avatar', methods=['PUT', 'OPTIONS'])
+def update_session_avatar(session_id):
+    """更新会话的机器人头像"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        data = request.json
+        avatar = data.get('avatar')  # base64编码的头像字符串
+        
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            
+            # 检查会话是否存在
+            cursor.execute("SELECT session_id FROM sessions WHERE session_id = %s", (session_id,))
+            if not cursor.fetchone():
+                return jsonify({'error': 'Session not found'}), 404
+            
+            # 更新头像
+            cursor.execute("""
+                UPDATE sessions 
+                SET avatar = %s 
+                WHERE session_id = %s
+            """, (avatar, session_id))
+            conn.commit()
+            
+            return jsonify({
+                'session_id': session_id,
+                'message': 'Avatar updated successfully'
+            }), 200
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Session API] Error updating avatar: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/sessions/<session_id>/summaries/cache', methods=['DELETE', 'OPTIONS'])
 def clear_summarize_cache(session_id):
@@ -5630,6 +5686,1125 @@ def get_message_execution(message_id):
         print(f"[Message Execution API] Error: {e}")
         import traceback
         traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+# ==================== 爬虫模块 API ====================
+
+@app.route('/api/crawler/fetch', methods=['POST', 'OPTIONS'])
+def crawler_fetch():
+    """爬取网页"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from web_crawler import WebCrawler
+        
+        data = request.json
+        if not data or 'url' not in data:
+            return jsonify({'success': False, 'error': 'INVALID_REQUEST', 'message': '缺少url参数'}), 400
+        
+        url = data.get('url')
+        options = data.get('options', {})
+        
+        # 验证URL格式
+        if not url.startswith(('http://', 'https://')):
+            return jsonify({
+                'success': False,
+                'error': 'INVALID_URL',
+                'message': 'URL格式无效，必须以http://或https://开头',
+                'url': url
+            }), 400
+        
+        # 创建爬虫实例
+        crawler_config = config.get('crawler', {})
+        default_timeout = crawler_config.get('default_timeout', 30)
+        default_user_agent = crawler_config.get('default_user_agent')
+        
+        crawler = WebCrawler(
+            default_timeout=default_timeout,
+            default_user_agent=default_user_agent
+        )
+        
+        # 执行爬取
+        result = crawler.fetch(url, options)
+        
+        # 返回结果
+        if result.get('success'):
+            return jsonify(result), 200
+        else:
+            status_code = 500
+            if result.get('error') == 'TIMEOUT':
+                status_code = 408
+            elif result.get('error') == 'CONNECTION_ERROR':
+                status_code = 502
+            elif result.get('error') == 'AUTHENTICATION_REQUIRED':
+                status_code = 401
+            elif result.get('error') == 'AUTHENTICATION_FAILED':
+                status_code = 403
+            elif result.get('error') == 'INVALID_URL':
+                status_code = 400
+            
+            return jsonify(result), status_code
+            
+    except Exception as e:
+        print(f"[Crawler API] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': 'UNKNOWN_ERROR',
+            'message': str(e),
+            'url': data.get('url', '') if 'data' in locals() else ''
+        }), 500
+
+@app.route('/api/crawler/normalize', methods=['POST', 'OPTIONS'])
+def crawler_normalize():
+    """实时标准化预览（用于前端预览）"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from crawler_normalizer import CrawlerNormalizer
+        
+        data = request.json
+        if not data or 'raw_data' not in data:
+            return jsonify({'success': False, 'error': 'INVALID_REQUEST', 'message': '缺少raw_data参数'}), 400
+        
+        raw_data = data.get('raw_data')
+        normalize_config = data.get('normalize_config', {})
+        
+        # 执行标准化
+        normalizer = CrawlerNormalizer()
+        normalized_result = normalizer.normalize(raw_data, normalize_config)
+        
+        response = jsonify({
+            'success': True,
+            'normalized': normalized_result.get('normalized', {})
+        })
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return response, 200
+        
+    except Exception as e:
+        print(f"[Crawler API] Normalize error: {e}")
+        import traceback
+        traceback.print_exc()
+        response = jsonify({
+            'success': False,
+            'error': 'UNKNOWN_ERROR',
+            'message': str(e)
+        })
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return response, 500
+
+@app.route('/api/crawler/modules', methods=['GET', 'POST', 'OPTIONS'])
+def crawler_modules():
+    """模块管理：获取列表或创建模块"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        if request.method == 'GET':
+            # 获取模块列表
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT 
+                    module_id,
+                    module_name,
+                    description,
+                    target_url,
+                    created_at,
+                    updated_at
+                FROM crawler_modules
+                ORDER BY created_at DESC
+            """)
+            modules = cursor.fetchall()
+            
+            # 转换为字典列表
+            result = []
+            for module in modules:
+                result.append({
+                    'module_id': module['module_id'],
+                    'module_name': module['module_name'],
+                    'description': module['description'],
+                    'target_url': module['target_url'],
+                    'created_at': module['created_at'].isoformat() if module['created_at'] else None,
+                    'updated_at': module['updated_at'].isoformat() if module['updated_at'] else None,
+                })
+            
+            cursor.close()
+            conn.close()
+            return jsonify({'modules': result}), 200
+        
+        elif request.method == 'POST':
+            # 创建模块
+            data = request.json
+            if not data or 'module_name' not in data or 'target_url' not in data:
+                return jsonify({'error': '缺少必要参数：module_name, target_url'}), 400
+            
+            module_id = f"module_{int(time.time() * 1000)}"
+            module_name = data.get('module_name')
+            description = data.get('description')
+            target_url = data.get('target_url')
+            crawler_options = data.get('crawler_options')
+            normalize_config = data.get('normalize_config')
+            
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                INSERT INTO crawler_modules 
+                (module_id, module_name, description, target_url, crawler_options, normalize_config)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (
+                module_id,
+                module_name,
+                description,
+                target_url,
+                json.dumps(crawler_options, ensure_ascii=False) if crawler_options else None,
+                json.dumps(normalize_config, ensure_ascii=False) if normalize_config else None
+            ))
+            conn.commit()
+            
+            # 获取创建的模块
+            cursor.execute("""
+                SELECT * FROM crawler_modules WHERE module_id = %s
+            """, (module_id,))
+            module = cursor.fetchone()
+            
+            result = {
+                'module_id': module['module_id'],
+                'module_name': module['module_name'],
+                'description': module['description'],
+                'target_url': module['target_url'],
+                'crawler_options': json.loads(module['crawler_options']) if module['crawler_options'] else None,
+                'normalize_config': json.loads(module['normalize_config']) if module['normalize_config'] else None,
+                'created_at': module['created_at'].isoformat() if module['created_at'] else None,
+                'updated_at': module['updated_at'].isoformat() if module['updated_at'] else None,
+            }
+            
+            cursor.close()
+            conn.close()
+            return jsonify(result), 201
+            
+    except Exception as e:
+        print(f"[Crawler Modules API] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        if 'conn' in locals():
+            conn.close()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/crawler/modules/<module_id>', methods=['GET', 'PUT', 'DELETE', 'OPTIONS'])
+def crawler_module_detail(module_id):
+    """模块详情：获取、更新、删除"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        if request.method == 'GET':
+            # 获取模块详情
+            cursor.execute("""
+                SELECT * FROM crawler_modules WHERE module_id = %s
+            """, (module_id,))
+            module = cursor.fetchone()
+            
+            if not module:
+                cursor.close()
+                conn.close()
+                return jsonify({'error': 'Module not found'}), 404
+            
+            result = {
+                'module_id': module['module_id'],
+                'module_name': module['module_name'],
+                'description': module['description'],
+                'target_url': module['target_url'],
+                'crawler_options': json.loads(module['crawler_options']) if module['crawler_options'] else None,
+                'normalize_config': json.loads(module['normalize_config']) if module['normalize_config'] else None,
+                'created_at': module['created_at'].isoformat() if module['created_at'] else None,
+                'updated_at': module['updated_at'].isoformat() if module['updated_at'] else None,
+            }
+            
+            cursor.close()
+            conn.close()
+            return jsonify(result), 200
+        
+        elif request.method == 'PUT':
+            # 更新模块
+            data = request.json
+            if not data:
+                return jsonify({'error': '缺少请求体'}), 400
+            
+            # 检查模块是否存在
+            cursor.execute("SELECT module_id FROM crawler_modules WHERE module_id = %s", (module_id,))
+            if not cursor.fetchone():
+                cursor.close()
+                conn.close()
+                return jsonify({'error': 'Module not found'}), 404
+            
+            # 构建更新语句
+            update_fields = []
+            update_values = []
+            
+            if 'module_name' in data:
+                update_fields.append('module_name = %s')
+                update_values.append(data['module_name'])
+            if 'description' in data:
+                update_fields.append('description = %s')
+                update_values.append(data['description'])
+            if 'target_url' in data:
+                update_fields.append('target_url = %s')
+                update_values.append(data['target_url'])
+            if 'crawler_options' in data:
+                update_fields.append('crawler_options = %s')
+                update_values.append(json.dumps(data['crawler_options'], ensure_ascii=False) if data['crawler_options'] else None)
+            if 'normalize_config' in data:
+                update_fields.append('normalize_config = %s')
+                update_values.append(json.dumps(data['normalize_config'], ensure_ascii=False) if data['normalize_config'] else None)
+            
+            if not update_fields:
+                cursor.close()
+                conn.close()
+                return jsonify({'error': '没有要更新的字段'}), 400
+            
+            update_values.append(module_id)
+            sql = f"UPDATE crawler_modules SET {', '.join(update_fields)} WHERE module_id = %s"
+            cursor.execute(sql, update_values)
+            conn.commit()
+            
+            # 获取更新后的模块
+            cursor.execute("SELECT * FROM crawler_modules WHERE module_id = %s", (module_id,))
+            module = cursor.fetchone()
+            
+            result = {
+                'module_id': module['module_id'],
+                'module_name': module['module_name'],
+                'description': module['description'],
+                'target_url': module['target_url'],
+                'crawler_options': json.loads(module['crawler_options']) if module['crawler_options'] else None,
+                'normalize_config': json.loads(module['normalize_config']) if module['normalize_config'] else None,
+                'created_at': module['created_at'].isoformat() if module['created_at'] else None,
+                'updated_at': module['updated_at'].isoformat() if module['updated_at'] else None,
+            }
+            
+            cursor.close()
+            conn.close()
+            return jsonify(result), 200
+        
+        elif request.method == 'DELETE':
+            # 删除模块（级联删除批次）
+            cursor.execute("SELECT module_id FROM crawler_modules WHERE module_id = %s", (module_id,))
+            if not cursor.fetchone():
+                cursor.close()
+                conn.close()
+                return jsonify({'error': 'Module not found'}), 404
+            
+            cursor.execute("DELETE FROM crawler_modules WHERE module_id = %s", (module_id,))
+            conn.commit()
+            
+            cursor.close()
+            conn.close()
+            return jsonify({'message': 'Module deleted successfully'}), 200
+            
+    except Exception as e:
+        print(f"[Crawler Module Detail API] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        if 'conn' in locals():
+            conn.close()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/crawler/modules/<module_id>/batches', methods=['GET', 'POST', 'OPTIONS'])
+def crawler_module_batches(module_id):
+    """批次管理：获取列表或创建批次"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection, get_redis_client
+        from web_crawler import WebCrawler
+        from crawler_normalizer import CrawlerNormalizer
+        
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        # 检查模块是否存在
+        cursor.execute("SELECT * FROM crawler_modules WHERE module_id = %s", (module_id,))
+        module = cursor.fetchone()
+        if not module:
+            cursor.close()
+            conn.close()
+            return jsonify({'error': 'Module not found'}), 404
+        
+        if request.method == 'GET':
+            # 获取批次列表
+            cursor.execute("""
+                SELECT 
+                    batch_id,
+                    batch_name,
+                    crawled_at,
+                    status,
+                    error_message
+                FROM crawler_batches
+                WHERE module_id = %s
+                ORDER BY crawled_at DESC
+            """, (module_id,))
+            batches = cursor.fetchall()
+            
+            result = []
+            for batch in batches:
+                # 从Redis获取批次数据统计（不返回完整数据）
+                item_count = 0
+                try:
+                    redis_client = get_redis_client()
+                    if redis_client:
+                        cache_key = f"crawler:module:{module_id}:batch:{batch['batch_name']}"
+                        cached = redis_client.get(cache_key)
+                        if cached:
+                            # 确保正确解码（Redis返回bytes）
+                            if isinstance(cached, bytes):
+                                cached = cached.decode('utf-8')
+                            cached_data = json.loads(cached)
+                            normalized = cached_data.get('normalized', {})
+                            item_count = normalized.get('total_count', 0)
+                except:
+                    pass
+                
+                result.append({
+                    'batch_id': batch['batch_id'],
+                    'batch_name': batch['batch_name'],
+                    'crawled_at': batch['crawled_at'].isoformat() if batch['crawled_at'] else None,
+                    'status': batch['status'],
+                    'error_message': batch['error_message'],
+                    'item_count': item_count
+                })
+            
+            cursor.close()
+            conn.close()
+            return jsonify({'batches': result}), 200
+        
+        elif request.method == 'POST':
+            # 创建批次（执行爬取）
+            data = request.json or {}
+            batch_name = data.get('batch_name')
+            force_refresh = data.get('force_refresh', False)
+            
+            if not batch_name:
+                batch_name = datetime.now().strftime('%Y-%m-%d')
+            
+            # 检查批次是否已存在
+            cursor.execute("""
+                SELECT batch_id, status FROM crawler_batches 
+                WHERE module_id = %s AND batch_name = %s
+            """, (module_id, batch_name))
+            existing_batch = cursor.fetchone()
+            
+            if existing_batch and not force_refresh:
+                # 返回已存在的批次（从Redis或MySQL获取）
+                batch_id = existing_batch['batch_id']
+                
+                # 尝试从Redis获取
+                try:
+                    redis_client = get_redis_client()
+                    if redis_client:
+                        cache_key = f"crawler:module:{module_id}:batch:{batch_name}"
+                        cached = redis_client.get(cache_key)
+                        if cached:
+                            # 确保正确解码（Redis返回bytes）
+                            if isinstance(cached, bytes):
+                                cached = cached.decode('utf-8')
+                            cursor.close()
+                            conn.close()
+                            return jsonify(json.loads(cached)), 200
+                except:
+                    pass
+                
+                # 从MySQL获取
+                cursor.execute("SELECT * FROM crawler_batches WHERE batch_id = %s", (batch_id,))
+                batch = cursor.fetchone()
+                
+                # 安全地解析 parsed_data（可能是 NULL）
+                parsed_data_value = None
+                if batch.get('parsed_data'):
+                    try:
+                        parsed_data_value = json.loads(batch['parsed_data'])
+                    except (TypeError, ValueError) as e:
+                        print(f"[Crawler Batches API] Warning: Failed to parse parsed_data: {e}")
+                        parsed_data_value = None
+                
+                result = {
+                    'batch_id': batch['batch_id'],
+                    'module_id': batch['module_id'],
+                    'batch_name': batch['batch_name'],
+                    'crawled_data': json.loads(batch['crawled_data']),
+                    'parsed_data': parsed_data_value,
+                    'crawled_at': batch['crawled_at'].isoformat() if batch['crawled_at'] else None,
+                    'status': batch['status'],
+                    'error_message': batch['error_message']
+                }
+                
+                cursor.close()
+                conn.close()
+                response = jsonify(result)
+                response.headers['Access-Control-Allow-Origin'] = '*'
+                return response, 200
+            
+            # 执行爬取
+            target_url = module['target_url']
+            crawler_options = json.loads(module['crawler_options']) if module['crawler_options'] else {}
+            normalize_config = json.loads(module['normalize_config']) if module['normalize_config'] else {}
+            
+            # 创建批次记录（pending状态）
+            batch_id = f"batch_{int(time.time() * 1000)}"
+            cursor.execute("""
+                INSERT INTO crawler_batches 
+                (batch_id, module_id, batch_name, crawled_data, status)
+                VALUES (%s, %s, %s, %s, 'running')
+            """, (batch_id, module_id, batch_name, json.dumps({})))
+            conn.commit()
+            
+            try:
+                # 执行爬取
+                crawler_config = config.get('crawler', {})
+                default_timeout = crawler_config.get('default_timeout', 30)
+                default_user_agent = crawler_config.get('default_user_agent')
+                
+                crawler = WebCrawler(
+                    default_timeout=default_timeout,
+                    default_user_agent=default_user_agent
+                )
+                
+                raw_result = crawler.fetch(target_url, crawler_options)
+                
+                if not raw_result.get('success'):
+                    # 爬取失败
+                    cursor.execute("""
+                        UPDATE crawler_batches 
+                        SET status = 'error', error_message = %s
+                        WHERE batch_id = %s
+                    """, (raw_result.get('message', 'Unknown error'), batch_id))
+                    conn.commit()
+                    
+                    cursor.close()
+                    conn.close()
+                    return jsonify({
+                        'success': False,
+                        'error': raw_result.get('error'),
+                        'message': raw_result.get('message'),
+                        'batch_id': batch_id
+                    }), 500
+                
+                # 标准化处理
+                normalizer = CrawlerNormalizer()
+                normalized_result = normalizer.normalize(raw_result, normalize_config)
+                
+                # 保存到数据库（保存完整的数据结构，包含 normalized 字段）
+                crawled_data_to_save = {
+                    'normalized': normalized_result
+                }
+                cursor.execute("""
+                    UPDATE crawler_batches 
+                    SET crawled_data = %s, status = 'completed', error_message = NULL
+                    WHERE batch_id = %s
+                """, (json.dumps(crawled_data_to_save, ensure_ascii=False), batch_id))
+                conn.commit()
+                
+                # 缓存到Redis（缓存完整的数据结构，与数据库保持一致）
+                try:
+                    redis_client = get_redis_client()
+                    if redis_client:
+                        cache_key = f"crawler:module:{module_id}:batch:{batch_name}"
+                        redis_client.setex(cache_key, 86400, json.dumps(crawled_data_to_save, ensure_ascii=False))  # 24小时
+                except Exception as e:
+                    print(f"[Crawler] Error caching batch: {e}")
+                
+                # 返回结果（确保数据结构一致：crawled_data 包含 normalized 字段）
+                result = {
+                    'batch_id': batch_id,
+                    'module_id': module_id,
+                    'batch_name': batch_name,
+                    'crawled_data': {
+                        'normalized': normalized_result
+                    },
+                    'crawled_at': datetime.now().isoformat(),
+                    'status': 'completed'
+                }
+                
+                cursor.close()
+                conn.close()
+                return jsonify(result), 201
+                
+            except Exception as e:
+                # 更新错误状态
+                cursor.execute("""
+                    UPDATE crawler_batches 
+                    SET status = 'error', error_message = %s
+                    WHERE batch_id = %s
+                """, (str(e), batch_id))
+                conn.commit()
+                
+                cursor.close()
+                conn.close()
+                return jsonify({
+                    'success': False,
+                    'error': 'CRAWL_ERROR',
+                    'message': str(e),
+                    'batch_id': batch_id
+                }), 500
+            
+    except Exception as e:
+        print(f"[Crawler Batches API] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        if 'conn' in locals():
+            conn.close()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/crawler/modules/<module_id>/batches/<batch_id>', methods=['GET', 'PUT', 'DELETE', 'OPTIONS'])
+def crawler_batch_detail(module_id, batch_id):
+    """批次详情：获取、更新或删除"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        from database import get_redis_client
+        
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        if request.method == 'GET':
+            # 先尝试从Redis获取
+            try:
+                cursor.execute("""
+                    SELECT batch_name FROM crawler_batches 
+                    WHERE batch_id = %s AND module_id = %s
+                """, (batch_id, module_id))
+                batch_info = cursor.fetchone()
+                
+                if batch_info:
+                    redis_client = get_redis_client()
+                    if redis_client:
+                        cache_key = f"crawler:module:{module_id}:batch:{batch_info['batch_name']}"
+                        cached = redis_client.get(cache_key)
+                        if cached:
+                            # 确保正确解码（Redis返回bytes）
+                            if isinstance(cached, bytes):
+                                cached = cached.decode('utf-8')
+                            cursor.close()
+                            conn.close()
+                            return jsonify(json.loads(cached)), 200
+            except:
+                pass
+            
+            # 从MySQL获取
+            cursor.execute("""
+                SELECT * FROM crawler_batches 
+                WHERE batch_id = %s AND module_id = %s
+            """, (batch_id, module_id))
+            batch = cursor.fetchone()
+            
+            if not batch:
+                cursor.close()
+                conn.close()
+                return jsonify({'error': 'Batch not found'}), 404
+            
+            # 安全地解析 parsed_data（可能是 NULL）
+            parsed_data_value = None
+            if batch.get('parsed_data'):
+                try:
+                    parsed_data_value = json.loads(batch['parsed_data'])
+                except (TypeError, ValueError) as e:
+                    print(f"[Crawler Batch Detail API] Warning: Failed to parse parsed_data: {e}")
+                    parsed_data_value = None
+            
+            result = {
+                'batch_id': batch['batch_id'],
+                'module_id': batch['module_id'],
+                'batch_name': batch['batch_name'],
+                'crawled_data': json.loads(batch['crawled_data']),
+                'parsed_data': parsed_data_value,
+                'crawled_at': batch['crawled_at'].isoformat() if batch['crawled_at'] else None,
+                'status': batch['status'],
+                'error_message': batch['error_message']
+            }
+            
+            cursor.close()
+            conn.close()
+            response = jsonify(result)
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            return response, 200
+        
+        elif request.method == 'PUT':
+            # 更新批次的 parsed_data
+            print(f"[Crawler Batch Detail API] PUT request received for batch_id={batch_id}, module_id={module_id}")
+            data = request.json or {}
+            print(f"[Crawler Batch Detail API] Request data: {data}")
+            parsed_data = data.get('parsed_data')
+            
+            if parsed_data is None:
+                print(f"[Crawler Batch Detail API] Error: parsed_data is None")
+                cursor.close()
+                conn.close()
+                response = jsonify({'error': 'parsed_data is required'})
+                response.headers['Access-Control-Allow-Origin'] = '*'
+                return response, 400
+            
+            # 检查批次是否存在
+            cursor.execute("""
+                SELECT batch_id FROM crawler_batches 
+                WHERE batch_id = %s AND module_id = %s
+            """, (batch_id, module_id))
+            batch_check = cursor.fetchone()
+            if not batch_check:
+                print(f"[Crawler Batch Detail API] Error: Batch not found")
+                cursor.close()
+                conn.close()
+                response = jsonify({'error': 'Batch not found'})
+                response.headers['Access-Control-Allow-Origin'] = '*'
+                return response, 404
+            
+            # 将 parsed_data 转换为简单的 JSON 结构（只包含 title 和 content）
+            # 如果传入的是包含 items 的对象，提取 items 数组
+            # 如果传入的是数组，直接使用
+            # 最终保存为数组格式，每个元素包含 title 和 content
+            simple_parsed_data = None
+            try:
+                if isinstance(parsed_data, dict):
+                    # 如果传入的是对象，提取 items 数组
+                    items = parsed_data.get('items', [])
+                    print(f"[Crawler Batch Detail API] Parsed data is dict, items count: {len(items) if isinstance(items, list) else 0}")
+                    if isinstance(items, list) and len(items) > 0:
+                        # 转换为简单的数组结构，每个元素只包含 title 和 content
+                        simple_parsed_data = []
+                        for item in items:
+                            title = item.get('title', '') if isinstance(item, dict) else ''
+                            content = item.get('content', '') if isinstance(item, dict) else ''
+                            # 保留所有项，即使 title 和 content 都为空（避免数据丢失）
+                            simple_parsed_data.append({
+                                'title': title,
+                                'content': content
+                            })
+                        print(f"[Crawler Batch Detail API] Converted {len(simple_parsed_data)} items to simple format")
+                    else:
+                        # 如果没有 items，尝试将整个对象转换为数组
+                        print(f"[Crawler Batch Detail API] No items found, converting whole object to array")
+                        simple_parsed_data = [parsed_data]
+                elif isinstance(parsed_data, list):
+                    # 如果传入的是数组，直接使用，但确保每个元素只包含 title 和 content
+                    print(f"[Crawler Batch Detail API] Parsed data is list, count: {len(parsed_data)}")
+                    simple_parsed_data = []
+                    for item in parsed_data:
+                        if isinstance(item, dict):
+                            simple_parsed_data.append({
+                                'title': item.get('title', ''),
+                                'content': item.get('content', '')
+                            })
+                        else:
+                            simple_parsed_data.append({
+                                'title': '',
+                                'content': str(item)
+                            })
+                else:
+                    # 其他情况，转换为数组
+                    print(f"[Crawler Batch Detail API] Parsed data is other type: {type(parsed_data)}")
+                    simple_parsed_data = [{'title': '', 'content': str(parsed_data)}]
+                
+                if not simple_parsed_data:
+                    print(f"[Crawler Batch Detail API] Warning: simple_parsed_data is empty after conversion")
+                    simple_parsed_data = []
+                
+            except Exception as e:
+                print(f"[Crawler Batch Detail API] Error converting parsed_data: {e}")
+                import traceback
+                traceback.print_exc()
+                cursor.close()
+                conn.close()
+                response = jsonify({'error': f'Failed to convert parsed_data: {str(e)}'})
+                response.headers['Access-Control-Allow-Origin'] = '*'
+                return response, 500
+            
+            # 更新 parsed_data（保存为简单的数组结构）
+            try:
+                parsed_data_json = json.dumps(simple_parsed_data, ensure_ascii=False)
+                print(f"[Crawler Batch Detail API] Updating parsed_data, JSON length: {len(parsed_data_json)}, items count: {len(simple_parsed_data)}")
+                print(f"[Crawler Batch Detail API] Sample data (first item): {simple_parsed_data[0] if simple_parsed_data else 'empty'}")
+                
+                cursor.execute("""
+                    UPDATE crawler_batches 
+                    SET parsed_data = %s 
+                    WHERE batch_id = %s AND module_id = %s
+                """, (parsed_data_json, batch_id, module_id))
+                
+                affected_rows = cursor.rowcount
+                print(f"[Crawler Batch Detail API] UPDATE executed, affected rows: {affected_rows}")
+                
+                conn.commit()
+                print(f"[Crawler Batch Detail API] Database commit successful")
+            except Exception as e:
+                print(f"[Crawler Batch Detail API] Error updating database: {e}")
+                import traceback
+                traceback.print_exc()
+                conn.rollback()
+                cursor.close()
+                conn.close()
+                response = jsonify({'error': f'Failed to update database: {str(e)}'})
+                response.headers['Access-Control-Allow-Origin'] = '*'
+                return response, 500
+            
+            # 验证更新是否成功
+            cursor.execute("""
+                SELECT parsed_data FROM crawler_batches 
+                WHERE batch_id = %s AND module_id = %s
+            """, (batch_id, module_id))
+            verify_result = cursor.fetchone()
+            if verify_result:
+                parsed_data_in_db = verify_result.get('parsed_data')
+                print(f"[Crawler Batch Detail API] Verified: parsed_data exists in DB: {parsed_data_in_db is not None}")
+                if parsed_data_in_db:
+                    try:
+                        parsed_obj = json.loads(parsed_data_in_db) if isinstance(parsed_data_in_db, str) else parsed_data_in_db
+                        if isinstance(parsed_obj, list):
+                            print(f"[Crawler Batch Detail API] Verified: parsed_data contains {len(parsed_obj)} items")
+                        else:
+                            print(f"[Crawler Batch Detail API] Verified: parsed_data is {type(parsed_obj).__name__}")
+                    except Exception as e:
+                        print(f"[Crawler Batch Detail API] Warning: Failed to parse verified parsed_data: {e}")
+            
+            # 清除Redis缓存
+            try:
+                cursor.execute("SELECT batch_name FROM crawler_batches WHERE batch_id = %s", (batch_id,))
+                batch_info = cursor.fetchone()
+                if batch_info:
+                    redis_client = get_redis_client()
+                    if redis_client:
+                        cache_key = f"crawler:module:{module_id}:batch:{batch_info['batch_name']}"
+                        redis_client.delete(cache_key)
+                        print(f"[Crawler Batch Detail API] Redis cache cleared: {cache_key}")
+            except Exception as e:
+                print(f"[Crawler Batch Detail API] Warning: Failed to clear Redis cache: {e}")
+            
+            cursor.close()
+            conn.close()
+            response = jsonify({'success': True, 'message': 'Parsed data saved successfully'})
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            return response, 200
+        
+        elif request.method == 'DELETE':
+            # 删除批次
+            cursor.execute("""
+                SELECT batch_id FROM crawler_batches 
+                WHERE batch_id = %s AND module_id = %s
+            """, (batch_id, module_id))
+            if not cursor.fetchone():
+                cursor.close()
+                conn.close()
+                return jsonify({'error': 'Batch not found'}), 404
+            
+            # 删除Redis缓存
+            try:
+                cursor.execute("SELECT batch_name FROM crawler_batches WHERE batch_id = %s", (batch_id,))
+                batch_info = cursor.fetchone()
+                if batch_info:
+                    redis_client = get_redis_client()
+                    if redis_client:
+                        cache_key = f"crawler:module:{module_id}:batch:{batch_info['batch_name']}"
+                        redis_client.delete(cache_key)
+            except:
+                pass
+            
+            cursor.execute("DELETE FROM crawler_batches WHERE batch_id = %s", (batch_id,))
+            conn.commit()
+            
+            cursor.close()
+            conn.close()
+            response = jsonify({'message': 'Batch deleted successfully'})
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            return response, 200
+    
+    except Exception as e:
+        print(f"[Crawler Batch Detail API] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        if 'conn' in locals():
+            conn.close()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/crawler/modules/<module_id>/batches/<batch_id>/parsed-data', methods=['PUT', 'OPTIONS'])
+def update_batch_parsed_data(module_id, batch_id):
+    """保存解析后的数据到 parsed_data 字段"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    print(f"\n{'='*60}")
+    print(f"[SaveParsedData] 🚀 开始保存 parsed_data")
+    print(f"[SaveParsedData] Module ID: {module_id}")
+    print(f"[SaveParsedData] Batch ID: {batch_id}")
+    print(f"{'='*60}\n")
+    
+    try:
+        from database import get_mysql_connection, get_redis_client
+        
+        conn = get_mysql_connection()
+        if not conn:
+            print(f"[SaveParsedData] ❌ MySQL 不可用")
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        # 获取请求数据
+        data = request.json or {}
+        parsed_data_raw = data.get('parsed_data')
+        
+        print(f"[SaveParsedData] 📦 收到的数据类型: {type(parsed_data_raw)}")
+        
+        if parsed_data_raw is None:
+            print(f"[SaveParsedData] ❌ parsed_data 为空")
+            cursor.close()
+            conn.close()
+            return jsonify({'error': 'parsed_data is required'}), 400
+        
+        # 验证批次存在
+        cursor.execute("""
+            SELECT batch_id FROM crawler_batches 
+            WHERE batch_id = %s AND module_id = %s
+        """, (batch_id, module_id))
+        
+        if not cursor.fetchone():
+            print(f"[SaveParsedData] ❌ 批次不存在")
+            cursor.close()
+            conn.close()
+            return jsonify({'error': 'Batch not found'}), 404
+        
+        # 转换为标准格式：[{title, content}, ...]
+        final_data = []
+        
+        if isinstance(parsed_data_raw, list):
+            print(f"[SaveParsedData] ✅ 接收到数组，包含 {len(parsed_data_raw)} 项")
+            for idx, item in enumerate(parsed_data_raw):
+                if isinstance(item, dict):
+                    final_data.append({
+                        'title': str(item.get('title', '')),
+                        'content': str(item.get('content', ''))
+                    })
+                else:
+                    final_data.append({
+                        'title': '',
+                        'content': str(item)
+                    })
+                
+                # 打印前3项
+                if idx < 3:
+                    print(f"[SaveParsedData]   #{idx+1}: title='{final_data[-1]['title'][:50]}...', content_len={len(final_data[-1]['content'])}")
+        else:
+            print(f"[SaveParsedData] ⚠️ 接收到非数组类型: {type(parsed_data_raw)}")
+            final_data.append({
+                'title': '',
+                'content': str(parsed_data_raw)
+            })
+        
+        print(f"[SaveParsedData] 📊 最终数据: {len(final_data)} 条")
+        
+        if not final_data:
+            print(f"[SaveParsedData] ⚠️ 警告：没有数据可保存")
+        
+        # 保存到数据库
+        parsed_data_json = json.dumps(final_data, ensure_ascii=False)
+        print(f"[SaveParsedData] 💾 JSON 大小: {len(parsed_data_json)} 字节")
+        
+        cursor.execute("""
+            UPDATE crawler_batches 
+            SET parsed_data = %s 
+            WHERE batch_id = %s AND module_id = %s
+        """, (parsed_data_json, batch_id, module_id))
+        
+        affected_rows = cursor.rowcount
+        print(f"[SaveParsedData] 📝 UPDATE 影响行数: {affected_rows}")
+        
+        conn.commit()
+        print(f"[SaveParsedData] ✅ 提交成功")
+        
+        # 验证保存结果
+        cursor.execute("""
+            SELECT parsed_data FROM crawler_batches 
+            WHERE batch_id = %s AND module_id = %s
+        """, (batch_id, module_id))
+        
+        verify = cursor.fetchone()
+        if verify and verify.get('parsed_data'):
+            saved_data = json.loads(verify['parsed_data']) if isinstance(verify['parsed_data'], str) else verify['parsed_data']
+            print(f"[SaveParsedData] ✅ 验证成功: 数据库中有 {len(saved_data) if isinstance(saved_data, list) else 0} 条数据")
+        else:
+            print(f"[SaveParsedData] ⚠️ 验证失败: 未能读取保存的数据")
+        
+        # 清除缓存
+        try:
+            cursor.execute("SELECT batch_name FROM crawler_batches WHERE batch_id = %s", (batch_id,))
+            batch_info = cursor.fetchone()
+            if batch_info:
+                redis_client = get_redis_client()
+                if redis_client:
+                    cache_key = f"crawler:module:{module_id}:batch:{batch_info['batch_name']}"
+                    redis_client.delete(cache_key)
+                    print(f"[SaveParsedData] 🗑️ 清除缓存: {cache_key}")
+        except Exception as e:
+            print(f"[SaveParsedData] ⚠️ 清除缓存失败: {e}")
+        
+        cursor.close()
+        conn.close()
+        
+        print(f"\n{'='*60}")
+        print(f"[SaveParsedData] 🎉 保存完成: {len(final_data)} 条数据")
+        print(f"{'='*60}\n")
+        
+        return jsonify({
+            'success': True,
+            'item_count': len(final_data),
+            'message': f'Successfully saved {len(final_data)} items to parsed_data'
+        }), 200
+    
+    except Exception as e:
+        print(f"[SaveParsedData] ❌ 错误: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/crawler/modules/search', methods=['GET', 'OPTIONS'])
+def crawler_modules_search():
+    """搜索模块（用于聊天中的/模块联想）"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        from database import get_redis_client
+        
+        query = request.args.get('q', '').strip()
+        
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        # 搜索模块
+        if query:
+            cursor.execute("""
+                SELECT 
+                    module_id,
+                    module_name,
+                    description,
+                    target_url
+                FROM crawler_modules
+                WHERE module_name LIKE %s OR description LIKE %s
+                ORDER BY created_at DESC
+            """, (f'%{query}%', f'%{query}%'))
+        else:
+            cursor.execute("""
+                SELECT 
+                    module_id,
+                    module_name,
+                    description,
+                    target_url
+                FROM crawler_modules
+                ORDER BY created_at DESC
+            """)
+        
+        modules = cursor.fetchall()
+        
+        # 获取每个模块的批次列表
+        result = []
+        for module in modules:
+            cursor.execute("""
+                SELECT 
+                    batch_id,
+                    batch_name,
+                    crawled_at,
+                    status
+                FROM crawler_batches
+                WHERE module_id = %s AND status = 'completed'
+                ORDER BY crawled_at DESC
+                LIMIT 10
+            """, (module['module_id'],))
+            batches = cursor.fetchall()
+            
+            # 获取批次统计信息
+            batches_with_stats = []
+            for batch in batches:
+                item_count = 0
+                
+                # 优先从parsed_data字段获取数据条数
+                try:
+                    cursor.execute("""
+                        SELECT parsed_data FROM crawler_batches 
+                        WHERE batch_id = %s
+                    """, (batch['batch_id'],))
+                    batch_data = cursor.fetchone()
+                    if batch_data and batch_data.get('parsed_data'):
+                        parsed_data = batch_data['parsed_data']
+                        if isinstance(parsed_data, str):
+                            parsed_data = json.loads(parsed_data)
+                        if isinstance(parsed_data, list):
+                            item_count = len(parsed_data)
+                except Exception as e:
+                    print(f"[modules/search] Error reading parsed_data for batch {batch['batch_id']}: {e}")
+                
+                # 如果parsed_data没有数据，尝试从Redis缓存获取
+                if item_count == 0:
+                    try:
+                        redis_client = get_redis_client()
+                        if redis_client:
+                            cache_key = f"crawler:module:{module['module_id']}:batch:{batch['batch_name']}"
+                            cached = redis_client.get(cache_key)
+                            if cached:
+                                if isinstance(cached, bytes):
+                                    cached = cached.decode('utf-8')
+                                cached_data = json.loads(cached)
+                                normalized = cached_data.get('normalized', {})
+                                item_count = normalized.get('total_count', 0)
+                    except Exception as e:
+                        print(f"[modules/search] Error reading cache for batch {batch['batch_id']}: {e}")
+                
+                batches_with_stats.append({
+                    'batch_id': batch['batch_id'],
+                    'batch_name': batch['batch_name'],
+                    'item_count': item_count,
+                    'crawled_at': batch['crawled_at'].isoformat() if batch['crawled_at'] else None
+                })
+            
+            result.append({
+                'module_id': module['module_id'],
+                'module_name': module['module_name'],
+                'description': module['description'],
+                'target_url': module['target_url'],
+                'batches': batches_with_stats
+            })
+        
+        cursor.close()
+        conn.close()
+        return jsonify({'modules': result}), 200
+        
+    except Exception as e:
+        print(f"[Crawler Modules Search API] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        if 'conn' in locals():
+            conn.close()
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

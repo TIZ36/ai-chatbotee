@@ -252,6 +252,7 @@ def create_tables():
             `session_id` VARCHAR(100) NOT NULL UNIQUE COMMENT '会话ID',
             `title` VARCHAR(255) DEFAULT NULL COMMENT '会话标题（自动生成或用户设置）',
             `llm_config_id` VARCHAR(100) DEFAULT NULL COMMENT '使用的LLM配置ID',
+            `avatar` MEDIUMTEXT DEFAULT NULL COMMENT '机器人头像（base64编码）',
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
             `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
             `last_message_at` DATETIME DEFAULT NULL COMMENT '最后消息时间',
@@ -264,6 +265,42 @@ def create_tables():
         
         cursor.execute(create_sessions_table)
         print("✓ Table 'sessions' created/verified successfully")
+        
+        # 迁移：为已存在的表添加或修改 avatar 列（如果不存在或类型不对）
+        try:
+            cursor.execute("""
+                SELECT COLUMN_TYPE 
+                FROM information_schema.COLUMNS 
+                WHERE TABLE_SCHEMA = DATABASE() 
+                AND TABLE_NAME = 'sessions' 
+                AND COLUMN_NAME = 'avatar'
+            """)
+            avatar_column = cursor.fetchone()
+            
+            if not avatar_column:
+                # 列不存在，添加它
+                print("  → Adding 'avatar' column to 'sessions' table...")
+                cursor.execute("""
+                    ALTER TABLE `sessions` 
+                    ADD COLUMN `avatar` MEDIUMTEXT DEFAULT NULL COMMENT '机器人头像（base64编码）' 
+                    AFTER `llm_config_id`
+                """)
+                print("  ✓ Column 'avatar' added successfully")
+            else:
+                # 列存在，检查类型是否为 MEDIUMTEXT
+                column_type = avatar_column[0].upper()
+                if 'TEXT' in column_type and 'MEDIUMTEXT' not in column_type:
+                    # 如果是 TEXT 类型，修改为 MEDIUMTEXT
+                    print("  → Updating 'avatar' column type from TEXT to MEDIUMTEXT...")
+                    cursor.execute("""
+                        ALTER TABLE `sessions` 
+                        MODIFY COLUMN `avatar` MEDIUMTEXT DEFAULT NULL COMMENT '机器人头像（base64编码）'
+                    """)
+                    print("  ✓ Column 'avatar' type updated to MEDIUMTEXT")
+                else:
+                    print("  ✓ Column 'avatar' already exists with correct type")
+        except Exception as e:
+            print(f"  ⚠ Warning: Could not check/add 'avatar' column: {e}")
         
         # 消息表
         create_messages_table = """
@@ -361,6 +398,72 @@ def create_tables():
         
         cursor.execute(create_message_executions_table)
         print("✓ Table 'message_executions' created/verified successfully")
+        
+        # 爬虫模块表
+        create_crawler_modules_table = """
+        CREATE TABLE IF NOT EXISTS `crawler_modules` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `module_id` VARCHAR(100) NOT NULL UNIQUE COMMENT '模块ID',
+            `module_name` VARCHAR(255) NOT NULL COMMENT '模块名称',
+            `description` TEXT DEFAULT NULL COMMENT '模块描述',
+            `target_url` TEXT NOT NULL COMMENT '目标URL',
+            `crawler_options` JSON DEFAULT NULL COMMENT '爬虫配置（认证信息等）',
+            `normalize_config` JSON DEFAULT NULL COMMENT '标准化配置',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+            INDEX `idx_module_id` (`module_id`),
+            INDEX `idx_module_name` (`module_name`),
+            INDEX `idx_created_at` (`created_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='爬虫模块表';
+        """
+        
+        cursor.execute(create_crawler_modules_table)
+        print("✓ Table 'crawler_modules' created/verified successfully")
+        
+        # 爬虫子批次表
+        create_crawler_batches_table = """
+        CREATE TABLE IF NOT EXISTS `crawler_batches` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `batch_id` VARCHAR(100) NOT NULL UNIQUE COMMENT '批次ID',
+            `module_id` VARCHAR(100) NOT NULL COMMENT '所属模块ID',
+            `batch_name` VARCHAR(255) NOT NULL COMMENT '批次名称（如日期）',
+            `crawled_data` JSON NOT NULL COMMENT '爬取的数据（标准化后）',
+            `parsed_data` JSON DEFAULT NULL COMMENT '用户标记后生成的解析数据',
+            `crawled_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '爬取时间',
+            `status` VARCHAR(20) DEFAULT 'completed' COMMENT '状态：pending, running, completed, error',
+            `error_message` TEXT DEFAULT NULL COMMENT '错误信息',
+            INDEX `idx_batch_id` (`batch_id`),
+            INDEX `idx_module_id` (`module_id`),
+            INDEX `idx_batch_name` (`batch_name`),
+            INDEX `idx_crawled_at` (`crawled_at`),
+            FOREIGN KEY (`module_id`) REFERENCES `crawler_modules`(`module_id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='爬虫子批次表';
+        """
+        
+        cursor.execute(create_crawler_batches_table)
+        print("✓ Table 'crawler_batches' created/verified successfully")
+        
+        # 检查并添加 parsed_data 列（如果不存在）
+        try:
+            cursor.execute("""
+                SELECT COLUMN_NAME 
+                FROM INFORMATION_SCHEMA.COLUMNS 
+                WHERE TABLE_SCHEMA = DATABASE() 
+                AND TABLE_NAME = 'crawler_batches' 
+                AND COLUMN_NAME = 'parsed_data'
+            """)
+            if not cursor.fetchone():
+                print("Adding 'parsed_data' column to 'crawler_batches' table...")
+                cursor.execute("""
+                    ALTER TABLE `crawler_batches` 
+                    ADD COLUMN `parsed_data` JSON DEFAULT NULL COMMENT '用户标记后生成的解析数据' 
+                    AFTER `crawled_data`
+                """)
+                print("✓ Column 'parsed_data' added successfully")
+            else:
+                print("✓ Column 'parsed_data' already exists")
+        except Exception as e:
+            print(f"⚠ Warning: Could not check/add 'parsed_data' column: {e}")
         
         cursor.close()
         conn.close()  # 归还连接到连接池
