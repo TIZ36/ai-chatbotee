@@ -218,7 +218,9 @@ export class LLMClient {
     console.log(`[LLM] Using OpenAI Stream API URL: ${apiUrl}`);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000);
+    // 流式响应需要更长的超时时间（10分钟），因为AI可能需要较长时间生成内容
+    const timeoutDuration = 10 * 60 * 1000; // 10分钟
+    const timeoutId = setTimeout(() => controller.abort(), timeoutDuration);
     
     try {
       const response = await fetch(apiUrl, {
@@ -260,14 +262,34 @@ export class LLMClient {
       let fullThinking = ''; // 思考过程
       let toolCalls: LLMToolCall[] = [];
       let finishReason: string | undefined;
+      let lastChunkTime = Date.now(); // 记录最后一次收到数据的时间
 
       if (!reader) {
         throw new Error('Failed to get response stream');
       }
 
+      // 设置流式读取的超时保护（如果30秒内没有收到新数据，认为超时）
+      const streamTimeoutDuration = 30 * 1000; // 30秒
+      let streamTimeoutId: ReturnType<typeof setTimeout> | null = null;
+      
+      const resetStreamTimeout = () => {
+        if (streamTimeoutId) {
+          clearTimeout(streamTimeoutId);
+        }
+        streamTimeoutId = setTimeout(() => {
+          reader.cancel();
+          throw new Error(`Stream timeout: no data received for ${streamTimeoutDuration / 1000}s`);
+        }, streamTimeoutDuration);
+      };
+      
+      resetStreamTimeout();
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        
+        // 重置流式读取超时
+        resetStreamTimeout();
 
         const chunk = decoder.decode(value, { stream: true });
         const lines = chunk.split('\n').filter(line => line.trim() !== '');
@@ -338,6 +360,11 @@ export class LLMClient {
           }
         }
       }
+      
+      // 清理流式读取超时
+      if (streamTimeoutId) {
+        clearTimeout(streamTimeoutId);
+      }
 
       return {
         content: fullContent,
@@ -347,8 +374,11 @@ export class LLMClient {
       };
     } catch (error: any) {
       clearTimeout(timeoutId);
+      if (streamTimeoutId) {
+        clearTimeout(streamTimeoutId);
+      }
       if (error.name === 'AbortError') {
-        throw new Error('API request timeout (120s)');
+        throw new Error(`API request timeout (${timeoutDuration / 1000}s)`);
       }
       throw error;
     }
@@ -369,9 +399,11 @@ export class LLMClient {
 
     console.log(`[LLM] Using API URL: ${apiUrl} (original: ${this.config.apiUrl || 'default'})`);
 
-    // 创建带超时的 fetch（120秒超时）
+    // 创建带超时的 fetch
+    // 流式响应需要更长的超时时间（10分钟），因为AI可能需要较长时间生成内容
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000); // 120秒超时
+    const timeoutDuration = 10 * 60 * 1000; // 10分钟
+    const timeoutId = setTimeout(() => controller.abort(), timeoutDuration);
     
     try {
       const response = await fetch(apiUrl, {
@@ -425,7 +457,7 @@ export class LLMClient {
     } catch (error: any) {
       clearTimeout(timeoutId);
       if (error.name === 'AbortError') {
-        throw new Error('API request timeout (120s)');
+        throw new Error(`API request timeout (${timeoutDuration / 1000}s)`);
       }
       throw error;
     }
@@ -454,7 +486,9 @@ export class LLMClient {
     const conversationMessages = messages.filter(m => m.role !== 'system');
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000);
+    // 流式响应需要更长的超时时间（10分钟）
+    const timeoutDuration = 10 * 60 * 1000; // 10分钟
+    const timeoutId = setTimeout(() => controller.abort(), timeoutDuration);
     
     try {
       const response = await fetch(apiUrl, {
@@ -496,9 +530,28 @@ export class LLMClient {
         throw new Error('Failed to get response stream');
       }
 
+      // 设置流式读取的超时保护（如果30秒内没有收到新数据，认为超时）
+      const streamTimeoutDuration = 30 * 1000; // 30秒
+      let streamTimeoutId: ReturnType<typeof setTimeout> | null = null;
+      
+      const resetStreamTimeout = () => {
+        if (streamTimeoutId) {
+          clearTimeout(streamTimeoutId);
+        }
+        streamTimeoutId = setTimeout(() => {
+          reader.cancel();
+          throw new Error(`Stream timeout: no data received for ${streamTimeoutDuration / 1000}s`);
+        }, streamTimeoutDuration);
+      };
+      
+      resetStreamTimeout();
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        
+        // 重置流式读取超时
+        resetStreamTimeout();
 
         const chunk = decoder.decode(value, { stream: true });
         const lines = chunk.split('\n').filter(line => line.trim() !== '');
@@ -544,6 +597,11 @@ export class LLMClient {
           }
         }
       }
+      
+      // 清理流式读取超时
+      if (streamTimeoutId) {
+        clearTimeout(streamTimeoutId);
+      }
 
       return {
         content: fullContent,
@@ -552,8 +610,11 @@ export class LLMClient {
       };
     } catch (error: any) {
       clearTimeout(timeoutId);
+      if (streamTimeoutId) {
+        clearTimeout(streamTimeoutId);
+      }
       if (error.name === 'AbortError') {
-        throw new Error('API request timeout (120s)');
+        throw new Error(`API request timeout (${timeoutDuration / 1000}s)`);
       }
       throw error;
     }
@@ -578,9 +639,11 @@ export class LLMClient {
     const systemMessages = messages.filter(m => m.role === 'system');
     const conversationMessages = messages.filter(m => m.role !== 'system');
 
-    // 创建带超时的 fetch（120秒超时）
+    // 创建带超时的 fetch
+    // 流式响应需要更长的超时时间（10分钟），因为AI可能需要较长时间生成内容
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000); // 120秒超时
+    const timeoutDuration = 10 * 60 * 1000; // 10分钟
+    const timeoutId = setTimeout(() => controller.abort(), timeoutDuration);
     
     try {
       const response = await fetch(apiUrl, {
@@ -628,7 +691,7 @@ export class LLMClient {
     } catch (error: any) {
       clearTimeout(timeoutId);
       if (error.name === 'AbortError') {
-        throw new Error('API request timeout (120s)');
+        throw new Error(`API request timeout (${timeoutDuration / 1000}s)`);
       }
       throw error;
     }
@@ -665,7 +728,9 @@ export class LLMClient {
     console.log(`[LLM] Using Ollama Stream API URL: ${apiUrl}`);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000);
+    // 流式响应需要更长的超时时间（10分钟）
+    const timeoutDuration = 10 * 60 * 1000; // 10分钟
+    const timeoutId = setTimeout(() => controller.abort(), timeoutDuration);
     
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -714,9 +779,28 @@ export class LLMClient {
         throw new Error('Failed to get response stream');
       }
 
+      // 设置流式读取的超时保护（如果30秒内没有收到新数据，认为超时）
+      const streamTimeoutDuration = 30 * 1000; // 30秒
+      let streamTimeoutId: ReturnType<typeof setTimeout> | null = null;
+      
+      const resetStreamTimeout = () => {
+        if (streamTimeoutId) {
+          clearTimeout(streamTimeoutId);
+        }
+        streamTimeoutId = setTimeout(() => {
+          reader.cancel();
+          throw new Error(`Stream timeout: no data received for ${streamTimeoutDuration / 1000}s`);
+        }, streamTimeoutDuration);
+      };
+      
+      resetStreamTimeout();
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        
+        // 重置流式读取超时
+        resetStreamTimeout();
 
         const chunk = decoder.decode(value, { stream: true });
         const lines = chunk.split('\n').filter(line => line.trim() !== '');
@@ -755,6 +839,11 @@ export class LLMClient {
           }
         }
       }
+      
+      // 清理流式读取超时
+      if (streamTimeoutId) {
+        clearTimeout(streamTimeoutId);
+      }
 
       return {
         content: fullContent,
@@ -763,8 +852,11 @@ export class LLMClient {
       };
     } catch (error: any) {
       clearTimeout(timeoutId);
+      if (streamTimeoutId) {
+        clearTimeout(streamTimeoutId);
+      }
       if (error.name === 'AbortError') {
-        throw new Error('API request timeout (120s)');
+        throw new Error(`API request timeout (${timeoutDuration / 1000}s)`);
       }
       throw error;
     }
@@ -803,9 +895,11 @@ export class LLMClient {
 
     console.log(`[LLM] Using Ollama API URL: ${apiUrl} (original: ${this.config.apiUrl || 'default'})`);
 
-    // 创建带超时的 fetch（120秒超时）
+    // 创建带超时的 fetch
+    // 流式响应需要更长的超时时间（10分钟），因为AI可能需要较长时间生成内容
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000); // 120秒超时
+    const timeoutDuration = 10 * 60 * 1000; // 10分钟
+    const timeoutId = setTimeout(() => controller.abort(), timeoutDuration);
     
     // 构建请求头，API key 可选（Ollama 通常不需要）
     const headers: Record<string, string> = {
@@ -870,7 +964,7 @@ export class LLMClient {
     } catch (error: any) {
       clearTimeout(timeoutId);
       if (error.name === 'AbortError') {
-        throw new Error('API request timeout (120s)');
+        throw new Error(`API request timeout (${timeoutDuration / 1000}s)`);
       }
       throw error;
     }
@@ -1089,12 +1183,14 @@ ${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
     systemPrompt?: string, 
     tools?: MCPTool[],
     stream: boolean = false,
-    onChunk?: (content: string, thinking?: string) => void
+    onChunk?: (content: string, thinking?: string) => void,
+    messageHistory?: LLMMessage[] // 添加消息历史参数
   ): Promise<{ content: string; thinking?: string }> {
     // 设置允许使用的工具列表
     const allTools: MCPTool[] = tools || [];
     this.setAllowedTools(allTools);
 
+    // 构建消息数组：系统消息 + 历史消息 + 当前用户消息
     const messages: LLMMessage[] = [
       {
         role: 'system',
@@ -1105,11 +1201,19 @@ ${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
 当用户需要执行操作时，使用相应的工具。`
           : '你是一个智能助手，可以帮助用户完成各种任务。'),
       },
-      {
-        role: 'user',
-        content: userInput,
-      },
     ];
+    
+    // 如果有历史消息，添加到消息数组中（排除系统消息）
+    if (messageHistory && messageHistory.length > 0) {
+      const historyMessages = messageHistory.filter(msg => msg.role !== 'system');
+      messages.push(...historyMessages);
+    }
+    
+    // 添加当前用户消息
+    messages.push({
+      role: 'user',
+      content: userInput,
+    });
 
     let maxIterations = 10;
     let iteration = 0;

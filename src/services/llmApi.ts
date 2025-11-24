@@ -15,6 +15,7 @@ export interface LLMConfigFromDB {
   enabled: boolean;
   description?: string;
   metadata?: Record<string, any>;
+  max_tokens?: number; // 模型的最大 token 限制（从后端获取）
   created_at: string;
   updated_at: string;
 }

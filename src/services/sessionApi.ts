@@ -112,7 +112,7 @@ export async function getSession(session_id: string): Promise<Session> {
 export async function getSessionMessages(
   session_id: string,
   page: number = 1,
-  page_size: number = 50
+  page_size: number = 20  // 默认只加载20条，加快初始加载速度
 ): Promise<{
   messages: Message[];
   total: number;
@@ -151,6 +151,7 @@ export async function saveMessage(
       workflowId?: string;
       workflowName?: string;
       workflowStatus?: 'pending' | 'running' | 'completed' | 'error';
+      acc_token?: number; // 可选：手动指定累积 token（用于总结消息等特殊情况）
     }
 ): Promise<{ message_id: string; token_count: number }> {
   // 如果是工具消息（感知组件），将工作流信息存储在 tool_calls 中

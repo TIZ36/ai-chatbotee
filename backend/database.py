@@ -288,6 +288,30 @@ def create_tables():
         cursor.execute(create_messages_table)
         print("✓ Table 'messages' created/verified successfully")
         
+        # 迁移：为已存在的表添加 acc_token 列（如果不存在）
+        try:
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM information_schema.COLUMNS 
+                WHERE TABLE_SCHEMA = DATABASE() 
+                AND TABLE_NAME = 'messages' 
+                AND COLUMN_NAME = 'acc_token'
+            """)
+            acc_token_column_exists = cursor.fetchone()[0] > 0
+            
+            if not acc_token_column_exists:
+                print("  → Adding 'acc_token' column to 'messages' table...")
+                cursor.execute("""
+                    ALTER TABLE `messages` 
+                    ADD COLUMN `acc_token` INT DEFAULT NULL COMMENT '累积Token数量（直到该消息为止）' 
+                    AFTER `token_count`
+                """)
+                print("  ✓ Column 'acc_token' added successfully")
+            else:
+                print("  ✓ Column 'acc_token' already exists")
+        except Exception as e:
+            print(f"  ⚠ Warning: Could not check/add 'acc_token' column: {e}")
+        
         # 总结表
         create_summaries_table = """
         CREATE TABLE IF NOT EXISTS `summaries` (

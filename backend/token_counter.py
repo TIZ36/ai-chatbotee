@@ -3,6 +3,24 @@ Token 计数工具
 支持多种模型的 Token 计数
 """
 
+import logging
+import sys
+
+# 配置模块级别的 logger
+logger = logging.getLogger(__name__)
+
+# 如果没有配置过 handler，添加一个基本的控制台 handler
+if not logger.handlers:
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    ))
+    handler.setLevel(logging.INFO)  # handler 级别
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)  # logger 级别
+    logger.propagate = False  # 不传播到父 logger，确保日志直接输出
+
 def estimate_tokens(text: str, model: str = 'gpt-4') -> int:
     """
     估算文本的 Token 数量
@@ -80,12 +98,19 @@ def get_model_max_tokens(model: str) -> int:
     
     Args:
         model: 模型名称
-    
+
     Returns:
         最大 Token 数量
     """
+
+    logger.info(f"Getting max tokens for model: {model}")
+    print(f"[token_counter] Getting max tokens for model: {model}")  # 备用输出
     # 常见模型的最大 token 限制
     model_limits = {
+        # deepseek
+        'deepseek-reasoner': 128000,
+        'deepseek-chat': 128000,
+
         # OpenAI
         'gpt-4': 8192,
         'gpt-4-turbo': 128000,
@@ -108,8 +133,12 @@ def get_model_max_tokens(model: str) -> int:
     # 检查是否匹配（支持部分匹配）
     for key, limit in model_limits.items():
         if key.lower() in model.lower():
+            logger.info(f"Matched model '{key}' -> max_tokens: {limit}")
+            print(f"[token_counter] Matched model '{key}' -> max_tokens: {limit}")  # 备用输出
             return limit
     
     # 默认值（保守估计）
+    logger.warning(f"No matching model found for '{model}', using default max_tokens: 8192")
+    print(f"[token_counter] WARNING: No matching model found for '{model}', using default max_tokens: 8192")  # 备用输出
     return 8192
 

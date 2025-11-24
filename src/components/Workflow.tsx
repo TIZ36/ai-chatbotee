@@ -4,8 +4,10 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Loader, Bot, User, Wrench, AlertCircle, CheckCircle, Brain, Plug, RefreshCw, Power, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Plus, History, Sparkles, Workflow as WorkflowIcon, GripVertical, Play, ArrowRight, Trash2, X } from 'lucide-react';
-import { LLMClient } from '../services/llmClient';
+import { Send, Loader, Bot, User, Wrench, AlertCircle, CheckCircle, Brain, Plug, RefreshCw, Power, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Plus, History, Sparkles, Workflow as WorkflowIcon, GripVertical, Play, ArrowRight, Trash2, X, Edit2, RotateCw } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { LLMClient, LLMMessage } from '../services/llmClient';
 import { getLLMConfigs, getLLMConfig, getLLMConfigApiKey, LLMConfigFromDB } from '../services/llmApi';
 import { mcpManager, MCPServer, MCPTool } from '../services/mcpClient';
 import { getMCPServers, MCPServerConfig } from '../services/mcpApi';
@@ -27,6 +29,7 @@ interface Message {
   workflowStatus?: 'pending' | 'running' | 'completed' | 'error'; // 工作流状态
   workflowResult?: string; // 工作流执行结果
   workflowConfig?: { nodes: WorkflowNode[]; connections: WorkflowConnection[] }; // 工作流配置（节点和连接）
+  isSummary?: boolean; // 是否是总结消息（不显示，但用于标记总结点）
 }
 
 const Workflow: React.FC = () => {
@@ -41,6 +44,7 @@ const Workflow: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [streamEnabled, setStreamEnabled] = useState(true); // 流式响应开关
   const [collapsedThinking, setCollapsedThinking] = useState<Set<string>>(new Set()); // 已折叠的思考过程
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null); // 正在编辑的消息ID
   
   // @ 符号选择器状态
   const [showAtSelector, setShowAtSelector] = useState(false);
@@ -61,6 +65,8 @@ const Workflow: React.FC = () => {
   const [messagePage, setMessagePage] = useState(1);
   const [summaries, setSummaries] = useState<Summary[]>([]);
   const [isSummarizing, setIsSummarizing] = useState(false);
+  const [showNewMessagePrompt, setShowNewMessagePrompt] = useState(false);
+  const [unreadMessageCount, setUnreadMessageCount] = useState(0);
   
   // LLM配置
   const [llmConfigs, setLlmConfigs] = useState<LLMConfigFromDB[]>([]);
@@ -82,9 +88,79 @@ const Workflow: React.FC = () => {
   const [draggingComponent, setDraggingComponent] = useState<{ type: 'mcp' | 'workflow'; id: string; name: string } | null>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const isInitialLoadRef = useRef(true);
+  const shouldMaintainScrollRef = useRef(false);
+  const isUserScrollingRef = useRef(false);
+  const scrollPositionRef = useRef<{ anchorMessageId: string; anchorOffsetTop: number; scrollTop: number } | null>(null);
+  const isLoadingMoreRef = useRef(false);
+  const lastMessageCountRef = useRef(0);
+
+  // 检查是否应该自动滚动到底部
+  const shouldAutoScroll = () => {
+    if (!chatContainerRef.current) return false;
+    const container = chatContainerRef.current;
+    const scrollTop = container.scrollTop;
+    const scrollHeight = container.scrollHeight;
+    const clientHeight = container.clientHeight;
+    // 如果距离底部小于100px，认为用户在底部附近，应该自动滚动
+    return scrollHeight - scrollTop - clientHeight < 100;
+  };
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // 如果需要保持滚动位置（加载更多历史消息），不滚动
+    if (shouldMaintainScrollRef.current) {
+      shouldMaintainScrollRef.current = false;
+      // lastMessageCountRef 已经在 setMessages 中更新了，这里不需要再更新
+      return;
+    }
+    
+    // 如果正在加载更多历史消息，不处理自动滚动
+    if (isLoadingMoreRef.current) {
+      return;
+    }
+    
+    // 如果是初始加载，直接跳到底部（不使用动画）
+    if (isInitialLoadRef.current && messages.length > 0) {
+      requestAnimationFrame(() => {
+        if (messagesEndRef.current) {
+          messagesEndRef.current.scrollIntoView({ behavior: 'instant' });
+          isInitialLoadRef.current = false;
+          lastMessageCountRef.current = messages.length;
+        }
+      });
+      return;
+    }
+    
+    // 检测是否有新消息（消息数量增加，且是追加到末尾的新消息，不是加载的历史消息）
+    // 注意：如果消息数量减少或不变，说明可能是替换消息（如编辑、删除），不处理
+    if (messages.length <= lastMessageCountRef.current) {
+      // 消息数量没有增加，可能是替换或删除，更新计数但不滚动
+      lastMessageCountRef.current = messages.length;
+      return;
+    }
+    
+    const hasNewMessages = messages.length > lastMessageCountRef.current;
+    const newMessageCount = hasNewMessages ? messages.length - lastMessageCountRef.current : 0;
+    
+    if (hasNewMessages) {
+      // 更新 lastMessageCountRef
+      lastMessageCountRef.current = messages.length;
+      
+      // 如果用户在底部附近，自动滚动到底部
+      if (shouldAutoScroll() && !isUserScrollingRef.current) {
+        requestAnimationFrame(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        });
+        // 用户已经在底部，隐藏新消息提示
+        setShowNewMessagePrompt(false);
+        setUnreadMessageCount(0);
+      } else {
+        // 用户不在底部，显示新消息提示
+        setShowNewMessagePrompt(true);
+        setUnreadMessageCount(prev => prev + newMessageCount);
+      }
+    }
   }, [messages]);
 
   // 加载会话列表
@@ -173,20 +249,84 @@ const Workflow: React.FC = () => {
   const loadSessionMessages = async (session_id: string, page: number = 1) => {
     try {
       setIsLoadingMessages(true);
-      const data = await getSessionMessages(session_id, page, 50);
+      
+      // 如果是加载更多历史消息（page > 1），记录当前滚动位置
+      if (page > 1 && chatContainerRef.current && messages.length > 0) {
+        isLoadingMoreRef.current = true;
+        const container = chatContainerRef.current;
+        const scrollTop = container.scrollTop;
+        
+        // 找到容器顶部附近的第一条消息作为锚点
+        let anchorMessageId: string | null = null;
+        let anchorOffsetTop = 0;
+        const threshold = 200; // 距离顶部200px内的消息
+        
+        for (const msg of messages) {
+          const element = container.querySelector(`[data-message-id="${msg.id}"]`) as HTMLElement;
+          if (element) {
+            const elementTop = element.offsetTop;
+            const relativeTop = elementTop - scrollTop;
+            
+            // 找到最接近顶部且在阈值内的消息
+            if (relativeTop >= -threshold && relativeTop <= threshold) {
+              anchorMessageId = msg.id;
+              anchorOffsetTop = elementTop;
+              break;
+            }
+          }
+        }
+        
+        // 如果没找到合适的锚点，使用第一条消息
+        if (!anchorMessageId && messages.length > 0) {
+          const firstElement = container.querySelector(`[data-message-id="${messages[0].id}"]`) as HTMLElement;
+          if (firstElement) {
+            anchorMessageId = messages[0].id;
+            anchorOffsetTop = firstElement.offsetTop;
+          }
+        }
+        
+        if (anchorMessageId) {
+          scrollPositionRef.current = {
+            anchorMessageId,
+            anchorOffsetTop,
+            scrollTop,
+          };
+          shouldMaintainScrollRef.current = true;
+        }
+      }
+      
+      // 默认只加载20条消息，加快初始加载速度
+      const data = await getSessionMessages(session_id, page, 20);
+      
+      // 先加载总结列表，用于关联总结消息和提示信息
+      const summaryList = await getSessionSummaries(session_id);
       
       // 格式化消息，恢复工作流信息
       const formatMessage = async (msg: any): Promise<Message | null> => {
+        // 确保 role 正确：如果是 'workflow'，转换为 'tool'
+        let role = msg.role;
+        if (role === 'workflow') {
+          role = 'tool';
+          console.warn('[Workflow] Fixed invalid role "workflow" to "tool" for message:', msg.message_id);
+        }
+        
+        // 检查是否是总结消息（通过 content 前缀识别）
+        const isSummaryMessage = role === 'system' && msg.content?.startsWith('__SUMMARY__');
+        const actualContent = isSummaryMessage 
+          ? msg.content.replace(/^__SUMMARY__/, '') // 移除前缀，保留实际内容
+          : msg.content;
+        
         const baseMessage: Message = {
           id: msg.message_id,
-          role: msg.role,
-          content: msg.content,
+          role: role as 'user' | 'assistant' | 'tool' | 'system',
+          content: actualContent,
           thinking: msg.thinking,
           toolCalls: msg.tool_calls,
+          isSummary: isSummaryMessage, // 标记为总结消息
         };
         
         // 如果是工具消息（感知组件），尝试从 content 或 tool_calls 中恢复工作流信息
-        if (msg.role === 'tool') {
+        if (baseMessage.role === 'tool') {
           // 过滤掉没有执行输出的感知组件（pending状态且没有content）
           if (!msg.content || msg.content.trim() === '' || msg.content === '[]') {
             const toolCalls = msg.tool_calls && typeof msg.tool_calls === 'object' ? msg.tool_calls : null;
@@ -229,20 +369,101 @@ const Workflow: React.FC = () => {
         return baseMessage;
       };
       
-      if (page === 1) {
-        // 第一页，替换所有消息
-        const formattedMessages = await Promise.all(data.messages.map(formatMessage));
-        // 过滤掉null值（无效的感知组件消息）
-        setMessages(formattedMessages.filter((msg): msg is Message => msg !== null));
-      } else {
-        // 后续页，添加到前面
-        const formattedMessages = await Promise.all(data.messages.map(formatMessage));
-        // 过滤掉null值（无效的感知组件消息）
-        setMessages(prev => [...formattedMessages.filter((msg): msg is Message => msg !== null), ...prev]);
+      // 格式化消息，恢复工作流信息
+      const formattedMessages = await Promise.all(data.messages.map(formatMessage));
+      // 过滤掉null值（无效的感知组件消息）
+      const validMessages = formattedMessages.filter((msg): msg is Message => msg !== null);
+      
+      // 在总结消息之后插入提示消息
+      const messagesWithNotifications: Message[] = [];
+      for (let i = 0; i < validMessages.length; i++) {
+        const msg = validMessages[i];
+        messagesWithNotifications.push(msg);
+        
+        // 如果是总结消息，查找对应的总结记录并添加提示消息
+        if (msg.isSummary) {
+          // 检查下一条消息是否已经是提示消息（避免重复添加）
+          const nextMsg = validMessages[i + 1];
+          const isAlreadyHasNotification = nextMsg && 
+            nextMsg.role === 'system' && 
+            (nextMsg.content.includes('已精简为') || nextMsg.content.includes('总结完成'));
+          
+          if (!isAlreadyHasNotification) {
+            // 通过内容匹配找到对应的总结记录
+            const matchingSummary = summaryList.find(s => 
+              s.summary_content === msg.content || 
+              msg.content.includes(s.summary_content) ||
+              s.summary_content.includes(msg.content)
+            );
+            
+            if (matchingSummary) {
+              const tokenAfter = matchingSummary.token_count_after || 0;
+              const tokenBefore = matchingSummary.token_count_before || 0;
+              const notificationMessage: Message = {
+                id: `notification-${msg.id}`,
+                role: 'system',
+                content: `您的对话内容已精简为 ${tokenAfter.toLocaleString()} token（原 ${tokenBefore.toLocaleString()} token）`,
+              };
+              messagesWithNotifications.push(notificationMessage);
+            }
+          }
+        }
       }
       
-      setHasMoreMessages(data.page < data.total_pages);
+      if (page === 1) {
+        // 第一页，替换所有消息（显示最新的消息）
+        setMessages(messagesWithNotifications);
+        isInitialLoadRef.current = true; // 标记为初始加载，会直接跳到底部
+        lastMessageCountRef.current = messagesWithNotifications.length;
+        // 重置新消息提示
+        setShowNewMessagePrompt(false);
+        setUnreadMessageCount(0);
+      } else {
+        // 后续页，添加到前面（加载历史消息）
+        // 在设置消息之前，先设置标志阻止自动滚动，并预计算新消息数量
+        shouldMaintainScrollRef.current = true;
+        const oldMessageCount = messages.length;
+        const newTotalCount = oldMessageCount + messagesWithNotifications.length;
+        
+        // 预先更新 lastMessageCountRef，这样 useEffect 就不会误判为新消息
+        lastMessageCountRef.current = newTotalCount;
+        
+        setMessages(prev => {
+          const newMessages = [...messagesWithNotifications, ...prev];
+          
+          // 恢复滚动位置（保持锚点消息的位置不变，类似微信的加载历史消息）
+          if (scrollPositionRef.current && chatContainerRef.current) {
+            // 使用双重 requestAnimationFrame 确保 DOM 完全更新
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                const container = chatContainerRef.current;
+                if (container && scrollPositionRef.current) {
+                  const { anchorMessageId, anchorOffsetTop, scrollTop: oldScrollTop } = scrollPositionRef.current;
+                  if (anchorMessageId) {
+                    const anchorElement = container.querySelector(`[data-message-id="${anchorMessageId}"]`) as HTMLElement;
+                    if (anchorElement) {
+                      // 计算新位置：目标消息的新位置 - 之前目标消息距离顶部的距离
+                      const newAnchorOffsetTop = anchorElement.offsetTop;
+                      const distanceFromTop = anchorOffsetTop - oldScrollTop;
+                      const newScrollTop = newAnchorOffsetTop - distanceFromTop;
+                      container.scrollTop = newScrollTop;
+                    }
+                  }
+                  scrollPositionRef.current = null;
+                  isLoadingMoreRef.current = false;
+                }
+              });
+            });
+          } else {
+            isLoadingMoreRef.current = false;
+          }
+          
+          return newMessages;
+        });
+      }
+      
       setMessagePage(page);
+      setHasMoreMessages(data.page < data.total_pages);
     } catch (error) {
       console.error('[Workflow] Failed to load messages:', error);
     } finally {
@@ -311,6 +532,101 @@ const Workflow: React.FC = () => {
     }
   };
   
+  // 处理总结的通用函数
+  const processSummarize = async (
+    sessionId: string,
+    messagesToSummarize: Array<{ message_id?: string; role: string; content: string }>,
+    isAuto: boolean = false
+  ) => {
+    if (!selectedLLMConfigId || !selectedLLMConfig) {
+      throw new Error('LLM配置未选择');
+    }
+
+    const model = selectedLLMConfig.model || 'gpt-4';
+    
+    // 调用总结 API
+    const summary = await summarizeSession(sessionId, {
+      llm_config_id: selectedLLMConfigId,
+      model: model,
+      messages: messagesToSummarize,
+    });
+    
+    // 获取被总结的最后一条消息ID（用于确定插入位置）
+    const lastSummarizedMessageId = messagesToSummarize
+      .map(msg => msg.message_id)
+      .filter((id): id is string => !!id)
+      .pop();
+    
+    // 将总结内容作为 system 类型的消息保存（不显示，但用于标记总结点）
+    // 使用特殊格式来标识这是总结消息：__SUMMARY__{summary_content}
+    const summaryMessageId = `msg-${Date.now()}`;
+    
+    // 计算总结消息的累积 token：总结前的累积 token + 总结消息的 token
+    const tokenCountBeforeAcc = (summary as any).token_count_before_acc || 0;
+    const summaryMessageTokens = estimate_tokens(summary.summary_content, model);
+    const summaryAccToken = tokenCountBeforeAcc + summaryMessageTokens;
+    
+    const summarySystemMessage = {
+      message_id: summaryMessageId,
+      role: 'system' as const,
+      content: `__SUMMARY__${summary.summary_content}`, // 使用特殊前缀标识总结消息
+      model: model,
+      acc_token: summaryAccToken, // 设置总结消息的累积 token
+    };
+    
+    await saveMessage(sessionId, summarySystemMessage);
+    
+    // 后端会自动重新计算总结后所有消息的 acc_token（在 saveMessage API 中处理）
+    
+    // 添加提示消息到消息列表（显示给用户）
+    const tokenAfter = summary.token_count_after || 0;
+    const tokenBefore = summary.token_count_before || 0;
+    const notificationMessageId = `notification-${Date.now()}`;
+    const notificationMessage: Message = {
+      id: notificationMessageId,
+      role: 'system',
+      content: `${isAuto ? '' : '总结完成！'}您的对话内容已精简为 ${tokenAfter.toLocaleString()} token（原 ${tokenBefore.toLocaleString()} token）`,
+    };
+    
+    // 在消息列表中添加总结消息（标记为不显示）和提示消息
+    setMessages(prev => {
+      const newMessages = [...prev];
+      
+      // 找到最后一条被总结消息的位置
+      const lastSummarizedIndex = lastSummarizedMessageId 
+        ? newMessages.findIndex(msg => msg.id === lastSummarizedMessageId)
+        : -1;
+      
+      const insertIndex = lastSummarizedIndex >= 0 ? lastSummarizedIndex + 1 : newMessages.length;
+      
+      // 插入总结消息（system 类型，isSummary: true，不显示）
+      const summaryMessage: Message = {
+        id: summaryMessageId,
+        role: 'system',
+        content: summary.summary_content, // 保存实际内容，但标记为总结消息
+        isSummary: true, // 标记为总结消息，不显示
+      };
+      
+      // 插入提示消息（显示给用户）
+      newMessages.splice(insertIndex, 0, summaryMessage, notificationMessage);
+      
+      return newMessages;
+    });
+    
+    // 重新加载消息列表（确保与数据库同步）
+    await loadSessionMessages(sessionId, 1);
+    
+    // 重新加载总结列表
+    await loadSessionSummaries(sessionId);
+    
+    // 清除总结缓存
+    await clearSummarizeCache(sessionId);
+    
+    console.log(`[Workflow] ${isAuto ? 'Auto-' : ''}Summarized: ${tokenBefore} -> ${tokenAfter} tokens`);
+    
+    return summary;
+  };
+
   // 手动触发总结
   const handleManualSummarize = async () => {
     if (!currentSessionId || !selectedLLMConfigId || !selectedLLMConfig) {
@@ -322,7 +638,7 @@ const Workflow: React.FC = () => {
       setIsSummarizing(true);
       
       // 获取当前会话的所有消息（用于总结）
-      const allMessages = messages.filter(m => m.role !== 'system');
+      const allMessages = messages.filter(m => m.role !== 'system' && !m.isSummary);
       const messagesToSummarize = allMessages.map(msg => ({
         message_id: msg.id,
         role: msg.role,
@@ -330,20 +646,25 @@ const Workflow: React.FC = () => {
         token_count: estimate_tokens(msg.content, selectedLLMConfig.model || 'gpt-4'),
       }));
       
-      // 调用总结 API
-      const summary = await summarizeSession(currentSessionId, {
-        llm_config_id: selectedLLMConfigId,
-        model: selectedLLMConfig.model || 'gpt-4',
-        messages: messagesToSummarize,
-      });
+      if (messagesToSummarize.length === 0) {
+        alert('没有可总结的消息');
+        return;
+      }
       
-      // 重新加载总结列表
-      await loadSessionSummaries(currentSessionId);
+      const summary = await processSummarize(currentSessionId, messagesToSummarize, false);
       
-      alert(`总结完成！Token 从 ${summary.token_count_before} 减少到 ${summary.token_count_after}`);
+      // 显示总结完成的提示消息
+      const tokenAfter = summary.token_count_after || 0;
+      const tokenBefore = summary.token_count_before || 0;
+      const notificationMsg: Message = {
+        id: `manual-summary-notification-${Date.now()}`,
+        role: 'system',
+        content: `总结完成！对话内容已精简为 ${tokenAfter.toLocaleString()} token（原 ${tokenBefore.toLocaleString()} token）`,
+      };
+      setMessages(prev => [...prev, notificationMsg]);
     } catch (error) {
       console.error('[Workflow] Failed to summarize:', error);
-      alert('总结失败，请重试');
+      alert(`总结失败: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setIsSummarizing(false);
     }
@@ -562,6 +883,12 @@ const Workflow: React.FC = () => {
       return;
     }
 
+    // 如果是编辑模式，先处理重新发送
+    if (editingMessageId) {
+      await handleResendMessage(editingMessageId, input.trim());
+      return;
+    }
+
     // 检查是否有选定的组件（tag）
     // 只处理工作流，MCP通过selectedMcpServerIds在正常对话中使用工具
     const workflowComponents = selectedComponents.filter(c => c.type === 'workflow');
@@ -762,20 +1089,95 @@ const Workflow: React.FC = () => {
 
       // 构建消息历史（用于 token 计数和自动 summarize）
       const model = selectedLLMConfig.model || 'gpt-4';
-      const maxTokens = get_model_max_tokens(model);
+      // 使用从后端获取的 max_tokens，如果没有则使用前端函数作为后备
+      const maxTokens = selectedLLMConfig.max_tokens || get_model_max_tokens(model);
       const tokenThreshold = maxTokens - 1000; // 在限额-1000时触发 summarize
       
-      // 获取当前会话的所有消息（不包括系统消息）
-      const conversationMessages = messages
-        .filter(m => m.role !== 'system')
-        .map(msg => ({
-          role: msg.role,
-          content: msg.content,
-          thinking: msg.thinking,
-        }));
+      // 找到最近一条总结消息的位置，只计算实际会发送的消息
+      let lastSummaryIndex = -1;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].isSummary) {
+          lastSummaryIndex = i;
+          break;
+        }
+      }
       
-      // 估算当前 token 数量
+      // 如果找到总结消息，从总结消息开始计算（包含总结消息）；否则计算所有消息
+      const messagesToCount = lastSummaryIndex >= 0 
+        ? messages.slice(lastSummaryIndex)
+        : messages;
+      
+      // 构建用于token计算的消息列表（排除不发送的系统消息）
+      const conversationMessages = messagesToCount
+        .filter(m => {
+          // 排除系统消息（但包含总结消息，因为总结消息会作为user消息发送）
+          if (m.role === 'system' && !m.isSummary) {
+            return false;
+          }
+          return true;
+        })
+        .map(msg => {
+          // 如果是总结消息，作为user消息计算token
+          if (msg.isSummary) {
+            return {
+              role: 'user' as const,
+              content: msg.content,
+              thinking: undefined,
+            };
+          }
+          return {
+            role: msg.role,
+            content: msg.content,
+            thinking: msg.thinking,
+          };
+        });
+      
+      // 估算当前 token 数量（包括新用户消息）
       const currentTokens = estimate_messages_tokens(conversationMessages, model);
+      
+      // 将消息历史转换为 LLMMessage 格式（用于传递给 LLMClient）
+      // 使用之前找到的 lastSummaryIndex，从总结消息开始（包含总结消息）
+      const messagesToSend = lastSummaryIndex >= 0 
+        ? messages.slice(lastSummaryIndex)
+        : messages;
+      
+      const messageHistory: LLMMessage[] = [];
+      for (const msg of messagesToSend) {
+        // 如果是总结消息，将其内容作为 user 消息发送
+        if (msg.isSummary) {
+          messageHistory.push({
+            role: 'user',
+            content: msg.content, // 总结内容作为 user 消息
+          });
+          continue;
+        }
+        
+        // 排除其他系统消息（通知消息等）
+        if (msg.role === 'system') {
+          continue;
+        }
+        
+        // 如果是 workflow 类型的 tool 消息，转换为 tool 类型
+        if (msg.role === 'tool' && msg.toolType === 'workflow') {
+          const workflowOutput = msg.content || '执行完成';
+          messageHistory.push({
+            role: 'tool',
+            name: msg.workflowName || 'workflow',
+            content: `我自己执行了一些操作，有这样的输出：${workflowOutput}`,
+          });
+        }
+        // 其他 tool 消息（如 MCP）排除
+        else if (msg.role === 'tool') {
+          continue;
+        }
+        // user 和 assistant 消息直接转换
+        else if (msg.role === 'user' || msg.role === 'assistant') {
+          messageHistory.push({
+            role: msg.role,
+            content: msg.content,
+          });
+        }
+      }
       
       // 检查是否需要自动 summarize
       let needsSummarize = false;
@@ -788,28 +1190,15 @@ const Workflow: React.FC = () => {
       if (needsSummarize && sessionId) {
         try {
           setIsSummarizing(true);
-          const messagesToSummarize = conversationMessages.slice(0, -1); // 不包括当前用户消息
-          const summary = await summarizeSession(sessionId, {
-            llm_config_id: selectedLLMConfigId,
-            model: model,
-            messages: messagesToSummarize.map((msg, idx) => ({
-              message_id: messages.find(m => m.content === msg.content)?.id || `msg-${idx}`,
-              role: msg.role,
-              content: msg.content,
-            })),
-          });
+          const messagesToSummarize = conversationMessages.slice(0, -1).map((msg, idx) => ({
+            message_id: messages.find(m => m.content === msg.content && m.role === msg.role)?.id || `msg-${idx}`,
+            role: msg.role,
+            content: msg.content,
+          }));
           
-          // 重新加载总结列表
-          await loadSessionSummaries(sessionId);
-          
-          // 更新系统提示词，包含新的总结
-          const newSummaryText = summary.summary_content;
-          systemPrompt = systemPrompt.replace(
-            /以下是之前对话的总结[^]*?\n\n/,
-            `以下是之前对话的总结，请参考这些上下文：\n\n${newSummaryText}\n\n`
-          );
-          
-          console.log(`[Workflow] Auto-summarized: ${summary.token_count_before} -> ${summary.token_count_after} tokens`);
+          if (messagesToSummarize.length > 0) {
+            await processSummarize(sessionId, messagesToSummarize, true);
+          }
         } catch (error) {
           console.error('[Workflow] Auto-summarize failed:', error);
           // 继续执行，即使 summarize 失败
@@ -877,7 +1266,8 @@ const Workflow: React.FC = () => {
                 updateMessage(fullResponse, fullThinking, false, true);
               }
             }
-          }
+          },
+          messageHistory // 传递消息历史
         );
 
         // 确保最终内容已更新（包括思考过程）
@@ -911,7 +1301,9 @@ const Workflow: React.FC = () => {
           userMessage.content,
           systemPrompt,
           allTools.length > 0 ? allTools : undefined,
-          false // 禁用流式响应
+          false, // 禁用流式响应
+          undefined, // 非流式模式不需要 onChunk
+          messageHistory // 传递消息历史
         );
         updateMessage(response.content, response.thinking, false, false);
         // 自动折叠思考过程（如果有思考内容）
@@ -964,6 +1356,75 @@ const Workflow: React.FC = () => {
       e.preventDefault();
       handleSend();
     }
+  };
+
+  // 开始编辑消息
+  const handleStartEdit = (messageId: string) => {
+    const message = messages.find(m => m.id === messageId);
+    if (message && message.role === 'user') {
+      setEditingMessageId(messageId);
+      setInput(message.content);
+      inputRef.current?.focus();
+    }
+  };
+
+  // 取消编辑
+  const handleCancelEdit = () => {
+    setEditingMessageId(null);
+    setInput('');
+  };
+
+  // 重新发送消息（编辑后或直接重新发送）
+  const handleResendMessage = async (messageId: string, newContent?: string) => {
+    const message = messages.find(m => m.id === messageId);
+    if (!message || message.role !== 'user') {
+      return;
+    }
+
+    const contentToSend = newContent || message.content;
+    
+    // 找到该消息的索引
+    const messageIndex = messages.findIndex(m => m.id === messageId);
+    if (messageIndex === -1) {
+      return;
+    }
+
+    // 删除该消息及其之后的所有消息（包括数据库中的）
+    const messagesToDelete = messages.slice(messageIndex);
+    
+    if (currentSessionId) {
+      try {
+        // 删除数据库中的消息
+        for (const msg of messagesToDelete) {
+          if (msg.role !== 'system') {
+            try {
+              await deleteMessage(currentSessionId, msg.id);
+            } catch (error) {
+              console.error(`[Workflow] Failed to delete message ${msg.id}:`, error);
+            }
+          }
+        }
+        
+        // 清除总结缓存（因为删除了消息）
+        await clearSummarizeCache(currentSessionId);
+        await loadSessionSummaries(currentSessionId);
+      } catch (error) {
+        console.error('[Workflow] Failed to delete messages:', error);
+      }
+    }
+
+    // 从消息列表中删除这些消息（保留到该消息之前的所有消息）
+    setMessages(prev => prev.slice(0, messageIndex));
+    
+    // 取消编辑状态
+    setEditingMessageId(null);
+    
+    // 使用新内容发送消息
+    setInput(contentToSend);
+    // 等待状态更新后发送
+    setTimeout(() => {
+      handleSend();
+    }, 100);
   };
 
   const toggleThinkingCollapse = (messageId: string) => {
@@ -1857,9 +2318,142 @@ const Workflow: React.FC = () => {
             )}
           </div>
         )}
-        <div className="text-[15px] leading-relaxed whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100">
-          {message.content}
-        </div>
+        {/* AI 助手消息使用 Markdown 渲染 */}
+        {message.role === 'assistant' ? (
+          <div className="prose prose-sm dark:prose-invert max-w-none text-gray-900 dark:text-gray-100 markdown-content">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                // 代码块样式
+                code: ({ node, inline, className, children, ...props }: any) => {
+                  const match = /language-(\w+)/.exec(className || '');
+                  const language = match ? match[1] : '';
+                  
+                  if (!inline && match) {
+                    // 代码块 - 使用独立的组件来处理复制状态
+                    const codeText = String(children).replace(/\n$/, '');
+                    const CodeBlock = () => {
+                      const [copied, setCopied] = useState(false);
+                      
+                      return (
+                        <div className="relative group my-3">
+                          {/* 语言标签 */}
+                          {language && (
+                            <div className="absolute top-2 left-2 text-xs text-gray-400 dark:text-gray-500 font-mono bg-gray-800/50 dark:bg-gray-900/50 px-2 py-0.5 rounded z-10">
+                              {language}
+                            </div>
+                          )}
+                          <pre className="bg-gray-900 dark:bg-gray-950 text-gray-100 rounded-lg p-4 pt-8 overflow-x-auto border border-gray-700 dark:border-gray-600">
+                            <code className={className} {...props}>
+                              {children}
+                            </code>
+                          </pre>
+                          <button
+                            onClick={async () => {
+                              try {
+                                await navigator.clipboard.writeText(codeText);
+                                setCopied(true);
+                                setTimeout(() => setCopied(false), 2000);
+                              } catch (err) {
+                                console.error('Failed to copy:', err);
+                              }
+                            }}
+                            className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white px-2 py-1 rounded text-xs flex items-center space-x-1 z-10"
+                            title="复制代码"
+                          >
+                            {copied ? (
+                              <>
+                                <CheckCircle className="w-3 h-3" />
+                                <span>已复制</span>
+                              </>
+                            ) : (
+                              <>
+                                <FileText className="w-3 h-3" />
+                                <span>复制</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      );
+                    };
+                    
+                    return <CodeBlock />;
+                  } else {
+                    // 行内代码
+                    return (
+                      <code className="bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 px-1.5 py-0.5 rounded text-sm font-mono" {...props}>
+                        {children}
+                      </code>
+                    );
+                  }
+                },
+                // 段落样式
+                p: ({ children }: any) => <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>,
+                // 标题样式
+                h1: ({ children }: any) => <h1 className="text-2xl font-bold mt-4 mb-3 first:mt-0">{children}</h1>,
+                h2: ({ children }: any) => <h2 className="text-xl font-bold mt-4 mb-3 first:mt-0">{children}</h2>,
+                h3: ({ children }: any) => <h3 className="text-lg font-bold mt-3 mb-2 first:mt-0">{children}</h3>,
+                // 列表样式
+                ul: ({ children }: any) => <ul className="list-disc list-inside mb-3 space-y-1 ml-4">{children}</ul>,
+                ol: ({ children }: any) => <ol className="list-decimal list-inside mb-3 space-y-1 ml-4">{children}</ol>,
+                li: ({ children }: any) => <li className="leading-relaxed">{children}</li>,
+                // 引用样式
+                blockquote: ({ children }: any) => (
+                  <blockquote className="border-l-4 border-blue-500 dark:border-blue-400 pl-4 my-3 italic text-gray-700 dark:text-gray-300">
+                    {children}
+                  </blockquote>
+                ),
+                // 链接样式
+                a: ({ href, children }: any) => (
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    {children}
+                  </a>
+                ),
+                // 表格样式
+                table: ({ children }: any) => (
+                  <div className="overflow-x-auto my-3">
+                    <table className="min-w-full border-collapse border border-gray-300 dark:border-gray-600">
+                      {children}
+                    </table>
+                  </div>
+                ),
+                thead: ({ children }: any) => (
+                  <thead className="bg-gray-100 dark:bg-gray-800">{children}</thead>
+                ),
+                tbody: ({ children }: any) => <tbody>{children}</tbody>,
+                tr: ({ children }: any) => (
+                  <tr className="border-b border-gray-200 dark:border-gray-700">{children}</tr>
+                ),
+                th: ({ children }: any) => (
+                  <th className="border border-gray-300 dark:border-gray-600 px-3 py-2 text-left font-semibold">
+                    {children}
+                  </th>
+                ),
+                td: ({ children }: any) => (
+                  <td className="border border-gray-300 dark:border-gray-600 px-3 py-2">
+                    {children}
+                  </td>
+                ),
+                // 水平分割线
+                hr: () => <hr className="my-4 border-gray-300 dark:border-gray-700" />,
+                // 强调样式
+                strong: ({ children }: any) => <strong className="font-semibold">{children}</strong>,
+                em: ({ children }: any) => <em className="italic">{children}</em>,
+              }}
+            >
+              {message.content}
+            </ReactMarkdown>
+          </div>
+        ) : (
+          <div className="text-[15px] leading-relaxed whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100">
+            {message.content}
+          </div>
+        )}
       </div>
     );
   };
@@ -2331,7 +2925,32 @@ const Workflow: React.FC = () => {
 
         {/* 消息列表 */}
           <div 
+            ref={chatContainerRef}
             className="flex-1 overflow-y-auto p-4 space-y-4 relative"
+            onScroll={(e) => {
+              const container = e.currentTarget;
+              const scrollTop = container.scrollTop;
+              
+              // 检测用户是否在滚动（排除程序控制的滚动）
+              if (!isLoadingMoreRef.current) {
+                isUserScrollingRef.current = true;
+                // 500ms 后重置，认为用户停止滚动
+                setTimeout(() => {
+                  isUserScrollingRef.current = false;
+                }, 500);
+              }
+              
+              // 滚动到顶部附近时，自动加载更多历史消息（类似微信、Telegram）
+              if (scrollTop < 150 && hasMoreMessages && !isLoadingMessages && !isLoadingMoreRef.current) {
+                loadSessionMessages(currentSessionId!, messagePage + 1);
+              }
+              
+              // 用户滚动到底部时，隐藏新消息提示
+              if (shouldAutoScroll()) {
+                setShowNewMessagePrompt(false);
+                setUnreadMessageCount(0);
+              }
+            }}
             onDragOver={(e) => {
               e.preventDefault();
               e.dataTransfer.dropEffect = 'move';
@@ -2344,26 +2963,65 @@ const Workflow: React.FC = () => {
               }
             }}
           >
-          {/* 加载更多历史消息 */}
+          {/* 加载更多历史消息提示（固定在顶部，类似微信） */}
           {hasMoreMessages && (
-            <div className="flex justify-center mb-4">
-              <button
-                onClick={() => loadSessionMessages(currentSessionId!, messagePage + 1)}
-                disabled={isLoadingMessages}
-                className="btn-primary flex items-center space-x-2 px-4 py-2 text-sm disabled:opacity-50"
-              >
+            <div className="sticky top-0 z-10 flex justify-center mb-2 pointer-events-none">
+              <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm px-3 py-1.5 rounded-full shadow-sm border border-gray-200 dark:border-gray-700 pointer-events-auto">
                 {isLoadingMessages ? (
-                  <Loader className="w-4 h-4 animate-spin" />
+                  <div className="flex items-center space-x-2 text-xs text-gray-600 dark:text-gray-400">
+                    <Loader className="w-3 h-3 animate-spin" />
+                    <span>加载历史消息...</span>
+                  </div>
                 ) : (
-                  <ChevronUp className="w-4 h-4" />
+                  <button
+                    onClick={() => loadSessionMessages(currentSessionId!, messagePage + 1)}
+                    className="flex items-center space-x-2 text-xs text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
+                  >
+                    <ChevronUp className="w-3 h-3" />
+                    <span>加载更多</span>
+                  </button>
                 )}
-                <span>加载更多历史消息</span>
+              </div>
+            </div>
+          )}
+          
+          {/* 新消息提示（固定在底部，类似微信、Telegram） */}
+          {showNewMessagePrompt && unreadMessageCount > 0 && (
+            <div className="sticky bottom-4 z-10 flex justify-center pointer-events-none">
+              <button
+                onClick={() => {
+                  messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                  setShowNewMessagePrompt(false);
+                  setUnreadMessageCount(0);
+                }}
+                className="bg-primary-500 hover:bg-primary-600 text-white px-4 py-2 rounded-full shadow-lg flex items-center space-x-2 text-sm font-medium transition-all pointer-events-auto hover:scale-105"
+              >
+                <ChevronDown className="w-4 h-4" />
+                <span>
+                  {unreadMessageCount === 1 ? '1 条新消息' : `${unreadMessageCount} 条新消息`}
+                </span>
               </button>
             </div>
           )}
-          {messages.map((message) => (
+          {messages.filter(msg => !msg.isSummary).map((message) => {
+            // 如果是总结提示消息，使用特殊的居中显示样式
+            const isSummaryNotification = message.role === 'system' && 
+              (message.content.includes('总结完成') || message.content.includes('已精简为'));
+            
+            if (isSummaryNotification) {
+              return (
+                <div key={message.id} data-message-id={message.id} className="flex justify-center my-2">
+                  <div className="text-xs text-gray-500 dark:text-gray-400 px-3 py-1.5 bg-gray-100 dark:bg-gray-800 rounded-full">
+                    {message.content}
+                  </div>
+                </div>
+              );
+            }
+            
+            return (
             <div
               key={message.id}
+              data-message-id={message.id}
               className={`flex items-start space-x-3 ${
                 message.role === 'user' ? 'flex-row-reverse space-x-reverse' : ''
               }`}
@@ -2423,25 +3081,47 @@ const Workflow: React.FC = () => {
                   </div>
                 )}
               </div>
-              <div
-                className={`flex-1 rounded-xl p-4 shadow-sm ${
-                  message.role === 'user'
-                    ? 'bg-primary-50 dark:bg-primary-900/20 text-gray-900 dark:text-gray-100'
-                    : message.role === 'assistant'
-                    ? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700'
-                    : message.role === 'tool'
-                    ? message.toolType === 'workflow'
-                      ? 'bg-purple-50 dark:bg-purple-900/20 text-gray-900 dark:text-gray-100 border border-purple-200 dark:border-purple-700'
-                      : message.toolType === 'mcp'
-                      ? 'bg-green-50 dark:bg-green-900/20 text-gray-900 dark:text-gray-100 border border-green-200 dark:border-green-700'
-                      : 'bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
-                    : 'bg-yellow-50 dark:bg-yellow-900/20 text-gray-700 dark:text-gray-300'
-                }`}
-              >
-                {renderMessageContent(message)}
+              <div className="flex-1 group relative">
+                <div
+                  className={`rounded-xl p-4 shadow-sm ${
+                    message.role === 'user'
+                      ? 'bg-primary-50 dark:bg-primary-900/20 text-gray-900 dark:text-gray-100'
+                      : message.role === 'assistant'
+                      ? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700'
+                      : message.role === 'tool'
+                      ? message.toolType === 'workflow'
+                        ? 'bg-purple-50 dark:bg-purple-900/20 text-gray-900 dark:text-gray-100 border border-purple-200 dark:border-purple-700'
+                        : message.toolType === 'mcp'
+                        ? 'bg-green-50 dark:bg-green-900/20 text-gray-900 dark:text-gray-100 border border-green-200 dark:border-green-700'
+                        : 'bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+                      : 'bg-yellow-50 dark:bg-yellow-900/20 text-gray-700 dark:text-gray-300'
+                  }`}
+                >
+                  {renderMessageContent(message)}
+                </div>
+                {/* 用户消息的编辑和重新发送按钮 */}
+                {message.role === 'user' && !isLoading && (
+                  <div className="absolute top-2 right-2 flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => handleStartEdit(message.id)}
+                      className="p-1.5 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-all"
+                      title="编辑消息"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => handleResendMessage(message.id)}
+                      className="p-1.5 text-gray-400 hover:text-green-600 dark:hover:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 rounded transition-all"
+                      title="重新发送"
+                    >
+                      <RotateCw className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
-          ))}
+            );
+          })}
           <div ref={messagesEndRef} />
         </div>
 
@@ -2573,7 +3253,9 @@ const Workflow: React.FC = () => {
                   }
                 }}
               placeholder={
-                !selectedLLMConfig
+                editingMessageId
+                  ? '编辑消息...'
+                  : !selectedLLMConfig
                   ? '请先选择 LLM 模型...'
                   : selectedMcpServerIds.size > 0
                     ? `输入你的任务，我可以使用 ${totalTools} 个工具帮助你完成... (输入 @ 选择感知组件)`
@@ -2583,6 +3265,19 @@ const Workflow: React.FC = () => {
               rows={3}
               disabled={isLoading || !selectedLLMConfig}
             />
+            {/* 编辑模式提示和取消按钮 */}
+            {editingMessageId && (
+              <div className="absolute top-2 right-2 flex items-center space-x-2">
+                <span className="text-xs text-yellow-600 dark:text-yellow-400 font-medium">编辑模式</span>
+                <button
+                  onClick={handleCancelEdit}
+                  className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                  title="取消编辑"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
               
               {/* @ 符号选择器 */}
               {showAtSelector && (
@@ -2707,9 +3402,61 @@ const Workflow: React.FC = () => {
               ) : (
                 <Send className="w-4 h-4" />
               )}
-              <span>发送</span>
+              <span>{editingMessageId ? '保存并重新发送' : '发送'}</span>
             </button>
           </div>
+          {/* Token计数显示 */}
+          {selectedLLMConfig && messages.filter(m => m.role !== 'system' && !m.isSummary).length > 0 && (() => {
+            const model = selectedLLMConfig.model || 'gpt-4';
+            
+            // 找到最近一条总结消息的位置，只计算实际会发送的消息
+            let lastSummaryIndex = -1;
+            for (let i = messages.length - 1; i >= 0; i--) {
+              if (messages[i].isSummary) {
+                lastSummaryIndex = i;
+                break;
+              }
+            }
+            
+            // 如果找到总结消息，从总结消息开始计算（包含总结消息）；否则计算所有消息
+            const messagesToCount = lastSummaryIndex >= 0 
+              ? messages.slice(lastSummaryIndex)
+              : messages;
+            
+            // 构建用于token计算的消息列表（排除不发送的系统消息）
+            const conversationMessages = messagesToCount
+              .filter(m => {
+                // 排除系统消息（但包含总结消息，因为总结消息会作为user消息发送）
+                if (m.role === 'system' && !m.isSummary) {
+                  return false;
+                }
+                return true;
+              })
+              .map(msg => {
+                // 如果是总结消息，作为user消息计算token
+                if (msg.isSummary) {
+                  return {
+                    role: 'user' as const,
+                    content: msg.content,
+                    thinking: undefined,
+                  };
+                }
+                return {
+                  role: msg.role,
+                  content: msg.content,
+                  thinking: msg.thinking,
+                };
+              });
+            
+            const currentTokens = estimate_messages_tokens(conversationMessages, model);
+            // 使用从后端获取的 max_tokens，如果没有则使用前端函数作为后备
+            const maxTokens = selectedLLMConfig?.max_tokens || get_model_max_tokens(model);
+            return (
+              <div className="text-xs text-yellow-600 dark:text-yellow-400 mt-1 px-1">
+                累计会话 Token: {currentTokens.toLocaleString()} / {maxTokens.toLocaleString()}
+              </div>
+            );
+          })()}
           <p className="text-xs text-gray-500 mt-2">
             {!selectedLLMConfig ? (
               '请先选择 LLM 模型'

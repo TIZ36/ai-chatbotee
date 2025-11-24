@@ -4,6 +4,7 @@ YouTube视频下载后端服务
 """
 
 import os
+import sys
 import json
 import yaml
 import threading
@@ -3626,6 +3627,8 @@ def list_llm_configs():
             
             columns = [desc[0] for desc in cursor.description]
             configs = []
+            # 导入 token_counter 函数
+            from token_counter import get_model_max_tokens
             for row in cursor.fetchall():
                 config = dict(zip(columns, row))
                 # 解析JSON字段
@@ -3648,6 +3651,9 @@ def list_llm_configs():
                     config['updated_at'] = config['updated_at'].isoformat() if hasattr(config['updated_at'], 'isoformat') else str(config['updated_at'])
                 # 不返回API密钥
                 config.pop('api_key', None)
+                # 添加模型的最大 token 限制
+                model_name = config.get('model', 'gpt-4')
+                config['max_tokens'] = get_model_max_tokens(model_name)
                 configs.append(config)
             
             return jsonify({'configs': configs, 'total': len(configs)})
@@ -3742,6 +3748,11 @@ def get_llm_config(config_id):
                 config['metadata'] = json.loads(config['metadata']) if isinstance(config['metadata'], str) else config['metadata']
             except:
                 config['metadata'] = {}
+        
+        # 添加模型的最大 token 限制
+        model_name = config.get('model', 'gpt-4')
+        from token_counter import get_model_max_tokens
+        config['max_tokens'] = get_model_max_tokens(model_name)
         
         cursor.close()
         return jsonify(config)
@@ -4365,7 +4376,7 @@ def get_session_messages(session_id):
             return jsonify({'messages': [], 'total': 0, 'error': 'MySQL not available'}), 503
         
         page = int(request.args.get('page', 1))
-        page_size = int(request.args.get('page_size', 50))
+        page_size = int(request.args.get('page_size', 20))  # 默认只加载20条，加快初始加载速度
         offset = (page - 1) * page_size
         
         cursor = None
@@ -4377,6 +4388,7 @@ def get_session_messages(session_id):
             total = cursor.fetchone()['total']
             
             # 获取消息（按时间倒序，最新的在前）
+            # 使用索引 idx_session_created (session_id, created_at) 优化查询性能
             cursor.execute("""
                 SELECT 
                     message_id,
@@ -4386,6 +4398,7 @@ def get_session_messages(session_id):
                     thinking,
                     tool_calls,
                     token_count,
+                    acc_token,
                     created_at
                 FROM messages
                 WHERE session_id = %s
@@ -4459,6 +4472,67 @@ def get_session_messages(session_id):
         traceback.print_exc()
         return jsonify({'messages': [], 'total': 0, 'error': str(e)}), 500
 
+def recalculate_acc_tokens_after_message(session_id: str, after_message_id: str, cursor):
+    """
+    重新计算指定消息之后所有消息的累积 token
+    
+    Args:
+        session_id: 会话ID
+        after_message_id: 基准消息ID（该消息之后的消息需要重新计算）
+        cursor: 数据库游标
+    """
+    try:
+        from token_counter import estimate_tokens
+        
+        # 获取基准消息的累积 token
+        cursor.execute("""
+            SELECT COALESCE(acc_token, token_count, 0) as acc_token, created_at
+            FROM messages 
+            WHERE session_id = %s AND message_id = %s
+        """, (session_id, after_message_id))
+        
+        base_row = cursor.fetchone()
+        if not base_row:
+            return
+        
+        base_acc_token = base_row['acc_token'] or 0
+        base_created_at = base_row['created_at']
+        
+        # 获取基准消息之后的所有消息
+        cursor.execute("""
+            SELECT message_id, role, content, thinking, model, created_at
+            FROM messages 
+            WHERE session_id = %s 
+            AND created_at > %s
+            ORDER BY created_at ASC
+        """, (session_id, base_created_at))
+        
+        subsequent_messages = cursor.fetchall()
+        
+        # 重新计算每条消息的累积 token
+        current_acc_token = base_acc_token
+        for msg in subsequent_messages:
+            # 估算当前消息的 token
+            msg_model = msg.get('model') or 'gpt-4'
+            msg_tokens = estimate_tokens(msg['content'] or '', msg_model)
+            if msg.get('thinking'):
+                msg_tokens += estimate_tokens(msg['thinking'], msg_model)
+            
+            # 更新累积 token
+            current_acc_token += msg_tokens
+            
+            # 更新数据库
+            cursor.execute("""
+                UPDATE messages 
+                SET acc_token = %s, token_count = %s
+                WHERE message_id = %s
+            """, (current_acc_token, msg_tokens, msg['message_id']))
+        
+    except Exception as e:
+        print(f"[Recalculate Acc Tokens] Error: {e}")
+        import traceback
+        traceback.print_exc()
+
 @app.route('/api/sessions/<session_id>/messages', methods=['POST', 'OPTIONS'])
 def save_message(session_id):
     """保存消息到会话"""
@@ -4479,20 +4553,43 @@ def save_message(session_id):
         thinking = data.get('thinking')
         tool_calls = data.get('tool_calls')
         model = data.get('model', 'gpt-4')  # 用于估算 token
+        acc_token_override = data.get('acc_token')  # 可选：手动指定累积 token（用于总结消息等特殊情况）
         
-        # 估算 token 数量
-        token_count = estimate_tokens(content, model)
+        # 估算当前消息的 token 数量
+        current_message_tokens = estimate_tokens(content, model)
         if thinking:
-            token_count += estimate_tokens(thinking, model)
+            current_message_tokens += estimate_tokens(thinking, model)
         
         cursor = None
         try:
-            cursor = conn.cursor()
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
             
-            # 保存消息
+            # 如果指定了 acc_token_override（如总结消息），直接使用
+            if acc_token_override is not None:
+                cumulative_token_count = acc_token_override
+            else:
+                # 获取上一条消息的累积 token（用于计算累积 token）
+                # 优先使用 acc_token，如果没有则使用 token_count（兼容旧数据）
+                cursor.execute("""
+                    SELECT COALESCE(acc_token, token_count, 0) as prev_acc_token
+                    FROM messages 
+                    WHERE session_id = %s 
+                    ORDER BY created_at DESC 
+                    LIMIT 1
+                """, (session_id,))
+                
+                previous_acc_token = 0
+                prev_row = cursor.fetchone()
+                if prev_row and prev_row.get('prev_acc_token'):
+                    previous_acc_token = prev_row['prev_acc_token'] or 0
+                
+                # 计算累积 token：上一条消息的累积 token + 当前消息的 token
+                cumulative_token_count = previous_acc_token + current_message_tokens
+            
+            # 保存消息（保存当前消息的 token 到 token_count，累积 token 到 acc_token）
             cursor.execute("""
-                INSERT INTO messages (message_id, session_id, role, content, thinking, tool_calls, token_count)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO messages (message_id, session_id, role, content, thinking, tool_calls, token_count, acc_token)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 message_id,
                 session_id,
@@ -4500,7 +4597,8 @@ def save_message(session_id):
                 content,
                 thinking,
                 json.dumps(tool_calls) if tool_calls else None,
-                token_count
+                current_message_tokens,  # token_count 保存当前消息的 token
+                cumulative_token_count   # acc_token 保存累积 token
             ))
             
             # 更新会话的最后消息时间
@@ -4525,11 +4623,16 @@ def save_message(session_id):
                         UPDATE sessions SET title = %s WHERE session_id = %s
                     """, (title, session_id))
             
+            # 如果保存的是总结消息，需要重新计算后续消息的 acc_token（在提交前）
+            if role == 'system' and content.startswith('__SUMMARY__'):
+                # 重新计算总结后所有消息的 acc_token
+                recalculate_acc_tokens_after_message(session_id, message_id, cursor)
+            
             conn.commit()
             
             return jsonify({
                 'message_id': message_id,
-                'token_count': token_count,
+                'token_count': cumulative_token_count,  # 返回累积 token
                 'message': 'Message saved successfully'
             }), 201
             
@@ -4643,6 +4746,12 @@ def summarize_session(session_id):
         llm_config_id = data.get('llm_config_id')
         model = data.get('model', 'gpt-4')
         messages_to_summarize = data.get('messages', [])  # 要总结的消息列表
+        
+        # 记录模型的最大 token 限制（用于日志和验证）
+        max_tokens = get_model_max_tokens(model)
+        # 使用 token_counter 模块的 logger
+        from token_counter import logger as token_logger
+        token_logger.info(f"[Summarize] Processing summarize request for model '{model}' (max_tokens: {max_tokens})")
         
         if not llm_config_id:
             return jsonify({'error': 'llm_config_id is required'}), 400
@@ -4803,13 +4912,53 @@ def summarize_session(session_id):
             summary_id = f'summary-{int(time.time() * 1000)}'
             last_message_id = messages_to_summarize[-1].get('message_id') if messages_to_summarize else None
             
-            token_count_before = sum(msg.get('token_count', 0) for msg in messages_to_summarize)
+            # 计算总结前后的 token（使用累积 token）
+            # 获取被总结的第一条消息之前的累积 token
+            first_summarized_msg_id = messages_to_summarize[0].get('message_id') if messages_to_summarize else None
+            token_count_before_acc = 0
+            if first_summarized_msg_id:
+                cursor.execute("""
+                    SELECT COALESCE(acc_token, token_count, 0) as acc_token
+                    FROM messages 
+                    WHERE session_id = %s AND message_id = %s
+                """, (session_id, first_summarized_msg_id))
+                first_msg_row = cursor.fetchone()
+                if first_msg_row:
+                    # 获取第一条被总结消息之前的累积 token
+                    cursor.execute("""
+                        SELECT COALESCE(acc_token, token_count, 0) as prev_acc_token
+                        FROM messages 
+                        WHERE session_id = %s 
+                        AND created_at < (SELECT created_at FROM messages WHERE message_id = %s)
+                        ORDER BY created_at DESC 
+                        LIMIT 1
+                    """, (session_id, first_summarized_msg_id))
+                    prev_row = cursor.fetchone()
+                    if prev_row:
+                        token_count_before_acc = prev_row['prev_acc_token'] or 0
+            
+            # 计算被总结消息的总 token（累积值）
+            last_summarized_msg_id = messages_to_summarize[-1].get('message_id') if messages_to_summarize else None
+            token_count_before = 0
+            if last_summarized_msg_id:
+                cursor.execute("""
+                    SELECT COALESCE(acc_token, token_count, 0) as acc_token
+                    FROM messages 
+                    WHERE session_id = %s AND message_id = %s
+                """, (session_id, last_summarized_msg_id))
+                last_msg_row = cursor.fetchone()
+                if last_msg_row:
+                    token_count_before = last_msg_row['acc_token'] or 0
+            
             token_count_after = estimated_tokens
             
             cursor.execute("""
                 INSERT INTO summaries (summary_id, session_id, summary_content, last_message_id, token_count_before, token_count_after)
                 VALUES (%s, %s, %s, %s, %s, %s)
             """, (summary_id, session_id, summary_content, last_message_id, token_count_before, token_count_after))
+            
+            # 总结消息会在 processSummarize 中保存，这里不需要处理
+            # 但需要记录总结前的累积 token，用于后续重新计算 acc_token
             
             # 缓存总结结果
             if redis_conn and cache_key:
@@ -4818,16 +4967,25 @@ def summarize_session(session_id):
                     'summary_content': summary_content,
                     'token_count_before': token_count_before,
                     'token_count_after': token_count_after,
+                    'token_count_before_acc': token_count_before_acc,  # 保存总结前的累积 token
                 }
                 redis_conn.setex(cache_key, 3600, json.dumps(summary_data))  # 缓存1小时
             
             conn.commit()
+            
+            # 总结消息会在 processSummarize 中保存，这里需要：
+            # 1. 保存总结消息时，设置正确的 acc_token（总结前的累积 token + 总结消息的 token）
+            # 2. 重新计算总结后所有消息的 acc_token
+            
+            # 注意：总结消息的保存在前端的 processSummarize 中完成
+            # 这里只返回总结信息，前端会调用 saveMessage 保存总结消息
             
             return jsonify({
                 'summary_id': summary_id,
                 'summary_content': summary_content,
                 'token_count_before': token_count_before,
                 'token_count_after': token_count_after,
+                'token_count_before_acc': token_count_before_acc,  # 返回总结前的累积 token，用于设置总结消息的 acc_token
             })
             
         finally:
@@ -5475,6 +5633,14 @@ def get_message_execution(message_id):
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
+    # 配置日志
+    import logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
     # 初始化服务
     from database import init_mysql, init_redis
     init_services()
