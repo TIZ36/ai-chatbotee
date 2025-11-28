@@ -6,7 +6,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   Globe, Loader, CheckCircle, XCircle, ChevronDown, ChevronUp, 
-  Save, Play, Eye, EyeOff, X, Plus, Trash2, MousePointer, Tag, Code2
+  Save, Play, Eye, EyeOff, X, Plus, Trash2, MousePointer, Tag, Code2, ExternalLink
 } from 'lucide-react';
 import { 
   fetchWebPage, createModule, previewNormalize, saveParsedDataToBatch, CrawlerOptions, CrawlerResult, 
@@ -1209,6 +1209,8 @@ ${html}
               {crawlResult.success && (
                 <div className="p-4">
                   {previewMode === 'summary' && (
+                    <div className="space-y-3">
+                      {/* 基本信息 */}
                     <div className="space-y-2">
                       <div>
                         <span className="text-sm font-medium">标题：</span>
@@ -1235,13 +1237,96 @@ ${html}
                           </span>
                         </div>
                       )}
+                      </div>
+
+                      {/* 正文预览 */}
                       {crawlResult.content?.text && (
                         <div className="mt-3">
                           <span className="text-sm font-medium block mb-1">正文预览：</span>
-                          <div className="text-xs text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 p-2 rounded max-h-32 overflow-auto">
+                          <div className="text-xs text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 p-2 rounded max-h-32 overflow-auto whitespace-pre-wrap">
                             {crawlResult.content.text.substring(0, 500)}
                             {crawlResult.content.text.length > 500 && '...'}
                           </div>
+                        </div>
+                      )}
+
+                      {/* 图片预览 */}
+                      {crawlResult.images && crawlResult.images.length > 0 && (
+                        <div className="mt-3">
+                          <span className="text-sm font-medium block mb-2">
+                            图片预览 ({crawlResult.images.length} 张)：
+                          </span>
+                          <div className="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto">
+                            {crawlResult.images.slice(0, 9).map((img, index) => (
+                              <div
+                                key={index}
+                                className="relative group cursor-pointer border border-gray-200 dark:border-gray-700 rounded overflow-hidden bg-gray-100 dark:bg-gray-800"
+                                onClick={() => window.open(img.url, '_blank')}
+                                title={img.alt || img.title || img.url}
+                              >
+                                <img
+                                  src={img.url}
+                                  alt={img.alt || `图片 ${index + 1}`}
+                                  className="w-full h-20 object-cover"
+                                  onError={(e) => {
+                                    (e.target as HTMLImageElement).style.display = 'none';
+                                    (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden');
+                                  }}
+                                />
+                                <div className="hidden absolute inset-0 flex items-center justify-center text-xs text-gray-500 p-1 break-all">
+                                  {img.url.substring(0, 30)}...
+                                </div>
+                                {img.alt && (
+                                  <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-xs p-1 truncate opacity-0 group-hover:opacity-100 transition-opacity">
+                                    {img.alt}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                          {crawlResult.images.length > 9 && (
+                            <div className="text-xs text-gray-500 mt-1 text-center">
+                              还有 {crawlResult.images.length - 9} 张图片...
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* 链接预览 */}
+                      {crawlResult.links && crawlResult.links.length > 0 && (
+                        <div className="mt-3">
+                          <span className="text-sm font-medium block mb-2">
+                            链接预览 ({crawlResult.links.length} 个)：
+                          </span>
+                          <div className="space-y-1 max-h-48 overflow-y-auto">
+                            {crawlResult.links.slice(0, 10).map((link, index) => (
+                              <a
+                                key={index}
+                                href={link.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center space-x-2 p-2 hover:bg-gray-50 dark:hover:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 group"
+                              >
+                                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                                  link.type === 'internal' ? 'bg-green-500' : 'bg-blue-500'
+                                }`} title={link.type === 'internal' ? '内部链接' : '外部链接'} />
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-xs font-medium text-gray-900 dark:text-gray-100 truncate">
+                                    {link.text || link.url}
+                                  </div>
+                                  <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                    {link.url}
+                                  </div>
+                                </div>
+                                <ExternalLink className="w-3 h-3 text-gray-400 group-hover:text-blue-500 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                              </a>
+                            ))}
+                          </div>
+                          {crawlResult.links.length > 10 && (
+                            <div className="text-xs text-gray-500 mt-1 text-center">
+                              还有 {crawlResult.links.length - 10} 个链接...
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1318,28 +1403,28 @@ ${html}
                           
                           {selectedElements.item && (
                             <div className="space-y-2">
-                              <div className="text-xs text-gray-600 dark:text-gray-400 flex items-center space-x-2">
-                                <span className="font-medium w-20">数据项：</span>
+                            <div className="text-xs text-gray-600 dark:text-gray-400 flex items-center space-x-2">
+                              <span className="font-medium w-20">数据项：</span>
                                 <code className="flex-1 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded font-mono text-xs">{selectedElements.item}</code>
-                                <button
-                                  onClick={() => {
-                                    setSelectedElements(prev => {
-                                      const newSel = { ...prev };
-                                      delete newSel.item;
-                                      return newSel;
-                                    });
+                              <button
+                                onClick={() => {
+                                  setSelectedElements(prev => {
+                                    const newSel = { ...prev };
+                                    delete newSel.item;
+                                    return newSel;
+                                  });
                                     setElementPreview(prev => {
                                       const newPreview = { ...prev };
                                       delete newPreview.item;
                                       return newPreview;
-                                    });
-                                    setItemSelector('');
-                                  }}
-                                  className="text-red-500 hover:text-red-700"
-                                  title="清除"
-                                >
-                                  <X className="w-3 h-3" />
-                                </button>
+                                  });
+                                  setItemSelector('');
+                                }}
+                                className="text-red-500 hover:text-red-700"
+                                title="清除"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
                               </div>
                               
                               {/* 元素预览 */}
@@ -1418,28 +1503,28 @@ ${html}
                           )}
                           {selectedElements.title && (
                             <div className="space-y-2">
-                              <div className="text-xs text-gray-600 dark:text-gray-400 flex items-center space-x-2">
-                                <span className="font-medium w-20">标题：</span>
+                            <div className="text-xs text-gray-600 dark:text-gray-400 flex items-center space-x-2">
+                              <span className="font-medium w-20">标题：</span>
                                 <code className="flex-1 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded font-mono text-xs">{selectedElements.title}</code>
-                                <button
-                                  onClick={() => {
-                                    setSelectedElements(prev => {
-                                      const newSel = { ...prev };
-                                      delete newSel.title;
-                                      return newSel;
-                                    });
+                              <button
+                                onClick={() => {
+                                  setSelectedElements(prev => {
+                                    const newSel = { ...prev };
+                                    delete newSel.title;
+                                    return newSel;
+                                  });
                                     setElementPreview(prev => {
                                       const newPreview = { ...prev };
                                       delete newPreview.title;
                                       return newPreview;
-                                    });
-                                    setTitleSelector('');
-                                  }}
-                                  className="text-red-500 hover:text-red-700"
-                                  title="清除"
-                                >
-                                  <X className="w-3 h-3" />
-                                </button>
+                                  });
+                                  setTitleSelector('');
+                                }}
+                                className="text-red-500 hover:text-red-700"
+                                title="清除"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
                               </div>
                               {elementPreview.title && (
                                 <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded p-2">
@@ -1455,28 +1540,28 @@ ${html}
                           )}
                           {selectedElements.content && (
                             <div className="space-y-2">
-                              <div className="text-xs text-gray-600 dark:text-gray-400 flex items-center space-x-2">
-                                <span className="font-medium w-20">内容：</span>
+                            <div className="text-xs text-gray-600 dark:text-gray-400 flex items-center space-x-2">
+                              <span className="font-medium w-20">内容：</span>
                                 <code className="flex-1 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded font-mono text-xs">{selectedElements.content}</code>
-                                <button
-                                  onClick={() => {
-                                    setSelectedElements(prev => {
-                                      const newSel = { ...prev };
-                                      delete newSel.content;
-                                      return newSel;
-                                    });
+                              <button
+                                onClick={() => {
+                                  setSelectedElements(prev => {
+                                    const newSel = { ...prev };
+                                    delete newSel.content;
+                                    return newSel;
+                                  });
                                     setElementPreview(prev => {
                                       const newPreview = { ...prev };
                                       delete newPreview.content;
                                       return newPreview;
-                                    });
-                                    setContentSelector('');
-                                  }}
-                                  className="text-red-500 hover:text-red-700"
-                                  title="清除"
-                                >
-                                  <X className="w-3 h-3" />
-                                </button>
+                                  });
+                                  setContentSelector('');
+                                }}
+                                className="text-red-500 hover:text-red-700"
+                                title="清除"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
                               </div>
                               {elementPreview.content && (
                                 <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded p-2">
@@ -1488,8 +1573,8 @@ ${html}
                                     {elementPreview.content.text.substring(0, 300)}
                                     {elementPreview.content.text.length > 300 && '\n...'}
                                   </div>
-                                </div>
-                              )}
+                            </div>
+                          )}
                             </div>
                           )}
                           <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
@@ -1550,14 +1635,14 @@ ${html}
                                     )}
                                   </div>
                                   {item.title ? (
-                                    <div className="font-semibold text-sm mb-1 text-gray-900 dark:text-gray-100">
-                                      {item.title}
-                                    </div>
+                                  <div className="font-semibold text-sm mb-1 text-gray-900 dark:text-gray-100">
+                                    {item.title}
+                                  </div>
                                   ) : (
                                     <div className="text-sm mb-1 text-yellow-600 dark:text-yellow-400">
                                       ⚠️ 标题为空
-                                    </div>
-                                  )}
+                                  </div>
+                                )}
                                   {item.content && item.content.trim() !== '' ? (
                                     <div className="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap break-words max-h-[300px] overflow-y-auto">
                                       {item.content}
@@ -1565,15 +1650,15 @@ ${html}
                                   ) : (
                                     <div className="text-xs text-red-500 dark:text-red-400 italic">
                                       ⚠️ 内容为空 - 请检查后端日志和下方 HTML 结构
-                                    </div>
-                                  )}
-                                  {item.metadata && Object.keys(item.metadata).length > 0 && (
-                                    <div className="mt-2 text-xs text-gray-500">
-                                      {Object.entries(item.metadata).slice(0, 3).map(([key, value]) => (
-                                        <span key={key} className="mr-2">
-                                          {key}: {String(value).substring(0, 30)}
-                                        </span>
-                                      ))}
+                                  </div>
+                                )}
+                                {item.metadata && Object.keys(item.metadata).length > 0 && (
+                                  <div className="mt-2 text-xs text-gray-500">
+                                    {Object.entries(item.metadata).slice(0, 3).map(([key, value]) => (
+                                      <span key={key} className="mr-2">
+                                        {key}: {String(value).substring(0, 30)}
+                                      </span>
+                                    ))}
                                     </div>
                                   )}
                                 </div>
@@ -1608,8 +1693,8 @@ ${html}
                           {/* 生成并保存按钮 */}
                           {previewNormalizedData && previewNormalizedData.items.length > 0 ? (
                             moduleId && batchId ? (
-                              <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                                <button
+                            <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                              <button
                                 onClick={async () => {
                                   if (!moduleId || !batchId || !previewNormalizedData) {
                                     console.error('[CrawlerTestPage] Missing required data:', { moduleId, batchId, previewNormalizedData });

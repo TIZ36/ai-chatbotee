@@ -14,7 +14,9 @@ import {
   MCPServerConfig,
   discoverMCPOAuth,
   authorizeMCPOAuth,
-  getNotionOAuthConfig,
+  registerNotionClient,
+  getNotionRegistrations,
+  NotionRegistration,
 } from '../services/mcpApi';
 
 // 获取后端URL的辅助函数
@@ -41,6 +43,16 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
   });
   const [notionIntegrationSecret, setNotionIntegrationSecret] = useState('');
   const [notionAuthState, setNotionAuthState] = useState<'idle' | 'authenticating' | 'authenticated'>('idle');
+  
+  // Notion 工作空间选择和注册相关状态
+  const [showWorkspaceSelection, setShowWorkspaceSelection] = useState(false);
+  const [showRegistrationForm, setShowRegistrationForm] = useState(false);
+  const [notionRegistrations, setNotionRegistrations] = useState<NotionRegistration[]>([]);
+  const [registrationFormData, setRegistrationFormData] = useState({
+    client_name: '',
+    redirect_uri_base: 'http://localhost:3001',
+  });
+  const [isRegistering, setIsRegistering] = useState(false);
 
   // 测试连接状态
   const [testingServers, setTestingServers] = useState<Set<string>>(new Set());
@@ -108,7 +120,132 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
     return typeof window !== 'undefined' && (window as any).electronAPI !== undefined;
   };
 
+  // 加载 Notion 注册列表
+  const loadNotionRegistrations = async (): Promise<NotionRegistration[]> => {
+    try {
+      const registrations = await getNotionRegistrations();
+      setNotionRegistrations(registrations);
+      return registrations;
+    } catch (error) {
+      console.error('[Notion] Failed to load registrations:', error);
+      setNotionRegistrations([]);
+      return [];
+    }
+  };
+
+  // 使用已注册的工作空间进行 OAuth 授权
+  const handleUseExistingWorkspace = async (registration: NotionRegistration) => {
+    setShowWorkspaceSelection(false);
+    
+    // 检查是否已有对应的服务器配置
+    const existingServer = servers.find(s => 
+      s.ext?.server_type === 'notion' && 
+      s.ext?.client_id === registration.client_id
+    );
+    
+    if (existingServer) {
+      // 如果服务器已存在，直接测试连接（后端会自动检查 token 并刷新）
+      console.log('[Notion] Server exists, testing connection with existing token...');
+      setNotionAuthState('authenticating');
+      
+      try {
+        // 测试连接（后端会自动处理 token 检查和刷新）
+        const response = await fetch(`${getBackendUrl()}/api/mcp/servers/${existingServer.id}/test`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          console.log('[Notion] ✅ Connection test successful:', result);
+          setNotionAuthState('authenticated');
+          await loadServers(); // 重新加载服务器列表
+          alert('Notion MCP 服务器连接成功！');
+          return;
+        } else {
+          const error = await response.json();
+          console.log('[Notion] Connection test failed:', error);
+          
+          // 如果明确需要 OAuth（token 不存在或无效），走 OAuth 流程
+          if (error.requires_oauth || response.status === 401) {
+            console.log('[Notion] OAuth required, starting OAuth flow...');
+            await performNotionOAuth(registration.client_id);
+          } else {
+            // 其他错误（如网络错误），提示用户
+            alert('连接失败: ' + (error.error || '未知错误'));
+            setNotionAuthState('idle');
+          }
+        }
+      } catch (error) {
+        console.error('[Notion] Connection test error:', error);
+        // 如果测试失败，走 OAuth 流程
+        await performNotionOAuth(registration.client_id);
+      }
+    } else {
+      // 如果服务器不存在，走 OAuth 流程
+      await performNotionOAuth(registration.client_id);
+    }
+  };
+
+  // 处理 Notion OAuth 连接（入口函数）
   const handleNotionOAuthConnect = async () => {
+    // 先加载已注册的工作空间列表
+    const registrations = await loadNotionRegistrations();
+    
+    // 如果有已注册的工作空间，显示选择对话框
+    if (registrations.length > 0) {
+      setShowWorkspaceSelection(true);
+      return;
+    }
+    
+    // 如果没有已注册的工作空间，直接显示注册表单
+    setShowRegistrationForm(true);
+  };
+
+  // 处理注册新工作空间
+  const handleRegisterNotion = async () => {
+    if (!registrationFormData.client_name.trim()) {
+      alert('请输入客户端名称（Client Name）');
+      return;
+    }
+
+    // 验证 client_name：只允许英文、数字、下划线、连字符
+    const clientNamePattern = /^[a-zA-Z0-9_-]+$/;
+    if (!clientNamePattern.test(registrationFormData.client_name)) {
+      alert('客户端名称只能包含英文、数字、下划线和连字符');
+      return;
+    }
+
+    setIsRegistering(true);
+    try {
+      const result = await registerNotionClient({
+        client_name: registrationFormData.client_name.trim(),
+        redirect_uri_base: registrationFormData.redirect_uri_base.trim() || 'http://localhost:3001',
+      });
+
+      console.log('[Notion] Registration successful:', result);
+      
+      // 重新加载注册列表
+      await loadNotionRegistrations();
+      
+      // 关闭注册表单，使用新注册的 client_id 进行 OAuth 授权
+      setShowRegistrationForm(false);
+      setRegistrationFormData({ client_name: '', redirect_uri_base: 'http://localhost:3001' });
+      
+      // 使用新注册的 client_id 进行 OAuth 授权
+      await performNotionOAuth(result.client_id);
+    } catch (error) {
+      console.error('[Notion] Registration failed:', error);
+      alert('注册失败: ' + (error instanceof Error ? error.message : String(error)));
+    } finally {
+      setIsRegistering(false);
+    }
+  };
+
+  // 执行 Notion OAuth 授权（使用指定的 client_id）
+  const performNotionOAuth = async (clientId: string) => {
     try {
       setNotionAuthState('authenticating');
       
@@ -119,19 +256,9 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
       const discovery = await discoverMCPOAuth('https://mcp.notion.com');
       console.log('[Notion OAuth] OAuth discovery result:', discovery);
       
-      // 2. 从后端配置获取 client_id
-      console.log('[Notion OAuth] Getting Notion OAuth config from backend...');
-      const notionConfig = await getNotionOAuthConfig();
-      const clientId = notionConfig.client_id;
-      const clientSecret = ''; // Notion MCP 可能不需要 client_secret
+      console.log('[Notion OAuth] Using Client ID:', clientId);
       
-      if (!clientId) {
-        throw new Error('Notion OAuth Client ID 未配置，请在 backend/config.yaml 中配置 notion.client_id');
-      }
-      
-      console.log('[Notion OAuth] Using Client ID from config:', clientId);
-      
-      // 3. 生成授权 URL（配置会保存到 Redis，回调地址为后端端点）
+      // 2. 生成授权 URL（配置会保存到 Redis，回调地址为后端端点）
       console.log('[Notion OAuth] Generating authorization URL...');
       const authorizeResult = await authorizeMCPOAuth({
         authorization_endpoint: discovery.authorization_server.authorization_endpoint,
@@ -139,7 +266,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
         resource: discovery.resource,
         code_challenge_methods_supported: discovery.authorization_server.code_challenge_methods_supported,
         token_endpoint: discovery.authorization_server.token_endpoint,
-        client_secret: clientSecret,
+        client_secret: '', // Notion MCP 不需要 client_secret
         token_endpoint_auth_methods_supported: discovery.authorization_server.token_endpoint_auth_methods_supported,
         mcp_url: mcpUrl,  // 传递 MCP URL，用于保存 token
       });
@@ -151,7 +278,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
       console.log('[Notion OAuth] Callback will be handled by backend');
       console.log('[Notion OAuth] Callback URL:', `${getBackendUrl()}/mcp/oauth/callback`);
       
-      // 4. 打开系统外部浏览器进行认证
+      // 3. 打开系统外部浏览器进行认证
       // 回调地址已设置为后端：/mcp/oauth/callback（固定地址，client_id从config.yaml读取）
       // 后端会自动处理 token 交换并保存到 Redis
       try {
@@ -220,6 +347,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
             
             tokenExchangeCompleted = true;
             setNotionAuthState('authenticated');
+            setShowWorkspaceSelection(false);
             alert('Notion MCP 服务器配置成功！Token 已保存到服务器。');
             return; // 成功，退出循环
             
@@ -278,15 +406,19 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
       console.log('[Notion OAuth] Creating server config (token already in Redis)...');
       console.log('[Notion OAuth] Client ID:', clientId);
       
+      // 从注册信息中获取 client_name（用于显示）
+      const registration = notionRegistrations.find(r => r.client_id === clientId);
+      const displayName = registration?.client_name || 'Notion';
+      
       // 创建 Notion MCP 服务器配置
       // Token 已保存在 Redis，MCP 代理会自动从 Redis 获取并刷新
       const notionServerConfig: Partial<MCPServerConfig> = {
-        name: 'Notion',
+        name: displayName,  // 使用 client_name 作为显示名称
         url: mcpUrl,
         type: 'http-stream',
         enabled: true,
         use_proxy: true,
-        description: 'Notion MCP Server - 通过 OAuth 访问 Notion 工作区',
+        description: `Notion MCP Server - ${displayName}`,
         metadata: {
           headers: {
             // Authorization header 会由 MCP 代理从 Redis 自动获取
@@ -296,6 +428,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
         ext: {
           server_type: 'notion',  // 标记为 notion 服务器，触发 token 自动刷新
           client_id: clientId,  // 保存 Client ID，用于关联 token
+          client_name: displayName,  // 保存 client_name，用于显示
           response_format: 'sse',  // Notion MCP 使用 SSE 格式响应
         },
       };
@@ -431,6 +564,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
           enabled: server.enabled,
           description: server.description,
           metadata: server.metadata,
+          ext: server.ext, // 传递扩展配置（包括 response_format, server_type 等）
         },
       });
 
@@ -885,7 +1019,9 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                   <div className={`w-2 h-2 rounded-full flex-shrink-0 ${server.enabled ? 'bg-green-500' : 'bg-gray-400'}`} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center space-x-2">
-                      <h3 className="text-sm font-medium text-gray-900 truncate">{server.name}</h3>
+                      <h3 className="text-sm font-medium text-gray-900 truncate">
+                        {(server as any).display_name || (server as any).client_name || server.name}
+                      </h3>
                       {server.ext?.server_type && (
                         <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
                           {server.ext.server_type}
@@ -895,6 +1031,12 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                     <p className="text-xs text-gray-500 truncate mt-0.5">{server.url}</p>
                     {server.description && (
                       <p className="text-xs text-gray-400 mt-1 line-clamp-1">{server.description}</p>
+                    )}
+                    {/* 如果是 Notion 服务器，显示 client_name 作为额外标识 */}
+                    {server.ext?.server_type === 'notion' && server.ext?.client_name && (
+                      <p className="text-xs text-blue-600 mt-0.5">
+                        工作空间: {server.ext.client_name}
+                      </p>
                     )}
                     {server.ext?.integration_secret && (
                       <p className="text-xs text-gray-400 mt-1 font-mono">
@@ -1054,6 +1196,170 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
           </div>
         </div>
       </div>
+
+      {/* Notion 工作空间选择对话框 */}
+      {showWorkspaceSelection && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  选择 Notion 工作空间
+                </h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  选择已有工作空间进行连接或重新授权
+                </p>
+              </div>
+              <button
+                onClick={() => setShowWorkspaceSelection(false)}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-3 mb-4 max-h-64 overflow-y-auto">
+              {notionRegistrations.map((registration) => {
+                // 检查是否已有对应的服务器配置
+                const existingServer = servers.find(s => 
+                  s.ext?.server_type === 'notion' && 
+                  s.ext?.client_id === registration.client_id
+                );
+                
+                return (
+                  <div
+                    key={registration.id}
+                    className="p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-2">
+                          <div className="font-medium text-gray-900 dark:text-gray-100">
+                            {registration.client_name}
+                          </div>
+                          {existingServer && (
+                            <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">
+                              已连接
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                          注册时间: {registration.created_at ? new Date(registration.created_at).toLocaleString('zh-CN') : '未知'}
+                        </div>
+                        {existingServer && (
+                          <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                            点击可重新授权
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => handleUseExistingWorkspace(registration)}
+                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded transition-colors"
+                      >
+                        {existingServer ? '重新授权' : '连接'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            
+            <div className="flex space-x-2">
+              <button
+                onClick={() => {
+                  setShowWorkspaceSelection(false);
+                  setShowRegistrationForm(true);
+                }}
+                className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded transition-colors"
+              >
+                注册新工作空间
+              </button>
+              <button
+                onClick={() => setShowWorkspaceSelection(false)}
+                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100 font-medium rounded transition-colors"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Notion 注册表单对话框 */}
+      {showRegistrationForm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                注册新的 Notion 工作空间
+              </h3>
+              <button
+                onClick={() => {
+                  setShowRegistrationForm(false);
+                  setRegistrationFormData({ client_name: '', redirect_uri_base: 'http://localhost:3001' });
+                }}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Client Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={registrationFormData.client_name}
+                  onChange={(e) => setRegistrationFormData({ ...registrationFormData, client_name: e.target.value })}
+                  placeholder="例如: my-notion-workspace"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  只能包含英文、数字、下划线和连字符
+                </p>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Redirect URI Base (可选)
+                </label>
+                <input
+                  type="text"
+                  value={registrationFormData.redirect_uri_base}
+                  onChange={(e) => setRegistrationFormData({ ...registrationFormData, redirect_uri_base: e.target.value })}
+                  placeholder="http://localhost:3001"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  回调地址基础部分，默认: http://localhost:3001
+                </p>
+              </div>
+            </div>
+            
+            <div className="flex space-x-2 mt-6">
+              <button
+                onClick={handleRegisterNotion}
+                disabled={isRegistering || !registrationFormData.client_name.trim()}
+                className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-medium rounded transition-colors"
+              >
+                {isRegistering ? '注册中...' : '注册并连接'}
+              </button>
+              <button
+                onClick={() => {
+                  setShowRegistrationForm(false);
+                  setRegistrationFormData({ client_name: '', redirect_uri_base: 'http://localhost:3001' });
+                }}
+                disabled={isRegistering}
+                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 disabled:opacity-50 text-gray-900 dark:text-gray-100 font-medium rounded transition-colors"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

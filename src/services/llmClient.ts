@@ -5,6 +5,7 @@
 
 import { llmConfigManager, LLMConfig } from './llmConfig';
 import { mcpManager, MCPClient, MCPTool } from './mcpClient';
+import { GoogleGenAI, Content, Part } from '@google/genai';
 
 export interface LLMMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -12,6 +13,24 @@ export interface LLMMessage {
   tool_call_id?: string;
   name?: string;
   tool_calls?: LLMToolCall[];
+  // 多模态内容支持
+  parts?: Array<{
+    text?: string;
+    inlineData?: {
+      mimeType: string;
+      data: string; // base64 编码的数据
+    };
+    fileData?: {
+      mimeType: string;
+      fileUri: string;
+    };
+    thoughtSignature?: string; // 思维签名（在 part 级别）
+  }>;
+  // 思维签名（用于 Gemini，整个消息的签名）
+  thoughtSignature?: string;
+  // 工具调用中的思维签名（用于多步调用）
+  // 格式：{ toolCallId: signature }
+  toolCallSignatures?: Record<string, string>;
 }
 
 export interface LLMToolCall {
@@ -28,6 +47,14 @@ export interface LLMResponse {
   thinking?: string; // 思考过程（用于 o1 等思考模型）
   tool_calls?: LLMToolCall[];
   finish_reason?: string;
+  thoughtSignature?: string; // 思维签名（用于 Gemini）
+  toolCallSignatures?: Record<string, string>; // 工具调用的思维签名映射
+  // 多模态输出支持（图片生成等）
+  media?: Array<{
+    type: 'image' | 'video';
+    mimeType: string;
+    data: string; // base64 编码的数据
+  }>;
 }
 
 /**
@@ -191,6 +218,10 @@ export class LLMClient {
         return stream
           ? this.callOllamaStream(messages, tools, onChunk, onThinking)
           : this.callOllama(messages, tools);
+      case 'gemini':
+        return stream
+          ? this.callGeminiStream(messages, tools, onChunk, onThinking)
+          : this.callGemini(messages, tools);
       case 'local':
         return this.callLocal(messages, tools);
       default:
@@ -374,9 +405,6 @@ export class LLMClient {
       };
     } catch (error: any) {
       clearTimeout(timeoutId);
-      if (streamTimeoutId) {
-        clearTimeout(streamTimeoutId);
-      }
       if (error.name === 'AbortError') {
         throw new Error(`API request timeout (${timeoutDuration / 1000}s)`);
       }
@@ -610,9 +638,6 @@ export class LLMClient {
       };
     } catch (error: any) {
       clearTimeout(timeoutId);
-      if (streamTimeoutId) {
-        clearTimeout(streamTimeoutId);
-      }
       if (error.name === 'AbortError') {
         throw new Error(`API request timeout (${timeoutDuration / 1000}s)`);
       }
@@ -852,9 +877,6 @@ export class LLMClient {
       };
     } catch (error: any) {
       clearTimeout(timeoutId);
-      if (streamTimeoutId) {
-        clearTimeout(streamTimeoutId);
-      }
       if (error.name === 'AbortError') {
         throw new Error(`API request timeout (${timeoutDuration / 1000}s)`);
       }
@@ -969,6 +991,450 @@ export class LLMClient {
       throw error;
     }
   }
+
+  /**
+   * 调用Gemini API（流式响应）- 使用官方 @google/genai SDK
+   */
+  private async callGeminiStream(
+    messages: LLMMessage[], 
+    tools?: any[], 
+    onChunk?: (chunk: string) => void,
+    onThinking?: (thinking: string) => void
+  ): Promise<LLMResponse> {
+    if (!this.config.apiKey) {
+      throw new Error('Gemini API key not configured');
+    }
+
+    const model = this.config.model || 'gemini-2.5-flash';
+    console.log(`[LLM] Using Gemini SDK with model: ${model}`);
+
+    try {
+      // 初始化 Gemini SDK
+      const ai = new GoogleGenAI({ apiKey: this.config.apiKey });
+      
+      // 转换消息格式为 Gemini 格式
+      const contents = this.convertMessagesToGeminiContents(messages);
+      
+      // 调试日志：检查是否有多模态内容
+      for (const content of contents) {
+        if (content.parts) {
+          for (const part of content.parts) {
+            if ((part as any).inlineData) {
+              const inlineData = (part as any).inlineData;
+              console.log(`[LLM] Gemini 多模态内容: mimeType=${inlineData.mimeType}, data长度=${inlineData.data?.length || 0}`);
+            }
+          }
+        }
+      }
+      
+      // 提取 system 消息作为 systemInstruction
+      const systemMessages = messages.filter(m => m.role === 'system');
+      const systemInstruction = systemMessages.length > 0
+        ? systemMessages.map(m => m.content).join('\n\n')
+        : undefined;
+      
+      // 检查模型是否支持图片生成（如 gemini-2.0-flash-exp-image-generation 或包含 image 的模型）
+      const supportsImageGeneration = model.toLowerCase().includes('image');
+      
+      // 如果是图片生成模式，需要重新转换消息，清理 thoughtSignature
+      // 因为图片生成模式不支持 thinking，带有 thoughtSignature 的消息会导致 API 报错
+      const finalContents = supportsImageGeneration 
+        ? this.convertMessagesToGeminiContents(messages, true) // 清理 thoughtSignature
+        : contents;
+      
+      // 构建配置
+      const config: any = {
+        systemInstruction: systemInstruction,
+      };
+      
+      if (supportsImageGeneration) {
+        // 图片生成模式：启用文本和图片输出，禁用 thinking（图片模型不支持）
+        config.responseModalities = ['Text', 'Image'];
+        console.log(`[LLM] Gemini 图片生成模式已启用 (responseModalities: ['Text', 'Image'])`);
+      } else {
+        // 非图片生成模式：配置 thinking
+        // 默认禁用 thinking 模式，避免 thought_signature 问题
+        // 如果需要 thinking，用户可以在 metadata 中设置 enableThinking: true
+        config.thinkingConfig = this.config.metadata?.enableThinking 
+          ? { thinkingBudget: this.config.metadata?.thinkingBudget || 1024 }
+          : { thinkingBudget: 0 };
+        console.log(`[LLM] Gemini thinking mode: ${this.config.metadata?.enableThinking ? 'enabled' : 'disabled'}`);
+      }
+      
+      // 添加工具（如果提供）- 图片生成模型可能不支持工具，但仍然尝试添加
+      if (tools && tools.length > 0 && !supportsImageGeneration) {
+        config.tools = [{
+          functionDeclarations: tools.map(tool => ({
+            name: tool.function.name,
+            description: tool.function.description,
+            parameters: tool.function.parameters,
+          })),
+        }];
+      }
+      
+      console.log(`[LLM] Gemini 请求配置:`, JSON.stringify(config, null, 2));
+      
+      // 调用流式 API
+      const streamingResult = await ai.models.generateContentStream({
+        model: model,
+        contents: finalContents,
+        config: config,
+      });
+      
+      let fullContent = '';
+      let fullThinking = '';
+      let toolCalls: LLMToolCall[] = [];
+      let finishReason: string | undefined;
+      let thoughtSignature: string | undefined;
+      const toolCallSignatures: Record<string, string> = {};
+      // 多模态输出（图片等）
+      const media: Array<{ type: 'image' | 'video'; mimeType: string; data: string }> = [];
+      
+      // 处理流式响应
+      let chunkIndex = 0;
+      for await (const chunk of streamingResult) {
+        chunkIndex++;
+        console.log(`[LLM] Gemini chunk #${chunkIndex}:`, 
+          `hasText=${!!chunk.text}`,
+          `hasCandidates=${!!chunk.candidates}`,
+          chunk.candidates ? `parts=${chunk.candidates[0]?.content?.parts?.length || 0}` : ''
+        );
+        
+        // 处理文本内容
+        if (chunk.text) {
+          fullContent += chunk.text;
+          onChunk?.(chunk.text);
+        }
+        
+        // 处理函数调用和多模态输出
+        if (chunk.candidates && chunk.candidates[0]?.content?.parts) {
+          const parts = chunk.candidates[0].content.parts;
+          // 调试日志：显示 parts 的内容类型
+          console.log(`[LLM] Gemini response parts count: ${parts.length}, types: ${parts.map(p => {
+            if (p.text) return 'text';
+            if (p.functionCall) return 'functionCall';
+            if ((p as any).inlineData) return `inlineData(${(p as any).inlineData?.mimeType})`;
+            return `unknown(${Object.keys(p).join(',')})`;
+          }).join(', ')}`);
+          
+          for (const part of parts) {
+            if (part.functionCall) {
+              const toolCallId = part.functionCall.name || `call_${Date.now()}_${Math.random()}`;
+              const existingIndex = toolCalls.findIndex(
+                tc => tc.function.name === part.functionCall?.name
+              );
+              
+              if (existingIndex < 0) {
+                toolCalls.push({
+                  id: toolCallId,
+                  type: 'function',
+                  function: {
+                    name: part.functionCall.name || '',
+                    arguments: JSON.stringify(part.functionCall.args || {}),
+                  },
+                });
+              }
+            }
+            
+            // 处理图片输出（inlineData）
+            if ((part as any).inlineData) {
+              const inlineData = (part as any).inlineData;
+              if (inlineData.mimeType && inlineData.data) {
+                const mediaType = inlineData.mimeType.startsWith('video/') ? 'video' : 'image';
+                media.push({
+                  type: mediaType,
+                  mimeType: inlineData.mimeType,
+                  data: inlineData.data,
+                });
+                console.log(`[LLM] Gemini 返回了 ${mediaType}: mimeType=${inlineData.mimeType}, 大小=${Math.round(inlineData.data.length / 1024)}KB`);
+              }
+            }
+            
+            // 处理思维签名（如果有）
+            if ((part as any).thoughtSignature) {
+              thoughtSignature = (part as any).thoughtSignature;
+            }
+          }
+        }
+        
+        // 处理完成原因
+        if (chunk.candidates && chunk.candidates[0]?.finishReason) {
+          finishReason = chunk.candidates[0].finishReason;
+        }
+      }
+
+      console.log(`[LLM] Gemini 流式响应完成: content长度=${fullContent.length}, media数量=${media.length}, toolCalls数量=${toolCalls.length}`);
+      
+      return {
+        content: fullContent,
+        thinking: fullThinking || undefined,
+        tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+        finish_reason: finishReason,
+        thoughtSignature: thoughtSignature,
+        toolCallSignatures: Object.keys(toolCallSignatures).length > 0 ? toolCallSignatures : undefined,
+        media: media.length > 0 ? media : undefined,
+      };
+    } catch (error: any) {
+      console.error('[LLM] Gemini API error:', error);
+      throw new Error(`Gemini API error: ${error.message || 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * 调用Gemini API（非流式响应）- 使用官方 @google/genai SDK
+   */
+  private async callGemini(messages: LLMMessage[], tools?: any[]): Promise<LLMResponse> {
+    if (!this.config.apiKey) {
+      throw new Error('Gemini API key not configured');
+    }
+
+    const model = this.config.model || 'gemini-2.5-flash';
+    console.log(`[LLM] Using Gemini SDK with model: ${model}`);
+
+    try {
+      // 初始化 Gemini SDK
+      const ai = new GoogleGenAI({ apiKey: this.config.apiKey });
+      
+      // 转换消息格式为 Gemini 格式
+      const contents = this.convertMessagesToGeminiContents(messages);
+      
+      // 提取 system 消息作为 systemInstruction
+      const systemMessages = messages.filter(m => m.role === 'system');
+      const systemInstruction = systemMessages.length > 0
+        ? systemMessages.map(m => m.content).join('\n\n')
+        : undefined;
+      
+      // 检查模型是否支持图片生成（如 gemini-2.0-flash-exp-image-generation 或包含 image 的模型）
+      const supportsImageGeneration = model.toLowerCase().includes('image');
+      
+      // 如果是图片生成模式，需要重新转换消息，清理 thoughtSignature
+      const finalContents = supportsImageGeneration 
+        ? this.convertMessagesToGeminiContents(messages, true) // 清理 thoughtSignature
+        : contents;
+      
+      // 构建配置
+      const config: any = {
+        systemInstruction: systemInstruction,
+      };
+      
+      if (supportsImageGeneration) {
+        // 图片生成模式：启用文本和图片输出，禁用 thinking（图片模型不支持）
+        config.responseModalities = ['Text', 'Image'];
+        console.log(`[LLM] Gemini 图片生成模式已启用 (responseModalities: ['Text', 'Image'])`);
+      } else {
+        // 非图片生成模式：配置 thinking
+        config.thinkingConfig = this.config.metadata?.enableThinking 
+          ? { thinkingBudget: this.config.metadata?.thinkingBudget || 1024 }
+          : { thinkingBudget: 0 };
+      }
+      
+      // 添加工具（如果提供）- 图片生成模型可能不支持工具
+      if (tools && tools.length > 0 && !supportsImageGeneration) {
+        config.tools = [{
+          functionDeclarations: tools.map(tool => ({
+            name: tool.function.name,
+            description: tool.function.description,
+            parameters: tool.function.parameters,
+          })),
+        }];
+      }
+      
+      // 调用非流式 API
+      const response = await ai.models.generateContent({
+        model: model,
+        contents: finalContents,
+        config: config,
+      });
+      
+      let fullContent = '';
+      let toolCalls: LLMToolCall[] = [];
+      let thoughtSignature: string | undefined;
+      const toolCallSignatures: Record<string, string> = {};
+      // 多模态输出（图片等）
+      const media: Array<{ type: 'image' | 'video'; mimeType: string; data: string }> = [];
+      
+      // 处理响应文本
+      if (response.text) {
+        fullContent = response.text;
+      }
+      
+      // 处理函数调用、图片输出和其他内容
+      if (response.candidates && response.candidates[0]?.content?.parts) {
+        const parts = response.candidates[0].content.parts;
+        // 调试日志：显示 parts 的内容类型
+        console.log(`[LLM] Gemini response parts count: ${parts.length}, types: ${parts.map(p => {
+          if (p.text) return 'text';
+          if (p.functionCall) return 'functionCall';
+          if ((p as any).inlineData) return 'inlineData';
+          return 'unknown';
+        }).join(', ')}`);
+        
+        for (const part of parts) {
+          if (part.functionCall) {
+            const toolCallId = part.functionCall.name || `call_${Date.now()}`;
+            toolCalls.push({
+              id: toolCallId,
+              type: 'function',
+              function: {
+                name: part.functionCall.name || '',
+                arguments: JSON.stringify(part.functionCall.args || {}),
+              },
+            });
+          }
+          
+          // 处理图片输出（inlineData）
+          if ((part as any).inlineData) {
+            const inlineData = (part as any).inlineData;
+            if (inlineData.mimeType && inlineData.data) {
+              const mediaType = inlineData.mimeType.startsWith('video/') ? 'video' : 'image';
+              media.push({
+                type: mediaType,
+                mimeType: inlineData.mimeType,
+                data: inlineData.data,
+              });
+              console.log(`[LLM] Gemini 返回了 ${mediaType}: mimeType=${inlineData.mimeType}, 大小=${Math.round(inlineData.data.length / 1024)}KB`);
+            }
+          }
+          
+          // 处理思维签名（如果有）
+          if ((part as any).thoughtSignature) {
+            thoughtSignature = (part as any).thoughtSignature;
+          }
+        }
+      }
+
+      return {
+        content: fullContent,
+        tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+        finish_reason: response.candidates?.[0]?.finishReason,
+        thoughtSignature: thoughtSignature,
+        toolCallSignatures: Object.keys(toolCallSignatures).length > 0 ? toolCallSignatures : undefined,
+        media: media.length > 0 ? media : undefined,
+      };
+    } catch (error: any) {
+      console.error('[LLM] Gemini API error:', error);
+      throw new Error(`Gemini API error: ${error.message || 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * 将 LLMMessage 格式转换为 Gemini SDK 的 Content 格式
+   * @param messages 消息列表
+   * @param stripThoughtSignatures 是否清理 thoughtSignature（图片生成模式需要）
+   */
+  private convertMessagesToGeminiContents(messages: LLMMessage[], stripThoughtSignatures: boolean = false): Content[] {
+    const contents: Content[] = [];
+    let currentUserParts: Part[] = [];
+    
+    // 如果是图片生成模式，只保留最近的消息，避免 thought_signature 冲突
+    // Gemini 图片生成模式不支持 thinking，如果历史消息中有 thinking 相关内容会导致 API 报错
+    let processMessages = messages;
+    if (stripThoughtSignatures) {
+      // 找到最后一条用户消息的索引
+      const lastUserIndex = messages.findLastIndex(m => m.role === 'user');
+      if (lastUserIndex >= 0) {
+        // 只保留 system 消息和最后一条用户消息
+        processMessages = messages.filter((m, i) => m.role === 'system' || i === lastUserIndex);
+        console.log(`[LLM] 图片生成模式: 简化历史消息，从 ${messages.length} 条减少到 ${processMessages.length} 条`);
+      }
+    }
+    
+    for (const msg of processMessages) {
+      // 跳过 system 消息（它们会在调用 API 时作为 systemInstruction 处理）
+      if (msg.role === 'system') {
+        continue;
+      }
+      
+      if (msg.role === 'user') {
+        // 如果之前有累积的 user parts，先提交
+        if (currentUserParts.length > 0) {
+          contents.push({ role: 'user', parts: currentUserParts });
+          currentUserParts = [];
+        }
+        
+        // 处理多模态内容
+        if (msg.parts && msg.parts.length > 0) {
+          for (const part of msg.parts) {
+            if (part.text && part.text.trim()) {
+              currentUserParts.push({ text: part.text });
+            }
+            
+            if (part.inlineData) {
+              currentUserParts.push({
+                inlineData: {
+                  mimeType: part.inlineData.mimeType,
+                  data: part.inlineData.data,
+                },
+              } as Part);
+            }
+          }
+        } else if (msg.content && msg.content.trim()) {
+          currentUserParts.push({ text: msg.content });
+        }
+      } else if (msg.role === 'assistant') {
+        // 如果之前有累积的 user parts，先提交
+        if (currentUserParts.length > 0) {
+          contents.push({ role: 'user', parts: currentUserParts });
+          currentUserParts = [];
+        }
+        
+        const modelParts: Part[] = [];
+        
+        // 处理文本内容
+        if (msg.content) {
+          modelParts.push({ text: msg.content });
+        }
+        
+        // 处理工具调用
+        if (msg.tool_calls) {
+          for (const toolCall of msg.tool_calls) {
+            try {
+              const args = JSON.parse(toolCall.function.arguments || '{}');
+              modelParts.push({
+                functionCall: {
+                  name: toolCall.function.name,
+                  args: args,
+                },
+              } as Part);
+            } catch (e) {
+              console.warn('[LLM] Failed to parse tool call arguments:', e);
+            }
+          }
+        }
+        
+        if (modelParts.length > 0) {
+          contents.push({ role: 'model', parts: modelParts });
+        }
+      } else if (msg.role === 'tool') {
+        // 工具响应
+        try {
+          const response = JSON.parse(msg.content || '{}');
+          currentUserParts.push({
+            functionResponse: {
+              name: msg.name || '',
+              response: response,
+            },
+          } as Part);
+        } catch (e) {
+          console.warn('[LLM] Failed to parse tool response:', e);
+          currentUserParts.push({
+            functionResponse: {
+              name: msg.name || '',
+              response: { error: msg.content || 'Unknown error' },
+            },
+          } as Part);
+        }
+      }
+    }
+    
+    // 处理剩余的 user parts
+    if (currentUserParts.length > 0) {
+      contents.push({ role: 'user', parts: currentUserParts });
+    }
+    
+    return contents;
+  }
+  
 
   /**
    * 调用本地模型（需要用户自己实现）
@@ -1184,8 +1650,9 @@ ${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
     tools?: MCPTool[],
     stream: boolean = false,
     onChunk?: (content: string, thinking?: string) => void,
-    messageHistory?: LLMMessage[] // 添加消息历史参数
-  ): Promise<{ content: string; thinking?: string }> {
+    messageHistory?: LLMMessage[], // 添加消息历史参数
+    onStepChange?: (step: string) => void // 添加步骤变化回调
+  ): Promise<{ content: string; thinking?: string; thoughtSignature?: string; toolCallSignatures?: Record<string, string>; media?: Array<{ type: 'image' | 'video'; mimeType: string; data: string }> }> {
     // 设置允许使用的工具列表
     const allTools: MCPTool[] = tools || [];
     this.setAllowedTools(allTools);
@@ -1209,11 +1676,21 @@ ${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
       messages.push(...historyMessages);
     }
     
-    // 添加当前用户消息
+    // 添加当前用户消息（支持多模态）
+    // 注意：如果 messageHistory 中已经包含了用户消息（包含多模态内容），这里不需要重复添加
+    // 检查最后一条消息是否是用户消息
+    const lastMessage = messages[messages.length - 1];
+    if (!lastMessage || lastMessage.role !== 'user') {
+      // 如果没有用户消息，添加新的用户消息
     messages.push({
       role: 'user',
       content: userInput,
     });
+    } else if (lastMessage.role === 'user' && !lastMessage.parts) {
+      // 如果最后一条消息是用户消息但没有多模态内容，更新内容
+      lastMessage.content = userInput;
+    }
+    // 如果最后一条消息已经是用户消息且包含多模态内容，则不需要添加（已在 messageHistory 中）
 
     let maxIterations = 10;
     let iteration = 0;
@@ -1259,32 +1736,68 @@ ${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
       }
 
       if (response.tool_calls && response.tool_calls.length > 0) {
-        messages.push({
+        // 构建 assistant 消息，包含思维签名
+        const assistantMsg: LLMMessage = {
           role: 'assistant',
           content: response.content || '',
           tool_calls: response.tool_calls,
-        });
+        };
+        
+        // 添加思维签名
+        if (response.thoughtSignature) {
+          assistantMsg.thoughtSignature = response.thoughtSignature;
+        }
+        
+        // 添加工具调用的思维签名
+        if (response.toolCallSignatures) {
+          assistantMsg.toolCallSignatures = response.toolCallSignatures;
+        }
+        
+        messages.push(assistantMsg);
 
         const toolResults = await Promise.all(
           response.tool_calls.map(async (toolCall) => {
             try {
+              // 更新步骤：正在调用工具
+              onStepChange?.(`正在调用工具: ${toolCall.function.name}`);
               console.log(`[LLM] Executing tool: ${toolCall.function.name}`);
               const result = await this.executeToolCall(toolCall);
               console.log(`[LLM] Tool result:`, result);
-              return {
+              // 工具调用完成，清除步骤提示
+              onStepChange?.('');
+              
+              // 构建工具响应消息，包含思维签名
+              const toolMsg: LLMMessage = {
                 tool_call_id: toolCall.id,
                 role: 'tool' as const,
                 name: toolCall.function.name,
                 content: JSON.stringify(result),
               };
+              
+              // 如果有工具调用的思维签名，添加到工具消息中
+              if (response.toolCallSignatures && response.toolCallSignatures[toolCall.id]) {
+                toolMsg.thoughtSignature = response.toolCallSignatures[toolCall.id];
+              }
+              
+              return toolMsg;
             } catch (error: any) {
               console.error(`[LLM] Tool execution error:`, error);
-              return {
+              // 工具调用失败，清除步骤提示
+              onStepChange?.('');
+              
+              // 构建错误响应，也包含思维签名（如果有）
+              const toolMsg: LLMMessage = {
                 tool_call_id: toolCall.id,
                 role: 'tool' as const,
                 name: toolCall.function.name,
                 content: JSON.stringify({ error: error.message }),
               };
+              
+              if (response.toolCallSignatures && response.toolCallSignatures[toolCall.id]) {
+                toolMsg.thoughtSignature = response.toolCallSignatures[toolCall.id];
+              }
+              
+              return toolMsg;
             }
           })
         );
@@ -1295,6 +1808,9 @@ ${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
         return {
           content: response.content,
           thinking: accumulatedThinking || response.thinking,
+          thoughtSignature: response.thoughtSignature, // 返回思维签名
+          toolCallSignatures: response.toolCallSignatures, // 返回工具调用的思维签名
+          media: response.media, // 返回多模态输出（图片等）
         };
       }
     }

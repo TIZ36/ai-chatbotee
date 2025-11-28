@@ -4,8 +4,8 @@
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Plus, Trash2, CheckCircle, XCircle, Edit2, Brain, Key, Save, X, Loader2, Loader } from 'lucide-react';
-import { getLLMConfigs, createLLMConfig, updateLLMConfig, deleteLLMConfig, LLMConfigFromDB, CreateLLMConfigRequest } from '../services/llmApi';
+import { Plus, Trash2, CheckCircle, XCircle, Edit2, Brain, Save, X, Loader2, Eye, EyeOff, Type, Image, Video, Music } from 'lucide-react';
+import { getLLMConfigs, createLLMConfig, updateLLMConfig, deleteLLMConfig, getLLMConfigApiKey, LLMConfigFromDB, CreateLLMConfigRequest } from '../services/llmApi';
 import { fetchOllamaModels } from '../services/ollamaService';
 
 const LLMConfigPanel: React.FC = () => {
@@ -26,6 +26,8 @@ const LLMConfigPanel: React.FC = () => {
   const [ollamaModels, setOllamaModels] = useState<string[]>([]);
   const [isLoadingOllamaModels, setIsLoadingOllamaModels] = useState(false);
   const [ollamaError, setOllamaError] = useState<string | null>(null);
+  const [showApiKey, setShowApiKey] = useState(false); // 控制API密钥显示/隐藏
+  const [loadingApiKey, setLoadingApiKey] = useState(false); // 加载API密钥状态
 
   useEffect(() => {
     loadConfigs();
@@ -111,6 +113,7 @@ const LLMConfigPanel: React.FC = () => {
       enabled: true,
         tags: [],
         description: '',
+        metadata: {},
     });
     setIsAdding(false);
     } catch (error) {
@@ -120,15 +123,31 @@ const LLMConfigPanel: React.FC = () => {
   };
 
   const handleUpdateConfig = async () => {
-    // Ollama 不需要 API key，其他提供商需要
-    const requiresApiKey = newConfig.provider !== 'ollama';
-    if (!editingId || !newConfig.name || (requiresApiKey && !newConfig.api_key)) {
-      alert(requiresApiKey ? '请填写配置名称和API密钥' : '请填写配置名称');
+    // 编辑时：Ollama 不需要 API key，其他提供商在新建时需要，但编辑时可以不填写（留空则不更新）
+    if (!editingId || !newConfig.name) {
+      alert('请填写配置名称');
       return;
     }
 
+    // 构建更新数据，如果api_key为空字符串，则不包含在更新数据中（后端会保留原有值）
+    const updateData: Partial<CreateLLMConfigRequest> = {
+      name: newConfig.name,
+      provider: newConfig.provider,
+      api_url: newConfig.api_url,
+      model: newConfig.model,
+      enabled: newConfig.enabled,
+      tags: newConfig.tags,
+      description: newConfig.description,
+      metadata: newConfig.metadata,
+    };
+    
+    // 只有在非Ollama且提供了api_key时才更新api_key
+    if (newConfig.provider !== 'ollama' && newConfig.api_key && newConfig.api_key.trim() !== '') {
+      updateData.api_key = newConfig.api_key;
+    }
+
     try {
-      await updateLLMConfig(editingId, newConfig);
+      await updateLLMConfig(editingId, updateData);
       await loadConfigs();
     
       // 重置表单
@@ -141,6 +160,7 @@ const LLMConfigPanel: React.FC = () => {
       enabled: true,
         tags: [],
         description: '',
+        metadata: {},
     });
     setIsAdding(false);
     setEditingId(null);
@@ -164,24 +184,52 @@ const LLMConfigPanel: React.FC = () => {
     }
   };
 
-  const handleEditConfig = (config: LLMConfigFromDB) => {
+  const handleEditConfig = async (config: LLMConfigFromDB) => {
     setNewConfig({
       name: config.name,
       provider: config.provider,
-      api_key: '', // 不显示API密钥（安全）
+      api_key: '', // 初始为空，用户可以通过点击眼睛图标查看
       api_url: config.api_url,
       model: config.model,
       enabled: config.enabled,
       tags: config.tags || [],
       description: config.description,
+      metadata: config.metadata || {},
     });
     setEditingId(config.config_id);
       setIsAdding(true);
+    setShowApiKey(false); // 重置显示状态
+  };
+
+  // 加载并显示API密钥
+  const handleLoadApiKey = async () => {
+    if (!editingId) return;
+    
+    if (showApiKey) {
+      // 如果已经显示，则隐藏
+      setShowApiKey(false);
+      setNewConfig(prev => ({ ...prev, api_key: '' }));
+      return;
+    }
+    
+    // 加载API密钥
+    setLoadingApiKey(true);
+    try {
+      const apiKey = await getLLMConfigApiKey(editingId);
+      setNewConfig(prev => ({ ...prev, api_key: apiKey }));
+      setShowApiKey(true);
+    } catch (error) {
+      console.error('Failed to load API key:', error);
+      alert(`加载API密钥失败: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setLoadingApiKey(false);
+    }
   };
 
   const handleCancel = () => {
     setIsAdding(false);
     setEditingId(null);
+    setShowApiKey(false);
     setNewConfig({
       name: '',
       provider: 'openai',
@@ -191,6 +239,7 @@ const LLMConfigPanel: React.FC = () => {
       enabled: true,
       tags: [],
       description: '',
+      metadata: {},
     });
   };
 
@@ -200,6 +249,8 @@ const LLMConfigPanel: React.FC = () => {
         return 'sk-...';
       case 'anthropic':
         return 'sk-ant-...';
+      case 'gemini':
+        return 'AIza...';
       case 'ollama':
         return 'Ollama 不需要 API 密钥（可选）';
       default:
@@ -213,6 +264,8 @@ const LLMConfigPanel: React.FC = () => {
         return 'https://api.openai.com/v1/chat/completions';
       case 'anthropic':
         return 'https://api.anthropic.com/v1/messages';
+      case 'gemini':
+        return 'https://generativelanguage.googleapis.com/v1beta';
       case 'ollama':
         return 'http://localhost:11434';
       default:
@@ -226,6 +279,8 @@ const LLMConfigPanel: React.FC = () => {
         return 'gpt-4';
       case 'anthropic':
         return 'claude-3-5-sonnet-20241022';
+      case 'gemini':
+        return 'gemini-2.5-flash';
       case 'ollama':
         return '';
       default:
@@ -239,6 +294,8 @@ const LLMConfigPanel: React.FC = () => {
         return 'https://api.openai.com/v1/chat/completions 或 https://api.deepseek.com';
       case 'anthropic':
         return 'https://api.anthropic.com/v1/messages';
+      case 'gemini':
+        return 'https://generativelanguage.googleapis.com/v1beta';
       case 'ollama':
         return 'http://10.104.4.16:11434 或 http://localhost:11434';
       default:
@@ -276,6 +333,7 @@ const LLMConfigPanel: React.FC = () => {
               enabled: true,
                 tags: [],
                 description: '',
+                metadata: {},
             });
           }}
           className="btn-primary flex items-center space-x-2"
@@ -331,13 +389,14 @@ const LLMConfigPanel: React.FC = () => {
                       provider,
                       api_url: getProviderDefaultUrl(provider),
                       model: getProviderDefaultModel(provider),
-                      api_key: provider === 'ollama' ? '' : newConfig.api_key, // Ollama 清空 API key
+                      api_key: (provider === 'ollama') ? '' : newConfig.api_key, // Ollama 清空 API key
                     });
                   }}
                   className="input-field appearance-none pr-8"
                 >
                   <option value="openai">OpenAI</option>
                   <option value="anthropic">Anthropic (Claude)</option>
+                  <option value="gemini">Google Gemini</option>
                   <option value="ollama">Ollama</option>
                   <option value="local">本地模型</option>
                   <option value="custom">自定义</option>
@@ -350,6 +409,8 @@ const LLMConfigPanel: React.FC = () => {
                         return <Brain className="w-4 h-4 text-[#10A37F]" />;
                       case 'anthropic':
                         return <Brain className="w-4 h-4 text-[#D4A574]" />;
+                      case 'gemini':
+                        return <Brain className="w-4 h-4 text-[#4285F4]" />;
                       case 'ollama':
                         return <Brain className="w-4 h-4 text-[#1D4ED8]" />;
                       default:
@@ -364,15 +425,35 @@ const LLMConfigPanel: React.FC = () => {
             {newConfig.provider !== 'ollama' && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  API密钥 * {editingId && <span className="text-xs text-gray-500">(留空则不更新)</span>}
+                  API密钥 {!editingId && <span className="text-red-500">*</span>} {editingId && <span className="text-xs text-gray-500">(留空则不更新)</span>}
                 </label>
+                <div className="relative">
                 <input
-                  type="password"
+                    type={showApiKey ? 'text' : 'password'}
                   value={newConfig.api_key || ''}
                   onChange={(e) => setNewConfig({ ...newConfig, api_key: e.target.value })}
-                  className="input-field"
-                  placeholder={getProviderPlaceholder(newConfig.provider || 'openai')}
-                />
+                    className="input-field pr-10"
+                    placeholder={editingId ? '点击右侧眼睛图标查看或留空不更新' : getProviderPlaceholder(newConfig.provider || 'openai')}
+                    readOnly={editingId !== null && !showApiKey && !newConfig.api_key}
+                  />
+                  {editingId && (
+                    <button
+                      type="button"
+                      onClick={handleLoadApiKey}
+                      disabled={loadingApiKey}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors disabled:opacity-50"
+                      title={showApiKey ? '隐藏API密钥' : '显示API密钥'}
+                    >
+                      {loadingApiKey ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : showApiKey ? (
+                        <EyeOff className="w-4 h-4" />
+                      ) : (
+                        <Eye className="w-4 h-4" />
+                      )}
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
@@ -425,7 +506,7 @@ const LLMConfigPanel: React.FC = () => {
             </div>
 
             {/* API URL */}
-            {(newConfig.provider === 'local' || newConfig.provider === 'custom' || newConfig.provider === 'openai' || newConfig.provider === 'ollama') && (
+            {(newConfig.provider === 'local' || newConfig.provider === 'custom' || newConfig.provider === 'openai' || newConfig.provider === 'gemini' || newConfig.provider === 'ollama') && (
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   {newConfig.provider === 'ollama' ? 'Ollama 服务器地址' : 'API URL'}
@@ -477,6 +558,133 @@ const LLMConfigPanel: React.FC = () => {
                 rows={2}
                 placeholder="模型描述..."
               />
+            </div>
+
+            {/* Thinking 模式配置 */}
+            <div className="md:col-span-2 flex items-center space-x-2">
+              <input
+                type="checkbox"
+                id="enableThinking"
+                checked={newConfig.metadata?.enableThinking ?? false}
+                onChange={(e) => {
+                  setNewConfig({
+                    ...newConfig,
+                    metadata: {
+                      ...newConfig.metadata,
+                      enableThinking: e.target.checked,
+                    },
+                  });
+                }}
+                className="w-4 h-4 text-primary-500 border-gray-300 rounded focus:ring-primary-500"
+              />
+              <label htmlFor="enableThinking" className="text-sm font-medium text-gray-700">
+                启用 Thinking 模式（深度思考）
+              </label>
+              <span className="text-xs text-gray-500">
+                （一旦启用，聊天中不允许切换模式。用户可灵活测试后确认）
+              </span>
+            </div>
+
+            {/* 支持的输入类型 */}
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                支持的输入类型
+              </label>
+              <div className="flex flex-wrap gap-3">
+                {(['text', 'image', 'video', 'audio'] as const).map((type) => {
+                  const supportedInputs = newConfig.metadata?.supportedInputs || [];
+                  const isChecked = supportedInputs.includes(type);
+                  const icons = {
+                    text: Type,
+                    image: Image,
+                    video: Video,
+                    audio: Music,
+                  };
+                  const labels = {
+                    text: '文字',
+                    image: '图片',
+                    video: '视频',
+                    audio: '音频',
+                  };
+                  const Icon = icons[type];
+                  
+                  return (
+                    <label key={type} className="flex items-center space-x-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={(e) => {
+                          const current = newConfig.metadata?.supportedInputs || [];
+                          const updated = e.target.checked
+                            ? [...current, type]
+                            : current.filter((t: string) => t !== type);
+                          setNewConfig({
+                            ...newConfig,
+                            metadata: {
+                              ...newConfig.metadata,
+                              supportedInputs: updated,
+                            },
+                          });
+                        }}
+                        className="w-4 h-4 text-primary-500 border-gray-300 rounded focus:ring-primary-500"
+                      />
+                      <Icon className="w-4 h-4 text-gray-600" />
+                      <span className="text-sm text-gray-700">{labels[type]}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 支持的输出类型 */}
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                支持的输出类型
+              </label>
+              <div className="flex flex-wrap gap-3">
+                {(['text', 'image', 'video', 'audio'] as const).map((type) => {
+                  const supportedOutputs = newConfig.metadata?.supportedOutputs || [];
+                  const isChecked = supportedOutputs.includes(type);
+                  const icons = {
+                    text: Type,
+                    image: Image,
+                    video: Video,
+                    audio: Music,
+                  };
+                  const labels = {
+                    text: '文字',
+                    image: '图片',
+                    video: '视频',
+                    audio: '音频',
+                  };
+                  const Icon = icons[type];
+                  
+                  return (
+                    <label key={type} className="flex items-center space-x-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={(e) => {
+                          const current = newConfig.metadata?.supportedOutputs || [];
+                          const updated = e.target.checked
+                            ? [...current, type]
+                            : current.filter((t: string) => t !== type);
+                          setNewConfig({
+                            ...newConfig,
+                            metadata: {
+                              ...newConfig.metadata,
+                              supportedOutputs: updated,
+                            },
+                          });
+                        }}
+                        className="w-4 h-4 text-primary-500 border-gray-300 rounded focus:ring-primary-500"
+                      />
+                      <Icon className="w-4 h-4 text-gray-600" />
+                      <span className="text-sm text-gray-700">{labels[type]}</span>
+                    </label>
+                  );
+                })}
+              </div>
             </div>
 
             {/* 启用状态 */}
@@ -549,6 +757,12 @@ const LLMConfigPanel: React.FC = () => {
                 case 'anthropic':
                   return (
                     <div className="w-5 h-5 rounded bg-[#D4A574] flex items-center justify-center">
+                      <Brain className="w-3.5 h-3.5 text-white" />
+                    </div>
+                  );
+                case 'gemini':
+                  return (
+                    <div className="w-5 h-5 rounded bg-[#4285F4] flex items-center justify-center">
                       <Brain className="w-3.5 h-3.5 text-white" />
                     </div>
                   );

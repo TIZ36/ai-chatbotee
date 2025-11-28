@@ -11,7 +11,69 @@ import requests
 from typing import Optional, Dict, Any
 from urllib.parse import urlencode
 
-from database import save_oauth_token, get_oauth_token, is_token_expired, refresh_oauth_token, get_oauth_config
+from database import save_oauth_token, get_oauth_token, is_token_expired, refresh_oauth_token, get_oauth_config, get_mysql_connection
+
+
+def get_notion_registration_from_db(client_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """
+    从数据库获取 Notion 注册信息
+    
+    Args:
+        client_id: 可选的 client_id，如果不提供则返回第一个注册信息
+        
+    Returns:
+        注册信息字典，如果不存在则返回 None
+    """
+    try:
+        conn = get_mysql_connection()
+        if not conn:
+            return None
+        
+        cursor = conn.cursor()
+        
+        if client_id:
+            cursor.execute("""
+                SELECT client_id, client_name, redirect_uri, redirect_uri_base, 
+                       client_uri, registration_data
+                FROM notion_registrations
+                WHERE client_id = %s
+                LIMIT 1
+            """, (client_id,))
+        else:
+            # 返回最新的注册信息
+            cursor.execute("""
+                SELECT client_id, client_name, redirect_uri, redirect_uri_base, 
+                       client_uri, registration_data
+                FROM notion_registrations
+                ORDER BY created_at DESC
+                LIMIT 1
+            """)
+        
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if not row:
+            return None
+        
+        registration_data = row[5]  # registration_data JSON
+        if isinstance(registration_data, str):
+            try:
+                registration_data = json.loads(registration_data)
+            except:
+                registration_data = {}
+        
+        return {
+            'client_id': row[0],
+            'client_name': row[1],
+            'redirect_uri': row[2],
+            'redirect_uri_base': row[3],
+            'client_uri': row[4],
+            'registration_data': registration_data,
+        }
+    except Exception as e:
+        print(f"[Notion OAuth] Error getting registration from DB: {e}")
+        return None
 
 
 class NotionOAuthHandler:
@@ -21,26 +83,41 @@ class NotionOAuthHandler:
     TOKEN_ENDPOINT = "https://mcp.notion.com/token"
     RESOURCE = "https://mcp.notion.com/"
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], client_id: Optional[str] = None):
         """
         初始化 Notion OAuth 处理器
         
         Args:
-            config: 应用配置字典（包含 notion 配置）
+            config: 应用配置字典（保留用于兼容性，但不再使用其中的 notion 配置）
+            client_id: 可选的 client_id，用于从数据库查找特定注册信息
         """
         self.config = config
+        self.client_id = client_id
+        # 从数据库读取注册信息
+        self.registration = get_notion_registration_from_db(client_id)
+        
+        # 兼容旧代码：如果没有数据库注册信息，尝试从 config.yaml 读取（向后兼容）
+        if not self.registration:
         self.notion_config = config.get('notion', {})
+            print(f"[Notion OAuth] ⚠️ No registration found in DB, falling back to config.yaml")
+        else:
+            self.notion_config = {}  # 不再使用 config.yaml
+            print(f"[Notion OAuth] ✅ Using registration from DB: {self.registration.get('client_name')}")
     
     def get_client_id(self) -> Optional[str]:
-        """获取 Notion Client ID"""
+        """获取 Notion Client ID（优先从数据库，否则从配置）"""
+        if self.registration:
+            return self.registration.get('client_id')
         return self.notion_config.get('client_id', '').strip() or None
     
     def get_client_secret(self) -> Optional[str]:
-        """获取 Notion Client Secret"""
-        return self.notion_config.get('client_secret', '').strip() or None
+        """获取 Notion Client Secret（Notion MCP 不需要）"""
+        return None  # Notion MCP 使用 token_endpoint_auth_method: 'none'
     
     def get_redirect_uri(self) -> str:
-        """获取 Redirect URI"""
+        """获取 Redirect URI（优先从数据库，否则从配置）"""
+        if self.registration:
+            return self.registration.get('redirect_uri')
         backend_url = self.config.get('server', {}).get('url', 'http://localhost:3001')
         return self.notion_config.get('redirect_uri', f"{backend_url}/mcp/oauth/callback/")
     
@@ -257,21 +334,22 @@ def get_notion_oauth_config(config: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def generate_notion_authorization_url(config: Dict[str, Any]) -> Dict[str, str]:
+def generate_notion_authorization_url(config: Dict[str, Any], client_id: Optional[str] = None) -> Dict[str, str]:
     """
     生成 Notion OAuth 授权 URL（便捷函数）
     
     Args:
         config: 应用配置字典
+        client_id: 可选的 client_id，用于从数据库查找特定注册信息
         
     Returns:
         包含 authorization_url, state, code_verifier 的字典
     """
-    handler = NotionOAuthHandler(config)
+    handler = NotionOAuthHandler(config, client_id)
     return handler.generate_authorization_url()
 
 
-def exchange_notion_token(config: Dict[str, Any], code: str, code_verifier: str, redirect_uri: Optional[str] = None) -> Dict[str, Any]:
+def exchange_notion_token(config: Dict[str, Any], code: str, code_verifier: str, redirect_uri: Optional[str] = None, client_id: Optional[str] = None) -> Dict[str, Any]:
     """
     交换 Notion OAuth token（便捷函数）
     
@@ -280,15 +358,16 @@ def exchange_notion_token(config: Dict[str, Any], code: str, code_verifier: str,
         code: 授权码
         code_verifier: PKCE code_verifier
         redirect_uri: 重定向 URI（可选）
+        client_id: 可选的 client_id，用于从数据库查找特定注册信息
         
     Returns:
         Token 信息字典
     """
-    handler = NotionOAuthHandler(config)
+    handler = NotionOAuthHandler(config, client_id)
     return handler.exchange_token(code, code_verifier, redirect_uri)
 
 
-def refresh_notion_token(config: Dict[str, Any], refresh_token: str, mcp_url: str) -> Optional[Dict[str, Any]]:
+def refresh_notion_token(config: Dict[str, Any], refresh_token: str, mcp_url: str, client_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     刷新 Notion OAuth token（便捷函数）
     
@@ -296,11 +375,12 @@ def refresh_notion_token(config: Dict[str, Any], refresh_token: str, mcp_url: st
         config: 应用配置字典
         refresh_token: Refresh token
         mcp_url: MCP 服务器 URL
+        client_id: 可选的 client_id，用于从数据库查找特定注册信息
         
     Returns:
         新的 token 信息，如果失败则返回 None
     """
-    handler = NotionOAuthHandler(config)
+    handler = NotionOAuthHandler(config, client_id)
     return handler.refresh_access_token(refresh_token, mcp_url)
 
 
@@ -372,14 +452,15 @@ def parse_notion_sse_event(event_type: str, data: str) -> Optional[Dict[str, Any
     """
     try:
         # 使用通用 MCP 解析
+        # 使用绝对导入，因为从 app.py 导入时路径不同
         import sys
-        from pathlib import Path
-        # 添加父目录到路径以导入 mcp_common_logic
-        parent_dir = str(Path(__file__).parent.parent)
-        if parent_dir not in sys.path:
-            sys.path.insert(0, parent_dir)
+        import os
+        # 获取 backend 目录路径
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if backend_dir not in sys.path:
+            sys.path.insert(0, backend_dir)
         
-        from mcp_common_logic import parse_sse_event as generic_parse_sse_event
+        from mcp_server.mcp_common_logic import parse_sse_event as generic_parse_sse_event
         
         # 先用通用解析
         response = generic_parse_sse_event(event_type, data)

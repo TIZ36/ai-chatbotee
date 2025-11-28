@@ -1493,7 +1493,10 @@ def mcp_proxy_inspector():
                 log_http_request('GET', target_url, headers=headers)
                 
                 # 转发 SSE 请求
-                sse_response = requests.get(
+                # 使用连接池（对于 GET 请求，也使用 Session 以复用连接）
+                from mcp_server.mcp_common_logic import get_mcp_session
+                session = get_mcp_session(target_url)
+                sse_response = session.get(
                     target_url,
                     headers=headers,
                     stream=True,
@@ -1682,8 +1685,10 @@ def mcp_proxy_inspector():
                 # 记录请求信息
                 log_http_request('POST', target_url, headers=headers, json_data=json_data)
                 
-                # 转发到目标服务器
-                post_response = requests.post(
+                # 转发到目标服务器（使用连接池）
+                from mcp_server.mcp_common_logic import get_mcp_session
+                session = get_mcp_session(target_url)
+                post_response = session.post(
                     target_url,
                     json=json_data,
                     headers=headers,
@@ -2145,12 +2150,20 @@ def mcp_oauth_authorize():
             }), 400
         
         # 使用固定的回调地址（不包含client_id）
-        # 对于 Notion，使用 config.yaml 中的 redirect_uri（包含末尾斜杠）
+        # 对于 Notion，从数据库读取注册信息
         is_notion = resource and 'mcp.notion.com' in resource
         if is_notion:
-            notion_config = config.get('notion', {})
-            redirect_uri = notion_config.get('redirect_uri', f"{config.get('server', {}).get('url', 'http://localhost:3001')}/mcp/oauth/callback/")
-            print(f"[MCP OAuth] Detected Notion MCP, using redirect_uri from config.yaml")
+            # 从数据库读取 Notion 注册信息
+            from mcp_server.well_known.notion import get_notion_registration_from_db
+            notion_registration = get_notion_registration_from_db(client_id)
+            if notion_registration:
+                redirect_uri = notion_registration.get('redirect_uri')
+                print(f"[MCP OAuth] Detected Notion MCP, using redirect_uri from database: {redirect_uri}")
+            else:
+                # 向后兼容：如果没有数据库记录，使用 config.yaml
+                notion_config = config.get('notion', {})
+                redirect_uri = notion_config.get('redirect_uri', f"{config.get('server', {}).get('url', 'http://localhost:3001')}/mcp/oauth/callback/")
+                print(f"[MCP OAuth] ⚠️ No Notion registration in DB, using redirect_uri from config.yaml")
         else:
             backend_url = config.get('server', {}).get('url', 'http://localhost:3001')
             redirect_uri = f"{backend_url}/mcp/oauth/callback"
@@ -2203,32 +2216,39 @@ def mcp_oauth_authorize():
         print(f"[MCP OAuth] Generated authorization URL (full): {authorization_url}")
         print(f"[MCP OAuth] Generated authorization URL (truncated): {authorization_url[:150]}...")
         
-        # 保存 OAuth 配置到 Redis（使用 client_id 作为 key）
+        # 保存 OAuth 配置到 Redis（使用 state 作为 key）
+        # 只保存 client_id，其他信息从 MySQL 获取
         from database import save_oauth_config
         
+        # 获取 token_endpoint 和其他配置
+        token_endpoint = data.get('token_endpoint')
+        client_secret = data.get('client_secret', '')
+        token_endpoint_auth_methods_supported = data.get('token_endpoint_auth_methods_supported', ['none'])
+        
         oauth_config = {
-            'client_id': client_id,
+            'client_id': client_id,  # 只保存 client_id，其他信息从数据库获取
             'code_verifier': code_verifier,
+            'code_challenge': code_challenge,
             'code_challenge_method': code_challenge_method,
-            'token_endpoint': data.get('token_endpoint'),  # 从请求中获取
-            'client_secret': data.get('client_secret', ''),
-            'redirect_uri': redirect_uri,  # 后端回调地址（包含 client_id）
+            'token_endpoint': token_endpoint,  # 从请求中获取
+            'client_secret': client_secret,
+            'redirect_uri': redirect_uri,
             'resource': resource,
-            'token_endpoint_auth_methods_supported': data.get('token_endpoint_auth_methods_supported', ['none']),
+            'token_endpoint_auth_methods_supported': token_endpoint_auth_methods_supported,
             'mcp_url': mcp_url,  # 保存 MCP URL，用于后续 token 管理
-            'state': state,  # 保留原始 state
         }
         
-        # 使用 client_id 作为 key 保存到 Redis，TTL 10 分钟
-        save_success = save_oauth_config(client_id, oauth_config, ttl=600)
+        # 使用 state 作为 key 保存到 Redis，TTL 10 分钟
+        save_success = save_oauth_config(state, oauth_config, ttl=600)
         if not save_success:
             print(f"[MCP OAuth] ⚠️ WARNING: Failed to save OAuth config to Redis!")
             return jsonify({
                 'error': 'Failed to save OAuth configuration',
                 'message': 'Could not save OAuth configuration to Redis. Please check Redis connection.'
             }), 500
-        print(f"[MCP OAuth] OAuth config saved to Redis with client_id: {client_id}")
-        print(f"[MCP OAuth] Redis key: oauth:config:{client_id}")
+        print(f"[MCP OAuth] ✅ OAuth config saved to Redis")
+        print(f"[MCP OAuth] Redis key: oauth:config:{state}")
+        print(f"[MCP OAuth] Client ID: {client_id}")
         
         return jsonify({
             'authorization_url': authorization_url,
@@ -2259,31 +2279,7 @@ def mcp_oauth_callback():
     
     从 config.yaml 读取 client_id，用于从 Redis 获取配置
     """
-    # 从 config.yaml 读取 client_id
-    notion_config = config.get('notion', {})
-    client_id = notion_config.get('client_id', '')
-    
-    if not client_id:
-        print(f"[MCP OAuth Callback] ❌ ERROR: client_id not found in config.yaml")
-        error_html = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>OAuth 配置错误</title>
-            <meta charset="utf-8">
-            <style>
-                body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
-                .error { color: #dc2626; }
-            </style>
-        </head>
-        <body>
-            <h1 class="error">OAuth 配置错误</h1>
-            <p>请在 backend/config.yaml 中配置 notion.client_id</p>
-            <p><a href="/mcp-config">返回 MCP 配置页面</a></p>
-        </body>
-        </html>
-        """
-        return error_html, 500
+    # 不再从 config.yaml 读取 client_id，而是从 state 对应的 Redis 配置中获取
     
     # 立即打印请求信息（无论什么方法）
     import sys
@@ -2294,7 +2290,6 @@ def mcp_oauth_callback():
 Method: {request.method}
 URL: {request.url}
 Path: {request.path}
-Client ID (from config.yaml): {client_id}
 Query String: {request.query_string.decode('utf-8') if request.query_string else 'None'}
 Headers: {dict(request.headers)}
 {'='*80}
@@ -2324,7 +2319,6 @@ Headers: {dict(request.headers)}
             error_description = request.args.get('error_description')
             
             print(f"[OAuth Callback] Request URL: {request.url}")
-            print(f"[OAuth Callback] Client ID: {client_id}")
             print(f"[OAuth Callback] Code: {code}")
             print(f"[OAuth Callback] Code (full): {code}")
             print(f"[OAuth Callback] State: {state}")
@@ -2381,18 +2375,18 @@ Headers: {dict(request.headers)}
                 """
                 return error_html, 400
             
-            # 从 Redis 获取 OAuth 配置（使用 client_id）
+            # 从 Redis 获取 OAuth 配置（使用 state 作为 key）
             from database import get_oauth_config, delete_oauth_config, save_oauth_config, get_redis_client
             
-            print(f"[OAuth Callback] Looking for OAuth config with client_id: {client_id}")
-            print(f"[OAuth Callback] Full client_id: {client_id}")
+            print(f"[OAuth Callback] Looking for OAuth config with state: {state[:30]}...")
+            print(f"[OAuth Callback] Full state: {state}")
             
             # 尝试获取配置
-            oauth_config = get_oauth_config(client_id)
+            oauth_config = get_oauth_config(state)
             
             # 如果找不到，尝试列出所有OAuth配置key以便调试
             if not oauth_config:
-                print(f"[OAuth Callback] ⚠️ OAuth config not found for client_id: {client_id}")
+                print(f"[OAuth Callback] ⚠️ OAuth config not found for state: {state[:30]}...")
                 try:
                     redis_client = get_redis_client()
                     if redis_client:
@@ -2400,18 +2394,6 @@ Headers: {dict(request.headers)}
                         print(f"[OAuth Callback] Available OAuth config keys in Redis: {[k.decode('utf-8') if isinstance(k, bytes) else k for k in all_keys[:20]]}")
                 except Exception as e:
                     print(f"[OAuth Callback] Error checking Redis keys: {e}")
-            
-            # 打印 code_verifier 用于手动调试
-            if oauth_config:
-                code_verifier = oauth_config.get('code_verifier')
-                print("\n" + "="*80)
-                print("==== DEBUG INFO FOR MANUAL TESTING ====")
-                print("="*80)
-                print(f"Code: {code}")
-                print(f"Code Verifier: {code_verifier}")
-                print(f"Client ID: {client_id}")
-                print(f"State: {state}")
-                print("="*80 + "\n")
             
             if not oauth_config:
                 error_html = f"""
@@ -2429,7 +2411,7 @@ Headers: {dict(request.headers)}
                 <body>
                     <h1 class="error">OAuth 配置过期</h1>
                     <p>OAuth 配置已过期或不存在。请重新开始授权流程。</p>
-                    <p class="info">Client ID: {client_id}</p>
+                    <p class="info">State: {state[:30]}...</p>
                     <p><a href="/mcp-config">返回 MCP 配置页面</a></p>
                 </body>
                 </html>
@@ -2439,19 +2421,49 @@ Headers: {dict(request.headers)}
             # 从 Redis 配置中提取所需信息
             code_verifier = oauth_config.get('code_verifier')
             token_endpoint = oauth_config.get('token_endpoint')
-            # client_id 已从路径参数获取，验证配置中的client_id是否匹配
+            # client_id 从 OAuth 配置中获取（之前保存的）
             config_client_id = oauth_config.get('client_id')
-            if config_client_id and config_client_id != client_id:
-                print(f"[OAuth Callback] ⚠️ Warning: Client ID mismatch. Path: {client_id}, Config: {config_client_id}")
+            if not config_client_id:
+                print(f"[OAuth Callback] ❌ ERROR: client_id not found in OAuth config")
+                error_html = """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>OAuth 配置错误</title>
+                    <meta charset="utf-8">
+                    <style>
+                        body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+                        .error { color: #dc2626; }
+                    </style>
+                </head>
+                <body>
+                    <h1 class="error">OAuth 配置错误</h1>
+                    <p>OAuth 配置中缺少 client_id</p>
+                    <p><a href="/mcp-config">返回 MCP 配置页面</a></p>
+                </body>
+                </html>
+                """
+                return error_html, 400
+            
+            print(f"[OAuth Callback] Using client_id from OAuth config: {config_client_id[:10]}...")
+            
             client_secret = oauth_config.get('client_secret', '')
             resource = oauth_config.get('resource')
             # 使用固定的回调地址（不包含client_id）
-            # 对于 Notion，使用 config.yaml 中的 redirect_uri（包含末尾斜杠）
+            # 对于 Notion，从数据库读取注册信息
             is_notion = resource and 'mcp.notion.com' in resource
             if is_notion:
-                notion_config = config.get('notion', {})
-                redirect_uri = notion_config.get('redirect_uri', f"{config.get('server', {}).get('url', 'http://localhost:3001')}/mcp/oauth/callback/")
-                print(f"[MCP OAuth Callback] Detected Notion MCP, using redirect_uri from config.yaml")
+                # 从数据库读取 Notion 注册信息
+                from mcp_server.well_known.notion import get_notion_registration_from_db
+                notion_registration = get_notion_registration_from_db(config_client_id)
+                if notion_registration:
+                    redirect_uri = notion_registration.get('redirect_uri')
+                    print(f"[MCP OAuth Callback] Detected Notion MCP, using redirect_uri from database: {redirect_uri}")
+                else:
+                    # 向后兼容：如果没有数据库记录，使用 config.yaml
+                    notion_config = config.get('notion', {})
+                    redirect_uri = notion_config.get('redirect_uri', f"{config.get('server', {}).get('url', 'http://localhost:3001')}/mcp/oauth/callback/")
+                    print(f"[MCP OAuth Callback] ⚠️ No Notion registration in DB, using redirect_uri from config.yaml")
             else:
                 backend_url = config.get('server', {}).get('url', 'http://localhost:3001')
                 redirect_uri = f"{backend_url}/mcp/oauth/callback"
@@ -2460,20 +2472,19 @@ Headers: {dict(request.headers)}
             
             print("[OAuth Callback] OAuth Config from Redis:")
             print(f"  token_endpoint: {token_endpoint}")
-            print(f"  client_id (from path): {client_id}")
             print(f"  client_id (from config): {config_client_id}")
             print(f"  redirect_uri (fixed): {redirect_uri}")
             print(f"  resource: {resource}")
             print(f"  mcp_url: {mcp_url}")
             print(f"  code_verifier present: {bool(code_verifier)}")
             
-            if not code_verifier or not token_endpoint or not client_id or not redirect_uri:
+            if not code_verifier or not token_endpoint or not config_client_id or not redirect_uri:
                 missing_fields = []
                 if not code_verifier:
                     missing_fields.append('code_verifier')
                 if not token_endpoint:
                     missing_fields.append('token_endpoint')
-                if not client_id:
+                if not config_client_id:
                     missing_fields.append('client_id')
                 if not redirect_uri:
                     missing_fields.append('redirect_uri')
@@ -2484,7 +2495,7 @@ Headers: {dict(request.headers)}
                 print(f"[OAuth Callback] Field values:")
                 print(f"  code_verifier: {'present' if code_verifier else 'MISSING'} ({type(code_verifier).__name__})")
                 print(f"  token_endpoint: {'present' if token_endpoint else 'MISSING'} ({type(token_endpoint).__name__})")
-                print(f"  client_id: {'present' if client_id else 'MISSING'} ({type(client_id).__name__})")
+                print(f"  client_id: {'present' if config_client_id else 'MISSING'} ({type(config_client_id).__name__ if config_client_id else 'None'})")
                 print(f"  redirect_uri: {'present' if redirect_uri else 'MISSING'} ({type(redirect_uri).__name__})")
                 
                 error_html = f"""
@@ -2509,6 +2520,32 @@ Headers: {dict(request.headers)}
                 """
                 return error_html, 400
             
+            # 从 OAuth 配置中获取 client_id（之前保存的）
+            config_client_id = oauth_config.get('client_id')
+            if not config_client_id:
+                print(f"[OAuth Callback] ❌ ERROR: client_id not found in OAuth config")
+                error_html = """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>OAuth 配置错误</title>
+                    <meta charset="utf-8">
+                    <style>
+                        body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+                        .error { color: #dc2626; }
+                    </style>
+                </head>
+                <body>
+                    <h1 class="error">OAuth 配置错误</h1>
+                    <p>OAuth 配置中缺少 client_id</p>
+                    <p><a href="/mcp-config">返回 MCP 配置页面</a></p>
+                </body>
+                </html>
+                """
+                return error_html, 400
+            
+            print(f"[OAuth Callback] Using client_id from OAuth config: {config_client_id[:10]}...")
+            
             # 自动交换 token
             print(f"[MCP OAuth] Exchanging code for access token")
             
@@ -2516,7 +2553,8 @@ Headers: {dict(request.headers)}
             if is_notion:
                 try:
                     from mcp_server.well_known.notion import exchange_notion_token
-                    token_data = exchange_notion_token(config, code, code_verifier, redirect_uri)
+                    # 传递 client_id 以便从数据库读取注册信息
+                    token_data = exchange_notion_token(config, code, code_verifier, redirect_uri, config_client_id)
                     access_token = token_data.get('access_token')
                     refresh_token = token_data.get('refresh_token')
                     expires_in = token_data.get('expires_in')
@@ -2552,13 +2590,13 @@ Headers: {dict(request.headers)}
                     'code': code,
                     'redirect_uri': redirect_uri,
                     'code_verifier': code_verifier,
-                    'client_id': client_id,
+                    'client_id': config_client_id,
                 }
                 
                 # 根据 token_endpoint_auth_methods 选择认证方式
                 if 'client_secret_basic' in token_endpoint_auth_methods and client_secret:
                     import base64
-                    auth_string = f"{client_id}:{client_secret}"
+                    auth_string = f"{config_client_id}:{client_secret}"
                     auth_bytes = auth_string.encode('utf-8')
                     auth_b64 = base64.b64encode(auth_bytes).decode('utf-8')
                     headers['Authorization'] = f'Basic {auth_b64}'
@@ -2650,7 +2688,7 @@ Headers: {dict(request.headers)}
             
             # 构建 token_info（对于 Notion，token_data 可能包含额外字段）
             token_info = {
-                'client_id': client_id,  # 关联 Client ID
+                'client_id': config_client_id,  # 关联 Client ID
                 'access_token': access_token,
                 'refresh_token': refresh_token,
                 'token_type': token_data.get('token_type', 'bearer'),
@@ -2677,13 +2715,13 @@ Headers: {dict(request.headers)}
                 print(f"[MCP OAuth] ✅ Token saved to Redis and MySQL with key: oauth:token:{normalized_mcp_url}")
             
             # 辅助 key：使用 client_id（用于前端查询状态）
-            save_oauth_token(f"client:{client_id}", token_info)
-            print(f"[MCP OAuth] ✅ Token also saved with client_id: oauth:token:client:{client_id[:10]}...")
-            print(f"[MCP OAuth] Client ID: {client_id}")
+            save_oauth_token(f"client:{config_client_id}", token_info)
+            print(f"[MCP OAuth] ✅ Token also saved with client_id: oauth:token:client:{config_client_id[:10]}...")
+            print(f"[MCP OAuth] Client ID: {config_client_id}")
             
             # 保存 OAuth 配置到 Redis（用于后续刷新 token）
             oauth_config_for_refresh = {
-                'client_id': client_id,
+                'client_id': config_client_id,
                 'token_endpoint': token_endpoint,
                 'client_secret': client_secret,
                 'resource': resource,
@@ -2696,8 +2734,8 @@ Headers: {dict(request.headers)}
                 save_oauth_config(f"refresh_{normalized_mcp_url}", oauth_config_for_refresh, ttl=None)  # 永不过期
                 print(f"[MCP OAuth] ✅ Refresh config saved with key: refresh_{normalized_mcp_url}")
             
-            save_oauth_config(f"refresh_client:{client_id}", oauth_config_for_refresh, ttl=None)  # 永不过期
-            print(f"[MCP OAuth] ✅ Refresh config saved with client_id: refresh_client:{client_id[:10]}...")
+            save_oauth_config(f"refresh_client:{config_client_id}", oauth_config_for_refresh, ttl=None)  # 永不过期
+            print(f"[MCP OAuth] ✅ Refresh config saved with client_id: refresh_client:{config_client_id[:10]}...")
             
             # 更新服务器配置的 ext 字段，确保包含 response_format
             if normalized_mcp_url:
@@ -2742,9 +2780,9 @@ Headers: {dict(request.headers)}
                 except Exception as update_error:
                     print(f"[MCP OAuth] ⚠️ Warning: Failed to update server ext: {update_error}")
             
-            # 删除临时的 OAuth 配置（client_id 相关的临时配置）
-            delete_oauth_config(client_id)
-            print(f"[MCP OAuth] ✅ Temporary OAuth config deleted: {client_id[:10]}...")
+            # 删除临时的 OAuth 配置（state 相关的临时配置）
+            delete_oauth_config(state)
+            print(f"[MCP OAuth] ✅ Temporary OAuth config deleted (state: {state[:30]}...)")
             
             # 返回成功页面
             success_html = """
@@ -2911,7 +2949,6 @@ Headers: {dict(request.headers)}
         state = data.get('state')
         
         print("\n[Callback] Extracted Parameters:")
-        print(f"  client_id: {client_id}")
         print(f"  code: {code[:50] + '...' if code and len(code) > 50 else code}")
         print(f"  state: {state}")
         print("="*80 + "\n")
@@ -2919,34 +2956,48 @@ Headers: {dict(request.headers)}
         if not code:
             return jsonify({'error': 'Missing authorization code'}), 400
         
-        # 从 Redis 获取 OAuth 配置（使用 client_id）
+        if not state:
+            return jsonify({'error': 'Missing state parameter'}), 400
+        
+        # 从 Redis 获取 OAuth 配置（使用 state 作为 key）
         from database import get_oauth_config, delete_oauth_config, save_oauth_config, save_oauth_token
         
-        print(f"[Callback POST] Looking for OAuth config with client_id: {client_id[:10]}...")
-        oauth_config = get_oauth_config(client_id)
+        print(f"[Callback POST] Looking for OAuth config with state: {state[:30]}...")
+        oauth_config = get_oauth_config(state)
         
         if not oauth_config:
             return jsonify({
                 'error': 'OAuth configuration not found',
-                'message': f'OAuth configuration for client_id {client_id[:10]}... expired or not found. Please restart the authorization flow.'
+                'message': f'OAuth configuration for state {state[:30]}... expired or not found. Please restart the authorization flow.'
             }), 400
         
         # 从 Redis 配置中提取所需信息
         code_verifier = oauth_config.get('code_verifier')
         token_endpoint = oauth_config.get('token_endpoint')
-        # client_id 已从路径参数获取，不需要从配置中再次获取
+        # client_id 从 OAuth 配置中获取（之前保存的）
         config_client_id = oauth_config.get('client_id')
-        if config_client_id and config_client_id != client_id:
-            print(f"[MCP OAuth POST] ⚠️ Warning: Client ID mismatch. Path: {client_id[:10]}..., Config: {config_client_id[:10]}...")
+        if not config_client_id:
+            return jsonify({
+                'error': 'OAuth configuration incomplete',
+                'message': 'client_id not found in OAuth configuration'
+            }), 400
         client_secret = oauth_config.get('client_secret', '')
         resource = oauth_config.get('resource')
         # 使用固定的回调地址（不包含client_id）
-        # 对于 Notion，使用 config.yaml 中的 redirect_uri（包含末尾斜杠）
+        # 对于 Notion，从数据库读取注册信息
         is_notion = resource and 'mcp.notion.com' in resource
         if is_notion:
-            notion_config = config.get('notion', {})
-            redirect_uri = notion_config.get('redirect_uri', f"{config.get('server', {}).get('url', 'http://localhost:3001')}/mcp/oauth/callback/")
-            print(f"[MCP OAuth POST Callback] Detected Notion MCP, using redirect_uri from config.yaml")
+            # 从数据库读取 Notion 注册信息
+            from mcp_server.well_known.notion import get_notion_registration_from_db
+            notion_registration = get_notion_registration_from_db(config_client_id)
+            if notion_registration:
+                redirect_uri = notion_registration.get('redirect_uri')
+                print(f"[MCP OAuth POST Callback] Detected Notion MCP, using redirect_uri from database: {redirect_uri}")
+            else:
+                # 向后兼容：如果没有数据库记录，使用 config.yaml
+                notion_config = config.get('notion', {})
+                redirect_uri = notion_config.get('redirect_uri', f"{config.get('server', {}).get('url', 'http://localhost:3001')}/mcp/oauth/callback/")
+                print(f"[MCP OAuth POST Callback] ⚠️ No Notion registration in DB, using redirect_uri from config.yaml")
         else:
             backend_url = config.get('server', {}).get('url', 'http://localhost:3001')
             redirect_uri = f"{backend_url}/mcp/oauth/callback"
@@ -2955,7 +3006,7 @@ Headers: {dict(request.headers)}
         
         print("[Callback] OAuth Config from Redis:")
         print(f"  token_endpoint: {token_endpoint}")
-        print(f"  client_id: {client_id[:10]}...")
+        print(f"  client_id: {config_client_id[:10]}...")
         print(f"  redirect_uri: {redirect_uri}")
         print(f"  resource: {resource}")
         print(f"  code_verifier: {code_verifier[:30] + '...' if code_verifier else 'None'}")
@@ -2967,7 +3018,7 @@ Headers: {dict(request.headers)}
         if not token_endpoint:
             return jsonify({'error': 'Missing token_endpoint in OAuth configuration'}), 400
         
-        if not client_id:
+        if not config_client_id:
             return jsonify({'error': 'Missing client_id in OAuth configuration'}), 400
         
         if not redirect_uri:
@@ -2979,7 +3030,8 @@ Headers: {dict(request.headers)}
         if is_notion:
             try:
                 from mcp_server.well_known.notion import exchange_notion_token
-                token_data = exchange_notion_token(config, code, code_verifier, redirect_uri)
+                # 传递 client_id 以便从数据库读取注册信息
+                token_data = exchange_notion_token(config, code, code_verifier, redirect_uri, config_client_id)
                 access_token = token_data.get('access_token')
                 refresh_token = token_data.get('refresh_token')
                 expires_in = token_data.get('expires_in')
@@ -3002,13 +3054,13 @@ Headers: {dict(request.headers)}
                 'code': code,
                 'redirect_uri': redirect_uri,
                 'code_verifier': code_verifier,
-                'client_id': client_id,
+                'client_id': config_client_id,
             }
             
             # 根据 token_endpoint_auth_methods 选择认证方式
             if 'client_secret_basic' in token_endpoint_auth_methods and client_secret:
                 import base64
-                auth_string = f"{client_id}:{client_secret}"
+                auth_string = f"{config_client_id}:{client_secret}"
                 auth_bytes = auth_string.encode('utf-8')
                 auth_b64 = base64.b64encode(auth_bytes).decode('utf-8')
                 headers['Authorization'] = f'Basic {auth_b64}'
@@ -3064,7 +3116,7 @@ Headers: {dict(request.headers)}
         normalized_mcp_url = mcp_url.rstrip('/') if mcp_url else None
         
         token_info = {
-            'client_id': client_id,
+            'client_id': config_client_id,
             'access_token': access_token,
             'refresh_token': refresh_token,
             'token_type': token_data.get('token_type', 'bearer'),
@@ -3086,12 +3138,12 @@ Headers: {dict(request.headers)}
             save_oauth_token(normalized_mcp_url, token_info)
             print(f"[MCP OAuth POST] ✅ Token saved to Redis with key: oauth:token:{normalized_mcp_url}")
         
-        save_oauth_token(f"client:{client_id}", token_info)
-        print(f"[MCP OAuth POST] ✅ Token also saved with client_id: oauth:token:client:{client_id[:10]}...")
+        save_oauth_token(f"client:{config_client_id}", token_info)
+        print(f"[MCP OAuth POST] ✅ Token also saved with client_id: oauth:token:client:{config_client_id[:10]}...")
         
         # 保存 OAuth 配置到 Redis（用于后续刷新 token）
         oauth_config_for_refresh = {
-            'client_id': client_id,
+            'client_id': config_client_id,
             'token_endpoint': token_endpoint,
             'client_secret': client_secret,
             'resource': resource,
@@ -3103,8 +3155,8 @@ Headers: {dict(request.headers)}
             save_oauth_config(f"refresh_{normalized_mcp_url}", oauth_config_for_refresh, ttl=None)
             print(f"[MCP OAuth POST] ✅ Refresh config saved with key: refresh_{normalized_mcp_url}")
         
-        save_oauth_config(f"refresh_client:{client_id}", oauth_config_for_refresh, ttl=None)
-        print(f"[MCP OAuth POST] ✅ Refresh config saved with client_id: refresh_client:{client_id[:10]}...")
+        save_oauth_config(f"refresh_client:{config_client_id}", oauth_config_for_refresh, ttl=None)
+        print(f"[MCP OAuth POST] ✅ Refresh config saved with client_id: refresh_client:{config_client_id[:10]}...")
         
         # 更新服务器配置的 ext 字段，确保包含 response_format
         if normalized_mcp_url:
@@ -3149,9 +3201,9 @@ Headers: {dict(request.headers)}
             except Exception as update_error:
                 print(f"[MCP OAuth POST] ⚠️ Warning: Failed to update server ext: {update_error}")
         
-        # 删除临时的 OAuth 配置（client_id 相关的临时配置）
-        delete_oauth_config(client_id)
-        print(f"[MCP OAuth POST] ✅ Temporary OAuth config deleted: {client_id[:10]}...")
+        # 删除临时的 OAuth 配置（state 相关的临时配置）
+        delete_oauth_config(state)
+        print(f"[MCP OAuth POST] ✅ Temporary OAuth config deleted (state: {state[:30]}...)")
         
         return jsonify({
             'success': True,
@@ -3160,7 +3212,7 @@ Headers: {dict(request.headers)}
             'expires_in': expires_in,
             'refresh_token': refresh_token,
             'scope': token_data.get('scope', ''),
-            'client_id': client_id,
+            'client_id': config_client_id,
         })
         
     except Exception as e:
@@ -3247,6 +3299,233 @@ def notion_oauth_callback():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+# ==================== Notion 注册管理 API ====================
+
+@app.route('/api/notion/register', methods=['POST', 'OPTIONS'])
+def register_notion_client():
+    """注册新的 Notion OAuth 客户端"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        data = request.get_json()
+        client_name = data.get('client_name', '').strip()
+        redirect_uri_base = data.get('redirect_uri_base', '').strip() or 'http://localhost:3001'
+        client_uri = data.get('client_uri', 'https://github.com/TIZ36/youtubemgr')
+        
+        if not client_name:
+            return jsonify({'error': 'client_name is required'}), 400
+        
+        # 验证 client_name：只允许英文、数字、下划线、连字符
+        import re
+        if not re.match(r'^[a-zA-Z0-9_-]+$', client_name):
+            return jsonify({'error': 'client_name must contain only letters, numbers, underscores, and hyphens'}), 400
+        
+        # 构建完整的 redirect_uri
+        redirect_uri = f"{redirect_uri_base.rstrip('/')}/mcp/oauth/callback/"
+        
+        # 调用 Notion 注册 API
+        import requests
+        register_url = 'https://mcp.notion.com/register'
+        register_payload = {
+            'client_name': client_name,
+            'client_uri': client_uri,
+            'grant_types': ['authorization_code', 'refresh_token'],
+            'redirect_uris': [redirect_uri],
+            'response_types': ['code'],
+            'scope': '',
+            'token_endpoint_auth_method': 'none'
+        }
+        
+        print(f"[Notion Register] Registering client: {client_name}")
+        print(f"[Notion Register] Redirect URI: {redirect_uri}")
+        
+        response = requests.post(
+            register_url,
+            json=register_payload,
+            headers={'Content-Type': 'application/json'},
+            timeout=30
+        )
+        
+        if not response.ok:
+            error_data = response.json() if response.headers.get('content-type', '').startswith('application/json') else {}
+            error_msg = error_data.get('error', {}).get('message', response.text) if isinstance(error_data, dict) else str(error_data)
+            print(f"[Notion Register] ❌ Registration failed: {response.status_code} - {error_msg}")
+            return jsonify({
+                'error': 'Registration failed',
+                'message': error_msg,
+                'status_code': response.status_code
+            }), response.status_code
+        
+        registration_data = response.json()
+        client_id = registration_data.get('client_id')
+        
+        if not client_id:
+            return jsonify({'error': 'No client_id in registration response'}), 500
+        
+        print(f"[Notion Register] ✅ Registration successful: {client_id}")
+        
+        # 保存到数据库
+        try:
+            from database import get_mysql_connection
+            conn = get_mysql_connection()
+            if not conn:
+                return jsonify({'error': 'Database connection failed'}), 500
+            
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO `notion_registrations` 
+                (`client_id`, `client_name`, `redirect_uri`, `redirect_uri_base`, `client_uri`, `registration_data`)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    `client_name` = VALUES(`client_name`),
+                    `redirect_uri` = VALUES(`redirect_uri`),
+                    `redirect_uri_base` = VALUES(`redirect_uri_base`),
+                    `client_uri` = VALUES(`client_uri`),
+                    `registration_data` = VALUES(`registration_data`),
+                    `updated_at` = CURRENT_TIMESTAMP
+            """, (
+                client_id,
+                client_name,
+                redirect_uri,
+                redirect_uri_base,
+                client_uri,
+                json.dumps(registration_data)
+            ))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            print(f"[Notion Register] ✅ Saved to database: {client_id}")
+        except Exception as db_error:
+            print(f"[Notion Register] ❌ Failed to save to database: {db_error}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': 'Failed to save registration to database'}), 500
+        
+        return jsonify({
+            'success': True,
+            'client_id': client_id,
+            'client_name': client_name,
+            'redirect_uri': redirect_uri,
+            'registration_data': registration_data
+        })
+        
+    except Exception as e:
+        print(f"[Notion Register] ❌ ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/notion/registrations', methods=['GET', 'OPTIONS'])
+def list_notion_registrations():
+    """获取所有已注册的 Notion 工作空间列表"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'Database connection failed'}), 500
+        
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT 
+                id, client_id, client_name, redirect_uri, redirect_uri_base, 
+                client_uri, registration_data, created_at, updated_at
+            FROM `notion_registrations`
+            ORDER BY created_at DESC
+        """)
+        
+        rows = cursor.fetchall()
+        registrations = []
+        
+        for row in rows:
+            registration_data = row[6]  # registration_data JSON
+            if isinstance(registration_data, str):
+                try:
+                    registration_data = json.loads(registration_data)
+                except:
+                    registration_data = {}
+            
+            registrations.append({
+                'id': row[0],
+                'client_id': row[1],
+                'client_name': row[2],
+                'redirect_uri': row[3],
+                'redirect_uri_base': row[4],
+                'client_uri': row[5],
+                'registration_data': registration_data,
+                'created_at': row[7].isoformat() if row[7] else None,
+                'updated_at': row[8].isoformat() if row[8] else None,
+            })
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({'registrations': registrations})
+        
+    except Exception as e:
+        print(f"[Notion Registrations] ❌ ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/notion/registrations/<client_id>', methods=['GET', 'OPTIONS'])
+def get_notion_registration(client_id):
+    """获取特定的 Notion 注册信息"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'Database connection failed'}), 500
+        
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT 
+                id, client_id, client_name, redirect_uri, redirect_uri_base, 
+                client_uri, registration_data, created_at, updated_at
+            FROM `notion_registrations`
+            WHERE client_id = %s
+            LIMIT 1
+        """, (client_id,))
+        
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if not row:
+            return jsonify({'error': 'Registration not found'}), 404
+        
+        registration_data = row[6]  # registration_data JSON
+        if isinstance(registration_data, str):
+            try:
+                registration_data = json.loads(registration_data)
+            except:
+                registration_data = {}
+        
+        return jsonify({
+            'id': row[0],
+            'client_id': row[1],
+            'client_name': row[2],
+            'redirect_uri': row[3],
+            'redirect_uri_base': row[4],
+            'client_uri': row[5],
+            'registration_data': registration_data,
+            'created_at': row[7].isoformat() if row[7] else None,
+            'updated_at': row[8].isoformat() if row[8] else None,
+        })
+        
+    except Exception as e:
+        print(f"[Notion Registration] ❌ ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 # ==================== MCP 服务器配置管理 API ====================
 
 @app.route('/api/mcp/servers', methods=['GET', 'OPTIONS'])
@@ -3272,11 +3551,18 @@ def list_mcp_servers():
                 print("[MCP API] Table 'mcp_servers' does not exist, returning empty list")
                 return jsonify({'servers': [], 'total': 0, 'warning': 'Table mcp_servers does not exist'})
             
+            # 查询 MCP 服务器，并关联查询 Notion 注册信息（如果有）
             cursor.execute("""
-                SELECT server_id, name, url, type, enabled, use_proxy, description, 
-                       metadata, ext, created_at, updated_at
-                FROM mcp_servers
-                ORDER BY created_at DESC
+                SELECT 
+                    s.server_id, s.name, s.url, s.type, s.enabled, s.use_proxy, s.description, 
+                    s.metadata, s.ext, s.created_at, s.updated_at,
+                    n.client_name, n.client_id as notion_client_id
+                FROM mcp_servers s
+                LEFT JOIN notion_registrations n ON (
+                    s.ext IS NOT NULL 
+                    AND JSON_EXTRACT(s.ext, '$.client_id') = n.client_id
+                )
+                ORDER BY s.created_at DESC
             """)
             
             columns = [desc[0] for desc in cursor.description]
@@ -3297,6 +3583,24 @@ def list_mcp_servers():
                         server['ext'] = json.loads(server['ext']) if isinstance(server['ext'], str) else server['ext']
                     except:
                         server['ext'] = {}
+                
+                # 如果是 Notion 服务器，从 ext 或关联查询中获取 client_name
+                if server.get('ext') and server['ext'].get('server_type') == 'notion':
+                    # 优先使用 ext 中的 client_name
+                    ext_client_name = server['ext'].get('client_name')
+                    if ext_client_name:
+                        server['display_name'] = ext_client_name
+                        server['client_name'] = ext_client_name
+                    # 如果没有，使用关联查询的 client_name
+                    elif server.get('client_name'):
+                        server['display_name'] = server['client_name']
+                        # 确保 ext 中也保存 client_name
+                        if server.get('ext'):
+                            server['ext']['client_name'] = server['client_name']
+                    # 如果都没有，使用服务器名称
+                    else:
+                        server['display_name'] = server.get('name', 'Notion')
+                
                 # 转换 TINYINT 为 boolean
                 server['enabled'] = bool(server.get('enabled'))
                 server['use_proxy'] = bool(server.get('use_proxy'))
@@ -3428,15 +3732,37 @@ def test_mcp_server(server_id):
             
             print(f"[MCP Test] Prepared headers with {len(headers)} entries")
             
+            # 检查是否需要 OAuth token（对于 Notion 等服务器）
+            server_type = server_data.get('ext', {}).get('server_type')
+            if server_type == 'notion':
+                # 检查是否有 Authorization header
+                if 'Authorization' not in headers:
+                    return jsonify({
+                        'success': False,
+                        'error': 'OAuth token not found. Please authorize first.',
+                        'step': 'oauth_required',
+                        'requires_oauth': True
+                    }), 401
+            
             # 1. 初始化会话
             print(f"[MCP Test] Step 1: Initializing session...")
             init_response = initialize_mcp_session(target_url, headers)
             
             if not init_response:
+                # 检查是否是认证错误
+                error_msg = 'Failed to initialize MCP session'
+                requires_oauth = False
+                
+                # 如果是 Notion 服务器且没有 token，提示需要 OAuth
+                if server_type == 'notion' and 'Authorization' not in headers:
+                    error_msg = 'OAuth token not found. Please authorize first.'
+                    requires_oauth = True
+                
                 return jsonify({
                     'success': False,
-                    'error': 'Failed to initialize MCP session',
-                    'step': 'initialize'
+                    'error': error_msg,
+                    'step': 'initialize',
+                    'requires_oauth': requires_oauth
                 }), 500
             
             print(f"[MCP Test] ✅ Session initialized")
@@ -4181,18 +4507,28 @@ def list_sessions():
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             
             # 获取会话列表，按最后消息时间排序
+            # 同时获取第一条用户消息作为缩略（如果没有名字）
             cursor.execute("""
                 SELECT 
                     s.session_id,
                     s.title,
+                    s.name,
                     s.llm_config_id,
                     s.avatar,
+                    s.system_prompt,
+                    s.session_type,
                     s.created_at,
                     s.updated_at,
                     s.last_message_at,
-                    COUNT(m.id) as message_count
+                    COUNT(m.id) as message_count,
+                    (SELECT content FROM messages 
+                     WHERE session_id = s.session_id 
+                     AND role = 'user' 
+                     ORDER BY created_at ASC 
+                     LIMIT 1) as first_user_message
                 FROM sessions s
                 LEFT JOIN messages m ON s.session_id = m.session_id
+                WHERE s.session_type != 'temporary' OR s.session_type IS NULL
                 GROUP BY s.session_id
                 ORDER BY s.last_message_at DESC, s.created_at DESC
                 LIMIT 100
@@ -4200,15 +4536,28 @@ def list_sessions():
             
             sessions = []
             for row in cursor.fetchall():
+                # 获取第一条用户消息作为缩略（如果没有名字）
+                first_message = row.get('first_user_message', '') or ''
+                preview_text = ''
+                if first_message:
+                    # 取前30个字符作为缩略
+                    preview_text = first_message[:30].replace('\n', ' ').strip()
+                    if len(first_message) > 30:
+                        preview_text += '...'
+                
                 session = {
                     'session_id': row['session_id'],
                     'title': row['title'],
+                    'name': row.get('name'),  # 用户自定义名称
                     'llm_config_id': row['llm_config_id'],
                     'avatar': row['avatar'],
+                    'system_prompt': row.get('system_prompt'),  # 人设
+                    'session_type': row.get('session_type', 'memory'),  # 会话类型
                     'created_at': row['created_at'].isoformat() if row['created_at'] else None,
                     'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
                     'last_message_at': row['last_message_at'].isoformat() if row['last_message_at'] else None,
                     'message_count': row['message_count'] or 0,
+                    'preview_text': preview_text,  # 第一条用户消息的缩略
                 }
                 sessions.append(session)
             
@@ -4242,18 +4591,35 @@ def create_session():
         session_id = data.get('session_id') or f'session-{int(time.time() * 1000)}'
         title = data.get('title')
         llm_config_id = data.get('llm_config_id')
+        session_type = data.get('session_type', 'memory')  # 默认为记忆体
         
         cursor = None
         try:
-            cursor = conn.cursor()
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute("""
-                INSERT INTO sessions (session_id, title, llm_config_id)
-                VALUES (%s, %s, %s)
-            """, (session_id, title, llm_config_id))
+                INSERT INTO sessions (session_id, title, llm_config_id, session_type)
+                VALUES (%s, %s, %s, %s)
+            """, (session_id, title, llm_config_id, session_type))
             conn.commit()
             
+            # 获取创建的会话信息
+            cursor.execute("""
+                SELECT session_id, title, name, llm_config_id, avatar, system_prompt, session_type, created_at, updated_at
+                FROM sessions
+                WHERE session_id = %s
+            """, (session_id,))
+            session = cursor.fetchone()
+            
             return jsonify({
-                'session_id': session_id,
+                'session_id': session['session_id'],
+                'title': session.get('title'),
+                'name': session.get('name'),
+                'llm_config_id': session.get('llm_config_id'),
+                'avatar': session.get('avatar'),
+                'system_prompt': session.get('system_prompt'),
+                'session_type': session.get('session_type', 'memory'),
+                'created_at': session.get('created_at').isoformat() if session.get('created_at') else None,
+                'updated_at': session.get('updated_at').isoformat() if session.get('updated_at') else None,
                 'message': 'Session created successfully'
             }), 201
             
@@ -4329,8 +4695,11 @@ def get_session(session_id):
                 SELECT 
                     s.session_id,
                     s.title,
+                    s.name,
                     s.llm_config_id,
                     s.avatar,
+                    s.system_prompt,
+                    s.session_type,
                     s.created_at,
                     s.updated_at,
                     s.last_message_at,
@@ -4348,8 +4717,11 @@ def get_session(session_id):
             session = {
                 'session_id': row['session_id'],
                 'title': row['title'],
+                'name': row['name'],
                 'llm_config_id': row['llm_config_id'],
                 'avatar': row['avatar'],
+                'system_prompt': row['system_prompt'],
+                'session_type': row.get('session_type', 'memory'),  # 会话类型
                 'created_at': row['created_at'].isoformat() if row['created_at'] else None,
                 'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
                 'last_message_at': row['last_message_at'].isoformat() if row['last_message_at'] else None,
@@ -4406,6 +4778,7 @@ def get_session_messages(session_id):
                     tool_calls,
                     token_count,
                     acc_token,
+                    ext,
                     created_at
                 FROM messages
                 WHERE session_id = %s
@@ -4428,6 +4801,14 @@ def get_session_messages(session_id):
                             except (json.JSONDecodeError, TypeError):
                                 pass
                 
+                # 解析 ext 字段
+                ext_data = None
+                if row.get('ext'):
+                    try:
+                        ext_data = json.loads(row['ext']) if isinstance(row['ext'], str) else row['ext']
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                
                 message = {
                     'message_id': row['message_id'],
                     'session_id': row['session_id'],
@@ -4436,6 +4817,7 @@ def get_session_messages(session_id):
                     'thinking': row['thinking'],
                     'tool_calls': json.loads(row['tool_calls']) if row['tool_calls'] else None,
                     'token_count': row['token_count'],
+                    'ext': ext_data,  # 扩展数据（如 Gemini 的 thoughtSignature）
                     'created_at': row['created_at'].isoformat() if row['created_at'] else None,
                 }
                 messages.append(message)
@@ -4561,6 +4943,7 @@ def save_message(session_id):
         tool_calls = data.get('tool_calls')
         model = data.get('model', 'gpt-4')  # 用于估算 token
         acc_token_override = data.get('acc_token')  # 可选：手动指定累积 token（用于总结消息等特殊情况）
+        ext = data.get('ext')  # 扩展数据：如 Gemini 的 thoughtSignature、模型信息等
         
         # 估算当前消息的 token 数量
         current_message_tokens = estimate_tokens(content, model)
@@ -4595,8 +4978,8 @@ def save_message(session_id):
             
             # 保存消息（保存当前消息的 token 到 token_count，累积 token 到 acc_token）
             cursor.execute("""
-                INSERT INTO messages (message_id, session_id, role, content, thinking, tool_calls, token_count, acc_token)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO messages (message_id, session_id, role, content, thinking, tool_calls, token_count, acc_token, ext)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 message_id,
                 session_id,
@@ -4605,7 +4988,8 @@ def save_message(session_id):
                 thinking,
                 json.dumps(tool_calls) if tool_calls else None,
                 current_message_tokens,  # token_count 保存当前消息的 token
-                cumulative_token_count   # acc_token 保存累积 token
+                cumulative_token_count,  # acc_token 保存累积 token
+                json.dumps(ext) if ext else None  # ext 保存扩展数据
             ))
             
             # 更新会话的最后消息时间
@@ -4902,6 +5286,84 @@ def summarize_session(session_id):
                         print(f"[Summarize] LLM API error: {error_msg}")
                         summary_content = f"[自动总结] 已精简 {len(messages_to_summarize)} 条消息的关键信息"
                 
+                elif provider == 'gemini':
+                    # Gemini API
+                    default_url = 'https://generativelanguage.googleapis.com/v1beta'
+                    base_url = api_url or default_url
+                    model_name = model_name or 'gemini-2.5-flash'
+                    
+                    # 构建完整的 API URL
+                    if base_url.endswith('/'):
+                        url = f"{base_url}models/{model_name}:generateContent"
+                    else:
+                        url = f"{base_url}/models/{model_name}:generateContent"
+                    
+                    # 转换消息格式为 Gemini 格式
+                    contents = []
+                    for msg in llm_messages:
+                        if msg['role'] == 'system':
+                            # system 消息作为 systemInstruction
+                            continue
+                        elif msg['role'] == 'user':
+                            contents.append({
+                                'role': 'user',
+                                'parts': [{'text': msg['content']}]
+                            })
+                        elif msg['role'] == 'assistant':
+                            contents.append({
+                                'role': 'model',
+                                'parts': [{'text': msg['content']}]
+                            })
+                    
+                    # 提取 system 消息
+                    system_msg = next((m['content'] for m in llm_messages if m['role'] == 'system'), None)
+                    
+                    payload = {
+                        'contents': contents,
+                        'generationConfig': {
+                            'temperature': 1.0,
+                            'thinkingLevel': 'high',
+                        },
+                    }
+                    
+                    # 添加 systemInstruction（如果存在）
+                    if system_msg:
+                        payload['systemInstruction'] = {
+                            'parts': [{'text': system_msg}]
+                        }
+                    
+                    # 如果有 metadata 中的 thinking_level，使用它
+                    if llm_config.get('metadata') and llm_config['metadata'].get('thinking_level'):
+                        payload['generationConfig']['thinkingLevel'] = llm_config['metadata']['thinking_level']
+                    
+                    response = requests.post(
+                        url,
+                        headers={
+                            'Content-Type': 'application/json',
+                            'x-goog-api-key': api_key,
+                        },
+                        json=payload,
+                        timeout=60
+                    )
+                    
+                    if response.ok:
+                        result = response.json()
+                        if result.get('candidates') and len(result['candidates']) > 0:
+                            candidate = result['candidates'][0]
+                            if candidate.get('content') and candidate['content'].get('parts'):
+                                # 提取所有文本内容
+                                text_parts = [part.get('text', '') for part in candidate['content']['parts'] if part.get('text')]
+                                summary_content = ''.join(text_parts)
+                            else:
+                                summary_content = f"[自动总结] 已精简 {len(messages_to_summarize)} 条消息的关键信息"
+                        else:
+                            summary_content = f"[自动总结] 已精简 {len(messages_to_summarize)} 条消息的关键信息"
+                    else:
+                        error_data = response.json() if response.content else {}
+                        error_msg = error_data.get('error', {}).get('message', response.text)
+                        print(f"[Summarize] LLM API error: {error_msg}")
+                        summary_content = f"[自动总结] 已精简 {len(messages_to_summarize)} 条消息的关键信息"
+                
                 else:
                     print(f"[Summarize] Provider {provider} not fully supported for summarize, using simplified summary")
                     summary_content = f"[自动总结] 已精简 {len(messages_to_summarize)} 条消息的关键信息"
@@ -5063,6 +5525,50 @@ def get_session_summaries(session_id):
         traceback.print_exc()
         return jsonify({'summaries': [], 'error': str(e)}), 500
 
+@app.route('/api/sessions/<session_id>/name', methods=['PUT', 'OPTIONS'])
+def update_session_name(session_id):
+    """更新会话的用户自定义名称"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        data = request.get_json()
+        name = data.get('name', '').strip() if data else ''
+        
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            
+            # 更新会话名称（允许设置为空字符串）
+            cursor.execute("""
+                UPDATE sessions 
+                SET name = %s, updated_at = NOW()
+                WHERE session_id = %s
+            """, (name if name else None, session_id))
+            
+            if cursor.rowcount == 0:
+                return jsonify({'error': 'Session not found'}), 404
+            
+            conn.commit()
+            return jsonify({'success': True, 'name': name or None})
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Session API] Error updating session name: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/sessions/<session_id>/avatar', methods=['PUT', 'OPTIONS'])
 def update_session_avatar(session_id):
     """更新会话的机器人头像"""
@@ -5111,6 +5617,216 @@ def update_session_avatar(session_id):
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/sessions/<session_id>/system-prompt', methods=['PUT', 'OPTIONS'])
+def update_session_system_prompt(session_id):
+    """更新会话的系统提示词（人设）"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        data = request.json
+        system_prompt = data.get('system_prompt')  # 系统提示词文本
+        
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            
+            # 检查会话是否存在
+            cursor.execute("SELECT session_id FROM sessions WHERE session_id = %s", (session_id,))
+            if not cursor.fetchone():
+                return jsonify({'error': 'Session not found'}), 404
+            
+            # 更新系统提示词
+            cursor.execute("""
+                UPDATE sessions 
+                SET system_prompt = %s 
+                WHERE session_id = %s
+            """, (system_prompt, session_id))
+            conn.commit()
+            
+            return jsonify({
+                'session_id': session_id,
+                'system_prompt': system_prompt,
+                'message': 'System prompt updated successfully'
+            }), 200
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Session API] Error updating system prompt: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/sessions/<session_id>/upgrade-to-agent', methods=['PUT', 'OPTIONS'])
+def upgrade_to_agent(session_id):
+    """升级记忆体为智能体"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        data = request.json
+        name = data.get('name', '').strip()
+        avatar = data.get('avatar', '').strip()
+        system_prompt = data.get('system_prompt', '').strip()
+        llm_config_id = data.get('llm_config_id', '').strip()
+        
+        # 验证必填字段
+        if not name:
+            return jsonify({'error': '智能体名称是必填的'}), 400
+        if not avatar:
+            return jsonify({'error': '智能体头像是必填的'}), 400
+        if not system_prompt:
+            return jsonify({'error': '智能体人设是必填的'}), 400
+        if not llm_config_id:
+            return jsonify({'error': 'LLM模型是必填的'}), 400
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 检查会话是否存在且是记忆体
+            cursor.execute("""
+                SELECT session_id, session_type 
+                FROM sessions 
+                WHERE session_id = %s
+            """, (session_id,))
+            session = cursor.fetchone()
+            
+            if not session:
+                return jsonify({'error': 'Session not found'}), 404
+            
+            if session.get('session_type') != 'memory':
+                return jsonify({'error': '只能将记忆体升级为智能体'}), 400
+            
+            # 升级为智能体（关联固定的LLM模型）
+            cursor.execute("""
+                UPDATE sessions 
+                SET session_type = 'agent',
+                    name = %s,
+                    avatar = %s,
+                    system_prompt = %s,
+                    llm_config_id = %s,
+                    updated_at = NOW()
+                WHERE session_id = %s
+            """, (name, avatar, system_prompt, llm_config_id, session_id))
+            conn.commit()
+            
+            # 获取更新后的会话信息
+            cursor.execute("""
+                SELECT session_id, title, name, llm_config_id, avatar, system_prompt, session_type, created_at, updated_at
+                FROM sessions
+                WHERE session_id = %s
+            """, (session_id,))
+            updated_session = cursor.fetchone()
+            
+            return jsonify({
+                'session_id': updated_session['session_id'],
+                'title': updated_session.get('title'),
+                'name': updated_session.get('name'),
+                'llm_config_id': updated_session.get('llm_config_id'),
+                'avatar': updated_session.get('avatar'),
+                'system_prompt': updated_session.get('system_prompt'),
+                'session_type': updated_session.get('session_type', 'agent'),
+                'created_at': updated_session.get('created_at').isoformat() if updated_session.get('created_at') else None,
+                'updated_at': updated_session.get('updated_at').isoformat() if updated_session.get('updated_at') else None,
+                'message': 'Upgraded to agent successfully'
+            }), 200
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Session API] Error upgrading to agent: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/agents', methods=['GET', 'OPTIONS'])
+def list_agents():
+    """获取智能体列表"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'agents': [], 'total': 0, 'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 获取所有智能体类型的会话
+            cursor.execute("""
+                SELECT 
+                    s.session_id,
+                    s.title,
+                    s.name,
+                    s.llm_config_id,
+                    s.avatar,
+                    s.system_prompt,
+                    s.session_type,
+                    s.created_at,
+                    s.updated_at,
+                    s.last_message_at,
+                    COUNT(m.id) as message_count
+                FROM sessions s
+                LEFT JOIN messages m ON s.session_id = m.session_id
+                WHERE s.session_type = 'agent'
+                GROUP BY s.session_id
+                ORDER BY s.updated_at DESC, s.created_at DESC
+            """)
+            
+            agents = []
+            for row in cursor.fetchall():
+                agent = {
+                    'session_id': row['session_id'],
+                    'title': row['title'],
+                    'name': row.get('name'),
+                    'llm_config_id': row['llm_config_id'],
+                    'avatar': row['avatar'],
+                    'system_prompt': row.get('system_prompt'),
+                    'session_type': row.get('session_type', 'agent'),
+                    'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+                    'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
+                    'last_message_at': row['last_message_at'].isoformat() if row['last_message_at'] else None,
+                    'message_count': row['message_count'] or 0,
+                }
+                agents.append(agent)
+            
+            return jsonify({'agents': agents, 'total': len(agents)})
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Agent API] Error listing agents: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'agents': [], 'total': 0, 'error': str(e)}), 500
 
 @app.route('/api/sessions/<session_id>/summaries/cache', methods=['DELETE', 'OPTIONS'])
 def clear_summarize_cache(session_id):
@@ -5626,6 +6342,59 @@ def call_llm_api(llm_config: dict, system_prompt: str, user_input: str, add_log=
             if add_log:
                 add_log(f"❌ LLM API调用失败: {response.status_code} - {response.text}")
             return None
+            
+    elif provider == 'gemini':
+        default_url = 'https://generativelanguage.googleapis.com/v1beta'
+        base_url = api_url or default_url
+        model_name = model or 'gemini-2.5-flash'
+        
+        # 构建完整的 API URL
+        if base_url.endswith('/'):
+            url = f"{base_url}models/{model_name}:generateContent"
+        else:
+            url = f"{base_url}/models/{model_name}:generateContent"
+        
+        # 转换消息格式为 Gemini 格式
+        contents = [
+            {
+                'role': 'user',
+                'parts': [{'text': f"{system_prompt}\n\n用户输入: {user_input}"}]
+            }
+        ]
+        
+        payload = {
+            'contents': contents,
+            'generationConfig': {
+                'temperature': 1.0,  # Gemini 3 推荐使用默认温度
+                'thinkingLevel': 'high',  # 默认使用高思考级别
+            },
+        }
+        
+        # 如果有 metadata 中的 thinking_level，使用它
+        if llm_config.get('metadata') and llm_config['metadata'].get('thinking_level'):
+            payload['generationConfig']['thinkingLevel'] = llm_config['metadata']['thinking_level']
+        
+        headers = {
+            'x-goog-api-key': api_key,
+            'Content-Type': 'application/json',
+        }
+        
+        response = requests.post(url, json=payload, headers=headers, timeout=60)
+        if response.ok:
+            data = response.json()
+            if data.get('candidates') and len(data['candidates']) > 0:
+                candidate = data['candidates'][0]
+                if candidate.get('content') and candidate['content'].get('parts'):
+                    # 提取所有文本内容
+                    text_parts = [part.get('text', '') for part in candidate['content']['parts'] if part.get('text')]
+                    return ''.join(text_parts)
+            return None
+        else:
+            if add_log:
+                error_data = response.json() if response.content else {}
+                error_msg = error_data.get('error', {}).get('message', response.text)
+                add_log(f"❌ LLM API调用失败: {response.status_code} - {error_msg}")
+            return None
     else:
         if add_log:
             add_log(f"❌ 不支持的LLM提供商: {provider}")
@@ -6056,7 +6825,8 @@ def crawler_module_batches(module_id):
                     batch_name,
                     crawled_at,
                     status,
-                    error_message
+                    error_message,
+                    parsed_data
                 FROM crawler_batches
                 WHERE module_id = %s
                 ORDER BY crawled_at DESC
@@ -6065,22 +6835,34 @@ def crawler_module_batches(module_id):
             
             result = []
             for batch in batches:
-                # 从Redis获取批次数据统计（不返回完整数据）
+                # 优先从parsed_data字段获取数据条数
                 item_count = 0
                 try:
-                    redis_client = get_redis_client()
-                    if redis_client:
-                        cache_key = f"crawler:module:{module_id}:batch:{batch['batch_name']}"
-                        cached = redis_client.get(cache_key)
-                        if cached:
-                            # 确保正确解码（Redis返回bytes）
-                            if isinstance(cached, bytes):
-                                cached = cached.decode('utf-8')
-                            cached_data = json.loads(cached)
-                            normalized = cached_data.get('normalized', {})
-                            item_count = normalized.get('total_count', 0)
-                except:
-                    pass
+                    if batch.get('parsed_data'):
+                        parsed_data = batch['parsed_data']
+                        if isinstance(parsed_data, str):
+                            parsed_data = json.loads(parsed_data)
+                        if isinstance(parsed_data, list):
+                            item_count = len(parsed_data)
+                except Exception as e:
+                    print(f"[Crawler Batches API] Error reading parsed_data for batch {batch['batch_id']}: {e}")
+                
+                # 如果parsed_data没有数据，尝试从Redis缓存获取
+                if item_count == 0:
+                    try:
+                        redis_client = get_redis_client()
+                        if redis_client:
+                            cache_key = f"crawler:module:{module_id}:batch:{batch['batch_name']}"
+                            cached = redis_client.get(cache_key)
+                            if cached:
+                                # 确保正确解码（Redis返回bytes）
+                                if isinstance(cached, bytes):
+                                    cached = cached.decode('utf-8')
+                                cached_data = json.loads(cached)
+                                normalized = cached_data.get('normalized', {})
+                                item_count = normalized.get('total_count', 0)
+                    except Exception as e:
+                        print(f"[Crawler Batches API] Error reading cache for batch {batch['batch_id']}: {e}")
                 
                 result.append({
                     'batch_id': batch['batch_id'],
@@ -6166,13 +6948,20 @@ def crawler_module_batches(module_id):
             crawler_options = json.loads(module['crawler_options']) if module['crawler_options'] else {}
             normalize_config = json.loads(module['normalize_config']) if module['normalize_config'] else {}
             
+            # 保存配置快照（用于快速创建新批次）
+            config_snapshot = {
+                'target_url': target_url,
+                'crawler_options': crawler_options,
+                'normalize_config': normalize_config
+            }
+            
             # 创建批次记录（pending状态）
             batch_id = f"batch_{int(time.time() * 1000)}"
             cursor.execute("""
                 INSERT INTO crawler_batches 
-                (batch_id, module_id, batch_name, crawled_data, status)
-                VALUES (%s, %s, %s, %s, 'running')
-            """, (batch_id, module_id, batch_name, json.dumps({})))
+                (batch_id, module_id, batch_name, crawled_data, crawler_config_snapshot, status)
+                VALUES (%s, %s, %s, %s, %s, 'running')
+            """, (batch_id, module_id, batch_name, json.dumps({}), json.dumps(config_snapshot)))
             conn.commit()
             
             try:
@@ -6543,6 +7332,184 @@ def crawler_batch_detail(module_id, batch_id):
         traceback.print_exc()
         if 'conn' in locals():
             conn.close()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/crawler/modules/<module_id>/batches/<batch_id>/quick-create', methods=['POST', 'OPTIONS'])
+def quick_create_batch_from_history(module_id, batch_id):
+    """基于历史批次快速创建新批次"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection, get_redis_client
+        from web_crawler import WebCrawler
+        from crawler_normalizer import CrawlerNormalizer
+        
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        # 获取历史批次信息
+        cursor.execute("""
+            SELECT batch_id, module_id, batch_name, crawler_config_snapshot, status
+            FROM crawler_batches
+            WHERE batch_id = %s AND module_id = %s
+        """, (batch_id, module_id))
+        history_batch = cursor.fetchone()
+        
+        if not history_batch:
+            cursor.close()
+            conn.close()
+            return jsonify({'error': 'History batch not found'}), 404
+        
+        if history_batch['status'] != 'completed':
+            cursor.close()
+            conn.close()
+            return jsonify({'error': 'Only completed batches can be used for quick create'}), 400
+        
+        # 获取配置快照
+        config_snapshot = None
+        if history_batch.get('crawler_config_snapshot'):
+            try:
+                if isinstance(history_batch['crawler_config_snapshot'], str):
+                    config_snapshot = json.loads(history_batch['crawler_config_snapshot'])
+                else:
+                    config_snapshot = history_batch['crawler_config_snapshot']
+            except:
+                pass
+        
+        if not config_snapshot:
+            cursor.close()
+            conn.close()
+            return jsonify({'error': 'No config snapshot found in history batch'}), 400
+        
+        # 获取请求参数
+        data = request.json or {}
+        new_batch_name = data.get('batch_name')
+        if not new_batch_name:
+            new_batch_name = datetime.now().strftime('%Y-%m-%d')
+        
+        # 检查新批次是否已存在
+        cursor.execute("""
+            SELECT batch_id FROM crawler_batches 
+            WHERE module_id = %s AND batch_name = %s
+        """, (module_id, new_batch_name))
+        existing = cursor.fetchone()
+        if existing:
+            cursor.close()
+            conn.close()
+            return jsonify({'error': f'Batch with name "{new_batch_name}" already exists'}), 400
+        
+        # 使用配置快照创建新批次
+        target_url = config_snapshot.get('target_url')
+        crawler_options = config_snapshot.get('crawler_options', {})
+        normalize_config = config_snapshot.get('normalize_config', {})
+        
+        # 创建批次记录
+        new_batch_id = f"batch_{int(time.time() * 1000)}"
+        cursor.execute("""
+            INSERT INTO crawler_batches 
+            (batch_id, module_id, batch_name, crawled_data, crawler_config_snapshot, status)
+            VALUES (%s, %s, %s, %s, %s, 'running')
+        """, (new_batch_id, module_id, new_batch_name, json.dumps({}), json.dumps(config_snapshot)))
+        conn.commit()
+        
+        try:
+            # 执行爬取
+            crawler_config = config.get('crawler', {})
+            default_timeout = crawler_config.get('default_timeout', 30)
+            default_user_agent = crawler_config.get('default_user_agent')
+            
+            crawler = WebCrawler(
+                default_timeout=default_timeout,
+                default_user_agent=default_user_agent
+            )
+            
+            raw_result = crawler.fetch(target_url, crawler_options)
+            
+            if not raw_result.get('success'):
+                # 爬取失败
+                cursor.execute("""
+                    UPDATE crawler_batches 
+                    SET status = 'error', error_message = %s
+                    WHERE batch_id = %s
+                """, (raw_result.get('message', 'Unknown error'), new_batch_id))
+                conn.commit()
+                
+                cursor.close()
+                conn.close()
+                return jsonify({
+                    'success': False,
+                    'error': raw_result.get('error'),
+                    'message': raw_result.get('message'),
+                    'batch_id': new_batch_id
+                }), 500
+            
+            # 标准化处理
+            normalizer = CrawlerNormalizer()
+            normalized_result = normalizer.normalize(raw_result, normalize_config)
+            
+            # 保存到数据库
+            crawled_data_to_save = {
+                'normalized': normalized_result
+            }
+            cursor.execute("""
+                UPDATE crawler_batches 
+                SET crawled_data = %s, status = 'completed', error_message = NULL
+                WHERE batch_id = %s
+            """, (json.dumps(crawled_data_to_save, ensure_ascii=False), new_batch_id))
+            conn.commit()
+            
+            # 缓存到Redis
+            try:
+                redis_client = get_redis_client()
+                if redis_client:
+                    cache_key = f"crawler:module:{module_id}:batch:{new_batch_name}"
+                    redis_client.setex(cache_key, 86400, json.dumps(crawled_data_to_save, ensure_ascii=False))
+            except Exception as e:
+                print(f"[Quick Create Batch] Error caching batch: {e}")
+            
+            # 返回结果
+            result = {
+                'batch_id': new_batch_id,
+                'module_id': module_id,
+                'batch_name': new_batch_name,
+                'crawled_data': {
+                    'normalized': normalized_result
+                },
+                'crawled_at': datetime.now().isoformat(),
+                'status': 'completed'
+            }
+            
+            cursor.close()
+            conn.close()
+            response = jsonify(result)
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            return response, 200
+            
+        except Exception as e:
+            # 更新批次状态为错误
+            cursor.execute("""
+                UPDATE crawler_batches 
+                SET status = 'error', error_message = %s
+                WHERE batch_id = %s
+            """, (str(e), new_batch_id))
+            conn.commit()
+            
+            cursor.close()
+            conn.close()
+            return jsonify({
+                'success': False,
+                'error': str(e),
+                'batch_id': new_batch_id
+            }), 500
+    
+    except Exception as e:
+        print(f"[Quick Create Batch] Error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/crawler/modules/<module_id>/batches/<batch_id>/parsed-data', methods=['PUT', 'OPTIONS'])

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, Link, useLocation } from 'react-router-dom';
-import { Brain, Plug, Workflow as WorkflowIcon, Settings, Code, Terminal, MessageCircle, Globe } from 'lucide-react';
+import { Brain, Plug, Workflow as WorkflowIcon, Settings, Code, Terminal, MessageCircle, Globe, Sparkles } from 'lucide-react';
 import TerminalPanel from './components/TerminalPanel';
 import { setTerminalExecutor } from './utils/terminalExecutor';
 import SettingsPanel from './components/SettingsPanel';
@@ -9,6 +9,7 @@ import MCPConfig from './components/MCPConfig';
 import WorkflowEditor from './components/WorkflowEditor';
 import Workflow from './components/Workflow';
 import CrawlerConfigPage from './components/CrawlerConfigPage';
+import AgentsPage from './components/AgentsPage';
 
 interface Settings {
   theme: 'light' | 'dark' | 'system';
@@ -94,6 +95,18 @@ const App: React.FC = () => {
             title="工作流编辑器"
           >
             <WorkflowIcon className="w-[22px] h-[22px]" strokeWidth={2} />
+          </Link>
+
+          <Link
+            to="/agents"
+            className={`w-11 h-11 flex items-center justify-center rounded-xl transition-all duration-300 group relative flex-shrink-0 ${
+              location.pathname === '/agents' 
+                ? 'bg-primary-600 text-white shadow-lg shadow-primary-600/30' 
+                : 'text-gray-400 dark:text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-800/60 hover:text-gray-900 dark:hover:text-gray-200'
+            }`}
+            title="智能体"
+          >
+            <Sparkles className="w-[22px] h-[22px]" strokeWidth={2} />
           </Link>
         </div>
         
@@ -204,6 +217,9 @@ const App: React.FC = () => {
 
                   {/* 爬虫配置页面 */}
                   <Route path="/crawler-config" element={<CrawlerConfigPage />} />
+
+                  {/* 智能体页面 */}
+                  <Route path="/agents" element={<AgentsPage />} />
 
                   {/* 设置页面 */}
                   <Route path="/settings" element={

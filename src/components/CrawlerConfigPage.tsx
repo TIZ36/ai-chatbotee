@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Globe, Package, Database, Plus, Trash2, Edit2, RefreshCw, X, ChevronRight, ChevronDown, Loader, AlertCircle } from 'lucide-react';
+import { Globe, Package, Database, Plus, Trash2, Edit2, RefreshCw, X, ChevronRight, ChevronDown, Loader, AlertCircle, Copy } from 'lucide-react';
 import CrawlerTestPage from './CrawlerTestPage';
 import { 
   getModules, 
@@ -12,6 +12,7 @@ import {
   deleteModule, 
   deleteBatch, 
   createBatch,
+  quickCreateBatchFromHistory,
   CrawlerModule, 
   CrawlerBatch 
 } from '../services/crawlerApi';
@@ -24,6 +25,7 @@ const CrawlerConfigPage: React.FC = () => {
   const [moduleBatches, setModuleBatches] = useState<Map<string, CrawlerBatch[]>>(new Map());
   const [loadingBatches, setLoadingBatches] = useState<Set<string>>(new Set());
   const [refreshingBatch, setRefreshingBatch] = useState<string | null>(null);
+  const [quickCreatingBatch, setQuickCreatingBatch] = useState<string | null>(null);
   const [editingModuleId, setEditingModuleId] = useState<string | undefined>(undefined);
   const [editingBatchId, setEditingBatchId] = useState<string | undefined>(undefined);
 
@@ -125,6 +127,29 @@ const CrawlerConfigPage: React.FC = () => {
       alert('刷新批次失败');
     } finally {
       setRefreshingBatch(null);
+    }
+  };
+
+  const handleQuickCreateBatch = async (moduleId: string, batchId: string, batchName: string) => {
+    const key = `${moduleId}:${batchId}`;
+    setQuickCreatingBatch(key);
+    try {
+      // 生成新的批次名称（基于当前时间）
+      const newBatchName = `${batchName}_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
+      
+      // 调用快速创建API
+      await quickCreateBatchFromHistory(moduleId, batchId, newBatchName);
+      
+      // 重新加载批次列表
+      const batches = await getBatches(moduleId);
+      setModuleBatches(prev => new Map(prev).set(moduleId, batches));
+      
+      alert('快速创建批次成功！');
+    } catch (error) {
+      console.error('[CrawlerConfigPage] Failed to quick create batch:', error);
+      alert(error instanceof Error ? error.message : '快速创建批次失败');
+    } finally {
+      setQuickCreatingBatch(null);
     }
   };
 
@@ -301,6 +326,19 @@ const CrawlerConfigPage: React.FC = () => {
                                   </div>
                                   <div className="flex items-center space-x-2 flex-shrink-0 ml-4">
                                     {batch.status === 'completed' && (
+                                      <>
+                                        <button
+                                          onClick={() => handleQuickCreateBatch(module.module_id, batch.batch_id, batch.batch_name)}
+                                          disabled={quickCreatingBatch === `${module.module_id}:${batch.batch_id}`}
+                                          className="p-2 text-gray-400 hover:text-green-600 dark:hover:text-green-400 transition-colors disabled:opacity-50"
+                                          title="基于此批次快速创建新批次"
+                                        >
+                                          {quickCreatingBatch === `${module.module_id}:${batch.batch_id}` ? (
+                                            <Loader className="w-4 h-4 animate-spin" />
+                                          ) : (
+                                            <Copy className="w-4 h-4" />
+                                          )}
+                                        </button>
                                       <button
                                         onClick={() => handleRefreshBatch(module.module_id, batch.batch_name)}
                                         disabled={isRefreshing}
@@ -313,6 +351,7 @@ const CrawlerConfigPage: React.FC = () => {
                                           <RefreshCw className="w-4 h-4" />
                                         )}
                                       </button>
+                                      </>
                                     )}
                                     <button
                                       onClick={() => {

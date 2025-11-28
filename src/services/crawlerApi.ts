@@ -377,6 +377,44 @@ export async function getBatches(moduleId: string): Promise<CrawlerBatch[]> {
 }
 
 /**
+ * 基于历史批次快速创建新批次
+ */
+export async function quickCreateBatchFromHistory(
+  moduleId: string,
+  batchId: string,
+  batchName?: string
+): Promise<CrawlerBatch> {
+  const response = await fetch(
+    `${API_BASE}/crawler/modules/${moduleId}/batches/${batchId}/quick-create`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        batch_name: batchName,
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || `Failed to quick create batch: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return {
+    batch_id: data.batch_id,
+    module_id: data.module_id,
+    batch_name: data.batch_name,
+    crawled_data: data.crawled_data,
+    crawled_at: data.crawled_at,
+    status: data.status,
+    error_message: data.error_message,
+  };
+}
+
+/**
  * 获取批次详情
  */
 export async function getBatch(moduleId: string, batchId: string): Promise<CrawlerBatch> {

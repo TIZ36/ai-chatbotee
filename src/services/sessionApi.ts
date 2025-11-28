@@ -5,12 +5,16 @@
 export interface Session {
   session_id: string;
   title?: string;
+  name?: string; // 用户自定义会话名称
   llm_config_id?: string;
   avatar?: string; // base64编码的头像
+  system_prompt?: string; // 系统提示词（人设）
+  session_type?: 'temporary' | 'memory' | 'agent'; // 会话类型：临时会话/记忆体/智能体
   created_at?: string;
   updated_at?: string;
   last_message_at?: string;
   message_count?: number;
+  preview_text?: string; // 第一条用户消息的缩略（如果没有名字时使用）
 }
 
 export interface Message {
@@ -23,6 +27,24 @@ export interface Message {
   token_count?: number;
   created_at?: string;
   tool_type?: 'workflow' | 'mcp'; // 感知组件类型（当 role === 'tool' 时使用）
+  ext?: MessageExt; // 扩展数据
+}
+
+// 消息扩展数据（用于存储 Gemini 等模型的特殊数据）
+export interface MessageExt {
+  // Gemini 相关
+  provider?: string; // LLM 提供商
+  model?: string; // 模型名称
+  enableThinking?: boolean; // 是否启用 thinking 模式
+  thinkingBudget?: number; // thinking 预算
+  thoughtSignature?: string; // 思维签名（用于多轮对话）
+  toolCallSignatures?: Record<string, string>; // 工具调用的思维签名
+  // 多模态相关
+  media?: Array<{
+    type: 'image' | 'video';
+    mimeType: string;
+    data: string;
+  }>;
 }
 
 export interface Summary {
@@ -73,11 +95,30 @@ export async function getSessions(): Promise<Session[]> {
 }
 
 /**
+ * 获取智能体列表
+ */
+export async function getAgents(): Promise<Session[]> {
+  try {
+    const response = await fetch(`${API_BASE}/agents`);
+    if (!response.ok) {
+      console.warn(`Failed to fetch agents: ${response.statusText}`);
+      return [];
+    }
+    const data = await response.json();
+    return data.agents || [];
+  } catch (error) {
+    console.warn('Error fetching agents:', error);
+    return [];
+  }
+}
+
+/**
  * 创建新会话
  */
 export async function createSession(
   llm_config_id?: string,
-  title?: string
+  title?: string,
+  session_type?: 'temporary' | 'memory' | 'agent'
 ): Promise<Session> {
   const response = await fetch(`${API_BASE}/sessions`, {
     method: 'POST',
@@ -87,6 +128,7 @@ export async function createSession(
     body: JSON.stringify({
       llm_config_id,
       title,
+      session_type: session_type || 'memory',
     }),
   });
   if (!response.ok) {
@@ -153,6 +195,7 @@ export async function saveMessage(
       workflowName?: string;
       workflowStatus?: 'pending' | 'running' | 'completed' | 'error';
       acc_token?: number; // 可选：手动指定累积 token（用于总结消息等特殊情况）
+      ext?: MessageExt; // 扩展数据（如 Gemini 的 thoughtSignature）
     }
 ): Promise<{ message_id: string; token_count: number }> {
   // 如果是工具消息（感知组件），将工作流信息存储在 tool_calls 中
@@ -330,5 +373,54 @@ export async function updateSessionAvatar(session_id: string, avatar: string): P
   if (!response.ok) {
     throw new Error(`Failed to update avatar: ${response.statusText}`);
   }
+}
+
+/**
+ * 更新会话的用户自定义名称
+ */
+export async function updateSessionName(session_id: string, name: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/sessions/${session_id}/name`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ name }),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to update session name: ${response.statusText}`);
+  }
+}
+
+/**
+ * 更新会话的系统提示词（人设）
+ */
+export async function updateSessionSystemPrompt(session_id: string, system_prompt: string | null): Promise<void> {
+  const response = await fetch(`${API_BASE}/sessions/${session_id}/system-prompt`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ system_prompt }),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to update system prompt: ${response.statusText}`);
+  }
+}
+
+/**
+ * 升级记忆体为智能体
+ */
+export async function upgradeToAgent(session_id: string, name: string, avatar: string, system_prompt: string, llm_config_id: string): Promise<Session> {
+  const response = await fetch(`${API_BASE}/sessions/${session_id}/upgrade-to-agent`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ name, avatar, system_prompt, llm_config_id }),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to upgrade to agent: ${response.statusText}`);
+  }
+  return await response.json();
 }
 

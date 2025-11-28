@@ -227,6 +227,55 @@ def create_tables():
         cursor.execute(create_oauth_tokens_table)
         print("✓ Table 'oauth_tokens' created/verified successfully")
         
+        # Notion 注册信息表
+        create_notion_registrations_table = """
+        CREATE TABLE IF NOT EXISTS `notion_registrations` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `client_id` VARCHAR(255) NOT NULL UNIQUE COMMENT 'Notion OAuth Client ID',
+            `client_name` VARCHAR(255) NOT NULL COMMENT '客户端名称（用户输入）',
+            `redirect_uri` TEXT NOT NULL COMMENT '完整回调地址',
+            `redirect_uri_base` VARCHAR(500) DEFAULT NULL COMMENT '回调地址基础部分（用户输入）',
+            `client_uri` VARCHAR(500) DEFAULT NULL COMMENT '客户端 URI',
+            `registration_data` JSON DEFAULT NULL COMMENT '完整注册响应数据',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+            INDEX `idx_client_id` (`client_id`),
+            INDEX `idx_client_name` (`client_name`),
+            INDEX `idx_created_at` (`created_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Notion MCP 注册信息表';
+        """
+        
+        cursor.execute(create_notion_registrations_table)
+        print("✓ Table 'notion_registrations' created/verified successfully")
+        
+        # 迁移：为 oauth_tokens 表添加 notion_registration_id 字段（如果不存在）
+        try:
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM information_schema.COLUMNS 
+                WHERE TABLE_SCHEMA = DATABASE() 
+                AND TABLE_NAME = 'oauth_tokens' 
+                AND COLUMN_NAME = 'notion_registration_id'
+            """)
+            notion_reg_id_column_exists = cursor.fetchone()[0] > 0
+            
+            if not notion_reg_id_column_exists:
+                print("  → Adding 'notion_registration_id' column to 'oauth_tokens' table...")
+                cursor.execute("""
+                    ALTER TABLE `oauth_tokens` 
+                    ADD COLUMN `notion_registration_id` INT DEFAULT NULL COMMENT '关联的 Notion 注册信息 ID' 
+                    AFTER `mcp_url`,
+                    ADD CONSTRAINT `fk_oauth_tokens_notion_reg` 
+                    FOREIGN KEY (`notion_registration_id`) 
+                    REFERENCES `notion_registrations`(`id`) 
+                    ON DELETE SET NULL
+                """)
+                print("  ✓ Column 'notion_registration_id' added successfully")
+            else:
+                print("  ✓ Column 'notion_registration_id' already exists")
+        except Exception as e:
+            print(f"  ⚠ Warning: Could not check/add 'notion_registration_id' column: {e}")
+        
         # 工作流配置表
         create_workflows_table = """
         CREATE TABLE IF NOT EXISTS `workflows` (
@@ -251,6 +300,7 @@ def create_tables():
             `id` INT AUTO_INCREMENT PRIMARY KEY,
             `session_id` VARCHAR(100) NOT NULL UNIQUE COMMENT '会话ID',
             `title` VARCHAR(255) DEFAULT NULL COMMENT '会话标题（自动生成或用户设置）',
+            `name` VARCHAR(255) DEFAULT NULL COMMENT '用户自定义会话名称',
             `llm_config_id` VARCHAR(100) DEFAULT NULL COMMENT '使用的LLM配置ID',
             `avatar` MEDIUMTEXT DEFAULT NULL COMMENT '机器人头像（base64编码）',
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -265,6 +315,78 @@ def create_tables():
         
         cursor.execute(create_sessions_table)
         print("✓ Table 'sessions' created/verified successfully")
+        
+        # 迁移：为已存在的表添加 name 列（如果不存在）
+        try:
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM information_schema.COLUMNS 
+                WHERE TABLE_SCHEMA = DATABASE() 
+                AND TABLE_NAME = 'sessions' 
+                AND COLUMN_NAME = 'name'
+            """)
+            name_column_exists = cursor.fetchone()[0] > 0
+            
+            if not name_column_exists:
+                print("  → Adding 'name' column to 'sessions' table...")
+                cursor.execute("""
+                    ALTER TABLE `sessions` 
+                    ADD COLUMN `name` VARCHAR(255) DEFAULT NULL COMMENT '用户自定义会话名称' 
+                    AFTER `title`
+                """)
+                conn.commit()
+                print("  ✓ Column 'name' added to 'sessions' table")
+        except Exception as e:
+            print(f"  ⚠️ Warning: Failed to add 'name' column: {e}")
+        
+        # 迁移：为已存在的表添加 system_prompt 列（用于存储会话人设）
+        try:
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM information_schema.COLUMNS 
+                WHERE TABLE_SCHEMA = DATABASE() 
+                AND TABLE_NAME = 'sessions' 
+                AND COLUMN_NAME = 'system_prompt'
+            """)
+            system_prompt_exists = cursor.fetchone()[0] > 0
+            
+            if not system_prompt_exists:
+                print("  → Adding 'system_prompt' column to 'sessions' table...")
+                cursor.execute("""
+                    ALTER TABLE `sessions` 
+                    ADD COLUMN `system_prompt` TEXT DEFAULT NULL COMMENT '系统提示词（人设）' 
+                    AFTER `avatar`
+                """)
+                print("  ✓ Column 'system_prompt' added successfully")
+            else:
+                print("  ✓ Column 'system_prompt' already exists")
+        except Exception as e:
+            print(f"  ⚠️ Warning: Failed to add 'system_prompt' column: {e}")
+        
+        # 迁移：为已存在的表添加 session_type 列（会话类型：temporary/memory/agent）
+        try:
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM information_schema.COLUMNS 
+                WHERE TABLE_SCHEMA = DATABASE() 
+                AND TABLE_NAME = 'sessions' 
+                AND COLUMN_NAME = 'session_type'
+            """)
+            session_type_exists = cursor.fetchone()[0] > 0
+            
+            if not session_type_exists:
+                print("  → Adding 'session_type' column to 'sessions' table...")
+                cursor.execute("""
+                    ALTER TABLE `sessions` 
+                    ADD COLUMN `session_type` VARCHAR(20) DEFAULT 'memory' COMMENT '会话类型：temporary(临时会话)/memory(记忆体)/agent(智能体)' 
+                    AFTER `llm_config_id`
+                """)
+                conn.commit()
+                print("  ✓ Column 'session_type' added to 'sessions' table")
+            else:
+                print("  ✓ Column 'session_type' already exists")
+        except Exception as e:
+            print(f"  ⚠️ Warning: Failed to add 'session_type' column: {e}")
         
         # 迁移：为已存在的表添加或修改 avatar 列（如果不存在或类型不对）
         try:
@@ -349,6 +471,31 @@ def create_tables():
         except Exception as e:
             print(f"  ⚠ Warning: Could not check/add 'acc_token' column: {e}")
         
+        # 迁移：为已存在的表添加 ext 列（如果不存在）- 用于存储扩展数据
+        # 如 Gemini 的 thoughtSignature、模型信息、thinking配置等
+        try:
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM information_schema.COLUMNS 
+                WHERE TABLE_SCHEMA = DATABASE() 
+                AND TABLE_NAME = 'messages' 
+                AND COLUMN_NAME = 'ext'
+            """)
+            ext_column_exists = cursor.fetchone()[0] > 0
+            
+            if not ext_column_exists:
+                print("  → Adding 'ext' column to 'messages' table...")
+                cursor.execute("""
+                    ALTER TABLE `messages` 
+                    ADD COLUMN `ext` JSON DEFAULT NULL COMMENT '扩展数据(JSON): 思维签名、模型信息等' 
+                    AFTER `acc_token`
+                """)
+                print("  ✓ Column 'ext' added successfully")
+            else:
+                print("  ✓ Column 'ext' already exists")
+        except Exception as e:
+            print(f"  ⚠ Warning: Could not check/add 'ext' column: {e}")
+        
         # 总结表
         create_summaries_table = """
         CREATE TABLE IF NOT EXISTS `summaries` (
@@ -429,6 +576,7 @@ def create_tables():
             `batch_name` VARCHAR(255) NOT NULL COMMENT '批次名称（如日期）',
             `crawled_data` JSON NOT NULL COMMENT '爬取的数据（标准化后）',
             `parsed_data` JSON DEFAULT NULL COMMENT '用户标记后生成的解析数据',
+            `crawler_config_snapshot` JSON DEFAULT NULL COMMENT '爬虫配置快照（用于快速创建新批次）',
             `crawled_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '爬取时间',
             `status` VARCHAR(20) DEFAULT 'completed' COMMENT '状态：pending, running, completed, error',
             `error_message` TEXT DEFAULT NULL COMMENT '错误信息',
@@ -464,6 +612,28 @@ def create_tables():
                 print("✓ Column 'parsed_data' already exists")
         except Exception as e:
             print(f"⚠ Warning: Could not check/add 'parsed_data' column: {e}")
+        
+        # 检查并添加 crawler_config_snapshot 列（如果不存在）
+        try:
+            cursor.execute("""
+                SELECT COLUMN_NAME 
+                FROM INFORMATION_SCHEMA.COLUMNS 
+                WHERE TABLE_SCHEMA = DATABASE() 
+                AND TABLE_NAME = 'crawler_batches' 
+                AND COLUMN_NAME = 'crawler_config_snapshot'
+            """)
+            if not cursor.fetchone():
+                print("Adding 'crawler_config_snapshot' column to 'crawler_batches' table...")
+                cursor.execute("""
+                    ALTER TABLE `crawler_batches` 
+                    ADD COLUMN `crawler_config_snapshot` JSON DEFAULT NULL COMMENT '爬虫配置快照（用于快速创建新批次）' 
+                    AFTER `parsed_data`
+                """)
+                print("✓ Column 'crawler_config_snapshot' added successfully")
+            else:
+                print("✓ Column 'crawler_config_snapshot' already exists")
+        except Exception as e:
+            print(f"⚠ Warning: Could not check/add 'crawler_config_snapshot' column: {e}")
         
         cursor.close()
         conn.close()  # 归还连接到连接池
@@ -798,6 +968,9 @@ def refresh_oauth_token(mcp_url: str, token_info: dict, oauth_config: dict) -> O
         is_notion = resource and 'mcp.notion.com' in resource
         if is_notion:
             try:
+                # 从 token_info 中获取 client_id
+                client_id = token_info.get('client_id')
+                
                 # 动态导入 config（避免循环依赖）
                 import sys
                 from pathlib import Path
@@ -807,7 +980,8 @@ def refresh_oauth_token(mcp_url: str, token_info: dict, oauth_config: dict) -> O
                     app_config = yaml.safe_load(f)
                 
                 from mcp_server.well_known.notion import refresh_notion_token
-                new_token_info = refresh_notion_token(app_config, refresh_token, mcp_url)
+                # 传递 client_id 以便从数据库读取注册信息
+                new_token_info = refresh_notion_token(app_config, refresh_token, mcp_url, client_id)
                 if new_token_info:
                     print(f"[OAuth Token] ✅ Notion token refreshed successfully")
                 return new_token_info

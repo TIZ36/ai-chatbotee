@@ -15,6 +15,7 @@ export interface MCPServer {
   enabled: boolean;
   description?: string;
   metadata?: Record<string, any>;
+  ext?: Record<string, any>; // 扩展配置（如 response_format, server_type 等）
 }
 
 export interface MCPTool {
@@ -328,11 +329,15 @@ export class MCPClient {
         console.log(`[MCP] Sending request to ${targetUrl}`);
         console.log(`[MCP] Request body:`, JSON.stringify(requestBody));
 
+        // 检查服务器是否使用 SSE 格式（Notion MCP 使用 SSE）
+        const isSSE = (this.server as any).ext?.response_format === 'sse' || 
+                      (this.server as any).ext?.server_type === 'notion';
+
         const response = await fetch(targetUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Accept': 'application/json',
+            'Accept': isSSE ? 'text/event-stream' : 'application/json',
             'mcp-protocol-version': '2025-06-18',
             'mcp-session-id': (this.transport as any).sessionId || '',
           },
@@ -343,8 +348,53 @@ export class MCPClient {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
 
-        const jsonResponse = await response.json();
-        console.log(`[MCP] Received response:`, jsonResponse);
+        // 检查响应类型：SSE流式响应还是普通JSON响应
+        const contentType = response.headers.get('content-type') || '';
+        const isStreaming = contentType.includes('text/event-stream') || isSSE;
+
+        let jsonResponse: any;
+
+        if (isStreaming) {
+          // 处理 SSE 格式响应
+          console.log(`[MCP] Detected SSE response for tools/list, parsing...`);
+          const responseText = await response.text();
+          console.log(`[MCP] SSE response preview:`, responseText.substring(0, 200));
+          
+          // 解析 SSE 格式
+          const lines = responseText.split('\n');
+          for (const line of lines) {
+            const trimmedLine = line.trim();
+            if (trimmedLine.startsWith('data: ')) {
+              const jsonStr = trimmedLine.substring(6);
+              if (jsonStr.trim()) {
+                try {
+                  jsonResponse = JSON.parse(jsonStr);
+                  console.log(`[MCP] Parsed SSE response:`, jsonResponse);
+                  break;
+                } catch (parseError) {
+                  console.warn(`[MCP] Failed to parse SSE data line:`, parseError);
+                }
+              }
+            } else if (trimmedLine.startsWith('{')) {
+              // 直接是JSON对象（没有 "data: " 前缀）
+              try {
+                jsonResponse = JSON.parse(trimmedLine);
+                console.log(`[MCP] Parsed JSON response:`, jsonResponse);
+                break;
+              } catch (parseError) {
+                console.warn(`[MCP] Failed to parse JSON line:`, parseError);
+              }
+            }
+          }
+          
+          if (!jsonResponse) {
+            throw new Error('Failed to parse SSE response for tools/list');
+          }
+        } else {
+          // 普通 JSON 响应
+          jsonResponse = await response.json();
+          console.log(`[MCP] Received JSON response:`, jsonResponse);
+        }
 
         if (jsonResponse.error) {
           throw new Error(`MCP Error: ${jsonResponse.error.message}`);

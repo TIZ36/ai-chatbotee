@@ -8,7 +8,7 @@ const API_BASE_URL = 'http://localhost:3002/api/llm';
 export interface LLMConfigFromDB {
   config_id: string;
   name: string;
-  provider: 'openai' | 'anthropic' | 'local' | 'custom' | 'ollama';
+  provider: 'openai' | 'anthropic' | 'local' | 'custom' | 'ollama' | 'gemini';
   api_url?: string;
   model?: string;
   tags?: string[];
@@ -23,7 +23,7 @@ export interface LLMConfigFromDB {
 export interface CreateLLMConfigRequest {
   config_id?: string;
   name: string;
-  provider: 'openai' | 'anthropic' | 'local' | 'custom' | 'ollama';
+  provider: 'openai' | 'anthropic' | 'local' | 'custom' | 'ollama' | 'gemini';
   api_key?: string;
   api_url?: string;
   model?: string;

@@ -4,14 +4,15 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Loader, Bot, User, Wrench, AlertCircle, CheckCircle, Brain, Plug, RefreshCw, Power, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Plus, History, Sparkles, Workflow as WorkflowIcon, GripVertical, Play, ArrowRight, Trash2, X, Edit2, RotateCw, Database, Image as ImageIcon } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { Send, Loader, Bot, User, Wrench, AlertCircle, CheckCircle, Brain, Plug, RefreshCw, Power, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Plus, History, Sparkles, Workflow as WorkflowIcon, GripVertical, Play, ArrowRight, Trash2, X, Edit2, RotateCw, Database, Paperclip, Type, Image, Video, Music, HelpCircle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { LLMClient, LLMMessage } from '../services/llmClient';
 import { getLLMConfigs, getLLMConfig, getLLMConfigApiKey, LLMConfigFromDB } from '../services/llmApi';
 import { mcpManager, MCPServer, MCPTool } from '../services/mcpClient';
 import { getMCPServers, MCPServerConfig } from '../services/mcpApi';
-import { getSessions, createSession, getSessionMessages, saveMessage, summarizeSession, getSessionSummaries, deleteSession, clearSummarizeCache, deleteMessage, executeMessageComponent, updateSessionAvatar, Session, Summary } from '../services/sessionApi';
+import { getSessions, createSession, getSessionMessages, saveMessage, summarizeSession, getSessionSummaries, deleteSession, clearSummarizeCache, deleteMessage, executeMessageComponent, updateSessionAvatar, updateSessionName, updateSessionSystemPrompt, upgradeToAgent, Session, Summary } from '../services/sessionApi';
 import { estimate_messages_tokens, get_model_max_tokens, estimate_tokens } from '../services/tokenCounter';
 import { getWorkflows, getWorkflow, Workflow as WorkflowType, WorkflowNode, WorkflowConnection } from '../services/workflowApi';
 import { getBatch } from '../services/crawlerApi';
@@ -23,9 +24,20 @@ interface Message {
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
   thinking?: string; // 思考过程（用于 o1 等思考模型）
-  toolCalls?: Array<{ name: string; arguments: any; result?: any }>;
+  toolCalls?: Array<{ name: string; arguments: any; result?: any }> | { 
+    // 系统提示词消息的元数据
+    isSystemPrompt?: boolean;
+    batchName?: string;
+    item?: any;
+    // 错误消息的重试元数据
+    canRetry?: boolean;
+    errorType?: 'network' | 'timeout' | 'api' | 'unknown';
+    // 工具调用的标准格式（兼容）
+    [key: string]: any;
+  };
   isStreaming?: boolean; // 是否正在流式输出
   isThinking?: boolean; // 是否正在思考
+  currentStep?: string; // 当前执行步骤（灰色小字显示）
   toolType?: 'workflow' | 'mcp'; // 感知组件类型（当 role === 'tool' 时使用）
   workflowId?: string; // 工作流ID（如果是工作流消息）
   workflowName?: string; // 工作流名称
@@ -33,7 +45,316 @@ interface Message {
   workflowResult?: string; // 工作流执行结果
   workflowConfig?: { nodes: WorkflowNode[]; connections: WorkflowConnection[] }; // 工作流配置（节点和连接）
   isSummary?: boolean; // 是否是总结消息（不显示，但用于标记总结点）
+  // 多模态内容支持
+  media?: Array<{
+    type: 'image' | 'video';
+    mimeType: string;
+    data: string; // base64 编码的数据或 URL
+    url?: string; // 如果是 URL
+  }>;
+  // 思维签名（用于 Gemini）
+  thoughtSignature?: string;
+  toolCallSignatures?: Record<string, string>; // 工具调用的思维签名映射
 }
+
+// 会话列表项组件
+interface SessionListItemProps {
+  session: Session;
+  displayName: string;
+  avatarUrl: string | null;
+  isSelected: boolean;
+  onSelect: () => void;
+  onDelete: (e: React.MouseEvent) => void;
+  onUpdateName: (name: string) => Promise<void>;
+  onUpdateAvatar: (avatar: string) => Promise<void>;
+}
+
+const SessionListItem: React.FC<SessionListItemProps> = ({
+  session,
+  displayName,
+  avatarUrl,
+  isSelected,
+  onSelect,
+  onDelete,
+  onUpdateName,
+  onUpdateAvatar,
+}) => {
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [editName, setEditName] = useState(session.name || '');
+  const [editAvatar, setEditAvatar] = useState<string | null>(avatarUrl);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleAvatarClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setShowEditDialog(true);
+    setEditName(session.name || '');
+    setEditAvatar(avatarUrl);
+  };
+
+  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // 检查文件类型
+    if (!file.type.startsWith('image/')) {
+      alert('请选择图片文件');
+      return;
+    }
+
+    // 检查文件大小（限制为 2MB）
+    if (file.size > 2 * 1024 * 1024) {
+      alert('图片大小不能超过 2MB');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64String = event.target?.result as string;
+      setEditAvatar(base64String);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      // 更新名称
+      if (editName.trim() !== (session.name || '')) {
+        await onUpdateName(editName.trim());
+      }
+      
+      // 更新头像
+      if (editAvatar !== avatarUrl) {
+        await onUpdateAvatar(editAvatar || '');
+      }
+      
+      setShowEditDialog(false);
+    } catch (error) {
+      console.error('[SessionListItem] Failed to save:', error);
+      alert('保存失败，请重试');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCancel = () => {
+    setShowEditDialog(false);
+    setEditName(session.name || '');
+    setEditAvatar(avatarUrl);
+  };
+
+  // 默认头像 SVG（机器人图标）
+  const DefaultAvatar = () => (
+    <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center flex-shrink-0 cursor-pointer hover:bg-blue-600 transition-colors">
+      <Bot className="w-5 h-5 text-white" />
+    </div>
+  );
+
+  return (
+    <>
+      <div
+        className={`group relative w-full text-left px-2.5 py-2 rounded-lg text-sm transition-colors ${
+          isSelected
+            ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border border-primary-300 dark:border-primary-700'
+            : 'bg-gray-50 dark:bg-gray-800/50 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 border border-gray-200 dark:border-gray-700'
+        }`}
+      >
+        <button
+          onClick={onSelect}
+          className="w-full text-left"
+        >
+          <div className="flex items-start space-x-2">
+            {/* 头像 - 可点击 */}
+            <div onClick={handleAvatarClick} className="cursor-pointer hover:opacity-80 transition-opacity">
+              {avatarUrl ? (
+                <img
+                  src={avatarUrl}
+                  alt="Avatar"
+                  className="w-8 h-8 rounded-full flex-shrink-0 object-cover"
+                />
+              ) : (
+                <DefaultAvatar />
+              )}
+            </div>
+            
+            <div className="flex-1 min-w-0">
+              {/* 名称显示 */}
+              <div className="font-medium truncate">
+                {displayName}
+              </div>
+              
+              <div className="flex items-center space-x-2 mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                {session.message_count ? (
+                  <span>{session.message_count} 条消息</span>
+                ) : null}
+                {session.last_message_at && (
+                  <span className="truncate">
+                    {new Date(session.last_message_at).toLocaleDateString('zh-CN', {
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </button>
+        
+        {/* 删除按钮 */}
+        <button
+          onClick={onDelete}
+          className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded"
+          title="删除会话"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {/* 编辑对话框 */}
+      {showEditDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={handleCancel}>
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                编辑会话
+              </h3>
+              <button
+                onClick={handleCancel}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/* 头像编辑 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  头像
+                </label>
+                <div className="flex items-center space-x-4">
+                  <div className="relative">
+                    {editAvatar ? (
+                      <img
+                        src={editAvatar}
+                        alt="Avatar"
+                        className="w-16 h-16 rounded-full object-cover border-2 border-gray-200 dark:border-gray-700"
+                      />
+                    ) : (
+                      <div className="w-16 h-16 rounded-full bg-blue-500 flex items-center justify-center border-2 border-gray-200 dark:border-gray-700">
+                        <Bot className="w-8 h-8 text-white" />
+                      </div>
+                    )}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleAvatarUpload}
+                      className="hidden"
+                    />
+                  </div>
+                  <div className="flex flex-col space-y-2">
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded transition-colors"
+                    >
+                      选择图片
+                    </button>
+                    {editAvatar && (
+                      <button
+                        onClick={() => setEditAvatar(null)}
+                        className="px-3 py-1.5 text-sm bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50 text-red-700 dark:text-red-400 rounded transition-colors"
+                      >
+                        清除头像
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                  支持 JPG、PNG 等图片格式，建议大小不超过 2MB
+                </p>
+              </div>
+
+              {/* 名称编辑 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  会话名称
+                </label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleSave();
+                    } else if (e.key === 'Escape') {
+                      handleCancel();
+                    }
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
+                  placeholder="输入会话名称（留空则使用默认名称）"
+                />
+              </div>
+
+              {/* 人设显示 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  人设
+                </label>
+                <div className={`px-3 py-2.5 rounded-lg text-sm ${
+                  session.system_prompt 
+                    ? 'bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-700' 
+                    : 'bg-gray-50 dark:bg-gray-700/50 border border-dashed border-gray-300 dark:border-gray-600'
+                }`}>
+                  {session.system_prompt ? (
+                    <p className="text-gray-700 dark:text-gray-300 line-clamp-3">
+                      {session.system_prompt}
+                    </p>
+                  ) : (
+                    <p className="text-gray-400 dark:text-gray-500 italic">
+                      人设为空
+                    </p>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  人设可在聊天界面底部设置
+                </p>
+              </div>
+            </div>
+
+            {/* 操作按钮 */}
+            <div className="flex justify-end space-x-3 mt-6">
+              <button
+                onClick={handleCancel}
+                disabled={isSaving}
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors disabled:opacity-50"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={isSaving}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 flex items-center space-x-2"
+              >
+                {isSaving ? (
+                  <>
+                    <Loader className="w-4 h-4 animate-spin" />
+                    <span>保存中...</span>
+                  </>
+                ) : (
+                  <span>保存</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
 
 const Workflow: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([
@@ -45,6 +366,13 @@ const Workflow: React.FC = () => {
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  // 多模态内容（图片、视频）
+  const [attachedMedia, setAttachedMedia] = useState<Array<{
+    type: 'image' | 'video';
+    mimeType: string;
+    data: string; // base64 编码的数据
+    preview?: string; // 预览 URL（用于显示）
+  }>>([]);
   const [streamEnabled, setStreamEnabled] = useState(true); // 流式响应开关
   const [collapsedThinking, setCollapsedThinking] = useState<Set<string>>(new Set()); // 已折叠的思考过程
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null); // 正在编辑的消息ID
@@ -81,6 +409,20 @@ const Workflow: React.FC = () => {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [currentSessionAvatar, setCurrentSessionAvatar] = useState<string | null>(null); // 当前会话的头像
+  const [currentSystemPrompt, setCurrentSystemPrompt] = useState<string | null>(null); // 当前会话的系统提示词（人设）
+  const [isEditingSystemPrompt, setIsEditingSystemPrompt] = useState(false); // 是否正在编辑人设
+  const [systemPromptDraft, setSystemPromptDraft] = useState(''); // 人设编辑草稿
+  const [showHelpTooltip, setShowHelpTooltip] = useState(false); // 是否显示帮助提示
+  const [showSessionTypeDialog, setShowSessionTypeDialog] = useState(false); // 是否显示会话类型选择对话框
+  const [showUpgradeToAgentDialog, setShowUpgradeToAgentDialog] = useState(false); // 是否显示升级为智能体对话框
+  const [isTemporarySession, setIsTemporarySession] = useState(false); // 当前是否为临时会话
+  const [temporarySessionId] = useState('temporary-session'); // 临时会话ID（固定）
+  const [agentName, setAgentName] = useState(''); // 升级为智能体时的名称
+  const [agentAvatar, setAgentAvatar] = useState<string | null>(null); // 升级为智能体时的头像
+  const [agentSystemPrompt, setAgentSystemPrompt] = useState(''); // 升级为智能体时的人设
+  const [agentLLMConfigId, setAgentLLMConfigId] = useState<string | null>(null); // 升级为智能体时关联的LLM模型
+  const [isUpgrading, setIsUpgrading] = useState(false); // 是否正在升级
+  const agentAvatarFileInputRef = useRef<HTMLInputElement>(null); // 升级对话框的头像文件输入
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [messagePage, setMessagePage] = useState(1);
@@ -116,6 +458,17 @@ const Workflow: React.FC = () => {
   const scrollPositionRef = useRef<{ anchorMessageId: string; anchorOffsetTop: number; scrollTop: number } | null>(null);
   const isLoadingMoreRef = useRef(false);
   const lastMessageCountRef = useRef(0);
+  
+  // 保存最后一次请求信息，用于快速重试
+  const lastRequestRef = useRef<{
+    userMessage: string;
+    systemPrompt: string;
+    tools?: MCPTool[];
+    messageHistory?: LLMMessage[];
+    sessionId?: string;
+    messageId?: string;
+    model?: string;
+  } | null>(null);
 
   // 检查是否应该自动滚动到底部
   const shouldAutoScroll = () => {
@@ -124,7 +477,7 @@ const Workflow: React.FC = () => {
     const scrollTop = container.scrollTop;
     const scrollHeight = container.scrollHeight;
     const clientHeight = container.clientHeight;
-    // 如果距离底部小于100px，认为用户在底部附近，应该自动滚动
+    // 如果距离底部小于100px，认为用户在底部附近（最新消息位置）
     return scrollHeight - scrollTop - clientHeight < 100;
   };
 
@@ -141,15 +494,19 @@ const Workflow: React.FC = () => {
       return;
     }
     
-    // 如果是初始加载，直接跳到底部（不使用动画）
+    // 如果是初始加载，直接跳到底部（最新消息位置），不使用动画
     if (isInitialLoadRef.current && messages.length > 0) {
-      requestAnimationFrame(() => {
-        if (messagesEndRef.current) {
-          messagesEndRef.current.scrollIntoView({ behavior: 'instant' });
+      // 使用 setTimeout 确保 DOM 已完全渲染
+      setTimeout(() => {
+        if (chatContainerRef.current) {
+          const container = chatContainerRef.current;
+          // 直接设置 scrollTop，不使用动画
+          container.style.scrollBehavior = 'auto';
+          container.scrollTop = container.scrollHeight;
           isInitialLoadRef.current = false;
           lastMessageCountRef.current = messages.length;
         }
-      });
+      }, 0);
       return;
     }
     
@@ -168,11 +525,18 @@ const Workflow: React.FC = () => {
       // 更新 lastMessageCountRef
       lastMessageCountRef.current = messages.length;
       
-      // 如果用户在底部附近，自动滚动到底部
+      // 新消息在底部，如果用户在底部附近，自动滚动到底部（不使用动画）
       if (shouldAutoScroll() && !isUserScrollingRef.current) {
-        requestAnimationFrame(() => {
-          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-        });
+        setTimeout(() => {
+          if (chatContainerRef.current) {
+            const container = chatContainerRef.current;
+            // 直接设置 scrollTop，不使用动画
+            container.style.scrollBehavior = 'auto';
+            container.scrollTop = container.scrollHeight;
+          } else if (messagesEndRef.current) {
+            messagesEndRef.current.scrollIntoView({ behavior: 'instant' });
+          }
+        }, 0);
         // 用户已经在底部，隐藏新消息提示
         setShowNewMessagePrompt(false);
         setUnreadMessageCount(0);
@@ -196,6 +560,9 @@ const Workflow: React.FC = () => {
     }
   };
 
+  // 从URL参数中获取会话ID（用于从智能体页面跳转过来）
+  const [searchParams] = useSearchParams();
+  
   // 加载LLM配置和MCP服务器列表
   useEffect(() => {
     loadLLMConfigs();
@@ -204,18 +571,51 @@ const Workflow: React.FC = () => {
     loadWorkflows();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 从URL参数中加载会话
+  useEffect(() => {
+    const sessionIdFromUrl = searchParams.get('session');
+    if (sessionIdFromUrl && sessions.length > 0) {
+      const session = sessions.find(s => s.session_id === sessionIdFromUrl);
+      if (session && session.session_type === 'agent') {
+        handleSelectSession(sessionIdFromUrl);
+        // 清除URL参数
+        const newSearchParams = new URLSearchParams(searchParams);
+        newSearchParams.delete('session');
+        window.history.replaceState({}, '', window.location.pathname + (newSearchParams.toString() ? '?' + newSearchParams.toString() : ''));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, sessions]);
   
-  // 当选择会话时，加载历史消息和头像
+  // 当选择会话时，加载历史消息、头像和人设
   useEffect(() => {
     if (currentSessionId) {
+      if (isTemporarySession) {
+        // 临时会话：不加载历史消息和总结
+        setMessages([
+          {
+            id: '1',
+            role: 'system',
+            content: '你好！我是你的 AI 工作流助手。这是临时会话，不会保存历史记录。',
+          },
+        ]);
+        setSummaries([]);
+        setCurrentSessionAvatar(null);
+        setCurrentSystemPrompt(null);
+      } else {
+        // 记忆体或智能体：正常加载
       loadSessionMessages(currentSessionId);
       loadSessionSummaries(currentSessionId);
-      // 加载会话头像
+      // 加载会话头像和人设
       const session = sessions.find(s => s.session_id === currentSessionId);
       if (session?.avatar) {
         setCurrentSessionAvatar(session.avatar);
       } else {
         setCurrentSessionAvatar(null);
+      }
+      // 加载人设
+      setCurrentSystemPrompt(session?.system_prompt || null);
       }
     } else {
       // 新会话，清空消息（保留系统消息）
@@ -226,9 +626,12 @@ const Workflow: React.FC = () => {
       }]);
       setSummaries([]);
       setCurrentSessionAvatar(null);
+      setCurrentSystemPrompt(null);
+      // 清空系统提示词状态
+      setSelectedBatchItem(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSessionId, sessions]);
+  }, [currentSessionId, sessions, isTemporarySession]);
   
   // 当弹框显示时，调整位置使底部对齐光标，并滚动到底部
   useEffect(() => {
@@ -332,13 +735,18 @@ const Workflow: React.FC = () => {
     try {
       setIsLoadingMessages(true);
       
-      // 如果是加载更多历史消息（page > 1），记录当前滚动位置
+      // 第一页加载时，先清空系统提示词状态（只有在找到系统提示词消息时才设置）
+      if (page === 1) {
+        setSelectedBatchItem(null);
+      }
+      
+      // 如果是加载更多历史消息（page > 1），记录当前滚动位置（顶部附近）
       if (page > 1 && chatContainerRef.current && messages.length > 0) {
         isLoadingMoreRef.current = true;
         const container = chatContainerRef.current;
         const scrollTop = container.scrollTop;
         
-        // 找到容器顶部附近的第一条消息作为锚点
+        // 找到容器顶部附近的第一条消息作为锚点（历史消息在上方）
         let anchorMessageId: string | null = null;
         let anchorOffsetTop = 0;
         const threshold = 200; // 距离顶部200px内的消息
@@ -358,7 +766,7 @@ const Workflow: React.FC = () => {
           }
         }
         
-        // 如果没找到合适的锚点，使用第一条消息
+        // 如果没找到合适的锚点，使用第一条消息（历史消息在上方）
         if (!anchorMessageId && messages.length > 0) {
           const firstElement = container.querySelector(`[data-message-id="${messages[0].id}"]`) as HTMLElement;
           if (firstElement) {
@@ -411,15 +819,32 @@ const Workflow: React.FC = () => {
           isSummary: isSummaryMessage, // 标记为总结消息
         };
         
-        // 如果是系统提示词消息，恢复 selectedBatchItem
-        if (isSystemPromptMessage && toolCalls) {
+        // 恢复多模态内容（从 tool_calls 中读取）
+        // 注意：tool_calls 可能是对象（包含 media）或数组（标准工具调用格式）
+        if (toolCalls && typeof toolCalls === 'object' && !Array.isArray(toolCalls) && (toolCalls as any).media) {
+          baseMessage.media = (toolCalls as any).media;
+        }
+        
+        // 恢复思维签名（从 tool_calls 中读取）
+        if (toolCalls && typeof toolCalls === 'object') {
+          if ((toolCalls as any).thoughtSignature) {
+            baseMessage.thoughtSignature = (toolCalls as any).thoughtSignature;
+          }
+          if ((toolCalls as any).toolCallSignatures) {
+            baseMessage.toolCallSignatures = (toolCalls as any).toolCallSignatures;
+          }
+        }
+        
+        // 如果是系统提示词消息，恢复 selectedBatchItem（只在第一页加载时处理，避免重复设置）
+        // 注意：第一页加载时，系统提示词的恢复已经在消息处理完成后统一处理，这里只处理后续页加载的情况
+        if (isSystemPromptMessage && toolCalls && page > 1) {
           const systemPromptData = toolCalls as any;
           if (systemPromptData.batchName && systemPromptData.item) {
             setSelectedBatchItem({
               batchName: systemPromptData.batchName,
               item: systemPromptData.item,
             });
-            console.log('[Workflow] Restored system prompt from message:', msg.message_id);
+            console.log('[Workflow] Restored system prompt from message (page > 1):', msg.message_id);
           }
         }
         
@@ -508,16 +933,45 @@ const Workflow: React.FC = () => {
         }
       }
       
+      // 后端返回的消息已经是正序（最旧在前，最新在后），符合正常聊天显示顺序
+      // 第一页加载时，只显示最新的消息（在底部），然后历史消息追加到上方
       if (page === 1) {
-        // 第一页，替换所有消息（显示最新的消息）
-        setMessages(messagesWithNotifications);
-        isInitialLoadRef.current = true; // 标记为初始加载，会直接跳到底部
-        lastMessageCountRef.current = messagesWithNotifications.length;
+        // 第一页，只取最后几条消息（最新的），直接显示在底部
+        // 后端返回的是正序（最旧在前，最新在后），我们只取最后的部分
+        const latestMessages = messagesWithNotifications.slice(-20); // 只取最后20条（最新的）
+        setMessages(latestMessages);
+        isInitialLoadRef.current = true; // 标记为初始加载，会直接跳到底部（最新消息位置）
+        lastMessageCountRef.current = latestMessages.length;
         // 重置新消息提示
         setShowNewMessagePrompt(false);
         setUnreadMessageCount(0);
+        
+        // 检查是否有系统提示词消息，如果有则设置 selectedBatchItem
+        // 注意：这里需要检查所有消息，不仅仅是 latestMessages，因为系统提示词可能在历史消息中
+        let foundSystemPrompt = false;
+        for (const msg of messagesWithNotifications) {
+          if (msg.role === 'system' && 
+              msg.toolCalls && 
+              typeof msg.toolCalls === 'object' &&
+              (msg.toolCalls as any).isSystemPrompt === true) {
+            const systemPromptData = msg.toolCalls as any;
+            if (systemPromptData.batchName && systemPromptData.item) {
+              setSelectedBatchItem({
+                batchName: systemPromptData.batchName,
+                item: systemPromptData.item,
+              });
+              foundSystemPrompt = true;
+              console.log('[Workflow] Restored system prompt from message:', msg.id);
+              break;
+            }
+          }
+        }
+        // 如果没有找到系统提示词消息，确保 selectedBatchItem 为 null
+        if (!foundSystemPrompt) {
+          setSelectedBatchItem(null);
+        }
       } else {
-        // 后续页，添加到前面（加载历史消息）
+        // 后续页，加载历史消息，追加到数组前面（显示在上方）
         // 在设置消息之前，先设置标志阻止自动滚动，并预计算新消息数量
         shouldMaintainScrollRef.current = true;
         const oldMessageCount = messages.length;
@@ -527,31 +981,31 @@ const Workflow: React.FC = () => {
         lastMessageCountRef.current = newTotalCount;
         
         setMessages(prev => {
+          // 历史消息追加到数组前面（显示在上方）
           const newMessages = [...messagesWithNotifications, ...prev];
           
           // 恢复滚动位置（保持锚点消息的位置不变，类似微信的加载历史消息）
           if (scrollPositionRef.current && chatContainerRef.current) {
-            // 使用双重 requestAnimationFrame 确保 DOM 完全更新
-            requestAnimationFrame(() => {
-              requestAnimationFrame(() => {
-                const container = chatContainerRef.current;
-                if (container && scrollPositionRef.current) {
-                  const { anchorMessageId, anchorOffsetTop, scrollTop: oldScrollTop } = scrollPositionRef.current;
-                  if (anchorMessageId) {
-                    const anchorElement = container.querySelector(`[data-message-id="${anchorMessageId}"]`) as HTMLElement;
-                    if (anchorElement) {
-                      // 计算新位置：目标消息的新位置 - 之前目标消息距离顶部的距离
-                      const newAnchorOffsetTop = anchorElement.offsetTop;
-                      const distanceFromTop = anchorOffsetTop - oldScrollTop;
-                      const newScrollTop = newAnchorOffsetTop - distanceFromTop;
-                      container.scrollTop = newScrollTop;
-                    }
+            // 使用 setTimeout 确保 DOM 完全更新，并禁用滚动动画
+            setTimeout(() => {
+              const container = chatContainerRef.current;
+              if (container && scrollPositionRef.current) {
+                container.style.scrollBehavior = 'auto';
+                const { anchorMessageId, anchorOffsetTop, scrollTop: oldScrollTop } = scrollPositionRef.current;
+                if (anchorMessageId) {
+                  const anchorElement = container.querySelector(`[data-message-id="${anchorMessageId}"]`) as HTMLElement;
+                  if (anchorElement) {
+                    // 计算新位置：目标消息的新位置 - 之前目标消息距离顶部的距离
+                    const newAnchorOffsetTop = anchorElement.offsetTop;
+                    const distanceFromTop = anchorOffsetTop - oldScrollTop;
+                    const newScrollTop = newAnchorOffsetTop - distanceFromTop;
+                    container.scrollTop = newScrollTop;
                   }
-                  scrollPositionRef.current = null;
-                  isLoadingMoreRef.current = false;
                 }
-              });
-            });
+                scrollPositionRef.current = null;
+                isLoadingMoreRef.current = false;
+              }
+            }, 0);
           } else {
             isLoadingMoreRef.current = false;
           }
@@ -579,25 +1033,83 @@ const Workflow: React.FC = () => {
     }
   };
   
-  // 创建新会话
-  const handleCreateNewSession = async () => {
+  // 创建新会话 - 显示类型选择对话框
+  const handleCreateNewSession = () => {
+    if (!selectedLLMConfigId) {
+      alert('请先选择 LLM 模型');
+      return;
+    }
+    setShowSessionTypeDialog(true);
+  };
+
+  // 创建记忆体会话
+  const handleCreateMemorySession = async () => {
     try {
       const newSession = await createSession(
         selectedLLMConfigId || undefined,
-        '新会话'
+        '新会话',
+        'memory'
       );
       setCurrentSessionId(newSession.session_id);
+      setIsTemporarySession(false);
+      setShowSessionTypeDialog(false);
       await loadSessions();
     } catch (error) {
-      console.error('[Workflow] Failed to create session:', error);
-      alert('创建会话失败，请重试');
+      console.error('[Workflow] Failed to create memory session:', error);
+      alert('创建记忆体失败，请重试');
     }
+  };
+
+  // 切换到临时会话
+  const handleSwitchToTemporarySession = () => {
+    setCurrentSessionId(temporarySessionId);
+    setIsTemporarySession(true);
+    setShowSessionTypeDialog(false);
+    // 清空消息（临时会话不保存历史）
+    setMessages([
+      {
+        id: '1',
+        role: 'system',
+        content: '你好！我是你的 AI 工作流助手。这是临时会话，不会保存历史记录。',
+      },
+    ]);
+    setMessagePage(1);
+    setSummaries([]);
   };
   
   // 选择会话
   const handleSelectSession = async (session_id: string) => {
+    if (session_id === temporarySessionId) {
+      // 切换到临时会话
+      setIsTemporarySession(true);
+      setCurrentSessionId(temporarySessionId);
+      setMessages([
+        {
+          id: '1',
+          role: 'system',
+          content: '你好！我是你的 AI 工作流助手。这是临时会话，不会保存历史记录。',
+        },
+      ]);
+      setMessagePage(1);
+      setSummaries([]);
+      setCurrentSystemPrompt(null);
+      setCurrentSessionAvatar(null);
+    } else {
+      // 选择记忆体或智能体
+      setIsTemporarySession(false);
     setCurrentSessionId(session_id);
     setMessagePage(1);
+      // 加载会话信息
+      const session = sessions.find(s => s.session_id === session_id);
+      if (session) {
+        setCurrentSessionAvatar(session.avatar || null);
+        setCurrentSystemPrompt(session.system_prompt || null);
+        // 如果是智能体，自动选择关联的LLM模型
+        if (session.session_type === 'agent' && session.llm_config_id) {
+          setSelectedLLMConfigId(session.llm_config_id);
+        }
+      }
+    }
   };
   
   // 删除会话
@@ -629,74 +1141,6 @@ const Workflow: React.FC = () => {
       console.error('[Workflow] Failed to delete session:', error);
       alert('删除会话失败，请重试');
     }
-  };
-  
-  // 处理头像上传
-  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!currentSessionId) {
-      alert('请先选择一个会话');
-      return;
-    }
-    
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
-    // 检查文件类型
-    if (!file.type.startsWith('image/')) {
-      alert('请选择图片文件');
-      return;
-    }
-    
-    // 检查文件大小（限制为2MB）
-    if (file.size > 2 * 1024 * 1024) {
-      alert('图片大小不能超过2MB');
-      return;
-    }
-    
-    try {
-      // 将文件转换为base64
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        const base64String = event.target?.result as string;
-        
-        if (!base64String) {
-          alert('图片读取失败');
-          return;
-        }
-        
-        try {
-          // 保存到数据库
-          await updateSessionAvatar(currentSessionId, base64String);
-          
-          // 更新本地状态
-          setCurrentSessionAvatar(base64String);
-          
-          // 更新会话列表中的头像
-          setSessions(prev => prev.map(s => 
-            s.session_id === currentSessionId 
-              ? { ...s, avatar: base64String }
-              : s
-          ));
-          
-          console.log('[Workflow] Avatar updated successfully');
-        } catch (error) {
-          console.error('[Workflow] Failed to update avatar:', error);
-          alert('头像更新失败，请重试');
-        }
-      };
-      
-      reader.onerror = () => {
-        alert('图片读取失败');
-      };
-      
-      reader.readAsDataURL(file);
-    } catch (error) {
-      console.error('[Workflow] Failed to process avatar:', error);
-      alert('头像处理失败，请重试');
-    }
-    
-    // 清空input，允许重复选择同一文件
-    e.target.value = '';
   };
   
   // 处理总结的通用函数
@@ -800,6 +1244,10 @@ const Workflow: React.FC = () => {
       alert('请先选择会话和LLM模型');
       return;
     }
+    if (isTemporarySession) {
+      alert('临时会话不支持总结功能');
+      return;
+    }
     
     try {
       setIsSummarizing(true);
@@ -842,6 +1290,7 @@ const Workflow: React.FC = () => {
         role: 'system',
         content: `总结完成！对话内容已精简为 ${tokenAfter.toLocaleString()} token（原 ${tokenBefore.toLocaleString()} token）`,
       };
+      // 新消息追加到数组后面（显示在底部）
       setMessages(prev => [...prev, notificationMsg]);
     } catch (error) {
       console.error('[Workflow] Failed to summarize:', error);
@@ -923,12 +1372,13 @@ const Workflow: React.FC = () => {
       // 转换为 MCPServer 格式
       const mcpServer: MCPServer = {
         id: server.id,
-        name: server.name,
+        name: server.display_name || server.client_name || server.name,
         url: server.url,
         type: server.type,
         enabled: server.enabled,
         description: server.description,
         metadata: server.metadata,
+        ext: server.ext, // 传递扩展配置（包括 response_format, server_type 等）
       };
 
       const client = await mcpManager.addServer(mcpServer);
@@ -1051,7 +1501,8 @@ const Workflow: React.FC = () => {
   };
 
   const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
+    // 允许发送文本或图片（至少有一个）
+    if ((!input.trim() && attachedMedia.length === 0) || isLoading) return;
 
     // 检查配置
     if (!selectedLLMConfigId || !selectedLLMConfig) {
@@ -1060,6 +1511,7 @@ const Workflow: React.FC = () => {
         role: 'assistant',
         content: '❌ 请先选择一个 LLM 模型',
       };
+      // 新消息追加到数组后面（显示在底部）
       setMessages(prev => [...prev, errorMsg]);
       return;
     }
@@ -1104,10 +1556,11 @@ const Workflow: React.FC = () => {
           content: userInput,
         };
         
+        // 新消息追加到数组后面（显示在底部）
         setMessages(prev => [...prev, userMessage]);
         
-        // 保存用户消息
-        if (sessionId) {
+        // 保存用户消息（临时会话不保存）
+        if (sessionId && !isTemporarySession) {
           try {
             await saveMessage(sessionId, {
               message_id: userMessageId,
@@ -1149,6 +1602,7 @@ const Workflow: React.FC = () => {
             content: '',
             isThinking: true,
           };
+          // 新消息追加到数组后面（显示在底部）
           setMessages(prev => [...prev, instructionMessage]);
           
           // 更新提示消息内容（带动画效果）
@@ -1184,13 +1638,14 @@ const Workflow: React.FC = () => {
       }
     }
 
-    // 如果没有当前会话，创建新会话
-    let sessionId = currentSessionId;
-    if (!sessionId) {
+    // 临时会话：不需要创建新会话，使用固定的临时会话ID
+    let sessionId = isTemporarySession ? temporarySessionId : currentSessionId;
+    if (!sessionId && !isTemporarySession) {
       try {
-        const newSession = await createSession(selectedLLMConfigId, input.trim().substring(0, 50));
+        const newSession = await createSession(selectedLLMConfigId, input.trim().substring(0, 50), 'memory');
         sessionId = newSession.session_id;
         setCurrentSessionId(sessionId);
+        setIsTemporarySession(false);
         await loadSessions();
       } catch (error) {
         console.error('[Workflow] Failed to create session:', error);
@@ -1204,22 +1659,46 @@ const Workflow: React.FC = () => {
     const userMessage: Message = {
       id: userMessageId,
       role: 'user',
-      content: input.trim(),
+      content: input.trim() || (attachedMedia.length > 0 ? '[包含媒体内容]' : ''),
+      // 添加多模态内容
+      media: attachedMedia.length > 0 ? attachedMedia.map(m => ({
+        type: m.type,
+        mimeType: m.mimeType,
+        data: m.data,
+      })) : undefined,
     };
+
+    // 记录发送的媒体信息
+    if (attachedMedia.length > 0) {
+      console.log('[Workflow] 发送消息包含媒体:', attachedMedia.map(m => ({
+        type: m.type,
+        mimeType: m.mimeType,
+        dataSize: Math.round(m.data.length / 1024) + 'KB',
+      })));
+    }
 
     setMessages(prev => [...prev, userMessage]);
     setInput('');
+    setAttachedMedia([]); // 清空已发送的媒体
     setIsLoading(true);
     
-    // 保存用户消息到数据库
-    if (sessionId) {
+    // 保存用户消息到数据库（临时会话不保存）
+    if (sessionId && !isTemporarySession) {
       try {
-        await saveMessage(sessionId, {
+        // 保存时包含媒体信息（存储在 tool_calls 中作为临时方案）
+        const messageData: any = {
           message_id: userMessageId,
           role: 'user',
           content: userMessage.content,
           model: selectedLLMConfig.model || 'gpt-4',
-        });
+        };
+        
+        // 如果有媒体内容，保存到 tool_calls
+        if (userMessage.media && userMessage.media.length > 0) {
+          messageData.tool_calls = { media: userMessage.media };
+        }
+        
+        await saveMessage(sessionId, messageData);
       } catch (error) {
         console.error('[Workflow] Failed to save user message:', error);
       }
@@ -1241,7 +1720,9 @@ const Workflow: React.FC = () => {
         }
       }
 
-      // 创建LLM客户端
+      // 创建LLM客户端（传递 thinking 配置）
+      // 使用模型配置中的 thinking 模式，而不是用户切换的状态
+      const enableThinking = selectedLLMConfig.metadata?.enableThinking ?? false;
       const llmClient = new LLMClient({
         id: selectedLLMConfig.config_id,
         provider: selectedLLMConfig.provider,
@@ -1250,53 +1731,39 @@ const Workflow: React.FC = () => {
         apiUrl: selectedLLMConfig.api_url,
         model: selectedLLMConfig.model,
         enabled: selectedLLMConfig.enabled,
-        metadata: selectedLLMConfig.metadata,
+        metadata: {
+          ...selectedLLMConfig.metadata,
+          enableThinking: enableThinking, // 使用模型配置中的 thinking 模式
+        },
       });
 
       // 构建系统提示词
-      // 优先从消息中获取系统提示词（如果已保存）
-      let systemPrompt = '你是一个智能工作流助手，可以帮助用户完成各种任务。';
+      // 优先使用会话属性中的人设，其次使用默认提示词
+      let systemPrompt = currentSystemPrompt || '你是一个智能工作流助手，可以帮助用户完成各种任务。';
       
-      // 查找系统提示词消息
-      const systemPromptMessage = messages.find(m => 
-        m.role === 'system' && 
-        m.toolCalls && 
-        typeof m.toolCalls === 'object' &&
-        (m.toolCalls as any).isSystemPrompt === true
-      );
-      
-      if (systemPromptMessage) {
-        // 使用已保存的系统提示词消息内容
-        systemPrompt = systemPromptMessage.content;
-        console.log('[Workflow] Using saved system prompt from message');
-      } else {
-        // 如果没有保存的系统提示词，使用当前选定的批次数据项构建
-        // 添加历史总结（如果有）
-        if (summaries.length > 0) {
-          const summaryTexts = summaries.map(s => s.summary_content).join('\n\n');
-          systemPrompt += `\n\n以下是之前对话的总结，请参考这些上下文：\n\n${summaryTexts}\n\n`;
-        }
-        
-        // 添加选定的批次数据项（如果有）
-        if (selectedBatchItem) {
-          const { item, batchName } = selectedBatchItem;
-          systemPrompt += `\n\n【参考资料 - ${batchName}】\n`;
-          if (item.title) {
-            systemPrompt += `标题: ${item.title}\n`;
-          }
-          if (item.content) {
-            systemPrompt += `内容:\n${item.content}\n`;
-          }
-          systemPrompt += '\n请基于以上参考资料回答用户的问题。';
-          
-          console.log('[Workflow] 添加批次数据项到系统提示词:', { item, batchName });
-        }
+      if (currentSystemPrompt) {
+        console.log('[Workflow] 使用会话人设:', currentSystemPrompt.slice(0, 50) + '...');
       }
       
-      // 添加历史总结（如果有，且系统提示词消息中没有）
-      if (summaries.length > 0 && !systemPromptMessage) {
+      // 添加历史总结（如果有，临时会话不添加）
+      if (summaries.length > 0 && !isTemporarySession) {
         const summaryTexts = summaries.map(s => s.summary_content).join('\n\n');
         systemPrompt += `\n\n以下是之前对话的总结，请参考这些上下文：\n\n${summaryTexts}\n\n`;
+      }
+      
+      // 添加选定的批次数据项（如果有）
+      if (selectedBatchItem) {
+        const { item, batchName } = selectedBatchItem;
+        systemPrompt += `\n\n【参考资料 - ${batchName}】\n`;
+        if (item.title) {
+          systemPrompt += `标题: ${item.title}\n`;
+        }
+        if (item.content) {
+          systemPrompt += `内容:\n${item.content}\n`;
+        }
+        systemPrompt += '\n请基于以上参考资料回答用户的问题。';
+        
+        console.log('[Workflow] 添加批次数据项到系统提示词:', { item, batchName });
       }
       
       if (allTools.length > 0) {
@@ -1360,10 +1827,12 @@ const Workflow: React.FC = () => {
       const currentTokens = estimate_messages_tokens(conversationMessages, model);
       
       // 将消息历史转换为 LLMMessage 格式（用于传递给 LLMClient）
-      // 使用之前找到的 lastSummaryIndex，从总结消息开始（包含总结消息）
-      const messagesToSend = lastSummaryIndex >= 0 
+      // 临时会话：只发送当前用户消息，不发送历史消息
+      const messagesToSend = isTemporarySession 
+        ? [userMessage]  // 临时会话只发送当前消息
+        : (lastSummaryIndex >= 0 
         ? messages.slice(lastSummaryIndex)
-        : messages;
+          : messages);
       
       const messageHistory: LLMMessage[] = [];
       for (const msg of messagesToSend) {
@@ -1402,12 +1871,64 @@ const Workflow: React.FC = () => {
         else if (msg.role === 'tool') {
           continue;
         }
-        // user 和 assistant 消息直接转换
+        // user 和 assistant 消息直接转换（支持多模态和思维签名）
         else if (msg.role === 'user' || msg.role === 'assistant') {
-          messageHistory.push({
+          const llmMsg: LLMMessage = {
             role: msg.role,
             content: msg.content,
-          });
+          };
+          
+          // 添加多模态内容
+          if (msg.media && msg.media.length > 0) {
+            llmMsg.parts = [];
+            
+            // 添加文本部分
+            if (msg.content) {
+              llmMsg.parts.push({ text: msg.content });
+            }
+            
+            // 添加媒体部分
+            for (const media of msg.media) {
+              llmMsg.parts.push({
+                inlineData: {
+                  mimeType: media.mimeType,
+                  data: media.data,
+                },
+              });
+            }
+          }
+          
+          // 添加思维签名
+          if (msg.thoughtSignature) {
+            if (llmMsg.parts && llmMsg.parts.length > 0) {
+              // 如果有 parts，将签名添加到第一个 part
+              if (!llmMsg.parts[0].thoughtSignature) {
+                llmMsg.parts[0].thoughtSignature = msg.thoughtSignature;
+              }
+            } else {
+              // 如果没有 parts，使用消息级别的签名
+              llmMsg.thoughtSignature = msg.thoughtSignature;
+            }
+          }
+          
+          // 添加工具调用的思维签名
+          if (msg.toolCallSignatures) {
+            llmMsg.toolCallSignatures = msg.toolCallSignatures;
+          }
+          
+          // 添加工具调用（如果是 assistant 消息）
+          if (msg.role === 'assistant' && msg.toolCalls && Array.isArray(msg.toolCalls)) {
+            llmMsg.tool_calls = msg.toolCalls.map((tc: any) => ({
+              id: tc.name || `call_${Date.now()}`,
+              type: 'function' as const,
+              function: {
+                name: tc.name,
+                arguments: JSON.stringify(tc.arguments || {}),
+              },
+            }));
+          }
+          
+          messageHistory.push(llmMsg);
         }
       }
       
@@ -1418,8 +1939,8 @@ const Workflow: React.FC = () => {
         needsSummarize = true;
       }
       
-      // 如果需要 summarize，先执行总结
-      if (needsSummarize && sessionId) {
+      // 如果需要 summarize，先执行总结（临时会话不进行总结）
+      if (needsSummarize && sessionId && !isTemporarySession) {
         try {
           setIsSummarizing(true);
           const messagesToSummarize = conversationMessages.slice(0, -1).map((msg, idx) => ({
@@ -1449,6 +1970,7 @@ const Workflow: React.FC = () => {
         isStreaming: true,
         isThinking: true, // 初始状态为思考中
       };
+      // 新消息追加到数组后面（显示在底部）
       setMessages(prev => [...prev, assistantMessage]);
       // 默认折叠思考过程
       setCollapsedThinking(prev => new Set(prev).add(assistantMessageId));
@@ -1459,7 +1981,7 @@ const Workflow: React.FC = () => {
       let hasStartedContent = false; // 标记是否开始输出内容
       
       // 创建临时消息更新函数
-      const updateMessage = (content: string, thinking?: string, isThinking?: boolean, isStreaming?: boolean) => {
+      const updateMessage = (content: string, thinking?: string, isThinking?: boolean, isStreaming?: boolean, currentStep?: string) => {
         setMessages(prev => prev.map(msg => 
           msg.id === assistantMessageId 
             ? { 
@@ -1468,116 +1990,526 @@ const Workflow: React.FC = () => {
                 thinking: thinking !== undefined ? thinking : msg.thinking,
                 isThinking: isThinking !== undefined ? isThinking : msg.isThinking,
                 isStreaming: isStreaming !== undefined ? isStreaming : msg.isStreaming,
+                currentStep: currentStep !== undefined ? currentStep : msg.currentStep,
+              }
+            : msg
+        ));
+      };
+      
+      // 步骤变化回调
+      const handleStepChange = (step: string) => {
+        setMessages(prev => prev.map(msg => 
+          msg.id === assistantMessageId 
+            ? { 
+                ...msg, 
+                currentStep: step,
               }
             : msg
         ));
       };
 
-      if (streamEnabled) {
-        // 流式响应模式
-        const response = await llmClient.handleUserRequestWithThinking(
-          userMessage.content,
-          systemPrompt,
-          allTools.length > 0 ? allTools : undefined,
-          true, // 启用流式响应
-          (chunk: string, thinking?: string) => {
-            // 流式更新消息内容
-            if (chunk) {
-              fullResponse += chunk;
-              hasStartedContent = true;
-              // 如果开始输出内容，切换到回答状态，但保持流式
-              updateMessage(fullResponse, fullThinking, false, true);
+      // 保存请求信息用于重试
+      const requestInfo = {
+        userMessage: userMessage.content,
+        systemPrompt,
+        tools: allTools.length > 0 ? allTools : undefined,
+        messageHistory,
+        sessionId: sessionId || undefined, // 将 null 转换为 undefined
+        messageId: assistantMessageId,
+        model: selectedLLMConfig.model || 'gpt-4',
+      };
+      
+      // 存储到 ref 中，用于快速重试
+      lastRequestRef.current = requestInfo;
+
+      try {
+        if (streamEnabled) {
+          // 构建包含多模态内容的 LLMMessage
+          const userLLMMessage: LLMMessage = {
+            role: 'user',
+            content: userMessage.content,
+          };
+          
+          // 如果有媒体内容，构建 parts
+          if (userMessage.media && userMessage.media.length > 0) {
+            userLLMMessage.parts = [];
+            if (userMessage.content) {
+              userLLMMessage.parts.push({ text: userMessage.content });
             }
-            if (thinking !== undefined && thinking.length > 0) {
-              fullThinking = thinking; // 流式更新思考过程
-              // 如果有思考内容但还没有开始输出内容，保持思考状态
-              if (!hasStartedContent) {
-                updateMessage(fullResponse, fullThinking, true, true);
-              } else {
+            for (const media of userMessage.media) {
+              userLLMMessage.parts.push({
+                inlineData: {
+                  mimeType: media.mimeType,
+                  data: media.data,
+                },
+              });
+            }
+          }
+          
+          // 将用户消息添加到消息历史（包含多模态内容）
+          const messageHistoryWithUser = [...messageHistory, userLLMMessage];
+          
+          // 流式响应模式（使用包含多模态内容的消息历史）
+          const response = await llmClient.handleUserRequestWithThinking(
+            userMessage.content || '', // 即使没有文本内容，也传递空字符串
+            systemPrompt,
+            allTools.length > 0 ? allTools : undefined,
+            true, // 启用流式响应
+            (chunk: string, thinking?: string) => {
+              // 流式更新消息内容
+              if (chunk) {
+                fullResponse += chunk;
+                hasStartedContent = true;
+              }
+              
+              // 更新思考过程（即使 thinking 是空字符串也要更新，确保UI能正确显示）
+              if (thinking !== undefined) {
+                fullThinking = thinking; // 流式更新思考过程
+              }
+              
+              // 根据是否有内容来决定状态
+              if (hasStartedContent) {
                 // 如果已经开始输出内容，思考过程应该展开但标记为回答中
                 updateMessage(fullResponse, fullThinking, false, true);
+              } else if (fullThinking && fullThinking.length > 0) {
+                // 如果有思考内容但还没有开始输出内容，保持思考状态
+                updateMessage(fullResponse, fullThinking, true, true);
+              } else {
+                // 既没有内容也没有思考，保持当前状态
+                updateMessage(fullResponse, fullThinking, true, true);
               }
-            }
-          },
-          messageHistory // 传递消息历史
-        );
+            },
+            messageHistoryWithUser, // 传递包含多模态内容的消息历史
+            handleStepChange // 传递步骤变化回调
+          );
 
-        // 确保最终内容已更新（包括思考过程）
-        // 结果完成后，自动折叠思考并更新状态为完成
-        const finalContent = response.content || fullResponse;
-        const finalThinking = response.thinking || fullThinking;
-        updateMessage(finalContent, finalThinking, false, false);
-        // 自动折叠思考过程（如果有思考内容）
-        if (finalThinking && finalThinking.trim().length > 0) {
-          setCollapsedThinking(prev => new Set(prev).add(assistantMessageId));
-        }
-        
-        // 保存助手消息到数据库（流式响应模式）
-        if (sessionId) {
-          try {
-            await saveMessage(sessionId, {
-              message_id: assistantMessageId,
-              role: 'assistant',
-              content: finalContent, // 保存完整的回答内容
-              thinking: finalThinking, // 保存思考过程
-              model: selectedLLMConfig.model || 'gpt-4',
-            });
-            console.log('[Workflow] Saved assistant message to database:', assistantMessageId);
-          } catch (error) {
-            console.error('[Workflow] Failed to save assistant message:', error);
+          // 确保最终内容已更新（包括思考过程）
+          // 结果完成后，自动折叠思考并更新状态为完成
+          const finalContent = response.content || fullResponse;
+          const finalThinking = response.thinking || fullThinking;
+          
+          // 更新消息（包含思维签名和多模态输出）
+          console.log(`[Workflow] 更新 assistant 消息: content长度=${finalContent?.length || 0}, media数量=${response.media?.length || 0}`);
+          if (response.media && response.media.length > 0) {
+            console.log(`[Workflow] 收到 Gemini 图片:`, response.media.map(m => `${m.type}(${m.mimeType}, ${Math.round(m.data?.length / 1024)}KB)`).join(', '));
+          }
+          setMessages(prev => prev.map(msg => 
+            msg.id === assistantMessageId 
+              ? { 
+                  ...msg, 
+                  content: finalContent,
+                  thinking: finalThinking,
+                  isThinking: false,
+                  isStreaming: false,
+                  thoughtSignature: response.thoughtSignature, // 保存思维签名
+                  toolCallSignatures: response.toolCallSignatures, // 保存工具调用的思维签名
+                  media: response.media, // 保存多模态输出（图片等）
+                }
+              : msg
+          ));
+          
+          // 自动折叠思考过程（如果有思考内容）
+          if (finalThinking && finalThinking.trim().length > 0) {
+            setCollapsedThinking(prev => new Set(prev).add(assistantMessageId));
+          }
+          
+          // 保存助手消息到数据库（流式响应模式，包含思维签名和媒体内容，临时会话不保存）
+          if (sessionId && !isTemporarySession) {
+            try {
+              const messageData: any = {
+                message_id: assistantMessageId,
+                role: 'assistant',
+                content: finalContent, // 保存完整的回答内容
+                thinking: finalThinking, // 保存思考过程
+                model: selectedLLMConfig.model || 'gpt-4',
+              };
+              
+              // 保存思维签名和媒体内容到 tool_calls 中
+              const extData: any = {};
+              if (response.thoughtSignature) {
+                extData.thoughtSignature = response.thoughtSignature;
+              }
+              if (response.toolCallSignatures) {
+                extData.toolCallSignatures = response.toolCallSignatures;
+              }
+              // 保存 AI 生成的图片（base64）
+              if (response.media && response.media.length > 0) {
+                extData.media = response.media;
+                console.log(`[Workflow] 保存 ${response.media.length} 个 AI 生成的媒体文件到数据库`);
+              }
+              
+              if (Object.keys(extData).length > 0) {
+                messageData.tool_calls = extData;
+              }
+              
+              await saveMessage(sessionId, messageData);
+              console.log('[Workflow] Saved assistant message to database:', assistantMessageId);
+            } catch (error) {
+              console.error('[Workflow] Failed to save assistant message:', error);
+            }
+          }
+        } else {
+          // 构建包含多模态内容的 LLMMessage（非流式模式）
+          const userLLMMessage: LLMMessage = {
+            role: 'user',
+            content: userMessage.content,
+          };
+          
+          // 如果有媒体内容，构建 parts
+          if (userMessage.media && userMessage.media.length > 0) {
+            userLLMMessage.parts = [];
+            if (userMessage.content) {
+              userLLMMessage.parts.push({ text: userMessage.content });
+            }
+            for (const media of userMessage.media) {
+              userLLMMessage.parts.push({
+                inlineData: {
+                  mimeType: media.mimeType,
+                  data: media.data,
+                },
+              });
+            }
+          }
+          
+          // 将用户消息添加到消息历史（包含多模态内容）
+          const messageHistoryWithUser = [...messageHistory, userLLMMessage];
+          
+          // 非流式响应模式（使用包含多模态内容的消息历史）
+          const response = await llmClient.handleUserRequestWithThinking(
+            userMessage.content || '', // 即使没有文本内容，也传递空字符串
+            systemPrompt,
+            allTools.length > 0 ? allTools : undefined,
+            false, // 禁用流式响应
+            undefined, // 非流式模式不需要 onChunk
+            messageHistoryWithUser, // 传递包含多模态内容的消息历史
+            handleStepChange // 传递步骤变化回调
+          );
+          // 更新消息（包含思维签名和多模态输出）
+          setMessages(prev => prev.map(msg => 
+            msg.id === assistantMessageId 
+              ? { 
+                  ...msg, 
+                  content: response.content,
+                  thinking: response.thinking,
+                  isThinking: false,
+                  isStreaming: false,
+                  thoughtSignature: response.thoughtSignature, // 保存思维签名
+                  toolCallSignatures: response.toolCallSignatures, // 保存工具调用的思维签名
+                  media: response.media, // 保存多模态输出（图片等）
+                }
+              : msg
+          ));
+          
+          // 自动折叠思考过程（如果有思考内容）
+          if (response.thinking && response.thinking.trim().length > 0) {
+            setCollapsedThinking(prev => new Set(prev).add(assistantMessageId));
+          }
+          
+          // 保存助手消息到数据库（非流式响应模式，包含思维签名和媒体内容，临时会话不保存）
+          if (sessionId && !isTemporarySession) {
+            try {
+              const messageData: any = {
+                message_id: assistantMessageId,
+                role: 'assistant',
+                content: response.content, // 保存完整的回答内容
+                thinking: response.thinking, // 保存思考过程
+                model: selectedLLMConfig.model || 'gpt-4',
+              };
+              
+              // 保存思维签名和媒体内容到 tool_calls 中
+              const extData: any = {};
+              if (response.thoughtSignature) {
+                extData.thoughtSignature = response.thoughtSignature;
+              }
+              if (response.toolCallSignatures) {
+                extData.toolCallSignatures = response.toolCallSignatures;
+              }
+              // 保存 AI 生成的图片（base64）
+              if (response.media && response.media.length > 0) {
+                extData.media = response.media;
+                console.log(`[Workflow] 保存 ${response.media.length} 个 AI 生成的媒体文件到数据库`);
+              }
+              
+              if (Object.keys(extData).length > 0) {
+                messageData.tool_calls = extData;
+              }
+              
+              await saveMessage(sessionId, messageData);
+              console.log('[Workflow] Saved assistant message to database:', assistantMessageId);
+            } catch (error) {
+              console.error('[Workflow] Failed to save assistant message:', error);
+            }
           }
         }
-      } else {
-        // 非流式响应模式
-        const response = await llmClient.handleUserRequestWithThinking(
-          userMessage.content,
-          systemPrompt,
-          allTools.length > 0 ? allTools : undefined,
-          false, // 禁用流式响应
-          undefined, // 非流式模式不需要 onChunk
-          messageHistory // 传递消息历史
+        
+        // 无论流式还是非流式，完成后都更新 isLoading 状态
+        setIsLoading(false);
+      } catch (error) {
+        console.error('[Workflow] Error details:', error);
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        
+        // 判断错误类型
+        const isNetworkError = errorMsg.includes('fetch') || errorMsg.includes('network') || errorMsg.includes('Failed to');
+        const isTimeoutError = errorMsg.includes('timeout') || errorMsg.includes('AbortError');
+        const isRetryable = isNetworkError || isTimeoutError;
+        
+        // 更新消息状态为错误
+        updateMessage(
+          `❌ 错误: ${errorMsg}\n\n🔍 排查步骤：\n1. 检查 LLM 模型配置是否正确\n2. 检查 MCP 服务器是否已连接\n3. 检查 API 密钥是否有效\n4. 查看浏览器控制台的详细错误信息`,
+          undefined,
+          false,
+          false
         );
-        updateMessage(response.content, response.thinking, false, false);
-        // 自动折叠思考过程（如果有思考内容）
-        if (response.thinking && response.thinking.trim().length > 0) {
-          setCollapsedThinking(prev => new Set(prev).add(assistantMessageId));
-        }
         
-        // 保存助手消息到数据库（非流式响应模式）
-        if (sessionId) {
-          try {
-            await saveMessage(sessionId, {
-              message_id: assistantMessageId,
-              role: 'assistant',
-              content: response.content, // 保存完整的回答内容
-              thinking: response.thinking, // 保存思考过程
-              model: selectedLLMConfig.model || 'gpt-4',
-            });
-            console.log('[Workflow] Saved assistant message to database:', assistantMessageId);
-          } catch (error) {
-            console.error('[Workflow] Failed to save assistant message:', error);
-          }
-        }
-      }
-      
-      // 无论流式还是非流式，完成后都更新 isLoading 状态
-      setIsLoading(false);
-    } catch (error) {
-      console.error('[Workflow] Error details:', error);
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: `❌ 错误: ${errorMsg}
+        // 添加错误消息（带重试按钮）
+        const errorMessage: Message = {
+          id: assistantMessageId,
+          role: 'assistant',
+          content: `❌ 错误: ${errorMsg}
 
 🔍 排查步骤：
 1. 检查 LLM 模型配置是否正确
 2. 检查 MCP 服务器是否已连接
 3. 检查 API 密钥是否有效
 4. 查看浏览器控制台的详细错误信息`,
+          // 添加错误元数据，用于UI显示重试按钮
+          toolCalls: isRetryable ? { 
+            canRetry: true, 
+            errorType: (isNetworkError ? 'network' : isTimeoutError ? 'timeout' : 'unknown') as 'network' | 'timeout' | 'api' | 'unknown'
+          } : undefined,
+        };
+        
+        setMessages(prev => prev.map(msg => 
+          msg.id === assistantMessageId ? errorMessage : msg
+        ));
+      } finally {
+        setIsLoading(false);
+      }
+    } catch (outerError) {
+      // 外层错误处理（如果内层try-catch没有捕获到）
+      console.error('[Workflow] Outer error:', outerError);
+      setIsLoading(false);
+    }
+  };
+  
+  // 快速重试失败的消息
+  const handleRetryMessage = async (messageId: string) => {
+    if (!lastRequestRef.current) {
+      console.error('[Workflow] No previous request to retry');
+      return;
+    }
+    
+    const request = lastRequestRef.current;
+    
+    // 找到错误消息
+    const errorMessage = messages.find(m => m.id === messageId);
+    if (!errorMessage || errorMessage.role !== 'assistant') {
+      return;
+    }
+    
+    // 检查是否可以重试
+    const canRetry = errorMessage.toolCalls && 
+      typeof errorMessage.toolCalls === 'object' &&
+      (errorMessage.toolCalls as any).canRetry === true;
+    
+    if (!canRetry) {
+      alert('此错误无法自动重试，请检查配置后手动重试');
+      return;
+    }
+    
+    try {
+      setIsLoading(true);
+      
+      // 更新消息状态为"重试中"
+      setMessages(prev => prev.map(msg => 
+        msg.id === messageId
+          ? {
+              ...msg,
+              content: '🔄 正在重试...',
+              isStreaming: true,
+            }
+          : msg
+      ));
+      
+      // 重新发送请求（传递 thinking 配置）
+      // 使用模型配置中的 thinking 模式，而不是用户切换的状态
+      const enableThinking = selectedLLMConfig!.metadata?.enableThinking ?? false;
+      const llmClient = new LLMClient({
+        id: selectedLLMConfig!.config_id,
+        provider: selectedLLMConfig!.provider,
+        name: selectedLLMConfig!.name,
+        apiKey: await getLLMConfigApiKey(selectedLLMConfigId!),
+        apiUrl: selectedLLMConfig!.api_url,
+        model: selectedLLMConfig!.model,
+        enabled: selectedLLMConfig!.enabled,
+        metadata: {
+          ...selectedLLMConfig!.metadata,
+          enableThinking: enableThinking, // 使用模型配置中的 thinking 模式
+        },
+      });
+      
+      let fullResponse = '';
+      let fullThinking = '';
+      let hasStartedContent = false;
+      
+      const updateMessage = (content: string, thinking?: string, isThinking?: boolean, isStreaming?: boolean, currentStep?: string) => {
+        setMessages(prev => prev.map(msg => 
+          msg.id === messageId 
+            ? { 
+                ...msg, 
+                content, 
+                thinking: thinking !== undefined ? thinking : msg.thinking,
+                isThinking: isThinking !== undefined ? isThinking : msg.isThinking,
+                isStreaming: isStreaming !== undefined ? isStreaming : msg.isStreaming,
+                currentStep: currentStep !== undefined ? currentStep : msg.currentStep,
+              }
+            : msg
+        ));
       };
-      setMessages(prev => [...prev, errorMessage]);
+      
+      // 步骤变化回调（用于重试）
+      const handleStepChange = (step: string) => {
+        setMessages(prev => prev.map(msg => 
+          msg.id === messageId 
+            ? { 
+                ...msg, 
+                currentStep: step,
+              }
+            : msg
+        ));
+      };
+      
+      if (streamEnabled) {
+        const response = await llmClient.handleUserRequestWithThinking(
+          request.userMessage,
+          request.systemPrompt,
+          request.tools,
+          true,
+          (chunk: string, thinking?: string) => {
+            // 流式更新消息内容
+            if (chunk) {
+              fullResponse += chunk;
+              hasStartedContent = true;
+            }
+            
+            // 更新思考过程（即使 thinking 是空字符串也要更新，确保UI能正确显示）
+            if (thinking !== undefined) {
+              fullThinking = thinking; // 流式更新思考过程
+            }
+            
+            // 根据是否有内容来决定状态
+            if (hasStartedContent) {
+              // 如果已经开始输出内容，思考过程应该展开但标记为回答中
+              updateMessage(fullResponse, fullThinking, false, true);
+            } else if (fullThinking && fullThinking.length > 0) {
+              // 如果有思考内容但还没有开始输出内容，保持思考状态
+              updateMessage(fullResponse, fullThinking, true, true);
+            } else {
+              // 既没有内容也没有思考，保持当前状态
+              updateMessage(fullResponse, fullThinking, true, true);
+            }
+          },
+          request.messageHistory,
+          handleStepChange
+        );
+        
+        const finalContent = response.content || fullResponse;
+        const finalThinking = response.thinking || fullThinking;
+        updateMessage(finalContent, finalThinking, false, false);
+        
+        // 如果有多模态输出（图片等），添加到消息
+        if (response.media && response.media.length > 0) {
+          setMessages(prev => prev.map(msg => 
+            msg.id === messageId ? { ...msg, media: response.media } : msg
+          ));
+        }
+        
+        if (finalThinking && finalThinking.trim().length > 0) {
+          setCollapsedThinking(prev => new Set(prev).add(messageId));
+        }
+        
+        // 保存到数据库（临时会话不保存）
+        if (request.sessionId && !isTemporarySession) {
+          try {
+            const messageData: any = {
+              message_id: messageId,
+              role: 'assistant',
+              content: finalContent,
+              thinking: finalThinking,
+              model: request.model || 'gpt-4',
+            };
+            
+            // 保存媒体内容到 tool_calls 中
+            if (response.media && response.media.length > 0) {
+              messageData.tool_calls = { media: response.media };
+              console.log(`[Workflow] 保存 ${response.media.length} 个 AI 生成的媒体文件到数据库`);
+            }
+            
+            await saveMessage(request.sessionId, messageData);
+          } catch (error) {
+            console.error('[Workflow] Failed to save retried message:', error);
+          }
+        }
+      } else {
+        const response = await llmClient.handleUserRequestWithThinking(
+          request.userMessage,
+          request.systemPrompt,
+          request.tools,
+          false,
+          undefined,
+          request.messageHistory,
+          handleStepChange
+        );
+        updateMessage(response.content, response.thinking, false, false);
+        
+        // 如果有多模态输出（图片等），添加到消息
+        if (response.media && response.media.length > 0) {
+          setMessages(prev => prev.map(msg => 
+            msg.id === messageId ? { ...msg, media: response.media } : msg
+          ));
+        }
+        
+        if (response.thinking && response.thinking.trim().length > 0) {
+          setCollapsedThinking(prev => new Set(prev).add(messageId));
+        }
+        
+        // 保存到数据库
+        if (request.sessionId) {
+          try {
+            const messageData: any = {
+              message_id: messageId,
+              role: 'assistant',
+              content: response.content,
+              thinking: response.thinking,
+              model: request.model || 'gpt-4',
+            };
+            
+            // 保存媒体内容到 tool_calls 中
+            if (response.media && response.media.length > 0) {
+              messageData.tool_calls = { media: response.media };
+              console.log(`[Workflow] 保存 ${response.media.length} 个 AI 生成的媒体文件到数据库`);
+            }
+            
+            await saveMessage(request.sessionId, messageData);
+          } catch (error) {
+            console.error('[Workflow] Failed to save retried message:', error);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[Workflow] Retry failed:', error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      
+      // 更新错误消息
+      setMessages(prev => prev.map(msg => 
+        msg.id === messageId
+          ? {
+              ...msg,
+              content: `❌ 重试失败: ${errorMsg}\n\n请检查网络连接或稍后重试。`,
+              isStreaming: false,
+            }
+          : msg
+      ));
     } finally {
       setIsLoading(false);
     }
@@ -2322,135 +3254,42 @@ const Workflow: React.FC = () => {
     }
   };
   
-  // 将批次数据项设置为系统提示词
+  // 将批次数据项设置为系统提示词（人设）
   const handleSetAsSystemPrompt = async () => {
     if (!pendingBatchItem) return;
     
     const { item, batchName } = pendingBatchItem;
-    console.log('[Workflow] 设置批次数据项为系统提示词:', { item, batchName });
+    console.log('[Workflow] 设置批次数据项为人设:', { item, batchName });
     
-    // 保存选定的批次数据项
+    // 构建人设内容
+    let systemPromptContent = '';
+    if (item.title) {
+      systemPromptContent += `【${batchName}】${item.title}\n\n`;
+    }
+    if (item.content) {
+      systemPromptContent += item.content;
+    }
+    
+    // 保存选定的批次数据项（用于显示）
     setSelectedBatchItem({ item, batchName });
     setPendingBatchItem(null);
     
-    
-    // 如果有会话，保存或更新系统提示词消息
+    // 更新会话的人设属性
     if (currentSessionId) {
       try {
-        // 构建系统提示词内容
-        let systemPromptContent = '你是一个智能工作流助手，可以帮助用户完成各种任务。\n\n';
-        systemPromptContent += `【参考资料 - ${batchName}】\n`;
-        if (item.title) {
-          systemPromptContent += `标题: ${item.title}\n`;
-        }
-        if (item.content) {
-          systemPromptContent += `内容:\n${item.content}\n`;
-        }
-        systemPromptContent += '\n请基于以上参考资料回答用户的问题。';
-        
-        // 查找是否已有系统提示词消息
-        const existingSystemPromptMsg = messages.find(m => 
-          m.role === 'system' && 
-          m.toolCalls && 
-          typeof m.toolCalls === 'object' &&
-          (m.toolCalls as any).isSystemPrompt === true
-        );
-        
-        if (existingSystemPromptMsg) {
-          // 更新现有系统提示词消息
-          const systemPromptMessageId = existingSystemPromptMsg.id;
-          
-          // 更新本地消息
-          setMessages(prev => prev.map(msg => 
-            msg.id === systemPromptMessageId
-              ? {
-                  ...msg,
-                  content: systemPromptContent,
-                  toolCalls: {
-                    isSystemPrompt: true,
-                    batchName,
-                    item,
-                  }
-                }
-              : msg
-          ));
-          
-          // 更新数据库中的消息（需要先删除旧消息，再创建新消息，因为消息ID不变）
-          // 注意：这里我们直接更新内容，但数据库可能需要特殊处理
-          // 为了简化，我们可以删除旧消息并创建新消息
-          try {
-            await deleteMessage(currentSessionId, systemPromptMessageId);
-            await saveMessage(currentSessionId, {
-              message_id: systemPromptMessageId,
-              role: 'system',
-              content: systemPromptContent,
-              tool_calls: {
-                isSystemPrompt: true,
-                batchName,
-                item,
-              },
-              model: selectedLLMConfig?.model || 'gpt-4',
-            });
-            console.log('[Workflow] Updated system prompt message:', systemPromptMessageId);
-          } catch (error) {
-            console.error('[Workflow] Failed to update system prompt message:', error);
-          }
-        } else {
-          // 创建新的系统提示词消息
-          const systemPromptMessageId = `system-prompt-${Date.now()}`;
-          const systemPromptMessage: Message = {
-            id: systemPromptMessageId,
-            role: 'system',
-            content: systemPromptContent,
-            toolCalls: {
-              isSystemPrompt: true,
-              batchName,
-              item,
-            },
-          };
-          
-          // 添加到消息列表（插入到第一条用户消息之前，或最前面）
-          setMessages(prev => {
-            const userMessageIndex = prev.findIndex(m => m.role === 'user');
-            if (userMessageIndex >= 0) {
-              // 插入到第一条用户消息之前
-              const newMessages = [...prev];
-              newMessages.splice(userMessageIndex, 0, systemPromptMessage);
-              return newMessages;
-            } else {
-              // 如果没有用户消息，插入到最前面（系统消息之后）
-              const systemMessageIndex = prev.findIndex(m => m.role === 'system' && !m.toolCalls);
-              if (systemMessageIndex >= 0) {
-                const newMessages = [...prev];
-                newMessages.splice(systemMessageIndex + 1, 0, systemPromptMessage);
-                return newMessages;
-              } else {
-                return [systemPromptMessage, ...prev];
-              }
-            }
-          });
-          
-          // 保存到数据库
-          try {
-            await saveMessage(currentSessionId, {
-              message_id: systemPromptMessageId,
-              role: 'system',
-              content: systemPromptContent,
-              tool_calls: {
-                isSystemPrompt: true,
-                batchName,
-                item,
-              },
-              model: selectedLLMConfig?.model || 'gpt-4',
-            });
-            console.log('[Workflow] Saved system prompt message:', systemPromptMessageId);
-          } catch (error) {
-            console.error('[Workflow] Failed to save system prompt message:', error);
-          }
-        }
+        await updateSessionSystemPrompt(currentSessionId, systemPromptContent);
+        setCurrentSystemPrompt(systemPromptContent);
+        // 更新 sessions 列表
+        setSessions(prev => prev.map(s => 
+          s.session_id === currentSessionId ? { ...s, system_prompt: systemPromptContent } : s
+        ));
+        console.log('[Workflow] 人设已更新');
       } catch (error) {
-        console.error('[Workflow] Failed to save/update system prompt:', error);
+        console.error('[Workflow] Failed to update system prompt:', error);
       }
+    } else {
+      // 没有会话时，只更新本地状态
+      setCurrentSystemPrompt(systemPromptContent);
     }
   };
   
@@ -2506,6 +3345,7 @@ const Workflow: React.FC = () => {
         role: 'assistant',
         content: '⚠️ 只能选择一个感知组件。请先删除已选择的组件，然后再选择新的组件。',
       };
+      // 新消息追加到数组后面（显示在底部）
       setMessages(prev => [...prev, errorMsg]);
       setShowAtSelector(false);
       setAtSelectorIndex(-1);
@@ -2633,10 +3473,11 @@ const Workflow: React.FC = () => {
       workflowConfig: workflowDetails?.config, // 保存工作流配置（节点和连接）
     };
     
+    // 新消息追加到数组后面（显示在底部）
     setMessages(prev => [...prev, workflowMessage]);
     
-    // 保存消息到数据库，tool_calls字段包含组件信息，以便后端API能够找到并执行
-    if (currentSessionId) {
+    // 保存消息到数据库，tool_calls字段包含组件信息，以便后端API能够找到并执行（临时会话不保存）
+    if (currentSessionId && !isTemporarySession) {
       try {
         await saveMessage(currentSessionId, {
           message_id: workflowMessageId,
@@ -2761,6 +3602,7 @@ const Workflow: React.FC = () => {
         // 如果删除失败，恢复消息到列表中
         const message = messages.find(m => m.id === messageId);
         if (message) {
+          // 新消息追加到数组后面（显示在底部）
           setMessages(prev => [...prev, message]);
           alert('删除失败，请重试');
         }
@@ -2813,6 +3655,230 @@ const Workflow: React.FC = () => {
   };
 
   const renderMessageContent = (message: Message) => {
+    // 思考/生成中的占位内容（当内容为空且正在处理时）
+    if (message.role === 'assistant' && (!message.content || message.content.length === 0) && (message.isThinking || message.isStreaming)) {
+      const isGemini = selectedLLMConfig?.provider === 'gemini';
+      const hasThinkingContent = message.thinking && message.thinking.trim().length > 0;
+      
+      return (
+        <div className="flex flex-col items-center justify-center py-8 px-4">
+          {/* 思考动画 */}
+          <div className="relative mb-4">
+            <div className="w-16 h-16 rounded-full bg-gradient-to-r from-purple-500 via-blue-500 to-cyan-500 animate-spin" style={{ animationDuration: '3s' }}>
+              <div className="absolute inset-1 bg-white dark:bg-gray-800 rounded-full"></div>
+            </div>
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Brain className="w-6 h-6 text-purple-500" />
+            </div>
+          </div>
+          
+          {/* 状态文字 */}
+          <div className="text-center space-y-2">
+            <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {message.isThinking ? (
+                isGemini ? '🧠 Gemini 正在深度思考...' : '正在思考...'
+              ) : (
+                isGemini ? '✨ 正在生成回复...' : '正在处理...'
+              )}
+            </p>
+            {!hasThinkingContent && (
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              {isGemini ? (
+                message.isThinking 
+                  ? '模型正在进行推理，可能需要较长时间' 
+                  : '正在生成内容，请稍候'
+              ) : (
+                '请稍候...'
+              )}
+            </p>
+            )}
+          </div>
+          
+          {/* 思考内容显示 */}
+          {hasThinkingContent && (
+            <div className="w-full max-w-2xl mt-4">
+              <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                <div className="flex items-center space-x-2 mb-2">
+                  <Brain className="w-4 h-4 text-purple-500 animate-pulse" />
+                  <span className="text-xs font-medium text-gray-600 dark:text-gray-400">思考过程</span>
+                  {message.isThinking && (
+                    <span className="inline-flex items-center space-x-1">
+                      <span className="w-1.5 h-1.5 bg-purple-500 rounded-full animate-pulse"></span>
+                      <span className="text-xs text-purple-600 dark:text-purple-400">思考中...</span>
+                    </span>
+                  )}
+                </div>
+                <div className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words max-h-96 overflow-y-auto">
+                  {message.thinking}
+                  {message.isThinking && (
+                    <span className="inline-block ml-1 w-1.5 h-4 bg-purple-500 dark:bg-purple-400 animate-pulse"></span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* 进度条动画 */}
+          {!hasThinkingContent && (
+          <div className="w-48 h-1 bg-gray-200 dark:bg-gray-700 rounded-full mt-4 overflow-hidden">
+            <div 
+              className="h-full bg-gradient-to-r from-purple-500 via-blue-500 to-cyan-500 rounded-full"
+              style={{ 
+                width: '100%',
+                animation: 'pulse 2s ease-in-out infinite'
+              }}
+            ></div>
+          </div>
+          )}
+        </div>
+      );
+    }
+    
+    // 错误消息（带特殊样式）
+    if (message.role === 'assistant' && message.content?.includes('❌ 错误')) {
+      return (
+        <div className="w-full">
+          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+            <div className="flex items-start space-x-3">
+              <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <div className="text-sm text-red-900 dark:text-red-100 whitespace-pre-wrap">
+                  {message.content}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    
+    // 下载图片功能
+    const downloadImage = (mediaItem: { type: 'image' | 'video'; mimeType: string; data: string; url?: string }, index: number) => {
+      try {
+        // 获取文件扩展名
+        const ext = mediaItem.mimeType.split('/')[1] || 'png';
+        const filename = `ai-image-${Date.now()}-${index + 1}.${ext}`;
+        
+        if (mediaItem.url) {
+          // 如果是 URL，使用 fetch 下载
+          fetch(mediaItem.url)
+            .then(res => res.blob())
+            .then(blob => {
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = filename;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            });
+        } else if (mediaItem.data) {
+          // 如果是 base64 数据，转换为 blob 下载
+          const byteCharacters = atob(mediaItem.data);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          const blob = new Blob([byteArray], { type: mediaItem.mimeType });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
+      } catch (error) {
+        console.error('下载图片失败:', error);
+      }
+    };
+    
+    // 多模态内容显示（图片、视频）
+    const renderMedia = () => {
+      if (!message.media || message.media.length === 0) {
+        return null;
+      }
+      
+      return (
+        <div className="mb-3 space-y-2">
+          {message.media.map((media, index) => (
+            <div key={index} className="relative group">
+              {media.type === 'image' ? (
+                <div className="relative">
+                  <img
+                    src={media.url || `data:${media.mimeType};base64,${media.data}`}
+                    alt={`图片 ${index + 1}`}
+                    className="max-w-full max-h-96 rounded-lg border border-gray-300 dark:border-gray-600 object-contain cursor-pointer hover:opacity-90 transition-opacity"
+                    onClick={() => {
+                      // 点击图片可以放大查看
+                      const imgSrc = media.url || `data:${media.mimeType};base64,${media.data}`;
+                      const newWindow = window.open('', '_blank');
+                      if (newWindow) {
+                        newWindow.document.write(`
+                          <html>
+                            <head><title>图片预览</title></head>
+                            <body style="margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#000">
+                              <img src="${imgSrc}" style="max-width:100%;max-height:100vh;object-fit:contain;" />
+                            </body>
+                          </html>
+                        `);
+                      }
+                    }}
+                  />
+                  {/* 悬浮操作按钮 */}
+                  <div className="absolute bottom-2 right-2 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        downloadImage(media, index);
+                      }}
+                      className="bg-blue-500/90 hover:bg-blue-600 text-white text-xs px-3 py-1.5 rounded-md flex items-center gap-1 shadow-lg transition-colors"
+                      title="下载图片"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                      下载
+                    </button>
+                    <span className="bg-black/60 text-white text-xs px-2 py-1 rounded">
+                      点击放大
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div className="relative group">
+                  <video
+                    src={media.url || `data:${media.mimeType};base64,${media.data}`}
+                    controls
+                    className="max-w-full max-h-96 rounded-lg border border-gray-300 dark:border-gray-600"
+                  />
+                  {/* 悬浮操作按钮 */}
+                  <div className="absolute bottom-12 right-2 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        downloadImage(media, index);
+                      }}
+                      className="bg-blue-500/90 hover:bg-blue-600 text-white text-xs px-3 py-1.5 rounded-md flex items-center gap-1 shadow-lg transition-colors"
+                      title="下载视频"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                      下载
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      );
+    };
+    
     // 工具消息（感知组件）
     if (message.role === 'tool' && message.toolType) {
       const workflowConfig = message.workflowConfig;
@@ -3059,7 +4125,7 @@ const Workflow: React.FC = () => {
       return (
         <div>
           <div className="font-medium text-sm mb-2">工具调用:</div>
-          {message.toolCalls.map((toolCall, idx) => (
+          {Array.isArray(message.toolCalls) && message.toolCalls.map((toolCall: any, idx: number) => (
             <div key={idx} className="mb-3 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
               <div className="flex items-center space-x-2 mb-2">
                 <Wrench className="w-4 h-4 text-blue-500" />
@@ -3115,6 +4181,9 @@ const Workflow: React.FC = () => {
             )}
           </div>
         )}
+        {/* 多模态内容显示 */}
+        {renderMedia()}
+        
         {/* AI 助手消息使用 Markdown 渲染 */}
         {message.role === 'assistant' ? (
           <div className="prose prose-sm dark:prose-invert max-w-none text-gray-900 dark:text-gray-100 markdown-content">
@@ -3353,6 +4422,114 @@ const Workflow: React.FC = () => {
             ) : null}
           </div>
 
+          {/* 模型名片显示栏目 */}
+          {selectedLLMConfig && (
+            <div className="card p-3 flex-shrink-0">
+              <div className="flex items-center space-x-2 mb-2">
+                <Brain className="w-4 h-4 text-primary-600" />
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">模型信息</h3>
+              </div>
+              <div className="space-y-2">
+                {/* 基本信息 */}
+                <div className="text-xs text-gray-600 dark:text-gray-400">
+                  <div className="flex items-center space-x-2">
+                    <span className="font-medium">提供商:</span>
+                    <span className="capitalize">{selectedLLMConfig.provider}</span>
+                  </div>
+                  {selectedLLMConfig.model && (
+                    <div className="flex items-center space-x-2 mt-1">
+                      <span className="font-medium">模型:</span>
+                      <span>{selectedLLMConfig.model}</span>
+                    </div>
+                  )}
+                  {selectedLLMConfig.description && (
+                    <div className="mt-1 text-gray-500 dark:text-gray-500">
+                      {selectedLLMConfig.description}
+                    </div>
+                  )}
+                </div>
+                
+                {/* 支持的输入输出类型 */}
+                {(() => {
+                  const supportedInputs = selectedLLMConfig.metadata?.supportedInputs || [];
+                  const supportedOutputs = selectedLLMConfig.metadata?.supportedOutputs || [];
+                  
+                  if (supportedInputs.length === 0 && supportedOutputs.length === 0) {
+                    return null;
+                  }
+                  
+                  const typeIcons = {
+                    text: Type,
+                    image: Image,
+                    video: Video,
+                    audio: Music,
+                  };
+                  
+                  const typeLabels = {
+                    text: '文字',
+                    image: '图片',
+                    video: '视频',
+                    audio: '音频',
+                  };
+                  
+                  const typeColors = {
+                    text: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800',
+                    image: 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800',
+                    video: 'text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800',
+                    audio: 'text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800',
+                  };
+                  
+                  return (
+                    <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
+                      <div className="space-y-2 text-xs">
+                        {supportedInputs.length > 0 && (
+                          <div>
+                            <span className="text-gray-500 dark:text-gray-400 font-medium">支持的输入:</span>
+                            <div className="flex flex-wrap gap-1.5 mt-1">
+                              {supportedInputs.map((type: string) => {
+                                const Icon = typeIcons[type as keyof typeof typeIcons];
+                                return Icon ? (
+                                  <span
+                                    key={type}
+                                    className={`inline-flex items-center space-x-1 px-2 py-1 rounded border ${typeColors[type as keyof typeof typeColors] || 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700'}`}
+                                    title={typeLabels[type as keyof typeof typeLabels] || type}
+                                  >
+                                    <Icon className="w-3 h-3" />
+                                    <span>{typeLabels[type as keyof typeof typeLabels] || type}</span>
+                                  </span>
+                                ) : null;
+                              })}
+                            </div>
+                          </div>
+                        )}
+                        {supportedOutputs.length > 0 && (
+                          <div>
+                            <span className="text-gray-500 dark:text-gray-400 font-medium">支持的输出:</span>
+                            <div className="flex flex-wrap gap-1.5 mt-1">
+                              {supportedOutputs.map((type: string) => {
+                                const Icon = typeIcons[type as keyof typeof typeIcons];
+                                return Icon ? (
+                                  <span
+                                    key={type}
+                                    className={`inline-flex items-center space-x-1 px-2 py-1 rounded border ${typeColors[type as keyof typeof typeColors] || 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700'}`}
+                                    title={typeLabels[type as keyof typeof typeLabels] || type}
+                                  >
+                                    <Icon className="w-3 h-3" />
+                                    <span>{typeLabels[type as keyof typeof typeLabels] || type}</span>
+                                  </span>
+                                ) : null;
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
+
           {/* 会话列表模块 */}
           <div className="card p-3 flex-shrink-0">
             <div className="flex items-center justify-between mb-2">
@@ -3361,22 +4538,6 @@ const Workflow: React.FC = () => {
                 会话列表
             </label>
               <div className="flex items-center space-x-1">
-                {/* 头像上传按钮（仅在有会话时显示） */}
-                {currentSessionId && (
-                  <label
-                    className="flex items-center space-x-1 px-2 py-1 text-xs text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-colors cursor-pointer"
-                    title="更换机器人头像"
-                  >
-                    <ImageIcon className="w-3.5 h-3.5" />
-                    <span>头像</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleAvatarUpload}
-                      className="hidden"
-                    />
-                  </label>
-                )}
                 <button
                   onClick={handleCreateNewSession}
                   className="flex items-center space-x-1 px-2 py-1 text-xs text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-colors"
@@ -3389,21 +4550,20 @@ const Workflow: React.FC = () => {
             </div>
             {/* 会话列表容器：固定高度，显示5个会话项，其他需要滚动 */}
             <div className="space-y-1.5 max-h-[280px] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
-              {/* 新会话选项 */}
+              {/* 临时会话选项 */}
               <button
-                onClick={() => {
-                  setCurrentSessionId(null);
-                  setMessagePage(1);
-                }}
+                onClick={() => handleSelectSession(temporarySessionId)}
                 className={`w-full text-left px-2.5 py-2 rounded-lg text-sm transition-colors ${
-                  !currentSessionId
-                    ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border border-primary-300 dark:border-primary-700'
+                  isTemporarySession && currentSessionId === temporarySessionId
+                    ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700'
                     : 'bg-gray-50 dark:bg-gray-800/50 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 border border-gray-200 dark:border-gray-700'
                 }`}
+                title="临时会话：不保存历史记录，适合快速询问无关联问题"
               >
                 <div className="flex items-center space-x-2">
                   <MessageCircle className="w-4 h-4 flex-shrink-0" />
-                  <span className="font-medium truncate">新会话</span>
+                  <span className="font-medium truncate">临时会话</span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">(不保存)</span>
                 </div>
               </button>
               
@@ -3413,53 +4573,82 @@ const Workflow: React.FC = () => {
                   暂无历史会话
                 </div>
               ) : (
-                sessions.map((session) => (
-                  <div
-                    key={session.session_id}
-                    className={`group relative w-full text-left px-2.5 py-2 rounded-lg text-sm transition-colors ${
-                      currentSessionId === session.session_id
-                        ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border border-primary-300 dark:border-primary-700'
-                        : 'bg-gray-50 dark:bg-gray-800/50 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 border border-gray-200 dark:border-gray-700'
-                    }`}
-                  >
-                    <button
-                      onClick={() => handleSelectSession(session.session_id)}
-                      className="w-full text-left"
-                    >
-                      <div className="flex items-start space-x-2">
-                        <FileText className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium truncate">
-                            {session.title || `会话 ${session.session_id.substring(0, 8)}`}
-                          </div>
-                          <div className="flex items-center space-x-2 mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                            {session.message_count ? (
-                              <span>{session.message_count} 条消息</span>
-                            ) : null}
-                            {session.last_message_at && (
-                              <span className="truncate">
-                                {new Date(session.last_message_at).toLocaleDateString('zh-CN', {
-                                  month: 'short',
-                                  day: 'numeric',
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })}
-                              </span>
-                            )}
-                          </div>
+                sessions.map((session) => {
+                  // 确定显示的名称：优先使用 name，其次 title，最后使用 preview_text 或默认
+                  const displayName = session.name || session.title || session.preview_text || `会话 ${session.session_id.substring(0, 8)}`;
+                  
+                  // 确定头像：session.avatar 已经是 base64 字符串（可能包含 data:image 前缀），直接使用
+                  const avatarUrl = session.avatar || null;
+                  
+                  // 确定会话类型标签
+                  const sessionTypeLabel = session.session_type === 'agent' ? '智能体' : session.session_type === 'memory' ? '记忆体' : '';
+                  
+                  return (
+                    <div key={session.session_id} className="relative group">
+                    <SessionListItem
+                      session={session}
+                      displayName={displayName}
+                      avatarUrl={avatarUrl}
+                      isSelected={currentSessionId === session.session_id}
+                      onSelect={() => handleSelectSession(session.session_id)}
+                      onDelete={(e: React.MouseEvent) => handleDeleteSession(session.session_id, e)}
+                      onUpdateName={async (name: string) => {
+                        await updateSessionName(session.session_id, name);
+                        await loadSessions();
+                      }}
+                      onUpdateAvatar={async (avatar: string) => {
+                        await updateSessionAvatar(session.session_id, avatar);
+                        await loadSessions();
+                        // 如果当前会话，也更新当前会话的头像状态
+                        if (currentSessionId === session.session_id) {
+                          setCurrentSessionAvatar(avatar || null);
+                        }
+                      }}
+                    />
+                      {/* 会话类型标签和升级按钮 */}
+                      {sessionTypeLabel && (
+                        <div className="absolute top-1 right-1 flex items-center space-x-1">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                            {sessionTypeLabel}
+                          </span>
+                          {session.session_type === 'memory' && (() => {
+                            // 检查是否满足升级条件
+                            const hasName = !!session.name;
+                            const hasAvatar = !!session.avatar;
+                            const hasSystemPrompt = !!session.system_prompt;
+                            const canUpgrade = hasName && hasAvatar && hasSystemPrompt;
+                            
+                            return (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  // 初始化升级对话框的数据
+                                  setAgentName(session.name || '');
+                                  setAgentAvatar(session.avatar || null);
+                                  setAgentSystemPrompt(session.system_prompt || '');
+                                  setAgentLLMConfigId(session.llm_config_id || selectedLLMConfigId || null);
+                                  // 临时设置当前会话ID为要升级的会话
+                                  const upgradeSessionId = session.session_id;
+                                  setCurrentSessionId(upgradeSessionId);
+                                  setShowUpgradeToAgentDialog(true);
+                                }}
+                                className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
+                                  canUpgrade
+                                    ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/50'
+                                    : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 cursor-not-allowed'
+                                }`}
+                                title={canUpgrade ? '升级为智能体' : '需要设置名称、头像和人设才能升级'}
+                                disabled={!canUpgrade}
+                              >
+                                {canUpgrade ? '升级' : '需完善'}
+                              </button>
+                            );
+                          })()}
                         </div>
-                      </div>
-                    </button>
-                    {/* 删除按钮 */}
-                    <button
-                      onClick={(e) => handleDeleteSession(session.session_id, e)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded"
-                      title="删除会话"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
           </div>
@@ -3499,7 +4688,7 @@ const Workflow: React.FC = () => {
                   return (
                     <div
                       key={server.id}
-                      className="border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800/50 flex items-center group"
+                      className="border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800/50 group"
                       draggable={isConnected}
                       onDragStart={(e) => {
                         if (isConnected) {
@@ -3511,8 +4700,8 @@ const Workflow: React.FC = () => {
                         setDraggingComponent(null);
                       }}
                     >
-                      {/* 服务器主要信息行 */}
-                      <div className="flex items-center space-x-2 p-1.5 flex-1 min-w-0">
+                      {/* 服务器主要信息行 - 始终显示 */}
+                      <div className="flex items-center space-x-2 p-1.5">
                         {/* 服务器连接控制 */}
                         <button
                           onClick={() => isConnected ? handleDisconnectServer(server.id) : handleConnectServer(server.id)}
@@ -3533,21 +4722,27 @@ const Workflow: React.FC = () => {
                           )}
                         </button>
 
-                        {/* 服务器信息 */}
+                        {/* 服务器信息 - 始终显示 */}
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center space-x-2">
+                          <div className="flex items-center space-x-2 flex-wrap">
                             <Plug className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
                             <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                              {server.name}
+                              {server.display_name || server.client_name || server.name}
                             </span>
                             {isConnected && (
-                              <span className="text-xs text-green-600 dark:text-green-400 font-medium">
+                              <span className="text-xs text-green-600 dark:text-green-400 font-medium flex-shrink-0">
                                 已连接
                               </span>
                             )}
                             {isConnected && tools.length > 0 && (
-                              <span className="text-xs text-gray-500 dark:text-gray-400">
+                              <span className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
                                 ({tools.length} 工具)
+                              </span>
+                            )}
+                            {/* 服务器类型标签 */}
+                            {server.ext?.server_type && (
+                              <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-1.5 py-0.5 rounded flex-shrink-0">
+                                {server.ext.server_type}
                               </span>
                             )}
                           </div>
@@ -3561,7 +4756,10 @@ const Workflow: React.FC = () => {
                         {/* 展开/收起按钮（仅在已连接且有工具时显示） */}
                         {isConnected && tools.length > 0 && (
                           <button
-                            onClick={() => handleToggleServerExpand(server.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleToggleServerExpand(server.id);
+                            }}
                             className="flex-shrink-0 p-1.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
                             title={isExpanded ? '收起工具' : '展开工具'}
                           >
@@ -3575,7 +4773,7 @@ const Workflow: React.FC = () => {
 
                         {/* 使用开关（仅在已连接时可用） */}
                         {isConnected && (
-                          <label className="flex items-center space-x-1 cursor-pointer">
+                          <label className="flex items-center space-x-1 cursor-pointer flex-shrink-0">
                             <input
                               type="checkbox"
                               checked={isSelected}
@@ -3585,49 +4783,49 @@ const Workflow: React.FC = () => {
                             <span className="text-xs text-gray-600 dark:text-gray-400">使用</span>
                           </label>
                         )}
+                        
+                        {/* 拖动触点（仅在已连接时显示） */}
+                        {isConnected && (
+                          <div
+                            className="flex-shrink-0 p-1.5 cursor-grab active:cursor-grabbing text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                            title="拖动到对话框接入"
+                            onMouseDown={(e) => e.stopPropagation()}
+                          >
+                            <GripVertical className="w-4 h-4" />
+                          </div>
+                        )}
                       </div>
-                      
-                      {/* 拖动触点（仅在已连接时显示） */}
-                      {isConnected && (
-                        <div
-                          className="flex-shrink-0 p-2 cursor-grab active:cursor-grabbing text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                          title="拖动到对话框接入"
-                          onMouseDown={(e) => e.stopPropagation()}
-                        >
-                          <GripVertical className="w-4 h-4" />
-                        </div>
-                      )}
 
-                      {/* 工具列表（展开时显示） */}
+                      {/* 工具列表（展开时显示，在服务器信息下方） */}
                       {isConnected && isExpanded && tools.length > 0 && (
-                        <div className="border-t border-gray-200 bg-white p-2 space-y-1.5">
-                          <div className="text-xs font-medium text-gray-700 mb-1.5">
+                        <div className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-2 space-y-1.5">
+                          <div className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                             可用工具:
                           </div>
                           {tools.map((tool, index) => (
                             <div
                               key={index}
-                              className="bg-gray-50 border border-gray-200 rounded p-2 hover:bg-gray-100 transition-colors"
+                              className="bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded p-2 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                             >
                               <div className="flex items-start space-x-2">
                                 <Wrench className="w-3 h-3 text-blue-500 mt-0.5 flex-shrink-0" />
                                 <div className="flex-1 min-w-0">
-                                  <div className="text-xs font-medium text-gray-900">
+                                  <div className="text-xs font-medium text-gray-900 dark:text-gray-100">
                                     {tool.name}
                                   </div>
                                   {tool.description && (
-                                    <div className="text-xs text-gray-600 mt-1">
+                                    <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
                                       {tool.description}
                                     </div>
                                   )}
                                   {tool.inputSchema?.properties && (
                                     <div className="mt-1.5">
-                                      <div className="text-xs text-gray-500 mb-1">参数:</div>
+                                      <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">参数:</div>
                                       <div className="flex flex-wrap gap-1">
                                         {Object.keys(tool.inputSchema.properties).map((param) => (
                                           <span
                                             key={param}
-                                            className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded"
+                                            className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-1.5 py-0.5 rounded"
                                           >
                                             {param}
                                           </span>
@@ -3738,10 +4936,11 @@ const Workflow: React.FC = () => {
           </div>
         </div>
 
-        {/* 消息列表 */}
+        {/* 消息列表 - 正常顺序显示（老消息在上，新消息在下） */}
           <div 
             ref={chatContainerRef}
             className="flex-1 overflow-y-auto p-4 space-y-4 relative"
+            style={{ scrollBehavior: 'auto' }}
             onScroll={(e) => {
               const container = e.currentTarget;
               const scrollTop = container.scrollTop;
@@ -3755,12 +4954,12 @@ const Workflow: React.FC = () => {
                 }, 500);
               }
               
-              // 滚动到顶部附近时，自动加载更多历史消息（类似微信、Telegram）
+              // 滚动到顶部附近时，自动加载更多历史消息（历史消息在上方）
               if (scrollTop < 150 && hasMoreMessages && !isLoadingMessages && !isLoadingMoreRef.current) {
                 loadSessionMessages(currentSessionId!, messagePage + 1);
               }
               
-              // 用户滚动到底部时，隐藏新消息提示
+              // 用户滚动到底部时，隐藏新消息提示（最新消息在底部）
               if (shouldAutoScroll()) {
                 setShowNewMessagePrompt(false);
                 setUnreadMessageCount(0);
@@ -3778,7 +4977,7 @@ const Workflow: React.FC = () => {
               }
             }}
           >
-          {/* 加载更多历史消息提示（固定在顶部，类似微信） */}
+          {/* 加载更多历史消息提示（固定在顶部，历史消息在上方） */}
           {hasMoreMessages && (
             <div className="sticky top-0 z-10 flex justify-center mb-2 pointer-events-none">
               <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm px-3 py-1.5 rounded-full shadow-sm border border-gray-200 dark:border-gray-700 pointer-events-auto">
@@ -3800,12 +4999,19 @@ const Workflow: React.FC = () => {
             </div>
           )}
           
-          {/* 新消息提示（固定在底部，类似微信、Telegram） */}
+          {/* 新消息提示（固定在底部，最新消息在底部） */}
           {showNewMessagePrompt && unreadMessageCount > 0 && (
             <div className="sticky bottom-4 z-10 flex justify-center pointer-events-none">
               <button
                 onClick={() => {
-                  messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                  if (chatContainerRef.current) {
+                    const container = chatContainerRef.current;
+                    // 直接跳到底部（最新消息位置），不使用动画
+                    container.style.scrollBehavior = 'auto';
+                    container.scrollTop = container.scrollHeight;
+                  } else if (messagesEndRef.current) {
+                    messagesEndRef.current.scrollIntoView({ behavior: 'instant' });
+                  }
                   setShowNewMessagePrompt(false);
                   setUnreadMessageCount(0);
                 }}
@@ -3896,10 +5102,39 @@ const Workflow: React.FC = () => {
                 {message.role === 'assistant' && (
                   <div className="flex items-center space-x-1.5">
                     {message.isThinking && (!message.content || message.content.length === 0) ? (
-                      // 思考中动画（只有思考，还没有内容）
-                      <div className="flex items-center space-x-1.5">
-                        <Loader className="w-3.5 h-3.5 animate-spin text-blue-500" />
-                        <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">思考中</span>
+                      // 思考中动画（只有思考，还没有内容）- 增强版
+                      <div className="flex items-center space-x-2">
+                        {/* 大脑思考动画 */}
+                        <div className="relative">
+                          <Brain className="w-4 h-4 text-purple-500 animate-pulse" />
+                          <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-purple-400 rounded-full animate-ping opacity-75"></div>
+                        </div>
+                        <div className="flex items-center space-x-1">
+                          <span className="text-xs text-purple-600 dark:text-purple-400 font-medium">
+                            {selectedLLMConfig?.provider === 'gemini' ? '深度思考中' : '思考中'}
+                          </span>
+                          {/* 思考进度动画 */}
+                          <div className="flex space-x-0.5 ml-1">
+                            <div className="w-1 h-1 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '0ms', animationDuration: '1s' }}></div>
+                            <div className="w-1 h-1 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '200ms', animationDuration: '1s' }}></div>
+                            <div className="w-1 h-1 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '400ms', animationDuration: '1s' }}></div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : message.isStreaming && (!message.content || message.content.length === 0) ? (
+                      // 等待响应动画（流式模式但还没有内容）
+                      <div className="flex items-center space-x-2">
+                        <div className="relative">
+                          <Sparkles className="w-4 h-4 text-amber-500 animate-pulse" />
+                        </div>
+                        <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">
+                          {selectedLLMConfig?.provider === 'gemini' ? '生成中，请稍候...' : '处理中...'}
+                        </span>
+                        <div className="flex space-x-0.5">
+                          <div className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" style={{ animationDelay: '0ms' }}></div>
+                          <div className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" style={{ animationDelay: '200ms' }}></div>
+                          <div className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" style={{ animationDelay: '400ms' }}></div>
+                        </div>
                       </div>
                     ) : message.isStreaming ? (
                       // 回答中动画（正在流式输出内容）
@@ -3912,6 +5147,12 @@ const Workflow: React.FC = () => {
                         <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">回答中</span>
                       </div>
                     ) : null}
+                    {/* 当前执行步骤（灰色小字） */}
+                    {message.currentStep && message.currentStep.trim() && (
+                      <span className="text-xs text-gray-400 dark:text-gray-500 font-normal ml-2">
+                        {message.currentStep}
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
@@ -3949,6 +5190,25 @@ const Workflow: React.FC = () => {
                       title="重新发送"
                     >
                       <RotateCw className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+                
+                {/* Assistant错误消息的重试按钮 */}
+                {message.role === 'assistant' && 
+                 message.content?.includes('❌ 错误') && 
+                 message.toolCalls && 
+                 typeof message.toolCalls === 'object' &&
+                 (message.toolCalls as any).canRetry === true && (
+                  <div className="absolute top-2 right-2 flex items-center space-x-1">
+                    <button
+                      onClick={() => handleRetryMessage(message.id)}
+                      disabled={isLoading}
+                      className="px-3 py-1.5 text-sm font-medium text-white bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed rounded-lg transition-all flex items-center space-x-1.5 shadow-sm"
+                      title="重试发送"
+                    >
+                      <RotateCw className="w-3.5 h-3.5" />
+                      <span>重试</span>
                     </button>
                   </div>
                 )}
@@ -4112,12 +5372,85 @@ const Workflow: React.FC = () => {
           )}
           
           <div className="flex space-x-2">
+            {/* 附件预览区域 */}
+            {attachedMedia.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-2">
+                {attachedMedia.map((media, index) => (
+                  <div key={index} className="relative group">
+                    {media.type === 'image' ? (
+                      <img
+                        src={media.preview || `data:${media.mimeType};base64,${media.data}`}
+                        alt={`附件 ${index + 1}`}
+                        className="w-20 h-20 object-cover rounded border border-gray-300 dark:border-gray-600"
+                      />
+                    ) : (
+                      <video
+                        src={media.preview || `data:${media.mimeType};base64,${media.data}`}
+                        className="w-20 h-20 object-cover rounded border border-gray-300 dark:border-gray-600"
+                        controls={false}
+                      />
+                    )}
+                    <button
+                      onClick={() => {
+                        setAttachedMedia(prev => prev.filter((_, i) => i !== index));
+                      }}
+                      className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="删除附件"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            
             <div className="flex-1 relative at-selector-container">
             <textarea
                 ref={inputRef}
               value={input}
                 onChange={handleInputChange}
               onKeyPress={handleKeyPress}
+              onPaste={(e) => {
+                // 检查粘贴板中是否有图片
+                const items = e.clipboardData?.items;
+                if (!items) return;
+                
+                const imageItems: DataTransferItem[] = [];
+                for (let i = 0; i < items.length; i++) {
+                  const item = items[i];
+                  if (item.type.startsWith('image/')) {
+                    imageItems.push(item);
+                  }
+                }
+                
+                // 如果有图片，处理图片粘贴
+                if (imageItems.length > 0) {
+                  e.preventDefault(); // 阻止默认的文本粘贴行为
+                  
+                  imageItems.forEach(item => {
+                    const file = item.getAsFile();
+                    if (!file) return;
+                    
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                      const result = event.target?.result as string;
+                      // 移除 data URL 前缀，只保留 base64 数据
+                      const base64Data = result.includes(',') ? result.split(',')[1] : result;
+                      const mimeType = file.type || 'image/png';
+                      
+                      setAttachedMedia(prev => [...prev, {
+                        type: 'image',
+                        mimeType,
+                        data: base64Data,
+                        preview: result, // 用于预览
+                      }]);
+                      
+                      console.log('[Workflow] 已粘贴图片:', mimeType, '大小:', Math.round(base64Data.length / 1024), 'KB');
+                    };
+                    reader.readAsDataURL(file);
+                  });
+                }
+              }}
                 onKeyDown={(e) => {
                   // 如果批次数据项选择器显示，不处理键盘事件（由 CrawlerBatchItemSelector 处理）
                   if (showBatchItemSelector) {
@@ -4340,7 +5673,7 @@ const Workflow: React.FC = () => {
                               }`}
                             >
                               <Plug className="w-4 h-4 text-blue-500 flex-shrink-0" />
-                              <span className="text-sm text-gray-900 dark:text-gray-100">{server.name}</span>
+                              <span className="text-sm text-gray-900 dark:text-gray-100">{server.display_name || server.client_name || server.name}</span>
                             </div>
                           );
                         })}
@@ -4393,82 +5726,499 @@ const Workflow: React.FC = () => {
                 </div>
               )}
             </div>
-            <button
-              onClick={handleSend}
-              disabled={isLoading || !input.trim() || !selectedLLMConfig}
-              className="btn-primary flex items-center space-x-2 self-end disabled:opacity-50"
-            >
-              {isLoading ? (
-                <Loader className="w-4 h-4 animate-spin" />
-              ) : (
-                <Send className="w-4 h-4" />
-              )}
-              <span>{editingMessageId ? '保存并重新发送' : '发送'}</span>
-            </button>
+            <div className="flex items-center space-x-2">
+              {/* 图片/视频上传按钮 */}
+              <label className="cursor-pointer p-2 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors" title="上传图片或视频">
+                <Paperclip className="w-5 h-5" />
+                <input
+                  type="file"
+                  accept="image/*,video/*"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files || []);
+                    files.forEach(file => {
+                      const reader = new FileReader();
+                      reader.onload = (event) => {
+                        const result = event.target?.result as string;
+                        // 移除 data URL 前缀，只保留 base64 数据
+                        const base64Data = result.includes(',') ? result.split(',')[1] : result;
+                        const mimeType = file.type;
+                        const type = mimeType.startsWith('image/') ? 'image' : 'video';
+                        
+                        setAttachedMedia(prev => [...prev, {
+                          type,
+                          mimeType,
+                          data: base64Data,
+                          preview: result, // 用于预览
+                        }]);
+                      };
+                      reader.readAsDataURL(file);
+                    });
+                    // 清空 input，允许重复选择同一文件
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+              
+              <button
+                onClick={handleSend}
+                disabled={isLoading || (!input.trim() && attachedMedia.length === 0) || !selectedLLMConfig}
+                className="btn-primary flex items-center space-x-2 self-end disabled:opacity-50"
+              >
+                {isLoading ? (
+                  <Loader className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
+                <span>{editingMessageId ? '保存并重新发送' : '发送'}</span>
+              </button>
+            </div>
           </div>
-          {/* Token计数显示 */}
-          {selectedLLMConfig && messages.filter(m => m.role !== 'system' && !m.isSummary).length > 0 && (() => {
-            const model = selectedLLMConfig.model || 'gpt-4';
+          
+          {/* 底部工具栏：人设 + Thinking 开关 + Token 计数 */}
+          <div className="flex items-center justify-between mt-1.5 px-0.5">
+            {/* 左侧：帮助图标 + 人设 + Thinking 模式开关 */}
+            <div className="flex items-center space-x-2">
+              {/* 帮助问号图标 */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowHelpTooltip(!showHelpTooltip)}
+                  className="w-5 h-5 rounded-full bg-gray-400 hover:bg-gray-500 dark:bg-gray-600 dark:hover:bg-gray-500 text-white flex items-center justify-center transition-colors"
+                  title="查看帮助"
+                >
+                  <HelpCircle className="w-3 h-3" />
+                </button>
+                {/* 帮助提示弹窗 */}
+                {showHelpTooltip && (
+                  <>
+                    {/* 点击外部区域关闭 */}
+                    <div 
+                      className="fixed inset-0 z-10" 
+                      onClick={() => setShowHelpTooltip(false)}
+                    />
+                    <div className="absolute bottom-full left-0 mb-2 w-80 p-3 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-20">
+                      <div className="text-xs text-gray-700 dark:text-gray-300 space-y-1">
+                        {!selectedLLMConfig ? (
+                          <p>请先选择 LLM 模型</p>
+                        ) : selectedComponents.length > 0 ? (
+                          <p>已选择感知组件：<span className="font-medium">{selectedComponents[0].name}</span>。如需更换，请先删除当前组件，然后使用 @ 选择新的组件。</p>
+                        ) : selectedMcpServerIds.size > 0 ? (
+                          <p>提示：我可以使用 {totalTools} 个 MCP 工具帮助你完成任务，例如<span className="font-medium">"发布内容"</span>、<span className="font-medium">"查询信息"</span>等。使用 @ 可以选择感知组件。</p>
+                        ) : (
+                          <p>提示：你可以直接与我对话，我会尽力帮助你。如果需要使用工具，请在 MCP 服务器中选择至少一个服务器，或使用 @ 选择感知组件。</p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => setShowHelpTooltip(false)}
+                        className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+              
+              {/* 人设按钮 */}
+              {currentSessionId && (
+                <button
+                  onClick={() => {
+                    setSystemPromptDraft(currentSystemPrompt || '');
+                    setIsEditingSystemPrompt(true);
+                  }}
+                  className={`flex items-center space-x-1 px-1.5 py-0.5 rounded text-[11px] transition-all ${
+                    currentSystemPrompt 
+                      ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 font-medium' 
+                      : 'text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400'
+                  }`}
+                  title={currentSystemPrompt ? `人设: ${currentSystemPrompt.length > 50 ? currentSystemPrompt.slice(0, 50) + '...' : currentSystemPrompt}` : '点击设置人设'}
+                >
+                  <FileText className="w-3 h-3 flex-shrink-0" />
+                  <span>人设</span>
+                </button>
+              )}
+              
+              {/* Thinking 模式显示（仅显示，不允许切换） */}
+              {selectedLLMConfig && (() => {
+                // 从模型配置中读取 thinking 模式
+                const enableThinking = selectedLLMConfig.metadata?.enableThinking ?? false;
+                
+                // 只显示状态，不允许切换（所有模型都显示）
+                return (
+                  <div
+                    className={`flex items-center space-x-1 px-1.5 py-0.5 rounded text-[11px] transition-all ${
+                      enableThinking 
+                        ? 'bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 font-medium' 
+                        : 'text-gray-400 dark:text-gray-500'
+                    }`}
+                    title={enableThinking ? '深度思考模式（在模型配置中启用）' : '普通模式（在模型配置中禁用）'}
+                  >
+                    <Brain className="w-3 h-3" />
+                    <span>{enableThinking ? '深度思考' : '普通'}</span>
+                    {enableThinking && (
+                      <span className="w-1 h-1 bg-purple-500 rounded-full animate-pulse"></span>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
             
-            // 找到最近一条总结消息的位置，只计算实际会发送的消息
-            let lastSummaryIndex = -1;
-            for (let i = messages.length - 1; i >= 0; i--) {
-              if (messages[i].isSummary) {
-                lastSummaryIndex = i;
-                break;
+            {/* 右侧：Token 计数 */}
+            {selectedLLMConfig && messages.filter(m => m.role !== 'system' && !m.isSummary).length > 0 ? (() => {
+              const model = selectedLLMConfig.model || 'gpt-4';
+              let lastSummaryIndex = -1;
+              for (let i = messages.length - 1; i >= 0; i--) {
+                if (messages[i].isSummary) { lastSummaryIndex = i; break; }
               }
-            }
-            
-            // 如果找到总结消息，从总结消息开始计算（包含总结消息）；否则计算所有消息
-            const messagesToCount = lastSummaryIndex >= 0 
-              ? messages.slice(lastSummaryIndex)
-              : messages;
-            
-            // 构建用于token计算的消息列表（排除不发送的系统消息）
-            const conversationMessages = messagesToCount
-              .filter(m => {
-                // 排除系统消息（但包含总结消息，因为总结消息会作为user消息发送）
-                if (m.role === 'system' && !m.isSummary) {
-                  return false;
-                }
-                return true;
-              })
-              .map(msg => {
-                // 如果是总结消息，作为user消息计算token
-                if (msg.isSummary) {
-                  return {
-                    role: 'user' as const,
-                    content: msg.content,
-                    thinking: undefined,
-                  };
-                }
-                return {
-                  role: msg.role,
-                  content: msg.content,
-                  thinking: msg.thinking,
-                };
-              });
-            
-            const currentTokens = estimate_messages_tokens(conversationMessages, model);
-            // 使用从后端获取的 max_tokens，如果没有则使用前端函数作为后备
-            const maxTokens = selectedLLMConfig?.max_tokens || get_model_max_tokens(model);
+              const messagesToCount = lastSummaryIndex >= 0 ? messages.slice(lastSummaryIndex) : messages;
+              const conversationMessages = messagesToCount
+                .filter(m => !(m.role === 'system' && !m.isSummary))
+                .map(msg => msg.isSummary 
+                  ? { role: 'user' as const, content: msg.content, thinking: undefined }
+                  : { role: msg.role, content: msg.content, thinking: msg.thinking }
+                );
+              const currentTokens = estimate_messages_tokens(conversationMessages, model);
+              const maxTokens = selectedLLMConfig?.max_tokens || get_model_max_tokens(model);
+              return (
+                <span className="text-[11px] text-gray-400 dark:text-gray-500">
+                  {currentTokens.toLocaleString()} / {maxTokens.toLocaleString()} tokens
+                </span>
+              );
+            })() : <div />}
+          </div>
+          
+          {/* 人设编辑弹窗 */}
+          {isEditingSystemPrompt && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setIsEditingSystemPrompt(false)}>
+              <div 
+                className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center space-x-2">
+                    <FileText className="w-5 h-5 text-indigo-500" />
+                    <span>设置人设</span>
+                  </h3>
+                  <button 
+                    onClick={() => setIsEditingSystemPrompt(false)}
+                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="p-5">
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
+                    人设是 AI 的角色设定，会影响所有对话的回复风格和内容。
+                  </p>
+                  <textarea
+                    value={systemPromptDraft}
+                    onChange={(e) => setSystemPromptDraft(e.target.value)}
+                    placeholder="例如：你是一个专业的产品经理，擅长分析用户需求和产品设计..."
+                    className="w-full h-40 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                    autoFocus
+                  />
+                </div>
+                <div className="px-5 py-4 bg-gray-50 dark:bg-gray-900/50 flex items-center justify-between">
+                  <button
+                    onClick={async () => {
+                      if (currentSessionId) {
+                        try {
+                          await updateSessionSystemPrompt(currentSessionId, null);
+                          setCurrentSystemPrompt(null);
+                          setIsEditingSystemPrompt(false);
+                          // 更新 sessions 列表中的数据
+                          setSessions(prev => prev.map(s => 
+                            s.session_id === currentSessionId ? { ...s, system_prompt: undefined } : s
+                          ));
+                        } catch (error) {
+                          console.error('Failed to clear system prompt:', error);
+                        }
+                      }
+                    }}
+                    className="text-sm text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
+                  >
+                    清除人设
+                  </button>
+                  <div className="flex space-x-3">
+                    <button
+                      onClick={() => setIsEditingSystemPrompt(false)}
+                      className="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+                    >
+                      取消
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (currentSessionId) {
+                          try {
+                            await updateSessionSystemPrompt(currentSessionId, systemPromptDraft || null);
+                            setCurrentSystemPrompt(systemPromptDraft || null);
+                            setIsEditingSystemPrompt(false);
+                            // 更新 sessions 列表中的数据
+                            setSessions(prev => prev.map(s => 
+                              s.session_id === currentSessionId ? { ...s, system_prompt: systemPromptDraft || undefined } : s
+                            ));
+                          } catch (error) {
+                            console.error('Failed to update system prompt:', error);
+                          }
+                        }
+                      }}
+                      className="px-4 py-2 text-sm bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg"
+                    >
+                      保存
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* 会话类型选择对话框 */}
+          {showSessionTypeDialog && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowSessionTypeDialog(false)}>
+              <div 
+                className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">选择会话类型</h3>
+                  <button 
+                    onClick={() => setShowSessionTypeDialog(false)}
+                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="p-5 space-y-4">
+                  {/* 临时会话选项 */}
+                  <button
+                    onClick={handleSwitchToTemporarySession}
+                    className="w-full text-left p-4 border-2 border-gray-200 dark:border-gray-700 rounded-lg hover:border-amber-400 dark:hover:border-amber-600 transition-colors"
+                  >
+                    <div className="flex items-start space-x-3">
+                      <MessageCircle className="w-6 h-6 text-amber-500 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <h4 className="font-semibold text-gray-900 dark:text-white mb-1">临时会话</h4>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">
+                          不保存历史记录，不发送历史消息，不进行总结。适合快速询问各种无关联的问题。
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+
+                  {/* 记忆体选项 */}
+                  <button
+                    onClick={handleCreateMemorySession}
+                    className="w-full text-left p-4 border-2 border-gray-200 dark:border-gray-700 rounded-lg hover:border-primary-400 dark:hover:border-primary-600 transition-colors"
+                  >
+                    <div className="flex items-start space-x-3">
+                      <Database className="w-6 h-6 text-primary-500 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <h4 className="font-semibold text-gray-900 dark:text-white mb-1">记忆体</h4>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">
+                          保存所有消息记录，支持历史消息和总结功能。可以升级为智能体。
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 升级为智能体对话框 */}
+          {showUpgradeToAgentDialog && (() => {
+            const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+
+              if (!file.type.startsWith('image/')) {
+                alert('请选择图片文件');
+                return;
+              }
+
+              if (file.size > 2 * 1024 * 1024) {
+                alert('图片大小不能超过 2MB');
+                return;
+              }
+
+              const reader = new FileReader();
+              reader.onload = (event) => {
+                const base64String = event.target?.result as string;
+                setAgentAvatar(base64String);
+              };
+              reader.readAsDataURL(file);
+            };
+
+            const handleUpgrade = async () => {
+              if (!agentName.trim()) {
+                alert('请输入智能体名称');
+                return;
+              }
+              if (!agentAvatar) {
+                alert('请上传智能体头像');
+                return;
+              }
+              if (!agentSystemPrompt.trim()) {
+                alert('请设置智能体人设');
+                return;
+              }
+              if (!agentLLMConfigId) {
+                alert('请选择关联的LLM模型');
+                return;
+              }
+
+              if (!currentSessionId) {
+                alert('会话ID不存在');
+                return;
+              }
+
+              setIsUpgrading(true);
+              try {
+                await upgradeToAgent(
+                  currentSessionId,
+                  agentName.trim(),
+                  agentAvatar,
+                  agentSystemPrompt.trim(),
+                  agentLLMConfigId
+                );
+                setCurrentSystemPrompt(agentSystemPrompt.trim());
+                setCurrentSessionAvatar(agentAvatar);
+                await loadSessions();
+                setShowUpgradeToAgentDialog(false);
+                alert('升级为智能体成功！');
+              } catch (error) {
+                console.error('[Workflow] Failed to upgrade to agent:', error);
+                alert(`升级失败: ${error instanceof Error ? error.message : String(error)}`);
+              } finally {
+                setIsUpgrading(false);
+              }
+            };
+
             return (
-              <div className="text-xs text-yellow-600 dark:text-yellow-400 mt-1 px-1">
-                累计会话 Token: {currentTokens.toLocaleString()} / {maxTokens.toLocaleString()}
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowUpgradeToAgentDialog(false)}>
+                <div 
+                  className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center space-x-2">
+                      <Sparkles className="w-5 h-5 text-purple-500" />
+                      <span>升级为智能体</span>
+                    </h3>
+                    <button 
+                      onClick={() => setShowUpgradeToAgentDialog(false)}
+                      className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                  <div className="p-5 space-y-4">
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      智能体必须设置头像、名字和人设。升级后，该会话将拥有固定的身份和角色。
+                    </p>
+
+                    {/* 智能体名称 */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        智能体名称 <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={agentName}
+                        onChange={(e) => setAgentName(e.target.value)}
+                        className="input-field"
+                        placeholder="例如：AI助手、产品经理等"
+                      />
+          </div>
+
+                    {/* 智能体头像 */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        智能体头像 <span className="text-red-500">*</span>
+                      </label>
+                      <div className="flex items-center space-x-3">
+                        <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-gray-200 dark:border-gray-700 flex items-center justify-center bg-gray-100 dark:bg-gray-700">
+                          {agentAvatar ? (
+                            <img src={agentAvatar} alt="Avatar" className="w-full h-full object-cover" />
+                          ) : (
+                            <Bot className="w-8 h-8 text-gray-400" />
+                          )}
+                        </div>
+                        <button
+                          onClick={() => agentAvatarFileInputRef.current?.click()}
+                          className="btn-secondary text-sm"
+                        >
+                          选择头像
+                        </button>
+                        <input
+                          ref={agentAvatarFileInputRef}
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={handleAvatarUpload}
+                        />
+                      </div>
+                    </div>
+
+                    {/* 智能体人设 */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        智能体人设 <span className="text-red-500">*</span>
+                      </label>
+                      <textarea
+                        value={agentSystemPrompt}
+                        onChange={(e) => setAgentSystemPrompt(e.target.value)}
+                        placeholder="例如：你是一个专业的产品经理，擅长分析用户需求和产品设计..."
+                        className="input-field"
+                        rows={4}
+                      />
+                    </div>
+
+                    {/* 关联LLM模型 */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        关联LLM模型 <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={agentLLMConfigId || ''}
+                        onChange={(e) => setAgentLLMConfigId(e.target.value || null)}
+                        className="input-field"
+                      >
+                        <option value="">请选择模型</option>
+                        {llmConfigs
+                          .filter(config => config.enabled)
+                          .map(config => (
+                            <option key={config.config_id} value={config.config_id}>
+                              {config.name} ({config.provider})
+                            </option>
+                          ))}
+                      </select>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        智能体将固定使用此模型，升级后不可更改
+                      </p>
+                    </div>
+                  </div>
+                  <div className="px-5 py-4 bg-gray-50 dark:bg-gray-900/50 flex items-center justify-between">
+                    <button
+                      onClick={() => setShowUpgradeToAgentDialog(false)}
+                      className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100"
+                    >
+                      取消
+                    </button>
+                    <button
+                      onClick={handleUpgrade}
+                      disabled={isUpgrading || !agentName.trim() || !agentAvatar || !agentSystemPrompt.trim() || !agentLLMConfigId}
+                      className="btn-primary text-sm disabled:opacity-50"
+                    >
+                      {isUpgrading ? '升级中...' : '确认升级'}
+                    </button>
+                  </div>
+                </div>
               </div>
             );
           })()}
-          <p className="text-xs text-gray-500 mt-2">
-            {!selectedLLMConfig ? (
-              '请先选择 LLM 模型'
-            ) : selectedComponents.length > 0 ? (
-              <>已选择感知组件：<span className="font-medium">{selectedComponents[0].name}</span>。如需更换，请先删除当前组件，然后使用 @ 选择新的组件。</>
-            ) : selectedMcpServerIds.size > 0 ? (
-              <>提示：我可以使用 {totalTools} 个 MCP 工具帮助你完成任务，例如<span className="font-medium">"发布内容"</span>、<span className="font-medium">"查询信息"</span>等。使用 @ 可以选择感知组件。</>
-            ) : (
-              <>提示：你可以直接与我对话，我会尽力帮助你。如果需要使用工具，请在 MCP 服务器中选择至少一个服务器，或使用 @ 选择感知组件。</>
-            )}
-          </p>
           </div>
         </div>
       </div>

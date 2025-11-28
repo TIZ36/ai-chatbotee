@@ -1171,6 +1171,7 @@ const WorkflowEditor: React.FC = () => {
                     enabled: server.enabled,
                     description: server.description,
                     metadata: server.metadata,
+                    ext: server.ext, // 传递扩展配置（包括 response_format, server_type 等）
                   };
                 
                   // 使用连接池获取MCP连接（自动处理并发session隔离）
@@ -2009,6 +2010,7 @@ const WorkflowEditor: React.FC = () => {
                       enabled: server.enabled,
                       description: server.description,
                       metadata: server.metadata,
+                      ext: server.ext, // 传递扩展配置（包括 response_format, server_type 等）
                     };
                     await mcpManager.addServer(mcpServer);
                   

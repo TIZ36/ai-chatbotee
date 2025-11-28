@@ -16,6 +16,8 @@ export interface MCPServerConfig {
   description?: string;
   metadata?: Record<string, any>;
   ext?: Record<string, any>; // 扩展配置（如Notion的Integration Secret等）
+  display_name?: string; // 显示名称（用于 Notion 等，使用 client_name）
+  client_name?: string; // Notion 注册的 client_name
 }
 
 // 获取后端API地址
@@ -285,6 +287,92 @@ export async function exchangeMCPOAuthToken(params: {
   if (!response.ok) {
     const error = await response.json();
     throw new Error(error.error || error.message || error.details?.error_description || `HTTP ${response.status}: ${response.statusText}`);
+  }
+  
+  return await response.json();
+}
+
+// ==================== Notion 注册管理 API ====================
+
+export interface NotionRegistration {
+  id: number;
+  client_id: string;
+  client_name: string;
+  redirect_uri: string;
+  redirect_uri_base?: string;
+  client_uri?: string;
+  registration_data?: any;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/**
+ * 注册新的 Notion OAuth 客户端
+ */
+export async function registerNotionClient(params: {
+  client_name: string;
+  redirect_uri_base?: string;
+  client_uri?: string;
+}): Promise<{
+  success: boolean;
+  client_id: string;
+  client_name: string;
+  redirect_uri: string;
+  registration_data: any;
+}> {
+  const backendUrl = getBackendUrl();
+  const response = await fetch(`${backendUrl}/api/notion/register`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(params),
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || error.message || `HTTP ${response.status}: ${response.statusText}`);
+  }
+  
+  return await response.json();
+}
+
+/**
+ * 获取所有已注册的 Notion 工作空间列表
+ */
+export async function getNotionRegistrations(): Promise<NotionRegistration[]> {
+  const backendUrl = getBackendUrl();
+  const response = await fetch(`${backendUrl}/api/notion/registrations`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || error.message || `HTTP ${response.status}: ${response.statusText}`);
+  }
+  
+  const data = await response.json();
+  return data.registrations || [];
+}
+
+/**
+ * 获取特定的 Notion 注册信息
+ */
+export async function getNotionRegistration(client_id: string): Promise<NotionRegistration> {
+  const backendUrl = getBackendUrl();
+  const response = await fetch(`${backendUrl}/api/notion/registrations/${client_id}`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || error.message || `HTTP ${response.status}: ${response.statusText}`);
   }
   
   return await response.json();

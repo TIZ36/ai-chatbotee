@@ -9,6 +9,69 @@ import requests
 from typing import Optional, Dict, Any
 from database import get_mysql_connection, get_oauth_token, is_token_expired, refresh_oauth_token, get_oauth_config
 
+# 连接池：为每个 MCP URL 维护一个 Session
+_mcp_sessions: Dict[str, requests.Session] = {}
+
+# 响应缓存：短期缓存 tools/list 和 initialize 响应
+_response_cache: Dict[str, Dict[str, Any]] = {}
+_cache_timestamps: Dict[str, float] = {}
+CACHE_TTL = 30  # 缓存30秒
+
+def get_mcp_session(mcp_url: str) -> requests.Session:
+    """
+    获取或创建 MCP 服务器的 Session（连接池）
+    
+    Args:
+        mcp_url: MCP 服务器 URL
+        
+    Returns:
+        requests.Session 实例
+    """
+    normalized_url = mcp_url.rstrip('/')
+    if normalized_url not in _mcp_sessions:
+        session = requests.Session()
+        # 设置默认超时
+        session.timeout = 30
+        _mcp_sessions[normalized_url] = session
+        print(f"[MCP Common] Created new session for {normalized_url[:50]}...")
+    return _mcp_sessions[normalized_url]
+
+def get_cached_response(cache_key: str) -> Optional[Dict[str, Any]]:
+    """
+    获取缓存的响应
+    
+    Args:
+        cache_key: 缓存键（如 "tools_list:url"）
+        
+    Returns:
+        缓存的响应，如果不存在或已过期则返回 None
+    """
+    if cache_key not in _response_cache:
+        return None
+    
+    # 检查是否过期
+    timestamp = _cache_timestamps.get(cache_key, 0)
+    if time.time() - timestamp > CACHE_TTL:
+        # 缓存过期，删除
+        del _response_cache[cache_key]
+        del _cache_timestamps[cache_key]
+        return None
+    
+    print(f"[MCP Common] ✅ Using cached response for {cache_key[:50]}...")
+    return _response_cache[cache_key]
+
+def set_cached_response(cache_key: str, response: Dict[str, Any]):
+    """
+    设置缓存的响应
+    
+    Args:
+        cache_key: 缓存键
+        response: 响应数据
+    """
+    _response_cache[cache_key] = response
+    _cache_timestamps[cache_key] = time.time()
+    print(f"[MCP Common] ✅ Cached response for {cache_key[:50]}...")
+
 
 def prepare_mcp_headers(target_url: str, request_headers: Dict[str, str], base_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     """
@@ -186,21 +249,38 @@ def initialize_mcp_session(target_url: str, headers: Dict[str, str]) -> Optional
                 'protocolVersion': headers.get('mcp-protocol-version', '2025-06-18'),
                 'capabilities': {},
                 'clientInfo': {
-                    'name': 'YouTube Manager',
+                    'name': 'Workflow Manager',
                     'version': '1.0.0'
                 }
             }
         }
         
+        # 检查缓存（initialize 响应可以缓存，因为通常不会变化）
+        cache_key = f"initialize:{target_url}"
+        cached = get_cached_response(cache_key)
+        if cached:
+            print(f"[MCP Common] ✅ Using cached initialize response")
+            return cached
+        
         print(f"[MCP Common] Initializing session with {target_url}")
-        response = requests.post(target_url, json=init_request, headers=headers, timeout=30)
+        # 使用连接池，较短的超时（初始化应该很快）
+        session = get_mcp_session(target_url)
+        response = session.post(target_url, json=init_request, headers=headers, timeout=10)
         
         if response.ok:
             init_response = response.json()
+            # 缓存响应
+            set_cached_response(cache_key, init_response)
             print(f"[MCP Common] ✅ Session initialized successfully")
             return init_response
         else:
             print(f"[MCP Common] ❌ Failed to initialize session: {response.status_code}")
+            return None
+    except requests.exceptions.Timeout:
+        print(f"[MCP Common] ❌ Initialize timeout: {target_url}")
+        return None
+    except requests.exceptions.ConnectionError as e:
+        print(f"[MCP Common] ❌ Connection error: {e}")
             return None
     except Exception as e:
         print(f"[MCP Common] ❌ Error initializing session: {e}")
@@ -228,7 +308,9 @@ def send_mcp_notification(target_url: str, method: str, params: Dict[str, Any], 
         }
         
         print(f"[MCP Common] Sending notification: {method}")
-        response = requests.post(target_url, json=notification, headers=headers, timeout=30)
+        # 使用连接池，较短的超时（通知不需要响应）
+        session = get_mcp_session(target_url)
+        response = session.post(target_url, json=notification, headers=headers, timeout=5)
         
         if response.ok:
             print(f"[MCP Common] ✅ Notification sent successfully")
@@ -241,18 +323,26 @@ def send_mcp_notification(target_url: str, method: str, params: Dict[str, Any], 
         return False
 
 
-def get_mcp_tools_list(target_url: str, headers: Dict[str, str]) -> Optional[Dict[str, Any]]:
+def get_mcp_tools_list(target_url: str, headers: Dict[str, str], use_cache: bool = True) -> Optional[Dict[str, Any]]:
     """
-    获取 MCP 服务器工具列表
+    获取 MCP 服务器工具列表（带缓存）
     
     Args:
         target_url: MCP 服务器 URL
         headers: 请求头
+        use_cache: 是否使用缓存（默认 True）
         
     Returns:
         工具列表响应，如果失败则返回 None
     """
     try:
+        # 检查缓存
+        cache_key = f"tools_list:{target_url}"
+        if use_cache:
+            cached = get_cached_response(cache_key)
+            if cached:
+                return cached
+        
         tools_request = {
             'jsonrpc': '2.0',
             'id': 2,
@@ -261,14 +351,25 @@ def get_mcp_tools_list(target_url: str, headers: Dict[str, str]) -> Optional[Dic
         }
         
         print(f"[MCP Common] Getting tools list from {target_url}")
-        response = requests.post(target_url, json=tools_request, headers=headers, timeout=30)
+        # 使用连接池，中等超时（工具列表应该较快）
+        session = get_mcp_session(target_url)
+        response = session.post(target_url, json=tools_request, headers=headers, timeout=15)
         
         if response.ok:
             tools_response = response.json()
+            # 缓存响应
+            if use_cache:
+                set_cached_response(cache_key, tools_response)
             print(f"[MCP Common] ✅ Tools list retrieved successfully")
             return tools_response
         else:
             print(f"[MCP Common] ❌ Failed to get tools list: {response.status_code}")
+            return None
+    except requests.exceptions.Timeout:
+        print(f"[MCP Common] ❌ Tools list timeout: {target_url}")
+        return None
+    except requests.exceptions.ConnectionError as e:
+        print(f"[MCP Common] ❌ Connection error: {e}")
             return None
     except Exception as e:
         print(f"[MCP Common] ❌ Error getting tools list: {e}")
@@ -326,9 +427,9 @@ def parse_mcp_jsonrpc_response(data: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def call_mcp_tool(target_url: str, headers: Dict[str, str], tool_name: str, tool_args: Dict[str, Any], add_log=None) -> Optional[Any]:
+def call_mcp_tool(target_url: str, headers: Dict[str, str], tool_name: str, tool_args: Dict[str, Any], add_log=None, max_retries: int = 3) -> Optional[Any]:
     """
-    调用 MCP 工具
+    调用 MCP 工具（带重试机制）
     
     Args:
         target_url: MCP 服务器 URL
@@ -336,10 +437,14 @@ def call_mcp_tool(target_url: str, headers: Dict[str, str], tool_name: str, tool
         tool_name: 工具名称
         tool_args: 工具参数
         add_log: 日志回调函数（可选）
+        max_retries: 最大重试次数（默认3次）
         
     Returns:
         工具执行结果，如果失败则返回 None
     """
+    last_error = None
+    
+    for attempt in range(max_retries):
     try:
         # 准备请求头（包括OAuth token等）
         prepared_headers = prepare_mcp_headers(target_url, headers)
@@ -355,15 +460,32 @@ def call_mcp_tool(target_url: str, headers: Dict[str, str], tool_name: str, tool
             }
         }
         
-        if add_log:
+            if add_log and attempt == 0:
             add_log(f"调用MCP工具: {tool_name}")
-        
-        # 发送请求
-        response = requests.post(target_url, json=tool_request, headers=prepared_headers, timeout=60)
+            elif add_log and attempt > 0:
+                add_log(f"重试调用MCP工具: {tool_name} (尝试 {attempt + 1}/{max_retries})")
+            
+            # 发送请求（使用连接池）
+            # 工具调用可能需要较长时间，使用较长的超时
+            session = get_mcp_session(target_url)
+            response = session.post(target_url, json=tool_request, headers=prepared_headers, timeout=120)
         
         if not response.ok:
+                # 判断是否可重试
+                is_retryable = response.status_code >= 500 or response.status_code == 429
+                error_msg = f"HTTP {response.status_code} - {response.text[:200]}"
+                
+                if is_retryable and attempt < max_retries - 1:
+                    # 指数退避：等待时间 = 2^attempt 秒
+                    wait_time = 2 ** attempt
+                    if add_log:
+                        add_log(f"⚠️ 可重试错误，{wait_time}秒后重试: {error_msg}")
+                    time.sleep(wait_time)
+                    last_error = error_msg
+                    continue
+                else:
             if add_log:
-                add_log(f"❌ MCP工具调用失败: HTTP {response.status_code} - {response.text}")
+                        add_log(f"❌ MCP工具调用失败: {error_msg}")
             return None
         
         # 解析响应
@@ -371,9 +493,22 @@ def call_mcp_tool(target_url: str, headers: Dict[str, str], tool_name: str, tool
         
         if 'error' in response_data:
             error = response_data['error']
-            error_msg = f"{error.get('code', 'unknown')} - {error.get('message', 'unknown error')}"
+                error_code = error.get('code', 'unknown')
+                error_msg = error.get('message', 'unknown error')
+                
+                # 判断是否可重试（-32000 通常是服务器错误）
+                is_retryable = error_code in [-32000, -32603] or 'timeout' in error_msg.lower() or 'network' in error_msg.lower()
+                
+                if is_retryable and attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    if add_log:
+                        add_log(f"⚠️ 可重试错误，{wait_time}秒后重试: {error_code} - {error_msg}")
+                    time.sleep(wait_time)
+                    last_error = f"{error_code} - {error_msg}"
+                    continue
+                else:
             if add_log:
-                add_log(f"❌ MCP工具返回错误: {error_msg}")
+                        add_log(f"❌ MCP工具返回错误: {error_code} - {error_msg}")
             return None
         
         if 'result' not in response_data:
@@ -395,13 +530,47 @@ def call_mcp_tool(target_url: str, headers: Dict[str, str], tool_name: str, tool
             return content
         
         return result
+                
+        except requests.exceptions.Timeout as e:
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt
+                if add_log:
+                    add_log(f"⚠️ 请求超时，{wait_time}秒后重试")
+                time.sleep(wait_time)
+                last_error = str(e)
+                continue
+            else:
+                if add_log:
+                    add_log(f"❌ MCP工具调用超时: {str(e)}")
+                print(f"[MCP Common] ❌ Timeout calling tool {tool_name}: {e}")
+                return None
+                
+        except requests.exceptions.ConnectionError as e:
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt
+                if add_log:
+                    add_log(f"⚠️ 连接错误，{wait_time}秒后重试: {str(e)}")
+                time.sleep(wait_time)
+                last_error = str(e)
+                continue
+            else:
+                if add_log:
+                    add_log(f"❌ MCP工具连接错误: {str(e)}")
+                print(f"[MCP Common] ❌ Connection error calling tool {tool_name}: {e}")
+                return None
         
     except Exception as e:
+            # 其他错误通常不可重试
         if add_log:
             add_log(f"❌ MCP工具调用异常: {str(e)}")
         print(f"[MCP Common] ❌ Error calling tool {tool_name}: {e}")
         import traceback
         traceback.print_exc()
+            return None
+    
+    # 所有重试都失败
+    if add_log and last_error:
+        add_log(f"❌ MCP工具调用失败（已重试{max_retries}次）: {last_error}")
         return None
 
 def validate_tools_list_response(response_data: Dict[str, Any]) -> bool:
