@@ -1,0 +1,118 @@
+#!/bin/bash
+
+# Ubuntu 版本 - 启动后端服务器
+# 自动检测/创建虚拟环境，安装依赖，并启动 Flask 应用
+
+set -e
+
+# 获取脚本所在目录的绝对路径
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR/backend"
+
+echo "=========================================="
+echo "  后端服务器启动脚本 (Ubuntu)"
+echo "=========================================="
+
+# 检查 Python 环境
+if ! command -v python3 &> /dev/null; then
+    echo "❌ 错误: 未找到 python3，请先安装 Python"
+    echo "   sudo apt update && sudo apt install python3 python3-venv python3-pip"
+    exit 1
+fi
+
+echo "✅ Python 版本: $(python3 --version)"
+
+# 检查 python3-venv 是否安装
+if ! python3 -m venv --help &> /dev/null; then
+    echo "❌ 错误: python3-venv 未安装"
+    echo "   sudo apt install python3-venv"
+    exit 1
+fi
+
+# 检查 requirements.txt 是否存在
+if [ ! -f "requirements.txt" ]; then
+    echo "❌ 错误: 未找到 requirements.txt"
+    exit 1
+fi
+
+# 检测并创建虚拟环境
+if [ ! -d "venv" ]; then
+    echo "📦 虚拟环境不存在，正在创建..."
+    python3 -m venv venv
+    echo "✅ 虚拟环境创建成功"
+else
+    echo "✅ 虚拟环境已存在"
+fi
+
+# 激活虚拟环境
+echo "🔄 激活虚拟环境..."
+. venv/bin/activate
+
+# 升级 pip
+echo "🔄 升级 pip..."
+pip install --upgrade pip --quiet 2>/dev/null || pip install --upgrade pip
+
+# 检查依赖是否已安装
+NEED_INSTALL=false
+if ! python -c "import flask" 2>/dev/null; then
+    NEED_INSTALL=true
+elif ! python -c "import dbutils" 2>/dev/null; then
+    NEED_INSTALL=true
+fi
+
+if [ "$NEED_INSTALL" = true ]; then
+    echo "📦 依赖未完全安装，正在安装依赖..."
+    pip install -r requirements.txt
+    echo "✅ 依赖安装完成"
+else
+    echo "✅ 依赖已安装"
+    # 检查是否有新依赖需要安装
+    echo "🔄 检查是否有新依赖需要安装..."
+    pip install -r requirements.txt --quiet --upgrade 2>/dev/null || true
+fi
+
+# 运行数据库迁移/初始化
+echo "🔄 初始化数据库..."
+python -c "
+import sys
+import yaml
+from pathlib import Path
+
+try:
+    from database import init_mysql, create_tables
+    
+    # 加载配置
+    config_path = Path('config.yaml')
+    if config_path.exists():
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+        
+        # 初始化 MySQL（如果启用）
+        mysql_config = config.get('mysql', {})
+        if mysql_config.get('enabled', False):
+            print('正在初始化 MySQL 数据库...')
+            success, error = init_mysql(config)
+            if success:
+                print('✅ 数据库初始化成功（表已创建/验证）')
+            else:
+                print(f'⚠️  数据库初始化失败: {error}')
+                print('继续启动服务器（无数据库支持）...')
+        else:
+            print('ℹ️  MySQL 未启用，跳过数据库初始化')
+    else:
+        print('⚠️  未找到 config.yaml，跳过数据库初始化')
+except ImportError as e:
+    print(f'⚠️  导入错误: {e}')
+    print('数据库初始化将在服务器启动时进行...')
+except Exception as e:
+    print(f'⚠️  数据库初始化出错: {e}')
+    print('继续启动服务器...')
+" 2>&1
+
+# 启动服务器
+echo ""
+echo "=========================================="
+echo "🚀 启动后端服务器..."
+echo "=========================================="
+python app.py
+

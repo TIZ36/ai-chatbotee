@@ -4,6 +4,7 @@ pyyaml==6.0.1
 yt-dlp==2023.12.30
 redis==5.0.1
 pymysql==1.1.0
+cryptography==41.0.7
 DBUtils==3.0.3
 sqlalchemy==2.0.23
 celery==5.3.4
