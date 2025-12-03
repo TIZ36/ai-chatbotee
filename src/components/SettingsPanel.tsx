@@ -16,7 +16,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       localStorage.clear();
       window.location.reload();
     }
-  };
+  }; 
 
   return (
     <div className="space-y-4">

@@ -281,7 +281,7 @@ def initialize_mcp_session(target_url: str, headers: Dict[str, str]) -> Optional
         return None
     except requests.exceptions.ConnectionError as e:
         print(f"[MCP Common] ❌ Connection error: {e}")
-            return None
+        return None
     except Exception as e:
         print(f"[MCP Common] ❌ Error initializing session: {e}")
         return None
@@ -370,7 +370,7 @@ def get_mcp_tools_list(target_url: str, headers: Dict[str, str], use_cache: bool
         return None
     except requests.exceptions.ConnectionError as e:
         print(f"[MCP Common] ❌ Connection error: {e}")
-            return None
+        return None
     except Exception as e:
         print(f"[MCP Common] ❌ Error getting tools list: {e}")
         return None
@@ -445,23 +445,23 @@ def call_mcp_tool(target_url: str, headers: Dict[str, str], tool_name: str, tool
     last_error = None
     
     for attempt in range(max_retries):
-    try:
-        # 准备请求头（包括OAuth token等）
-        prepared_headers = prepare_mcp_headers(target_url, headers)
-        
-        # 构建工具调用请求
-        tool_request = {
-            'jsonrpc': '2.0',
-            'id': int(time.time() * 1000),
-            'method': 'tools/call',
-            'params': {
-                'name': tool_name,
-                'arguments': tool_args
+        try:
+            # 准备请求头（包括OAuth token等）
+            prepared_headers = prepare_mcp_headers(target_url, headers)
+            
+            # 构建工具调用请求
+            tool_request = {
+                'jsonrpc': '2.0',
+                'id': int(time.time() * 1000),
+                'method': 'tools/call',
+                'params': {
+                    'name': tool_name,
+                    'arguments': tool_args
+                }
             }
-        }
-        
+            
             if add_log and attempt == 0:
-            add_log(f"调用MCP工具: {tool_name}")
+                add_log(f"调用MCP工具: {tool_name}")
             elif add_log and attempt > 0:
                 add_log(f"重试调用MCP工具: {tool_name} (尝试 {attempt + 1}/{max_retries})")
             
@@ -469,8 +469,8 @@ def call_mcp_tool(target_url: str, headers: Dict[str, str], tool_name: str, tool
             # 工具调用可能需要较长时间，使用较长的超时
             session = get_mcp_session(target_url)
             response = session.post(target_url, json=tool_request, headers=prepared_headers, timeout=120)
-        
-        if not response.ok:
+            
+            if not response.ok:
                 # 判断是否可重试
                 is_retryable = response.status_code >= 500 or response.status_code == 429
                 error_msg = f"HTTP {response.status_code} - {response.text[:200]}"
@@ -484,15 +484,15 @@ def call_mcp_tool(target_url: str, headers: Dict[str, str], tool_name: str, tool
                     last_error = error_msg
                     continue
                 else:
-            if add_log:
+                    if add_log:
                         add_log(f"❌ MCP工具调用失败: {error_msg}")
-            return None
-        
-        # 解析响应
-        response_data = response.json()
-        
-        if 'error' in response_data:
-            error = response_data['error']
+                    return None
+            
+            # 解析响应
+            response_data = response.json()
+            
+            if 'error' in response_data:
+                error = response_data['error']
                 error_code = error.get('code', 'unknown')
                 error_msg = error.get('message', 'unknown error')
                 
@@ -507,29 +507,29 @@ def call_mcp_tool(target_url: str, headers: Dict[str, str], tool_name: str, tool
                     last_error = f"{error_code} - {error_msg}"
                     continue
                 else:
-            if add_log:
+                    if add_log:
                         add_log(f"❌ MCP工具返回错误: {error_code} - {error_msg}")
-            return None
-        
-        if 'result' not in response_data:
-            if add_log:
-                add_log(f"❌ MCP工具响应格式错误: 缺少result字段")
-            return None
-        
-        result = response_data['result']
-        
-        # 提取内容（可能是content字段）
-        if isinstance(result, dict) and 'content' in result:
-            content = result['content']
-            if isinstance(content, list) and len(content) > 0:
-                # 取第一个content项
-                first_content = content[0]
-                if isinstance(first_content, dict) and 'text' in first_content:
-                    return first_content['text']
-                return first_content
-            return content
-        
-        return result
+                    return None
+            
+            if 'result' not in response_data:
+                if add_log:
+                    add_log(f"❌ MCP工具响应格式错误: 缺少result字段")
+                return None
+            
+            result = response_data['result']
+            
+            # 提取内容（可能是content字段）
+            if isinstance(result, dict) and 'content' in result:
+                content = result['content']
+                if isinstance(content, list) and len(content) > 0:
+                    # 取第一个content项
+                    first_content = content[0]
+                    if isinstance(first_content, dict) and 'text' in first_content:
+                        return first_content['text']
+                    return first_content
+                return content
+            
+            return result
                 
         except requests.exceptions.Timeout as e:
             if attempt < max_retries - 1:
@@ -559,19 +559,19 @@ def call_mcp_tool(target_url: str, headers: Dict[str, str], tool_name: str, tool
                 print(f"[MCP Common] ❌ Connection error calling tool {tool_name}: {e}")
                 return None
         
-    except Exception as e:
+        except Exception as e:
             # 其他错误通常不可重试
-        if add_log:
-            add_log(f"❌ MCP工具调用异常: {str(e)}")
-        print(f"[MCP Common] ❌ Error calling tool {tool_name}: {e}")
-        import traceback
-        traceback.print_exc()
+            if add_log:
+                add_log(f"❌ MCP工具调用异常: {str(e)}")
+            print(f"[MCP Common] ❌ Error calling tool {tool_name}: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     # 所有重试都失败
     if add_log and last_error:
         add_log(f"❌ MCP工具调用失败（已重试{max_retries}次）: {last_error}")
-        return None
+    return None
 
 def validate_tools_list_response(response_data: Dict[str, Any]) -> bool:
     """

@@ -2088,6 +2088,28 @@ const Workflow: React.FC = () => {
           const finalContent = response.content || fullResponse;
           const finalThinking = response.thinking || fullThinking;
           
+          // 详细打印响应内容（用于调试 gemini-image 等问题）
+          console.log(`[Workflow] 📥 LLM 响应完成:`, {
+            hasContent: !!response.content,
+            contentLength: response.content?.length || 0,
+            hasThinking: !!response.thinking,
+            thinkingLength: response.thinking?.length || 0,
+            hasMedia: !!response.media,
+            mediaCount: response.media?.length || 0,
+            fullResponseLength: fullResponse?.length || 0,
+          });
+          
+          // 如果响应为空，打印警告
+          if (!response.content && !response.media?.length) {
+            console.warn(`[Workflow] ⚠️ LLM 返回了空响应！`);
+            console.warn(`[Workflow] ⚠️ 完整响应对象:`, JSON.stringify(response, (key, value) => {
+              if (key === 'data' && typeof value === 'string' && value.length > 100) {
+                return value.substring(0, 100) + `...(${value.length} chars)`;
+              }
+              return value;
+            }, 2));
+          }
+          
           // 更新消息（包含思维签名和多模态输出）
           console.log(`[Workflow] 更新 assistant 消息: content长度=${finalContent?.length || 0}, media数量=${response.media?.length || 0}`);
           if (response.media && response.media.length > 0) {

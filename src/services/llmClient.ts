@@ -1033,8 +1033,27 @@ export class LLMClient {
         ? systemMessages.map(m => m.content).join('\n\n')
         : undefined;
       
-      // 检查模型是否支持图片生成（如 gemini-2.0-flash-exp-image-generation 或包含 image 的模型）
+      // 检查模型是否支持图片生成
+      // 支持的图片生成模型名称：
+      // - gemini-2.0-flash-exp-image-generation (实验性)
+      // - gemini-2.5-flash-image (较新)
+      // - 或其他包含 'image' 的模型名称
       const supportsImageGeneration = model.toLowerCase().includes('image');
+      
+      if (supportsImageGeneration) {
+        console.log(`[LLM] 📷 检测到图片生成模型: ${model}`);
+        // 验证模型名称是否正确
+        const validImageModels = [
+          'gemini-2.0-flash-exp-image-generation',
+          'gemini-2.5-flash-image',
+          'gemini-2.0-flash-exp',
+        ];
+        const isKnownModel = validImageModels.some(m => model.toLowerCase().includes(m.toLowerCase()));
+        if (!isKnownModel) {
+          console.warn(`[LLM] ⚠️ 模型名称 "${model}" 可能不正确！`);
+          console.warn(`[LLM] ⚠️ 推荐的图片生成模型: ${validImageModels.join(', ')}`);
+        }
+      }
       
       // 如果是图片生成模式，需要重新转换消息，清理 thoughtSignature
       // 因为图片生成模式不支持 thinking，带有 thoughtSignature 的消息会导致 API 报错
@@ -1063,23 +1082,47 @@ export class LLMClient {
       
       // 添加工具（如果提供）- 图片生成模型可能不支持工具，但仍然尝试添加
       if (tools && tools.length > 0 && !supportsImageGeneration) {
+        // 转换工具格式：支持 MCP 格式和 OpenAI 格式
         config.tools = [{
-          functionDeclarations: tools.map(tool => ({
-            name: tool.function.name,
-            description: tool.function.description,
-            parameters: tool.function.parameters,
-          })),
+          functionDeclarations: tools.map(tool => {
+            // 检查是否是 OpenAI 格式 (有 function 属性) 还是 MCP 格式 (直接有 name 属性)
+            if (tool.function) {
+              return {
+                name: tool.function.name,
+                description: tool.function.description,
+                parameters: tool.function.parameters,
+              };
+            } else {
+              // MCP 格式
+              return {
+                name: tool.name,
+                description: tool.description,
+                parameters: tool.inputSchema,
+              };
+            }
+          }),
         }];
       }
       
       console.log(`[LLM] Gemini 请求配置:`, JSON.stringify(config, null, 2));
       
       // 调用流式 API
+      console.log(`[LLM] Gemini 开始流式调用...`);
+      console.log(`[LLM] Gemini 请求内容 (contents):`, JSON.stringify(finalContents, (key, value) => {
+        // 截断 base64 数据以避免日志过长
+        if (key === 'data' && typeof value === 'string' && value.length > 100) {
+          return value.substring(0, 100) + `...(${value.length} chars)`;
+        }
+        return value;
+      }, 2));
+      
       const streamingResult = await ai.models.generateContentStream({
         model: model,
         contents: finalContents,
         config: config,
       });
+      
+      console.log(`[LLM] Gemini generateContentStream 返回成功，开始读取流...`);
       
       let fullContent = '';
       let fullThinking = '';
@@ -1094,6 +1137,14 @@ export class LLMClient {
       let chunkIndex = 0;
       for await (const chunk of streamingResult) {
         chunkIndex++;
+        // 详细打印每个 chunk 的完整结构
+        console.log(`[LLM] Gemini chunk #${chunkIndex} 原始数据:`, JSON.stringify(chunk, (key, value) => {
+          // 截断 base64 数据
+          if (key === 'data' && typeof value === 'string' && value.length > 100) {
+            return value.substring(0, 100) + `...(${value.length} chars)`;
+          }
+          return value;
+        }, 2));
         console.log(`[LLM] Gemini chunk #${chunkIndex}:`, 
           `hasText=${!!chunk.text}`,
           `hasCandidates=${!!chunk.candidates}`,
@@ -1163,9 +1214,15 @@ export class LLMClient {
         }
       }
 
-      console.log(`[LLM] Gemini 流式响应完成: content长度=${fullContent.length}, media数量=${media.length}, toolCalls数量=${toolCalls.length}`);
+      console.log(`[LLM] Gemini 流式响应完成: content长度=${fullContent.length}, media数量=${media.length}, toolCalls数量=${toolCalls.length}, chunkIndex=${chunkIndex}`);
       
-      return {
+      // 如果没有收到任何内容，打印警告
+      if (fullContent.length === 0 && media.length === 0 && toolCalls.length === 0) {
+        console.warn(`[LLM] ⚠️ Gemini 返回了空响应！总共收到 ${chunkIndex} 个 chunks`);
+        console.warn(`[LLM] ⚠️ finishReason: ${finishReason}`);
+      }
+      
+      const result = {
         content: fullContent,
         thinking: fullThinking || undefined,
         tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
@@ -1174,8 +1231,36 @@ export class LLMClient {
         toolCallSignatures: Object.keys(toolCallSignatures).length > 0 ? toolCallSignatures : undefined,
         media: media.length > 0 ? media : undefined,
       };
+      
+      console.log(`[LLM] Gemini 最终响应:`, JSON.stringify(result, (key, value) => {
+        if (key === 'data' && typeof value === 'string' && value.length > 100) {
+          return value.substring(0, 100) + `...(${value.length} chars)`;
+        }
+        return value;
+      }, 2));
+      
+      return result;
     } catch (error: any) {
-      console.error('[LLM] Gemini API error:', error);
+      console.error('[LLM] ❌ Gemini 流式 API error:', error);
+      console.error('[LLM] ❌ error.message:', error.message);
+      console.error('[LLM] ❌ error.stack:', error.stack);
+      
+      // 打印请求上下文信息，帮助调试
+      console.error('[LLM] ❌ 请求上下文:');
+      console.error('[LLM]   - model:', model);
+      console.error('[LLM]   - supportsImageGeneration:', model.toLowerCase().includes('image'));
+      console.error('[LLM]   - messages count:', messages.length);
+      
+      // 检查是否是特定的错误类型
+      if (error.message?.includes('500') || error.message?.includes('INTERNAL')) {
+        console.error('[LLM] ❌ 这是 Gemini 服务器内部错误 (500)，可能的原因:');
+        console.error('[LLM]   1. 模型名称不正确 - 当前使用: ' + model);
+        console.error('[LLM]   2. 图片生成模型需要特定的模型名称，如: gemini-2.0-flash-exp-image-generation');
+        console.error('[LLM]   3. 请求内容格式不正确');
+        console.error('[LLM]   4. Gemini 服务暂时不可用');
+        console.error('[LLM]   5. responseModalities 配置可能有问题');
+      }
+      
       throw new Error(`Gemini API error: ${error.message || 'Unknown error'}`);
     }
   }
@@ -1204,8 +1289,21 @@ export class LLMClient {
         ? systemMessages.map(m => m.content).join('\n\n')
         : undefined;
       
-      // 检查模型是否支持图片生成（如 gemini-2.0-flash-exp-image-generation 或包含 image 的模型）
+      // 检查模型是否支持图片生成
       const supportsImageGeneration = model.toLowerCase().includes('image');
+      
+      if (supportsImageGeneration) {
+        console.log(`[LLM] 📷 [非流式] 检测到图片生成模型: ${model}`);
+        const validImageModels = [
+          'gemini-2.0-flash-exp-image-generation',
+          'gemini-2.5-flash-image',
+          'gemini-2.0-flash-exp',
+        ];
+        const isKnownModel = validImageModels.some(m => model.toLowerCase().includes(m.toLowerCase()));
+        if (!isKnownModel) {
+          console.warn(`[LLM] ⚠️ 模型名称 "${model}" 可能不正确！推荐: ${validImageModels.join(', ')}`);
+        }
+      }
       
       // 如果是图片生成模式，需要重新转换消息，清理 thoughtSignature
       const finalContents = supportsImageGeneration 
@@ -1230,21 +1328,49 @@ export class LLMClient {
       
       // 添加工具（如果提供）- 图片生成模型可能不支持工具
       if (tools && tools.length > 0 && !supportsImageGeneration) {
+        // 转换工具格式：支持 MCP 格式和 OpenAI 格式
         config.tools = [{
-          functionDeclarations: tools.map(tool => ({
-            name: tool.function.name,
-            description: tool.function.description,
-            parameters: tool.function.parameters,
-          })),
+          functionDeclarations: tools.map(tool => {
+            // 检查是否是 OpenAI 格式 (有 function 属性) 还是 MCP 格式 (直接有 name 属性)
+            if (tool.function) {
+              return {
+                name: tool.function.name,
+                description: tool.function.description,
+                parameters: tool.function.parameters,
+              };
+            } else {
+              // MCP 格式
+              return {
+                name: tool.name,
+                description: tool.description,
+                parameters: tool.inputSchema,
+              };
+            }
+          }),
         }];
       }
       
       // 调用非流式 API
+      console.log(`[LLM] Gemini 开始非流式调用...`);
+      console.log(`[LLM] Gemini 请求内容 (contents):`, JSON.stringify(finalContents, (key, value) => {
+        if (key === 'data' && typeof value === 'string' && value.length > 100) {
+          return value.substring(0, 100) + `...(${value.length} chars)`;
+        }
+        return value;
+      }, 2));
+      
       const response = await ai.models.generateContent({
         model: model,
         contents: finalContents,
         config: config,
       });
+      
+      console.log(`[LLM] Gemini 非流式响应原始数据:`, JSON.stringify(response, (key, value) => {
+        if (key === 'data' && typeof value === 'string' && value.length > 100) {
+          return value.substring(0, 100) + `...(${value.length} chars)`;
+        }
+        return value;
+      }, 2));
       
       let fullContent = '';
       let toolCalls: LLMToolCall[] = [];
@@ -1256,6 +1382,9 @@ export class LLMClient {
       // 处理响应文本
       if (response.text) {
         fullContent = response.text;
+        console.log(`[LLM] Gemini 响应文本: ${response.text.substring(0, 200)}${response.text.length > 200 ? '...' : ''}`);
+      } else {
+        console.log(`[LLM] Gemini 响应没有文本内容`);
       }
       
       // 处理函数调用、图片输出和其他内容
@@ -1265,8 +1394,8 @@ export class LLMClient {
         console.log(`[LLM] Gemini response parts count: ${parts.length}, types: ${parts.map(p => {
           if (p.text) return 'text';
           if (p.functionCall) return 'functionCall';
-          if ((p as any).inlineData) return 'inlineData';
-          return 'unknown';
+          if ((p as any).inlineData) return `inlineData(${(p as any).inlineData?.mimeType})`;
+          return `unknown(${Object.keys(p).join(',')})`;
         }).join(', ')}`);
         
         for (const part of parts) {
@@ -1303,7 +1432,14 @@ export class LLMClient {
         }
       }
 
-      return {
+      // 如果没有收到任何内容，打印警告
+      if (fullContent.length === 0 && media.length === 0 && toolCalls.length === 0) {
+        console.warn(`[LLM] ⚠️ Gemini 非流式返回了空响应！`);
+        console.warn(`[LLM] ⚠️ finishReason: ${response.candidates?.[0]?.finishReason}`);
+        console.warn(`[LLM] ⚠️ candidates: ${JSON.stringify(response.candidates)}`);
+      }
+      
+      const result = {
         content: fullContent,
         tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
         finish_reason: response.candidates?.[0]?.finishReason,
@@ -1311,8 +1447,31 @@ export class LLMClient {
         toolCallSignatures: Object.keys(toolCallSignatures).length > 0 ? toolCallSignatures : undefined,
         media: media.length > 0 ? media : undefined,
       };
+      
+      console.log(`[LLM] Gemini 非流式最终响应:`, JSON.stringify(result, (key, value) => {
+        if (key === 'data' && typeof value === 'string' && value.length > 100) {
+          return value.substring(0, 100) + `...(${value.length} chars)`;
+        }
+        return value;
+      }, 2));
+      
+      return result;
     } catch (error: any) {
-      console.error('[LLM] Gemini API error:', error);
+      console.error('[LLM] ❌ Gemini 非流式 API error:', error);
+      console.error('[LLM] ❌ error.message:', error.message);
+      console.error('[LLM] ❌ error.stack:', error.stack);
+      
+      // 打印请求上下文信息
+      console.error('[LLM] ❌ 请求上下文:');
+      console.error('[LLM]   - model:', model);
+      console.error('[LLM]   - supportsImageGeneration:', model.toLowerCase().includes('image'));
+      
+      if (error.message?.includes('500') || error.message?.includes('INTERNAL')) {
+        console.error('[LLM] ❌ Gemini 500 错误，可能原因:');
+        console.error('[LLM]   1. 模型名称不正确: ' + model);
+        console.error('[LLM]   2. 正确的图片生成模型名称: gemini-2.0-flash-exp-image-generation');
+      }
+      
       throw new Error(`Gemini API error: ${error.message || 'Unknown error'}`);
     }
   }
@@ -1323,6 +1482,8 @@ export class LLMClient {
    * @param stripThoughtSignatures 是否清理 thoughtSignature（图片生成模式需要）
    */
   private convertMessagesToGeminiContents(messages: LLMMessage[], stripThoughtSignatures: boolean = false): Content[] {
+    console.log(`[LLM] convertMessagesToGeminiContents: 输入 ${messages.length} 条消息, stripThoughtSignatures=${stripThoughtSignatures}`);
+    
     const contents: Content[] = [];
     let currentUserParts: Part[] = [];
     
@@ -1336,6 +1497,19 @@ export class LLMClient {
         // 只保留 system 消息和最后一条用户消息
         processMessages = messages.filter((m, i) => m.role === 'system' || i === lastUserIndex);
         console.log(`[LLM] 图片生成模式: 简化历史消息，从 ${messages.length} 条减少到 ${processMessages.length} 条`);
+      }
+    }
+    
+    // 详细打印每条消息
+    console.log(`[LLM] processMessages 详情:`);
+    for (let i = 0; i < processMessages.length; i++) {
+      const msg = processMessages[i];
+      console.log(`[LLM]   [${i}] role=${msg.role}, content长度=${msg.content?.length || 0}, parts数量=${msg.parts?.length || 0}`);
+      if (msg.parts && msg.parts.length > 0) {
+        for (let j = 0; j < msg.parts.length; j++) {
+          const part = msg.parts[j];
+          console.log(`[LLM]     parts[${j}]: hasText=${!!part.text}, hasInlineData=${!!part.inlineData}`);
+        }
       }
     }
     
@@ -1354,9 +1528,11 @@ export class LLMClient {
         
         // 处理多模态内容
         if (msg.parts && msg.parts.length > 0) {
+          console.log(`[LLM] 处理用户消息的 ${msg.parts.length} 个 parts`);
           for (const part of msg.parts) {
             if (part.text && part.text.trim()) {
               currentUserParts.push({ text: part.text });
+              console.log(`[LLM]   添加文本 part: ${part.text.substring(0, 50)}...`);
             }
             
             if (part.inlineData) {
@@ -1366,10 +1542,14 @@ export class LLMClient {
                   data: part.inlineData.data,
                 },
               } as Part);
+              console.log(`[LLM]   添加 inlineData part: mimeType=${part.inlineData.mimeType}, data长度=${part.inlineData.data?.length || 0}`);
             }
           }
         } else if (msg.content && msg.content.trim()) {
           currentUserParts.push({ text: msg.content });
+          console.log(`[LLM] 处理用户消息 content: ${msg.content.substring(0, 50)}...`);
+        } else {
+          console.warn(`[LLM] ⚠️ 用户消息既没有 parts 也没有 content!`);
         }
       } else if (msg.role === 'assistant') {
         // 如果之前有累积的 user parts，先提交
@@ -1430,6 +1610,22 @@ export class LLMClient {
     // 处理剩余的 user parts
     if (currentUserParts.length > 0) {
       contents.push({ role: 'user', parts: currentUserParts });
+    }
+    
+    // 打印最终的 contents 数组摘要
+    console.log(`[LLM] convertMessagesToGeminiContents 结果: ${contents.length} 条消息`);
+    for (let i = 0; i < contents.length; i++) {
+      const c = contents[i];
+      console.log(`[LLM]   [${i}] role=${c.role}, parts数量=${c.parts?.length || 0}`);
+    }
+    
+    // 如果 contents 为空或者没有用户消息，打印警告
+    if (contents.length === 0) {
+      console.warn(`[LLM] ⚠️ convertMessagesToGeminiContents 返回空数组！`);
+    }
+    const hasUserMessage = contents.some(c => c.role === 'user');
+    if (!hasUserMessage) {
+      console.warn(`[LLM] ⚠️ convertMessagesToGeminiContents 结果中没有用户消息！`);
     }
     
     return contents;
@@ -1718,6 +1914,8 @@ ${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
         onChunk?.(chunk, accumulatedThinking || undefined);
       } : undefined;
       
+      console.log(`[LLM] handleUserRequestWithThinking 调用 chat(), provider=${this.config.provider}, model=${this.config.model}, stream=${stream}, iteration=${iteration}`);
+      
       const response = await this.chat(
         messages, 
         allTools.length > 0 ? allTools : undefined,
@@ -1725,6 +1923,18 @@ ${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
         wrappedOnChunk,
         wrappedOnThinking
       );
+      
+      // 详细打印响应（用于调试）
+      console.log(`[LLM] handleUserRequestWithThinking chat() 返回:`, {
+        hasContent: !!response.content,
+        contentLength: response.content?.length || 0,
+        hasMedia: !!response.media,
+        mediaCount: response.media?.length || 0,
+        hasThinking: !!response.thinking,
+        hasToolCalls: !!response.tool_calls,
+        toolCallsCount: response.tool_calls?.length || 0,
+        finishReason: response.finish_reason,
+      });
 
       // 收集思考过程（优先使用 response 中的，否则使用流式过程中收集的）
       if (response.thinking) {
@@ -1805,16 +2015,27 @@ ${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
         messages.push(...toolResults);
         iteration++;
       } else {
-        return {
+        const result = {
           content: response.content,
           thinking: accumulatedThinking || response.thinking,
           thoughtSignature: response.thoughtSignature, // 返回思维签名
           toolCallSignatures: response.toolCallSignatures, // 返回工具调用的思维签名
           media: response.media, // 返回多模态输出（图片等）
         };
+        
+        console.log(`[LLM] handleUserRequestWithThinking 最终返回:`, {
+          hasContent: !!result.content,
+          contentLength: result.content?.length || 0,
+          hasMedia: !!result.media,
+          mediaCount: result.media?.length || 0,
+          hasThinking: !!result.thinking,
+        });
+        
+        return result;
       }
     }
 
+    console.warn(`[LLM] handleUserRequestWithThinking 超时，迭代次数=${iteration}`);
     return { content: '处理超时，请重试。' };
   }
 }
