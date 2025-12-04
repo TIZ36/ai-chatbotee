@@ -9,6 +9,7 @@ export interface Session {
   llm_config_id?: string;
   avatar?: string; // base64编码的头像
   system_prompt?: string; // 系统提示词（人设）
+  media_output_path?: string; // 媒体输出本地路径（图片/视频/音频）
   session_type?: 'temporary' | 'memory' | 'agent'; // 会话类型：临时会话/记忆体/智能体
   created_at?: string;
   updated_at?: string;
@@ -408,6 +409,22 @@ export async function updateSessionSystemPrompt(session_id: string, system_promp
 }
 
 /**
+ * 更新会话/智能体的媒体输出路径
+ */
+export async function updateSessionMediaOutputPath(session_id: string, media_output_path: string | null): Promise<void> {
+  const response = await fetch(`${API_BASE}/sessions/${session_id}/media-output-path`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ media_output_path }),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to update media output path: ${response.statusText}`);
+  }
+}
+
+/**
  * 升级记忆体为智能体
  */
 export async function upgradeToAgent(session_id: string, name: string, avatar: string, system_prompt: string, llm_config_id: string): Promise<Session> {
@@ -422,5 +439,123 @@ export async function upgradeToAgent(session_id: string, name: string, avatar: s
     throw new Error(`Failed to upgrade to agent: ${response.statusText}`);
   }
   return await response.json();
+}
+
+// ==================== 智能体导入导出 ====================
+
+export interface AgentExportData {
+  version: string;
+  export_type: 'agent';
+  exported_at: string;
+  agent: {
+    name: string;
+    avatar?: string;
+    system_prompt?: string;
+  };
+  llm_config?: {
+    config_id: string;
+    name: string;
+    provider: string;
+    api_key?: string;
+    api_url?: string;
+    model?: string;
+    tags?: string[];
+    enabled: boolean;
+    description?: string;
+    metadata?: Record<string, any>;
+  };
+}
+
+/**
+ * 导出智能体配置（包含LLM配置和密钥）
+ */
+export async function exportAgent(session_id: string): Promise<AgentExportData> {
+  const response = await fetch(`${API_BASE}/agents/${session_id}/export`);
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || `Failed to export agent: ${response.statusText}`);
+  }
+  return await response.json();
+}
+
+/**
+ * 导入智能体配置
+ * @param data 导出的智能体数据
+ * @param llmMode 当LLM配置名称已存在时的处理方式: 'use_existing' | 'create_new'
+ */
+export async function importAgent(
+  data: AgentExportData,
+  llmMode: 'use_existing' | 'create_new' = 'use_existing'
+): Promise<{ session_id: string; name: string; llm_config_id?: string }> {
+  const response = await fetch(`${API_BASE}/agents/import?llm_mode=${llmMode}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || `Failed to import agent: ${response.statusText}`);
+  }
+  return await response.json();
+}
+
+/**
+ * 下载智能体配置为JSON文件
+ */
+export async function downloadAgentAsJson(session_id: string, agentName: string): Promise<void> {
+  const data = await exportAgent(session_id);
+  
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${agentName.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '_')}_agent.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * 从JSON文件导入智能体
+ */
+export function importAgentFromFile(): Promise<AgentExportData> {
+  return new Promise((resolve, reject) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) {
+        reject(new Error('No file selected'));
+        return;
+      }
+      
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text) as AgentExportData;
+        
+        // 验证数据格式
+        if (data.export_type !== 'agent') {
+          reject(new Error('无效的导入文件：不是智能体配置文件'));
+          return;
+        }
+        
+        if (!data.agent) {
+          reject(new Error('无效的导入文件：缺少智能体数据'));
+          return;
+        }
+        
+        resolve(data);
+      } catch (error) {
+        reject(new Error('无法解析文件：请确保是有效的JSON格式'));
+      }
+    };
+    
+    input.click();
+  });
 }
 

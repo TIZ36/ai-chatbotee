@@ -4,8 +4,12 @@
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Plus, Trash2, CheckCircle, XCircle, Edit2, Brain, Save, X, Loader2, Eye, EyeOff, Type, Image, Video, Music } from 'lucide-react';
-import { getLLMConfigs, createLLMConfig, updateLLMConfig, deleteLLMConfig, getLLMConfigApiKey, LLMConfigFromDB, CreateLLMConfigRequest } from '../services/llmApi';
+import { Plus, Trash2, CheckCircle, XCircle, Edit2, Brain, Save, X, Loader2, Eye, EyeOff, Type, Image, Video, Music, Download, Upload } from 'lucide-react';
+import { 
+  getLLMConfigs, createLLMConfig, updateLLMConfig, deleteLLMConfig, getLLMConfigApiKey, 
+  LLMConfigFromDB, CreateLLMConfigRequest,
+  downloadLLMConfigAsJson, downloadAllLLMConfigsAsJson, importLLMConfigsFromFile, importLLMConfigs
+} from '../services/llmApi';
 import { fetchOllamaModels } from '../services/ollamaService';
 
 const LLMConfigPanel: React.FC = () => {
@@ -243,6 +247,54 @@ const LLMConfigPanel: React.FC = () => {
     });
   };
 
+  // 导出单个配置
+  const handleExportConfig = async (config: LLMConfigFromDB) => {
+    try {
+      await downloadLLMConfigAsJson(config.config_id, config.name);
+    } catch (error) {
+      console.error('Failed to export config:', error);
+      alert(`导出失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  // 导出所有配置
+  const handleExportAllConfigs = async () => {
+    try {
+      await downloadAllLLMConfigsAsJson();
+    } catch (error) {
+      console.error('Failed to export all configs:', error);
+      alert(`导出失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  // 导入配置
+  const handleImportConfigs = async () => {
+    try {
+      const data = await importLLMConfigsFromFile();
+      
+      // 询问处理方式
+      const skipExisting = confirm(
+        '检测到配置文件。\n\n' +
+        '点击"确定"：跳过已存在的同名配置\n' +
+        '点击"取消"：创建新配置（添加后缀）'
+      );
+      
+      const result = await importLLMConfigs(data, skipExisting);
+      
+      let message = `成功导入 ${result.imported.length} 个配置`;
+      if (result.skipped.length > 0) {
+        message += `\n跳过 ${result.skipped.length} 个已存在的配置`;
+      }
+      alert(message);
+      
+      // 刷新列表
+      await loadConfigs();
+    } catch (error) {
+      console.error('Failed to import configs:', error);
+      alert(`导入失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
   const getProviderPlaceholder = (provider: string) => {
     switch (provider) {
       case 'openai':
@@ -320,27 +372,52 @@ const LLMConfigPanel: React.FC = () => {
           <h2 className="text-2xl font-semibold">LLM 模型配置</h2>
         </div>
         {!isAdding && (
-        <button
-          onClick={() => {
-            setIsAdding(true);
-            setEditingId(null);
-            setNewConfig({
-                name: '',
-              provider: 'openai',
-                api_key: '',
-                api_url: '',
-                model: '',
-              enabled: true,
-                tags: [],
-                description: '',
-                metadata: {},
-            });
-          }}
-          className="btn-primary flex items-center space-x-2"
-        >
-          <Plus className="w-4 h-4" />
-            <span>添加模型</span>
-        </button>
+          <div className="flex items-center space-x-2">
+            {/* 导入按钮 */}
+            <button
+              onClick={handleImportConfigs}
+              className="flex items-center space-x-1 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              title="导入配置"
+            >
+              <Upload className="w-4 h-4" />
+              <span>导入</span>
+            </button>
+            
+            {/* 导出全部按钮 */}
+            <button
+              onClick={handleExportAllConfigs}
+              className="flex items-center space-x-1 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              title="导出所有配置"
+            >
+              <Download className="w-4 h-4" />
+              <span>导出全部</span>
+            </button>
+            
+            <div className="w-px h-6 bg-gray-200" />
+            
+            {/* 添加模型按钮 */}
+            <button
+              onClick={() => {
+                setIsAdding(true);
+                setEditingId(null);
+                setNewConfig({
+                  name: '',
+                  provider: 'openai',
+                  api_key: '',
+                  api_url: '',
+                  model: '',
+                  enabled: true,
+                  tags: [],
+                  description: '',
+                  metadata: {},
+                });
+              }}
+              className="btn-primary flex items-center space-x-2"
+            >
+              <Plus className="w-4 h-4" />
+              <span>添加模型</span>
+            </button>
+          </div>
         )}
       </div>
 
@@ -830,6 +907,13 @@ const LLMConfigPanel: React.FC = () => {
                     title="编辑"
                   >
                           <Edit2 className="w-4 h-4" />
+                  </button>
+                  <button
+                          onClick={() => handleExportConfig(config)}
+                          className="p-1.5 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                    title="导出"
+                  >
+                          <Download className="w-4 h-4" />
                   </button>
                   <button
                           onClick={() => handleDeleteConfig(config.config_id)}

@@ -98,7 +98,7 @@ class NotionOAuthHandler:
         
         # 兼容旧代码：如果没有数据库注册信息，尝试从 config.yaml 读取（向后兼容）
         if not self.registration:
-        self.notion_config = config.get('notion', {})
+            self.notion_config = config.get('notion', {})
             print(f"[Notion OAuth] ⚠️ No registration found in DB, falling back to config.yaml")
         else:
             self.notion_config = {}  # 不再使用 config.yaml

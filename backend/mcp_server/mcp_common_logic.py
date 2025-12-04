@@ -31,7 +31,7 @@ def get_mcp_session(mcp_url: str) -> requests.Session:
     if normalized_url not in _mcp_sessions:
         session = requests.Session()
         # 设置默认超时
-        session.timeout = 30
+        session.timeout = 90
         _mcp_sessions[normalized_url] = session
         print(f"[MCP Common] Created new session for {normalized_url[:50]}...")
     return _mcp_sessions[normalized_url]

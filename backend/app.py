@@ -2021,7 +2021,7 @@ def mcp_proxy():
         # 记录请求信息
         log_http_request('POST', target_url, json_data=mcp_request)
         
-        response = requests.post(target_url, json=mcp_request, timeout=30)
+        response = requests.post(target_url, json=mcp_request, timeout=90)
 
         # 记录响应信息
         log_http_response(response)
@@ -4196,6 +4196,219 @@ def delete_llm_config(config_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/llm/configs/<config_id>/export', methods=['GET', 'OPTIONS'])
+def export_llm_config(config_id):
+    """导出单个LLM配置（包含API密钥）"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("""
+            SELECT config_id, name, provider, api_key, api_url, model, 
+                   tags, enabled, description, metadata, created_at
+            FROM llm_configs WHERE config_id = %s
+        """, (config_id,))
+        
+        config = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if not config:
+            return jsonify({'error': 'Config not found'}), 404
+        
+        # 处理 JSON 字段
+        if config.get('tags') and isinstance(config['tags'], str):
+            config['tags'] = json.loads(config['tags'])
+        if config.get('metadata') and isinstance(config['metadata'], str):
+            config['metadata'] = json.loads(config['metadata'])
+        
+        export_data = {
+            'version': '1.0',
+            'export_type': 'llm_config',
+            'exported_at': datetime.now().isoformat(),
+            'llm_config': {
+                'name': config['name'],
+                'provider': config['provider'],
+                'api_key': config['api_key'],
+                'api_url': config['api_url'],
+                'model': config['model'],
+                'tags': config['tags'],
+                'enabled': bool(config['enabled']),
+                'description': config['description'],
+                'metadata': config['metadata'],
+            }
+        }
+        
+        return jsonify(export_data)
+        
+    except Exception as e:
+        print(f"[LLM Config API] Error exporting config: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/llm/configs/export-all', methods=['GET', 'OPTIONS'])
+def export_all_llm_configs():
+    """导出所有LLM配置（包含API密钥）"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("""
+            SELECT config_id, name, provider, api_key, api_url, model, 
+                   tags, enabled, description, metadata, created_at
+            FROM llm_configs ORDER BY created_at DESC
+        """)
+        
+        configs = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        config_list = []
+        for config in configs:
+            # 处理 JSON 字段
+            if config.get('tags') and isinstance(config['tags'], str):
+                config['tags'] = json.loads(config['tags'])
+            if config.get('metadata') and isinstance(config['metadata'], str):
+                config['metadata'] = json.loads(config['metadata'])
+            
+            config_list.append({
+                'name': config['name'],
+                'provider': config['provider'],
+                'api_key': config['api_key'],
+                'api_url': config['api_url'],
+                'model': config['model'],
+                'tags': config['tags'],
+                'enabled': bool(config['enabled']),
+                'description': config['description'],
+                'metadata': config['metadata'],
+            })
+        
+        export_data = {
+            'version': '1.0',
+            'export_type': 'llm_configs',
+            'exported_at': datetime.now().isoformat(),
+            'llm_configs': config_list
+        }
+        
+        return jsonify(export_data)
+        
+    except Exception as e:
+        print(f"[LLM Config API] Error exporting all configs: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/llm/configs/import', methods=['POST', 'OPTIONS'])
+def import_llm_configs():
+    """导入LLM配置"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        import uuid
+        
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        export_type = data.get('export_type')
+        if export_type not in ['llm_config', 'llm_configs']:
+            return jsonify({'error': 'Invalid export type'}), 400
+        
+        # 处理单个配置或多个配置
+        if export_type == 'llm_config':
+            configs = [data.get('llm_config')]
+        else:
+            configs = data.get('llm_configs', [])
+        
+        if not configs:
+            return jsonify({'error': 'No configs to import'}), 400
+        
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        imported = []
+        skipped = []
+        
+        for config in configs:
+            if not config:
+                continue
+                
+            config_name = config.get('name')
+            if not config_name:
+                continue
+            
+            # 检查是否已存在同名配置
+            cursor.execute("SELECT config_id FROM llm_configs WHERE name = %s", (config_name,))
+            existing = cursor.fetchone()
+            
+            skip_mode = request.args.get('skip_existing', 'false').lower() == 'true'
+            
+            if existing:
+                if skip_mode:
+                    skipped.append(config_name)
+                    continue
+                else:
+                    # 添加后缀
+                    config_name = f"{config_name}_导入_{datetime.now().strftime('%m%d%H%M')}"
+            
+            # 创建新配置
+            new_config_id = str(uuid.uuid4())
+            
+            cursor.execute("""
+                INSERT INTO llm_configs 
+                (config_id, name, provider, api_key, api_url, model, tags, enabled, description, metadata)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                new_config_id,
+                config_name,
+                config.get('provider'),
+                config.get('api_key'),
+                config.get('api_url'),
+                config.get('model'),
+                json.dumps(config.get('tags')) if config.get('tags') else None,
+                1 if config.get('enabled', True) else 0,
+                config.get('description'),
+                json.dumps(config.get('metadata')) if config.get('metadata') else None,
+            ))
+            
+            imported.append({
+                'config_id': new_config_id,
+                'name': config_name,
+            })
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'message': f'Imported {len(imported)} config(s)',
+            'imported': imported,
+            'skipped': skipped,
+        }), 201
+        
+    except Exception as e:
+        print(f"[LLM Config API] Error importing configs: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 
 def init_services():
@@ -5668,6 +5881,53 @@ def update_session_system_prompt(session_id):
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/sessions/<session_id>/media-output-path', methods=['PUT', 'OPTIONS'])
+def update_session_media_output_path(session_id):
+    """更新会话/智能体的媒体输出路径"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        data = request.json
+        media_output_path = data.get('media_output_path')  # 媒体输出路径
+        
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            
+            # 检查会话是否存在
+            cursor.execute("SELECT session_id FROM sessions WHERE session_id = %s", (session_id,))
+            if not cursor.fetchone():
+                return jsonify({'error': 'Session not found'}), 404
+            
+            # 更新媒体输出路径
+            cursor.execute("""
+                UPDATE sessions 
+                SET media_output_path = %s 
+                WHERE session_id = %s
+            """, (media_output_path, session_id))
+            conn.commit()
+            
+            print(f"[Session API] Updated media_output_path for session {session_id}: {media_output_path}")
+            return jsonify({'success': True, 'media_output_path': media_output_path})
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Session API] Error updating media output path: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/sessions/<session_id>/upgrade-to-agent', methods=['PUT', 'OPTIONS'])
 def upgrade_to_agent(session_id):
     """升级记忆体为智能体"""
@@ -5827,6 +6087,222 @@ def list_agents():
         import traceback
         traceback.print_exc()
         return jsonify({'agents': [], 'total': 0, 'error': str(e)}), 500
+
+@app.route('/api/agents/<session_id>/export', methods=['GET', 'OPTIONS'])
+def export_agent(session_id):
+    """导出智能体配置（包含LLM配置和密钥）"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 获取智能体信息
+            cursor.execute("""
+                SELECT 
+                    session_id, title, name, llm_config_id, avatar, 
+                    system_prompt, session_type, created_at
+                FROM sessions 
+                WHERE session_id = %s
+            """, (session_id,))
+            
+            agent = cursor.fetchone()
+            if not agent:
+                return jsonify({'error': 'Agent not found'}), 404
+            
+            if agent.get('session_type') != 'agent':
+                return jsonify({'error': 'Session is not an agent'}), 400
+            
+            # 获取关联的 LLM 配置（包含密钥）
+            llm_config = None
+            if agent.get('llm_config_id'):
+                cursor.execute("""
+                    SELECT 
+                        config_id, name, provider, api_key, api_url, 
+                        model, tags, enabled, description, metadata
+                    FROM llm_configs 
+                    WHERE config_id = %s
+                """, (agent['llm_config_id'],))
+                llm_config = cursor.fetchone()
+                
+                if llm_config:
+                    # 处理 JSON 字段
+                    if llm_config.get('tags'):
+                        if isinstance(llm_config['tags'], str):
+                            llm_config['tags'] = json.loads(llm_config['tags'])
+                    if llm_config.get('metadata'):
+                        if isinstance(llm_config['metadata'], str):
+                            llm_config['metadata'] = json.loads(llm_config['metadata'])
+            
+            # 构建导出数据
+            export_data = {
+                'version': '1.0',
+                'export_type': 'agent',
+                'exported_at': datetime.now().isoformat(),
+                'agent': {
+                    'name': agent.get('name') or agent.get('title'),
+                    'avatar': agent.get('avatar'),
+                    'system_prompt': agent.get('system_prompt'),
+                },
+                'llm_config': llm_config if llm_config else None,
+            }
+            
+            return jsonify(export_data)
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Agent API] Error exporting agent: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/agents/import', methods=['POST', 'OPTIONS'])
+def import_agent():
+    """导入智能体配置"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        import uuid
+        
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        # 验证数据格式
+        if data.get('export_type') != 'agent':
+            return jsonify({'error': 'Invalid export type'}), 400
+        
+        agent_data = data.get('agent')
+        if not agent_data:
+            return jsonify({'error': 'Agent data is required'}), 400
+        
+        llm_config_data = data.get('llm_config')
+        
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 如果有 LLM 配置，先创建或更新
+            llm_config_id = None
+            if llm_config_data:
+                # 检查是否已存在同名配置
+                cursor.execute("""
+                    SELECT config_id FROM llm_configs WHERE name = %s
+                """, (llm_config_data.get('name'),))
+                existing = cursor.fetchone()
+                
+                if existing:
+                    # 使用现有配置，或创建新的带后缀的配置
+                    import_mode = request.args.get('llm_mode', 'use_existing')
+                    
+                    if import_mode == 'use_existing':
+                        llm_config_id = existing['config_id']
+                    else:
+                        # 创建新配置，名称加后缀
+                        new_config_id = str(uuid.uuid4())
+                        new_name = f"{llm_config_data.get('name')}_导入_{datetime.now().strftime('%m%d%H%M')}"
+                        
+                        cursor.execute("""
+                            INSERT INTO llm_configs 
+                            (config_id, name, provider, api_key, api_url, model, tags, enabled, description, metadata)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            new_config_id,
+                            new_name,
+                            llm_config_data.get('provider'),
+                            llm_config_data.get('api_key'),
+                            llm_config_data.get('api_url'),
+                            llm_config_data.get('model'),
+                            json.dumps(llm_config_data.get('tags')) if llm_config_data.get('tags') else None,
+                            1 if llm_config_data.get('enabled', True) else 0,
+                            llm_config_data.get('description'),
+                            json.dumps(llm_config_data.get('metadata')) if llm_config_data.get('metadata') else None,
+                        ))
+                        llm_config_id = new_config_id
+                else:
+                    # 创建新配置
+                    new_config_id = llm_config_data.get('config_id') or str(uuid.uuid4())
+                    
+                    cursor.execute("""
+                        INSERT INTO llm_configs 
+                        (config_id, name, provider, api_key, api_url, model, tags, enabled, description, metadata)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        new_config_id,
+                        llm_config_data.get('name'),
+                        llm_config_data.get('provider'),
+                        llm_config_data.get('api_key'),
+                        llm_config_data.get('api_url'),
+                        llm_config_data.get('model'),
+                        json.dumps(llm_config_data.get('tags')) if llm_config_data.get('tags') else None,
+                        1 if llm_config_data.get('enabled', True) else 0,
+                        llm_config_data.get('description'),
+                        json.dumps(llm_config_data.get('metadata')) if llm_config_data.get('metadata') else None,
+                    ))
+                    llm_config_id = new_config_id
+            
+            # 创建智能体会话
+            session_id = str(uuid.uuid4())
+            agent_name = agent_data.get('name', '导入的智能体')
+            
+            # 检查是否已存在同名智能体
+            cursor.execute("""
+                SELECT name FROM sessions WHERE name = %s AND session_type = 'agent'
+            """, (agent_name,))
+            if cursor.fetchone():
+                agent_name = f"{agent_name}_导入_{datetime.now().strftime('%m%d%H%M')}"
+            
+            cursor.execute("""
+                INSERT INTO sessions 
+                (session_id, title, name, llm_config_id, avatar, system_prompt, session_type)
+                VALUES (%s, %s, %s, %s, %s, %s, 'agent')
+            """, (
+                session_id,
+                agent_name,
+                agent_name,
+                llm_config_id,
+                agent_data.get('avatar'),
+                agent_data.get('system_prompt'),
+            ))
+            
+            conn.commit()
+            
+            return jsonify({
+                'message': 'Agent imported successfully',
+                'session_id': session_id,
+                'name': agent_name,
+                'llm_config_id': llm_config_id,
+            }), 201
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Agent API] Error importing agent: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/sessions/<session_id>/summaries/cache', methods=['DELETE', 'OPTIONS'])
 def clear_summarize_cache(session_id):
@@ -7773,6 +8249,975 @@ def crawler_modules_search():
         if 'conn' in locals():
             conn.close()
         return jsonify({'error': str(e)}), 500
+
+# ==================== 圆桌会议 API ====================
+
+@app.route('/api/round-tables', methods=['GET', 'OPTIONS'])
+def list_round_tables():
+    """获取圆桌会议列表"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'round_tables': [], 'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 获取所有圆桌会议，包含参与者数量
+            cursor.execute("""
+                SELECT 
+                    rt.round_table_id,
+                    rt.name,
+                    rt.status,
+                    rt.created_at,
+                    rt.updated_at,
+                    COUNT(DISTINCT CASE WHEN rtp.left_at IS NULL THEN rtp.session_id END) as participant_count
+                FROM round_tables rt
+                LEFT JOIN round_table_participants rtp ON rt.round_table_id = rtp.round_table_id
+                GROUP BY rt.round_table_id
+                ORDER BY rt.updated_at DESC, rt.created_at DESC
+            """)
+            
+            round_tables = []
+            for row in cursor.fetchall():
+                round_tables.append({
+                    'round_table_id': row['round_table_id'],
+                    'name': row['name'],
+                    'status': row['status'],
+                    'participant_count': row['participant_count'] or 0,
+                    'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+                    'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
+                })
+            
+            return jsonify({'round_tables': round_tables})
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Round Table API] Error listing round tables: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'round_tables': [], 'error': str(e)}), 500
+
+@app.route('/api/round-tables', methods=['POST', 'OPTIONS'])
+def create_round_table():
+    """创建圆桌会议"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        import uuid
+        
+        data = request.get_json() or {}
+        name = data.get('name', f'圆桌会议_{datetime.now().strftime("%Y%m%d_%H%M%S")}')
+        
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            round_table_id = str(uuid.uuid4())
+            
+            cursor.execute("""
+                INSERT INTO round_tables (round_table_id, name, status)
+                VALUES (%s, %s, 'active')
+            """, (round_table_id, name))
+            
+            conn.commit()
+            
+            return jsonify({
+                'round_table_id': round_table_id,
+                'name': name,
+                'status': 'active',
+                'participant_count': 0,
+                'created_at': datetime.now().isoformat(),
+            }), 201
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Round Table API] Error creating round table: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/round-tables/<round_table_id>', methods=['GET', 'OPTIONS'])
+def get_round_table(round_table_id):
+    """获取圆桌会议详情"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 获取圆桌会议基本信息
+            cursor.execute("""
+                SELECT round_table_id, name, status, created_at, updated_at
+                FROM round_tables
+                WHERE round_table_id = %s
+            """, (round_table_id,))
+            
+            round_table = cursor.fetchone()
+            if not round_table:
+                return jsonify({'error': 'Round table not found'}), 404
+            
+            # 获取当前参与者（未离开的）
+            cursor.execute("""
+                SELECT 
+                    rtp.session_id,
+                    rtp.joined_at,
+                    rtp.custom_llm_config_id,
+                    rtp.custom_system_prompt,
+                    s.name as agent_name,
+                    s.title as agent_title,
+                    s.avatar,
+                    s.system_prompt as default_system_prompt,
+                    s.llm_config_id as default_llm_config_id,
+                    s.media_output_path as agent_media_output_path
+                FROM round_table_participants rtp
+                JOIN sessions s ON rtp.session_id = s.session_id
+                WHERE rtp.round_table_id = %s AND rtp.left_at IS NULL
+                ORDER BY rtp.joined_at ASC
+            """, (round_table_id,))
+            
+            participants = []
+            for row in cursor.fetchall():
+                participants.append({
+                    'session_id': row['session_id'],
+                    'name': row['agent_name'] or row['agent_title'] or row['session_id'][:8],
+                    'avatar': row['avatar'],
+                    'joined_at': row['joined_at'].isoformat() if row['joined_at'] else None,
+                    'llm_config_id': row['custom_llm_config_id'] or row['default_llm_config_id'],
+                    'system_prompt': row['custom_system_prompt'] or row['default_system_prompt'],
+                    'custom_llm_config_id': row['custom_llm_config_id'],
+                    'custom_system_prompt': row['custom_system_prompt'],
+                    'media_output_path': row.get('agent_media_output_path'),  # 从 sessions 表读取（agent 级别）
+                })
+            
+            return jsonify({
+                'round_table_id': round_table['round_table_id'],
+                'name': round_table['name'],
+                'status': round_table['status'],
+                'participants': participants,
+                'participant_count': len(participants),
+                'created_at': round_table['created_at'].isoformat() if round_table['created_at'] else None,
+                'updated_at': round_table['updated_at'].isoformat() if round_table['updated_at'] else None,
+            })
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Round Table API] Error getting round table: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/round-tables/<round_table_id>', methods=['PUT', 'OPTIONS'])
+def update_round_table(round_table_id):
+    """更新圆桌会议（名称、状态）"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        
+        data = request.get_json() or {}
+        
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            
+            updates = []
+            params = []
+            
+            if 'name' in data:
+                updates.append('name = %s')
+                params.append(data['name'])
+            
+            if 'status' in data:
+                if data['status'] not in ['active', 'closed']:
+                    return jsonify({'error': 'Invalid status'}), 400
+                updates.append('status = %s')
+                params.append(data['status'])
+            
+            if not updates:
+                return jsonify({'error': 'No fields to update'}), 400
+            
+            params.append(round_table_id)
+            
+            cursor.execute(f"""
+                UPDATE round_tables
+                SET {', '.join(updates)}
+                WHERE round_table_id = %s
+            """, params)
+            
+            conn.commit()
+            
+            if cursor.rowcount == 0:
+                return jsonify({'error': 'Round table not found'}), 404
+            
+            return jsonify({'message': 'Round table updated'})
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Round Table API] Error updating round table: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/round-tables/<round_table_id>', methods=['DELETE', 'OPTIONS'])
+def delete_round_table(round_table_id):
+    """删除圆桌会议"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                DELETE FROM round_tables WHERE round_table_id = %s
+            """, (round_table_id,))
+            
+            conn.commit()
+            
+            if cursor.rowcount == 0:
+                return jsonify({'error': 'Round table not found'}), 404
+            
+            return jsonify({'message': 'Round table deleted'})
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Round Table API] Error deleting round table: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/round-tables/<round_table_id>/participants', methods=['POST', 'OPTIONS'])
+def add_round_table_participant(round_table_id):
+    """添加智能体到圆桌会议"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        
+        data = request.get_json() or {}
+        session_id = data.get('session_id')
+        
+        if not session_id:
+            return jsonify({'error': 'session_id is required'}), 400
+        
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 检查圆桌会议是否存在
+            cursor.execute("""
+                SELECT status FROM round_tables WHERE round_table_id = %s
+            """, (round_table_id,))
+            
+            round_table = cursor.fetchone()
+            if not round_table:
+                return jsonify({'error': 'Round table not found'}), 404
+            
+            if round_table['status'] == 'closed':
+                return jsonify({'error': 'Round table is closed'}), 400
+            
+            # 检查智能体是否存在
+            cursor.execute("""
+                SELECT session_id, name, title, avatar, system_prompt, llm_config_id
+                FROM sessions WHERE session_id = %s
+            """, (session_id,))
+            
+            agent = cursor.fetchone()
+            if not agent:
+                return jsonify({'error': 'Agent not found'}), 404
+            
+            # 检查是否已经在会议中
+            cursor.execute("""
+                SELECT id FROM round_table_participants
+                WHERE round_table_id = %s AND session_id = %s AND left_at IS NULL
+            """, (round_table_id, session_id))
+            
+            if cursor.fetchone():
+                return jsonify({'error': 'Agent already in round table'}), 400
+            
+            # 添加参与者
+            cursor.execute("""
+                INSERT INTO round_table_participants (round_table_id, session_id)
+                VALUES (%s, %s)
+            """, (round_table_id, session_id))
+            
+            conn.commit()
+            
+            return jsonify({
+                'message': 'Agent added to round table',
+                'participant': {
+                    'session_id': session_id,
+                    'name': agent['name'] or agent['title'] or session_id[:8],
+                    'avatar': agent['avatar'],
+                    'system_prompt': agent['system_prompt'],
+                    'llm_config_id': agent['llm_config_id'],
+                }
+            }), 201
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Round Table API] Error adding participant: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/round-tables/<round_table_id>/participants/<session_id>', methods=['DELETE', 'OPTIONS'])
+def remove_round_table_participant(round_table_id, session_id):
+    """从圆桌会议移除智能体"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            
+            # 标记离开时间而不是直接删除
+            cursor.execute("""
+                UPDATE round_table_participants
+                SET left_at = NOW()
+                WHERE round_table_id = %s AND session_id = %s AND left_at IS NULL
+            """, (round_table_id, session_id))
+            
+            conn.commit()
+            
+            if cursor.rowcount == 0:
+                return jsonify({'error': 'Participant not found in round table'}), 404
+            
+            return jsonify({'message': 'Agent removed from round table'})
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Round Table API] Error removing participant: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/round-tables/<round_table_id>/participants/<session_id>', methods=['PUT', 'OPTIONS'])
+def update_round_table_participant(round_table_id, session_id):
+    """更新圆桌会议参与者配置（自定义模型/人设）"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        
+        data = request.get_json() or {}
+        print(f"[Round Table API] Updating participant: round_table_id={round_table_id}, session_id={session_id}, data={data}")
+        
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        update_cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 先检查参与者是否存在
+            cursor.execute("""
+                SELECT id, round_table_id, session_id, left_at 
+                FROM round_table_participants 
+                WHERE round_table_id = %s AND session_id = %s
+            """, (round_table_id, session_id))
+            existing = cursor.fetchall()
+            print(f"[Round Table API] Found participants: {existing}")
+            
+            active_participant = [p for p in existing if p['left_at'] is None]
+            if not active_participant:
+                print(f"[Round Table API] No active participant found (left_at IS NULL)")
+                return jsonify({'error': 'Participant not found in round table (not active)'}), 404
+            
+            participant_id = active_participant[0]['id']
+            
+            # 使用新的游标执行更新
+            update_cursor = conn.cursor()
+            
+            # 构建动态更新语句
+            update_fields = []
+            update_values = []
+            
+            if 'custom_llm_config_id' in data:
+                update_fields.append('custom_llm_config_id = %s')
+                update_values.append(data['custom_llm_config_id'])
+            if 'custom_system_prompt' in data:
+                update_fields.append('custom_system_prompt = %s')
+                update_values.append(data['custom_system_prompt'])
+            if 'media_output_path' in data:
+                update_fields.append('media_output_path = %s')
+                update_values.append(data['media_output_path'])
+                
+            if not update_fields:
+                return jsonify({'error': 'No fields to update'}), 400
+            
+            update_values.append(participant_id)
+            sql = f"UPDATE round_table_participants SET {', '.join(update_fields)} WHERE id = %s"
+            print(f"[Round Table API] SQL: {sql}")
+            update_cursor.execute(sql, update_values)
+            
+            print(f"[Round Table API] Update rowcount before commit: {update_cursor.rowcount}")
+            conn.commit()
+            print(f"[Round Table API] Committed")
+            
+            # 验证更新是否成功
+            verify_cursor = conn.cursor(pymysql.cursors.DictCursor)
+            verify_cursor.execute("SELECT custom_llm_config_id, custom_system_prompt FROM round_table_participants WHERE id = %s", (participant_id,))
+            after_update = verify_cursor.fetchone()
+            verify_cursor.close()
+            print(f"[Round Table API] After update check: llm_config={after_update.get('custom_llm_config_id')}, prompt_len={len(after_update.get('custom_system_prompt') or '')}")
+            
+            # 根据验证结果返回
+            return jsonify({'message': 'Participant config updated'})
+            
+        finally:
+            if update_cursor:
+                update_cursor.close()
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Round Table API] Error updating participant: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/round-tables/<round_table_id>/messages', methods=['GET', 'OPTIONS'])
+def get_round_table_messages(round_table_id):
+    """获取圆桌会议消息列表"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        
+        page = request.args.get('page', 1, type=int)
+        page_size = request.args.get('page_size', 50, type=int)
+        offset = (page - 1) * page_size
+        
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 获取消息总数
+            cursor.execute("""
+                SELECT COUNT(*) as total FROM round_table_messages
+                WHERE round_table_id = %s
+            """, (round_table_id,))
+            total = cursor.fetchone()['total']
+            
+            # 获取消息列表
+            cursor.execute("""
+                SELECT 
+                    rtm.message_id,
+                    rtm.sender_type,
+                    rtm.sender_agent_id,
+                    rtm.content,
+                    rtm.mentions,
+                    rtm.is_raise_hand,
+                    rtm.media,
+                    rtm.reply_to_message_id,
+                    rtm.created_at,
+                    s.name as agent_name,
+                    s.title as agent_title,
+                    s.avatar as agent_avatar
+                FROM round_table_messages rtm
+                LEFT JOIN sessions s ON rtm.sender_agent_id = s.session_id
+                WHERE rtm.round_table_id = %s
+                ORDER BY rtm.created_at ASC
+                LIMIT %s OFFSET %s
+            """, (round_table_id, page_size, offset))
+            
+            messages = []
+            for row in cursor.fetchall():
+                msg = {
+                    'message_id': row['message_id'],
+                    'sender_type': row['sender_type'],
+                    'sender_agent_id': row['sender_agent_id'],
+                    'content': row['content'] or '',
+                    'mentions': json.loads(row['mentions']) if row['mentions'] else [],
+                    'is_raise_hand': bool(row['is_raise_hand']),
+                    'reply_to_message_id': row.get('reply_to_message_id'),
+                    'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+                }
+                
+                # 解析媒体内容
+                if row.get('media'):
+                    try:
+                        msg['media'] = json.loads(row['media'])
+                    except:
+                        msg['media'] = None
+                
+                if row['sender_type'] == 'agent':
+                    msg['agent_name'] = row['agent_name'] or row['agent_title'] or row['sender_agent_id'][:8]
+                    msg['agent_avatar'] = row['agent_avatar']
+                
+                # 获取该消息的所有响应
+                cursor.execute("""
+                    SELECT 
+                        rtr.response_id,
+                        rtr.agent_id,
+                        rtr.content,
+                        rtr.thinking,
+                        rtr.tool_calls,
+                        rtr.is_selected,
+                        rtr.created_at,
+                        s.name as agent_name,
+                        s.title as agent_title,
+                        s.avatar as agent_avatar
+                    FROM round_table_responses rtr
+                    LEFT JOIN sessions s ON rtr.agent_id = s.session_id
+                    WHERE rtr.message_id = %s
+                    ORDER BY rtr.created_at ASC
+                """, (row['message_id'],))
+                
+                responses = []
+                for resp_row in cursor.fetchall():
+                    responses.append({
+                        'response_id': resp_row['response_id'],
+                        'agent_id': resp_row['agent_id'],
+                        'agent_name': resp_row['agent_name'] or resp_row['agent_title'] or resp_row['agent_id'][:8],
+                        'agent_avatar': resp_row['agent_avatar'],
+                        'content': resp_row['content'],
+                        'thinking': resp_row['thinking'],
+                        'tool_calls': json.loads(resp_row['tool_calls']) if resp_row['tool_calls'] else None,
+                        'is_selected': bool(resp_row['is_selected']),
+                        'created_at': resp_row['created_at'].isoformat() if resp_row['created_at'] else None,
+                    })
+                
+                msg['responses'] = responses
+                messages.append(msg)
+            
+            return jsonify({
+                'messages': messages,
+                'total': total,
+                'page': page,
+                'page_size': page_size,
+                'total_pages': (total + page_size - 1) // page_size,
+            })
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Round Table API] Error getting messages: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/round-tables/<round_table_id>/messages', methods=['POST', 'OPTIONS'])
+def send_round_table_message(round_table_id):
+    """发送圆桌会议消息"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        import uuid
+        
+        data = request.get_json() or {}
+        content = data.get('content', '').strip()
+        sender_type = data.get('sender_type', 'user')
+        sender_agent_id = data.get('sender_agent_id')
+        mentions = data.get('mentions', [])
+        is_raise_hand = data.get('is_raise_hand', False)
+        media = data.get('media')  # 媒体内容（图片等）
+        reply_to_message_id = data.get('reply_to_message_id')  # 引用的消息ID
+        
+        print(f"[Round Table API] Sending message: content_len={len(content)}, sender={sender_type}, has_media={bool(media)}, media_count={len(media) if media else 0}, reply_to={reply_to_message_id}")
+        
+        # 允许空内容，但必须有内容或媒体
+        if not content and not media:
+            return jsonify({'error': 'content or media is required'}), 400
+        
+        if sender_type not in ['user', 'agent', 'system']:
+            return jsonify({'error': 'Invalid sender_type'}), 400
+        
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 检查圆桌会议是否存在且活跃
+            cursor.execute("""
+                SELECT status FROM round_tables WHERE round_table_id = %s
+            """, (round_table_id,))
+            
+            round_table = cursor.fetchone()
+            if not round_table:
+                return jsonify({'error': 'Round table not found'}), 404
+            
+            if round_table['status'] == 'closed':
+                return jsonify({'error': 'Round table is closed'}), 400
+            
+            message_id = str(uuid.uuid4())
+            
+            # 序列化媒体内容
+            media_json = json.dumps(media) if media else None
+            
+            cursor.execute("""
+                INSERT INTO round_table_messages 
+                (message_id, round_table_id, sender_type, sender_agent_id, content, mentions, is_raise_hand, media, reply_to_message_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                message_id, 
+                round_table_id, 
+                sender_type, 
+                sender_agent_id,
+                content or '',  # 空内容使用空字符串
+                json.dumps(mentions) if mentions else None,
+                1 if is_raise_hand else 0,
+                media_json,
+                reply_to_message_id
+            ))
+            
+            conn.commit()
+            
+            # 如果是 agent 发送的消息，获取 agent 信息
+            agent_name = None
+            agent_avatar = None
+            if sender_type == 'agent' and sender_agent_id:
+                cursor.execute("""
+                    SELECT name, avatar FROM sessions WHERE session_id = %s
+                """, (sender_agent_id,))
+                agent_info = cursor.fetchone()
+                if agent_info:
+                    agent_name = agent_info['name']
+                    agent_avatar = agent_info['avatar']
+            
+            return jsonify({
+                'message_id': message_id,
+                'sender_type': sender_type,
+                'sender_agent_id': sender_agent_id,
+                'agent_name': agent_name,
+                'agent_avatar': agent_avatar,
+                'content': content or '',
+                'mentions': mentions,
+                'is_raise_hand': is_raise_hand,
+                'media': media,  # 返回媒体内容
+                'reply_to_message_id': reply_to_message_id,  # 返回引用消息ID
+                'created_at': datetime.now().isoformat(),
+                'responses': [],
+            }), 201
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Round Table API] Error sending message: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/round-tables/<round_table_id>/messages/<message_id>/responses', methods=['POST', 'OPTIONS'])
+def add_round_table_response(round_table_id, message_id):
+    """添加智能体对消息的响应"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        import uuid
+        
+        data = request.get_json() or {}
+        agent_id = data.get('agent_id')
+        content = data.get('content', '')
+        thinking = data.get('thinking')
+        tool_calls = data.get('tool_calls')
+        
+        if not agent_id:
+            return jsonify({'error': 'agent_id is required'}), 400
+        
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 检查消息是否存在
+            cursor.execute("""
+                SELECT message_id FROM round_table_messages
+                WHERE message_id = %s AND round_table_id = %s
+            """, (message_id, round_table_id))
+            
+            if not cursor.fetchone():
+                return jsonify({'error': 'Message not found'}), 404
+            
+            response_id = str(uuid.uuid4())
+            
+            cursor.execute("""
+                INSERT INTO round_table_responses
+                (response_id, message_id, agent_id, content, thinking, tool_calls, is_selected)
+                VALUES (%s, %s, %s, %s, %s, %s, 0)
+            """, (
+                response_id,
+                message_id,
+                agent_id,
+                content,
+                thinking,
+                json.dumps(tool_calls) if tool_calls else None,
+            ))
+            
+            conn.commit()
+            
+            # 获取智能体信息
+            cursor.execute("""
+                SELECT name, title, avatar FROM sessions WHERE session_id = %s
+            """, (agent_id,))
+            agent = cursor.fetchone()
+            
+            return jsonify({
+                'response_id': response_id,
+                'message_id': message_id,
+                'agent_id': agent_id,
+                'agent_name': agent['name'] or agent['title'] or agent_id[:8] if agent else agent_id[:8],
+                'agent_avatar': agent['avatar'] if agent else None,
+                'content': content,
+                'thinking': thinking,
+                'tool_calls': tool_calls,
+                'is_selected': False,
+                'created_at': datetime.now().isoformat(),
+            }), 201
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Round Table API] Error adding response: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/round-tables/<round_table_id>/responses/<response_id>/select', methods=['PUT', 'OPTIONS'])
+def select_round_table_response(round_table_id, response_id):
+    """选择某个响应作为采纳的答案"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 获取响应所属的消息ID
+            cursor.execute("""
+                SELECT message_id FROM round_table_responses WHERE response_id = %s
+            """, (response_id,))
+            
+            response = cursor.fetchone()
+            if not response:
+                return jsonify({'error': 'Response not found'}), 404
+            
+            message_id = response['message_id']
+            
+            # 取消该消息下所有响应的选中状态
+            cursor.execute("""
+                UPDATE round_table_responses
+                SET is_selected = 0
+                WHERE message_id = %s
+            """, (message_id,))
+            
+            # 选中指定的响应
+            cursor.execute("""
+                UPDATE round_table_responses
+                SET is_selected = 1
+                WHERE response_id = %s
+            """, (response_id,))
+            
+            conn.commit()
+            
+            return jsonify({'message': 'Response selected'})
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Round Table API] Error selecting response: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/round-tables/save-media', methods=['POST', 'OPTIONS'])
+def save_round_table_media():
+    """保存媒体文件到本地路径"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        import base64
+        import os
+        from datetime import datetime
+        
+        data = request.get_json() or {}
+        
+        media_data = data.get('media_data')  # base64 编码的媒体数据
+        mime_type = data.get('mime_type', 'image/png')
+        output_path = data.get('output_path')  # 输出目录
+        filename = data.get('filename')  # 可选的自定义文件名
+        
+        if not media_data:
+            return jsonify({'error': 'media_data is required'}), 400
+        if not output_path:
+            return jsonify({'error': 'output_path is required'}), 400
+        
+        # 确保输出目录存在
+        try:
+            os.makedirs(output_path, exist_ok=True)
+        except Exception as e:
+            return jsonify({'error': f'Failed to create output directory: {str(e)}'}), 400
+        
+        # 生成文件名
+        ext = '.png'
+        if 'jpeg' in mime_type or 'jpg' in mime_type:
+            ext = '.jpg'
+        elif 'gif' in mime_type:
+            ext = '.gif'
+        elif 'webp' in mime_type:
+            ext = '.webp'
+        elif 'mp4' in mime_type:
+            ext = '.mp4'
+        elif 'webm' in mime_type:
+            ext = '.webm'
+        elif 'mp3' in mime_type:
+            ext = '.mp3'
+        elif 'wav' in mime_type:
+            ext = '.wav'
+        
+        if not filename:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+            filename = f"generated_{timestamp}{ext}"
+        elif not filename.endswith(ext):
+            filename = f"{filename}{ext}"
+        
+        # 完整的文件路径
+        full_path = os.path.join(output_path, filename)
+        
+        # 解码并保存
+        try:
+            media_bytes = base64.b64decode(media_data)
+            with open(full_path, 'wb') as f:
+                f.write(media_bytes)
+        except Exception as e:
+            return jsonify({'error': f'Failed to save file: {str(e)}'}), 500
+        
+        print(f"[Round Table API] Saved media to: {full_path} ({len(media_bytes)} bytes)")
+        
+        return jsonify({
+            'success': True,
+            'file_path': full_path,
+            'filename': filename,
+            'size': len(media_bytes),
+        })
+        
+    except Exception as e:
+        print(f"[Round Table API] Error saving media: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 
 if __name__ == '__main__':
     # 配置日志

@@ -31,6 +31,8 @@ export interface LLMMessage {
   // 工具调用中的思维签名（用于多步调用）
   // 格式：{ toolCallId: signature }
   toolCallSignatures?: Record<string, string>;
+  // DeepSeek 思考模式的推理内容
+  reasoning_content?: string;
 }
 
 export interface LLMToolCall {
@@ -270,6 +272,8 @@ export class LLMClient {
             if (msg.tool_call_id) message.tool_call_id = msg.tool_call_id;
             if (msg.name) message.name = msg.name;
             if (msg.tool_calls) message.tool_calls = msg.tool_calls;
+            // DeepSeek 思考模式需要 reasoning_content
+            if (msg.reasoning_content) message.reasoning_content = msg.reasoning_content;
             return message;
           }),
           tools: tools ? tools.map(convertMCPToolToLLMFunction) : undefined,
@@ -451,6 +455,8 @@ export class LLMClient {
             if (msg.tool_call_id) message.tool_call_id = msg.tool_call_id;
             if (msg.name) message.name = msg.name;
             if (msg.tool_calls) message.tool_calls = msg.tool_calls;
+            // DeepSeek 思考模式需要 reasoning_content
+            if (msg.reasoning_content) message.reasoning_content = msg.reasoning_content;
             return message;
           }),
           tools: tools ? tools.map(convertMCPToolToLLMFunction) : undefined,
@@ -1106,6 +1112,22 @@ export class LLMClient {
       
       console.log(`[LLM] Gemini 请求配置:`, JSON.stringify(config, null, 2));
       
+      // 检查 contents 是否有效
+      if (!finalContents || finalContents.length === 0) {
+        console.error('[LLM] ❌ Gemini contents 为空，无法发送请求');
+        throw new Error('Gemini API error: contents are required - no valid messages to send');
+      }
+      
+      // 确保有用户消息
+      const hasUserContent = finalContents.some(c => c.role === 'user' && c.parts && c.parts.length > 0);
+      if (!hasUserContent) {
+        console.error('[LLM] ❌ Gemini 没有有效的用户消息');
+        console.error('[LLM] finalContents:', JSON.stringify(finalContents, null, 2));
+        // 如果没有用户消息，添加一个默认消息以避免API错误
+        finalContents.push({ role: 'user', parts: [{ text: '请继续' }] });
+        console.log('[LLM] ⚠️ 已添加默认用户消息以避免API错误');
+      }
+      
       // 调用流式 API
       console.log(`[LLM] Gemini 开始流式调用...`);
       console.log(`[LLM] Gemini 请求内容 (contents):`, JSON.stringify(finalContents, (key, value) => {
@@ -1549,7 +1571,11 @@ export class LLMClient {
           currentUserParts.push({ text: msg.content });
           console.log(`[LLM] 处理用户消息 content: ${msg.content.substring(0, 50)}...`);
         } else {
-          console.warn(`[LLM] ⚠️ 用户消息既没有 parts 也没有 content!`);
+          console.warn(`[LLM] ⚠️ 用户消息既没有有效 parts 也没有 content!`);
+          console.warn(`[LLM]   msg.parts: ${JSON.stringify(msg.parts)}`);
+          console.warn(`[LLM]   msg.content: "${msg.content}"`);
+          // 添加一个占位文本以避免空消息
+          currentUserParts.push({ text: '请继续执行任务' });
         }
       } else if (msg.role === 'assistant') {
         // 如果之前有累积的 user parts，先提交
@@ -1789,12 +1815,17 @@ ${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
       );
 
       if (response.tool_calls && response.tool_calls.length > 0) {
-        // 添加 assistant 消息（包含 tool_calls）
-        messages.push({
+        // 添加 assistant 消息（包含 tool_calls 和 reasoning_content）
+        const assistantMsg: LLMMessage = {
           role: 'assistant',
           content: response.content || '',
           tool_calls: response.tool_calls,
-        });
+        };
+        // DeepSeek 思考模式需要 reasoning_content
+        if (response.thinking) {
+          assistantMsg.reasoning_content = response.thinking;
+        }
+        messages.push(assistantMsg);
 
         // 执行工具调用
         const toolResults = await Promise.all(
@@ -1961,6 +1992,11 @@ ${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
         // 添加工具调用的思维签名
         if (response.toolCallSignatures) {
           assistantMsg.toolCallSignatures = response.toolCallSignatures;
+        }
+        
+        // 添加 DeepSeek reasoning_content（思考模式必需）
+        if (response.thinking) {
+          assistantMsg.reasoning_content = response.thinking;
         }
         
         messages.push(assistantMsg);

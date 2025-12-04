@@ -424,6 +424,31 @@ def create_tables():
         except Exception as e:
             print(f"  ⚠ Warning: Could not check/add 'avatar' column: {e}")
         
+        # 迁移：为 sessions 表添加 media_output_path 列（用于保存生成的媒体文件）
+        try:
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM information_schema.COLUMNS 
+                WHERE TABLE_SCHEMA = DATABASE() 
+                AND TABLE_NAME = 'sessions' 
+                AND COLUMN_NAME = 'media_output_path'
+            """)
+            media_output_path_exists = cursor.fetchone()[0] > 0
+            
+            if not media_output_path_exists:
+                print("  → Adding 'media_output_path' column to 'sessions' table...")
+                cursor.execute("""
+                    ALTER TABLE `sessions` 
+                    ADD COLUMN `media_output_path` VARCHAR(500) DEFAULT NULL COMMENT '媒体输出本地路径（图片/视频/音频）' 
+                    AFTER `system_prompt`
+                """)
+                conn.commit()
+                print("  ✓ Column 'media_output_path' added to 'sessions' table")
+            else:
+                print("  ✓ Column 'media_output_path' already exists in 'sessions'")
+        except Exception as e:
+            print(f"  ⚠️ Warning: Failed to add 'media_output_path' column to sessions: {e}")
+        
         # 消息表
         create_messages_table = """
         CREATE TABLE IF NOT EXISTS `messages` (
@@ -634,6 +659,186 @@ def create_tables():
                 print("✓ Column 'crawler_config_snapshot' already exists")
         except Exception as e:
             print(f"⚠ Warning: Could not check/add 'crawler_config_snapshot' column: {e}")
+        
+        # ==================== 圆桌会议相关表 ====================
+        
+        # 圆桌会议表
+        create_round_tables_table = """
+        CREATE TABLE IF NOT EXISTS `round_tables` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `round_table_id` VARCHAR(100) NOT NULL UNIQUE COMMENT '圆桌会议ID',
+            `name` VARCHAR(255) NOT NULL COMMENT '会议名称',
+            `status` VARCHAR(20) DEFAULT 'active' COMMENT '状态：active(进行中), closed(已结束)',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+            INDEX `idx_round_table_id` (`round_table_id`),
+            INDEX `idx_status` (`status`),
+            INDEX `idx_created_at` (`created_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='圆桌会议表';
+        """
+        
+        cursor.execute(create_round_tables_table)
+        print("✓ Table 'round_tables' created/verified successfully")
+        
+        # 圆桌会议参与者表
+        create_round_table_participants_table = """
+        CREATE TABLE IF NOT EXISTS `round_table_participants` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `round_table_id` VARCHAR(100) NOT NULL COMMENT '圆桌会议ID',
+            `session_id` VARCHAR(100) NOT NULL COMMENT '智能体的会话ID',
+            `joined_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '加入时间',
+            `left_at` DATETIME DEFAULT NULL COMMENT '离开时间（NULL表示仍在会议中）',
+            `custom_llm_config_id` VARCHAR(100) DEFAULT NULL COMMENT '自定义LLM配置ID（覆盖智能体默认）',
+            `custom_system_prompt` TEXT DEFAULT NULL COMMENT '自定义系统提示词（覆盖智能体默认）',
+            INDEX `idx_round_table_id` (`round_table_id`),
+            INDEX `idx_session_id` (`session_id`),
+            INDEX `idx_joined_at` (`joined_at`),
+            UNIQUE KEY `uk_round_table_session` (`round_table_id`, `session_id`, `left_at`),
+            FOREIGN KEY (`round_table_id`) REFERENCES `round_tables`(`round_table_id`) ON DELETE CASCADE,
+            FOREIGN KEY (`session_id`) REFERENCES `sessions`(`session_id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='圆桌会议参与者表';
+        """
+        
+        cursor.execute(create_round_table_participants_table)
+        print("✓ Table 'round_table_participants' created/verified successfully")
+        
+        # 圆桌会议消息表
+        create_round_table_messages_table = """
+        CREATE TABLE IF NOT EXISTS `round_table_messages` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `message_id` VARCHAR(100) NOT NULL UNIQUE COMMENT '消息ID',
+            `round_table_id` VARCHAR(100) NOT NULL COMMENT '圆桌会议ID',
+            `sender_type` VARCHAR(20) NOT NULL COMMENT '发送者类型：user(用户), agent(智能体), system(系统)',
+            `sender_agent_id` VARCHAR(100) DEFAULT NULL COMMENT '发送者智能体ID（用户/系统消息为NULL）',
+            `content` TEXT COMMENT '消息内容（可为空，当只有媒体时）',
+            `mentions` JSON DEFAULT NULL COMMENT '被@的智能体列表',
+            `is_raise_hand` TINYINT(1) DEFAULT 0 COMMENT '是否是举手消息',
+            `media` LONGTEXT DEFAULT NULL COMMENT '媒体内容（JSON格式，存储图片等的base64数据）',
+            `reply_to_message_id` VARCHAR(100) DEFAULT NULL COMMENT '引用的消息ID',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+            INDEX `idx_message_id` (`message_id`),
+            INDEX `idx_round_table_id` (`round_table_id`),
+            INDEX `idx_sender_type` (`sender_type`),
+            INDEX `idx_sender_agent_id` (`sender_agent_id`),
+            INDEX `idx_created_at` (`created_at`),
+            INDEX `idx_round_table_created` (`round_table_id`, `created_at`),
+            INDEX `idx_reply_to_message_id` (`reply_to_message_id`),
+            FOREIGN KEY (`round_table_id`) REFERENCES `round_tables`(`round_table_id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='圆桌会议消息表';
+        """
+        
+        cursor.execute(create_round_table_messages_table)
+        print("✓ Table 'round_table_messages' created/verified successfully")
+        
+        # 迁移：为 round_table_messages 添加 media 列（如果不存在）
+        try:
+            cursor.execute("""
+                SELECT COUNT(*) as cnt FROM information_schema.COLUMNS 
+                WHERE TABLE_SCHEMA = DATABASE() 
+                AND TABLE_NAME = 'round_table_messages' 
+                AND COLUMN_NAME = 'media'
+            """)
+            result = cursor.fetchone()
+            has_media_column = result[0] > 0 if result else False
+            
+            if not has_media_column:
+                print("  → Adding 'media' column to 'round_table_messages' table...")
+                cursor.execute("""
+                    ALTER TABLE `round_table_messages` 
+                    ADD COLUMN `media` LONGTEXT DEFAULT NULL COMMENT '媒体内容（JSON格式，存储图片等的base64数据）' 
+                    AFTER `is_raise_hand`
+                """)
+                conn.commit()
+                print("  ✓ Column 'media' added to 'round_table_messages' table")
+            else:
+                print("  ✓ Column 'media' already exists in 'round_table_messages'")
+                
+            # 修改 content 列允许为空，并使用 LONGTEXT 支持更长内容
+            cursor.execute("""
+                ALTER TABLE `round_table_messages` 
+                MODIFY COLUMN `content` LONGTEXT COMMENT '消息内容（可为空，当只有媒体时）'
+            """)
+            conn.commit()
+            print("  ✓ Column 'content' modified to allow NULL")
+        except Exception as e:
+            print(f"  ! Migration warning: {e}")
+        
+        # 迁移：为 round_table_messages 添加 reply_to_message_id 列（如果不存在）
+        try:
+            cursor.execute("""
+                SELECT COUNT(*) as cnt FROM information_schema.COLUMNS 
+                WHERE TABLE_SCHEMA = DATABASE() 
+                AND TABLE_NAME = 'round_table_messages' 
+                AND COLUMN_NAME = 'reply_to_message_id'
+            """)
+            result = cursor.fetchone()
+            has_reply_column = result[0] > 0 if result else False
+            
+            if not has_reply_column:
+                print("  → Adding 'reply_to_message_id' column to 'round_table_messages' table...")
+                cursor.execute("""
+                    ALTER TABLE `round_table_messages` 
+                    ADD COLUMN `reply_to_message_id` VARCHAR(100) DEFAULT NULL COMMENT '引用的消息ID' 
+                    AFTER `media`
+                """)
+                cursor.execute("""
+                    CREATE INDEX `idx_reply_to_message_id` ON `round_table_messages` (`reply_to_message_id`)
+                """)
+                conn.commit()
+                print("  ✓ Column 'reply_to_message_id' added to 'round_table_messages' table")
+            else:
+                print("  ✓ Column 'reply_to_message_id' already exists in 'round_table_messages'")
+        except Exception as e:
+            print(f"  ! Migration warning for reply_to_message_id: {e}")
+        
+        # 迁移：为 round_table_participants 添加 media_output_path 列（用于配置媒体输出路径）
+        try:
+            cursor.execute("""
+                SELECT COUNT(*) as cnt FROM information_schema.COLUMNS 
+                WHERE TABLE_SCHEMA = DATABASE() 
+                AND TABLE_NAME = 'round_table_participants' 
+                AND COLUMN_NAME = 'media_output_path'
+            """)
+            result = cursor.fetchone()
+            has_media_output_path = result[0] > 0 if result else False
+            
+            if not has_media_output_path:
+                print("  → Adding 'media_output_path' column to 'round_table_participants' table...")
+                cursor.execute("""
+                    ALTER TABLE `round_table_participants` 
+                    ADD COLUMN `media_output_path` VARCHAR(500) DEFAULT NULL COMMENT '媒体输出本地路径（图片/视频/音频）' 
+                    AFTER `custom_system_prompt`
+                """)
+                conn.commit()
+                print("  ✓ Column 'media_output_path' added to 'round_table_participants' table")
+            else:
+                print("  ✓ Column 'media_output_path' already exists in 'round_table_participants'")
+        except Exception as e:
+            print(f"  ! Migration warning for media_output_path: {e}")
+        
+        # 圆桌会议响应表（存储所有智能体的响应，支持用户选择）
+        create_round_table_responses_table = """
+        CREATE TABLE IF NOT EXISTS `round_table_responses` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `response_id` VARCHAR(100) NOT NULL UNIQUE COMMENT '响应ID',
+            `message_id` VARCHAR(100) NOT NULL COMMENT '关联的用户消息ID',
+            `agent_id` VARCHAR(100) NOT NULL COMMENT '响应的智能体ID',
+            `content` TEXT NOT NULL COMMENT '响应内容',
+            `thinking` TEXT DEFAULT NULL COMMENT '思考过程',
+            `tool_calls` JSON DEFAULT NULL COMMENT '工具调用信息',
+            `is_selected` TINYINT(1) DEFAULT 0 COMMENT '是否被用户选中',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+            INDEX `idx_response_id` (`response_id`),
+            INDEX `idx_message_id` (`message_id`),
+            INDEX `idx_agent_id` (`agent_id`),
+            INDEX `idx_is_selected` (`is_selected`),
+            INDEX `idx_created_at` (`created_at`),
+            FOREIGN KEY (`message_id`) REFERENCES `round_table_messages`(`message_id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='圆桌会议响应表';
+        """
+        
+        cursor.execute(create_round_table_responses_table)
+        print("✓ Table 'round_table_responses' created/verified successfully")
         
         cursor.close()
         conn.close()  # 归还连接到连接池
