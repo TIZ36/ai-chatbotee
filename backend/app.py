@@ -13,6 +13,7 @@ import time
 import signal
 import requests
 import pymysql
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -1500,7 +1501,7 @@ def mcp_proxy_inspector():
                     target_url,
                     headers=headers,
                     stream=True,
-                    timeout=30
+                    timeout=120  # 增加SSE连接超时到120秒
                 )
                 
                 # 记录响应信息（SSE 流式响应，只记录状态码和 headers）
@@ -1566,7 +1567,7 @@ def mcp_proxy_inspector():
                         is_notion = target_url and 'mcp.notion.com' in target_url
                         buffer = b''
                         current_event_type = None
-                        chunk_timeout = 60  # 每个chunk的超时时间（秒）
+                        chunk_timeout = 180  # 每个chunk的超时时间（秒），增加到180秒以支持慢速MCP服务器
                         last_chunk_time = time.time()
                         
                         # 使用iter_content，但添加超时检测
@@ -1692,7 +1693,7 @@ def mcp_proxy_inspector():
                     target_url,
                     json=json_data,
                     headers=headers,
-                    timeout=30
+                    timeout=120  # 增加POST请求超时到120秒
                 )
                 
                 # 记录响应信息
@@ -1838,7 +1839,7 @@ def mcp_proxy_inspector():
                             buffer = b''
                             initialize_successful = False
                             session_id_for_auto_fetch = None
-                            chunk_timeout = 60  # 每个chunk的超时时间（秒）
+                            chunk_timeout = 180  # 每个chunk的超时时间（秒），增加到180秒以支持慢速MCP服务器
                             last_chunk_time = time.time()
                             
                             try:
@@ -6304,6 +6305,933 @@ def import_agent():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+# ==================== 技能包 API ====================
+
+@app.route('/api/skill-packs', methods=['GET', 'OPTIONS'])
+def list_skill_packs():
+    """获取所有技能包列表"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            cursor.execute("""
+                SELECT skill_pack_id, name, summary, source_session_id, source_messages,
+                       created_at, updated_at
+                FROM skill_packs
+                ORDER BY created_at DESC
+            """)
+            
+            skill_packs = cursor.fetchall()
+            
+            # 处理JSON字段和datetime
+            for sp in skill_packs:
+                if sp['source_messages']:
+                    try:
+                        sp['source_messages'] = json.loads(sp['source_messages']) if isinstance(sp['source_messages'], str) else sp['source_messages']
+                    except:
+                        sp['source_messages'] = []
+                if sp['created_at']:
+                    sp['created_at'] = sp['created_at'].isoformat()
+                if sp['updated_at']:
+                    sp['updated_at'] = sp['updated_at'].isoformat()
+            
+            return jsonify({'skill_packs': skill_packs})
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[SkillPack API] Error listing skill packs: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/skill-packs', methods=['POST', 'OPTIONS'])
+def create_skill_pack():
+    """创建技能包（从选定的消息范围生成）"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        data = request.json
+        session_id = data.get('session_id')
+        message_ids = data.get('message_ids', [])  # 选定的消息ID列表
+        llm_config_id = data.get('llm_config_id')  # 用于生成总结的LLM配置
+        
+        if not message_ids:
+            return jsonify({'error': 'message_ids is required'}), 400
+        if not llm_config_id:
+            return jsonify({'error': 'llm_config_id is required'}), 400
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 获取选定的消息内容（包含ext字段，可能存储媒体信息）
+            # 移除ORDER BY避免排序缓冲区溢出，改为在应用层排序
+            placeholders = ','.join(['%s'] * len(message_ids))
+            cursor.execute(f"""
+                SELECT message_id, role, content, tool_calls, thinking, ext, created_at
+                FROM messages
+                WHERE message_id IN ({placeholders})
+            """, message_ids)
+            
+            messages = cursor.fetchall()
+            if not messages:
+                return jsonify({'error': 'No messages found'}), 404
+            
+            # 在应用层按照message_ids的顺序排序（避免MySQL排序缓冲区溢出）
+            message_dict = {msg['message_id']: msg for msg in messages}
+            messages = [message_dict[mid] for mid in message_ids if mid in message_dict]
+            
+            # 获取LLM配置
+            cursor.execute("""
+                SELECT config_id, name, provider, api_key, api_url, model, metadata
+                FROM llm_configs
+                WHERE config_id = %s
+            """, (llm_config_id,))
+            
+            llm_config = cursor.fetchone()
+            if not llm_config:
+                return jsonify({'error': 'LLM config not found'}), 404
+            
+            # 格式化消息用于LLM总结（参考总结功能的处理方式）
+            formatted_messages = []
+            media_info_list = []  # 收集所有媒体资源信息
+            process_info = {
+                'messages_count': len(messages),
+                'thinking_count': 0,
+                'tool_calls_count': 0,
+                'media_count': 0,
+                'media_types': set(),
+            }
+            
+            for msg in messages:
+                role_label = {'user': '用户', 'assistant': 'AI助手', 'system': '系统', 'tool': '工具'}.get(msg['role'], msg['role'])
+                content = msg['content'] or ''
+                
+                # 处理ext字段中的媒体资源
+                if msg.get('ext'):
+                    try:
+                        ext_data = json.loads(msg['ext']) if isinstance(msg['ext'], str) else msg['ext']
+                        if isinstance(ext_data, dict) and 'media' in ext_data:
+                            media_list = ext_data['media']
+                            if isinstance(media_list, list):
+                                for media_item in media_list:
+                                    if isinstance(media_item, dict):
+                                        media_type = media_item.get('type', '').lower()
+                                        if media_type == 'image':
+                                            media_info_list.append('{image}')
+                                            process_info['media_count'] += 1
+                                            process_info['media_types'].add('image')
+                                        elif media_type == 'video':
+                                            media_info_list.append('{video}')
+                                            process_info['media_count'] += 1
+                                            process_info['media_types'].add('video')
+                                        elif media_type == 'audio':
+                                            media_info_list.append('{audio}')
+                                            process_info['media_count'] += 1
+                                            process_info['media_types'].add('audio')
+                    except Exception as e:
+                        print(f"[SkillPack] 解析ext字段失败: {e}")
+                
+                # 处理工具调用信息（包含媒体资源）
+                if msg['tool_calls']:
+                    process_info['tool_calls_count'] += 1
+                    try:
+                        tool_calls = json.loads(msg['tool_calls']) if isinstance(msg['tool_calls'], str) else msg['tool_calls']
+                        if tool_calls:
+                            # 检查是否有媒体资源
+                            media_info = []
+                            if isinstance(tool_calls, dict):
+                                # 检查是否有media字段
+                                if 'media' in tool_calls and isinstance(tool_calls['media'], list):
+                                    for media_item in tool_calls['media']:
+                                        if isinstance(media_item, dict):
+                                            media_type = media_item.get('type', '').lower()
+                                            if media_type == 'image':
+                                                media_info.append('{image}')
+                                                media_info_list.append('{image}')
+                                                process_info['media_count'] += 1
+                                                process_info['media_types'].add('image')
+                                            elif media_type == 'video':
+                                                media_info.append('{video}')
+                                                media_info_list.append('{video}')
+                                                process_info['media_count'] += 1
+                                                process_info['media_types'].add('video')
+                                            elif media_type == 'audio':
+                                                media_info.append('{audio}')
+                                                media_info_list.append('{audio}')
+                                                process_info['media_count'] += 1
+                                                process_info['media_types'].add('audio')
+                                
+                                # 移除media字段，避免在JSON中显示大量base64数据
+                                tool_calls_for_json = {k: v for k, v in tool_calls.items() if k != 'media'}
+                            else:
+                                tool_calls_for_json = tool_calls
+                            
+                            # 添加媒体占位符到内容中
+                            if media_info:
+                                content += f"\n[媒体资源]: {', '.join(media_info)}"
+                            
+                            # 添加工具调用信息（不包含media字段）
+                            if tool_calls_for_json:
+                                # 限制工具调用JSON的长度，避免过长
+                                tool_calls_str = json.dumps(tool_calls_for_json, ensure_ascii=False, indent=2)
+                                if len(tool_calls_str) > 5000:
+                                    tool_calls_str = tool_calls_str[:5000] + "...[已截断]"
+                                content += f"\n[工具调用]: {tool_calls_str}"
+                    except Exception as e:
+                        print(f"[SkillPack] 解析tool_calls失败: {e}")
+                        pass
+                
+                # 如果有思考过程，也包含（截断过长的思考）
+                if msg['thinking']:
+                    process_info['thinking_count'] += 1
+                    thinking_content = msg['thinking']
+                    if len(thinking_content) > 2000:
+                        thinking_content = thinking_content[:2000] + "...[已截断]"
+                    content += f"\n[思考过程]: {thinking_content}"
+                
+                formatted_messages.append(f"【{role_label}】\n{content}")
+            
+            # 如果有媒体资源，在对话开头添加说明
+            if media_info_list:
+                media_summary = f"[对话包含以下媒体资源: {', '.join(set(media_info_list))}]"
+                formatted_messages.insert(0, media_summary)
+            
+            conversation_text = "\n\n".join(formatted_messages)
+            
+            # 参考总结功能的处理方式，不限制长度（总结功能可以处理大量字符）
+            # 如果内容过长，LLM API会自动处理或返回错误，由调用方处理
+            print(f"[SkillPack] 对话记录总长度: {len(conversation_text)} 字符，消息数量: {len(messages)}")
+            
+            # 构建提示词让LLM生成技能包
+            prompt = f"""请分析以下对话记录，总结其中涉及的执行步骤和能力，要求：
+1. 不要遗漏任何与执行相关的信息（工具调用、参数、步骤顺序）
+2. 总结应让其他AI阅读后能够重现这些能力
+3. 输出格式必须严格遵循：
+   第一行：技能包名称（10字以内，简洁概括核心能力）
+   第二行开始：详细的执行步骤和能力描述
+
+对话记录：
+{conversation_text}"""
+
+            print(f"[SkillPack] 准备调用LLM生成技能包总结，提示词长度: {len(prompt)} 字符")
+            
+            # 调用LLM生成总结（使用app.py中已有的call_llm_api函数）
+            llm_config_dict = {
+                'provider': llm_config['provider'],
+                'api_key': llm_config['api_key'],
+                'api_url': llm_config['api_url'],
+                'model': llm_config['model'],
+                'metadata': json.loads(llm_config['metadata']) if llm_config['metadata'] else None
+            }
+            
+            # 创建日志回调函数来捕获详细错误信息
+            error_logs = []
+            def log_callback(msg):
+                print(f"[SkillPack LLM] {msg}")
+                error_logs.append(msg)
+            
+            try:
+                llm_response = call_llm_api(
+                    llm_config=llm_config_dict,
+                    system_prompt="你是一个专业的技能总结助手，擅长分析对话记录并提取关键执行步骤。",
+                    user_input=prompt,
+                    add_log=log_callback
+                )
+                
+                if not llm_response:
+                    error_detail = f"LLM API调用失败。"
+                    if error_logs:
+                        error_detail += f" 详细信息: {'; '.join(error_logs[-3:])}"  # 只显示最后3条日志
+                    else:
+                        error_detail += " 请检查：1. API密钥是否正确 2. 模型是否可用 3. 网络连接是否正常 4. 提示词是否过长"
+                    print(f"[SkillPack] {error_detail}")
+                    return jsonify({'error': error_detail}), 500
+                
+                print(f"[SkillPack] LLM响应成功，响应长度: {len(str(llm_response))} 字符")
+            except Exception as llm_error:
+                error_detail = f"LLM调用异常: {str(llm_error)}"
+                if error_logs:
+                    error_detail += f" 日志: {'; '.join(error_logs[-3:])}"
+                print(f"[SkillPack] {error_detail}")
+                import traceback
+                traceback.print_exc()
+                return jsonify({'error': error_detail}), 500
+            
+            # 解析LLM响应，提取名称和总结
+            response_content = llm_response.strip() if isinstance(llm_response, str) else str(llm_response)
+            
+            if not response_content:
+                return jsonify({'error': 'LLM返回了空响应'}), 500
+            
+            print(f"[SkillPack] LLM响应内容预览: {response_content[:200]}...")
+            
+            lines = response_content.split('\n', 1)
+            
+            # 提取技能包名称（第一行）
+            skill_name = lines[0].strip()[:50]  # 限制长度
+            if not skill_name:
+                skill_name = "未命名技能包"
+            
+            # 提取技能包总结（第二行开始，如果没有第二行则使用全部内容）
+            skill_summary = lines[1].strip() if len(lines) > 1 else response_content
+            
+            if not skill_summary:
+                skill_summary = response_content  # 如果总结为空，使用全部响应
+            
+            print(f"[SkillPack] 解析结果 - 名称: {skill_name}, 总结长度: {len(skill_summary)} 字符")
+            
+            # 准备制作过程信息
+            process_info['media_types'] = list(process_info['media_types'])
+            process_info['conversation_length'] = len(conversation_text)
+            process_info['prompt_length'] = len(prompt)
+            
+            # 不直接保存，返回制作过程信息和总结结果，让用户选择是否保存
+            return jsonify({
+                'name': skill_name,
+                'summary': skill_summary,
+                'source_session_id': session_id,
+                'source_messages': message_ids,
+                'process_info': process_info,
+                'conversation_text': conversation_text,  # 用于优化时重新生成
+            }), 200
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[SkillPack API] Error creating skill pack: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/skill-packs/save', methods=['POST', 'OPTIONS'])
+def save_skill_pack():
+    """保存技能包（用户确认后）"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        data = request.json
+        name = data.get('name')
+        summary = data.get('summary')
+        source_session_id = data.get('source_session_id')
+        source_messages = data.get('source_messages', [])
+        
+        if not name or not summary:
+            return jsonify({'error': 'name and summary are required'}), 400
+        
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            
+            # 生成技能包ID并保存
+            skill_pack_id = str(uuid.uuid4())
+            
+            cursor.execute("""
+                INSERT INTO skill_packs 
+                (skill_pack_id, name, summary, source_session_id, source_messages)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (
+                skill_pack_id,
+                name,
+                summary,
+                source_session_id,
+                json.dumps(source_messages) if source_messages else None
+            ))
+            
+            conn.commit()
+            
+            return jsonify({
+                'skill_pack_id': skill_pack_id,
+                'name': name,
+                'summary': summary,
+                'source_session_id': source_session_id,
+                'source_messages': source_messages,
+            }), 201
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[SkillPack API] Error saving skill pack: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/skill-packs/optimize', methods=['POST', 'OPTIONS'])
+def optimize_skill_pack_summary():
+    """优化技能包总结"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        data = request.json
+        conversation_text = data.get('conversation_text')
+        current_summary = data.get('current_summary')
+        optimization_prompt = data.get('optimization_prompt', '')  # 用户附加的优化提示词
+        llm_config_id = data.get('llm_config_id')
+        mcp_server_ids = data.get('mcp_server_ids', [])  # 要使用的MCP服务器ID列表
+        
+        if not conversation_text or not llm_config_id:
+            return jsonify({'error': 'conversation_text and llm_config_id are required'}), 400
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 获取LLM配置
+            cursor.execute("""
+                SELECT config_id, name, provider, api_key, api_url, model, metadata
+                FROM llm_configs
+                WHERE config_id = %s
+            """, (llm_config_id,))
+            
+            llm_config = cursor.fetchone()
+            if not llm_config:
+                return jsonify({'error': 'LLM config not found'}), 404
+            
+            # 获取MCP工具列表（如果指定了MCP服务器）
+            all_tools = []
+            tools_by_server = {}
+            if mcp_server_ids:
+                from mcp_server.mcp_common_logic import get_mcp_tools_list, prepare_mcp_headers
+                
+                cursor.execute("""
+                    SELECT server_id, name, url, type, metadata, ext
+                    FROM mcp_servers
+                    WHERE server_id IN ({}) AND enabled = 1
+                """.format(','.join(['%s'] * len(mcp_server_ids))), mcp_server_ids)
+                
+                mcp_servers = cursor.fetchall()
+                
+                for server in mcp_servers:
+                    server_id = server['server_id']
+                    server_name = server['name']
+                    server_url = server['url']
+                    
+                    # 准备请求头
+                    base_headers = {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'mcp-protocol-version': '2025-06-18',
+                    }
+                    headers = prepare_mcp_headers(server_url, base_headers, base_headers)
+                    
+                    # 获取工具列表
+                    tools_response = get_mcp_tools_list(server_url, headers)
+                    if tools_response and 'result' in tools_response:
+                        tools = tools_response['result'].get('tools', [])
+                        tools_by_server[server_name] = tools
+                        all_tools.extend(tools)
+                        print(f"[SkillPack Optimize] 获取到 {server_name} 的 {len(tools)} 个工具")
+            
+            # 构建工具描述（用于提示词）
+            tools_description = ""
+            if all_tools:
+                tools_description = "\n\n【可用工具列表】\n你可以使用以下工具来验证和确认工具名称、参数等信息：\n\n"
+                for server_name, tools in tools_by_server.items():
+                    tools_description += f"来自 {server_name} 的工具：\n"
+                    for tool in tools:
+                        tool_name = tool.get('name', '')
+                        tool_desc = tool.get('description', '')
+                        input_schema = tool.get('inputSchema', {})
+                        properties = input_schema.get('properties', {})
+                        required = input_schema.get('required', [])
+                        
+                        tools_description += f"- {tool_name}: {tool_desc}\n"
+                        if properties:
+                            tools_description += "  参数：\n"
+                            for param_name, param_info in properties.items():
+                                param_type = param_info.get('type', 'string')
+                                param_desc = param_info.get('description', '')
+                                is_required = param_name in required
+                                tools_description += f"    - {param_name} ({param_type}{', 必填' if is_required else ''}): {param_desc}\n"
+                    tools_description += "\n"
+            
+            # 构建优化提示词
+            base_prompt = """请优化以下技能包总结，要求：
+1. 更清晰地描述执行步骤
+2. 确保不遗漏关键信息，特别是工具调用的准确名称和参数
+3. 让其他AI更容易理解和重现这些能力
+4. 输出格式：第一行是技能包名称，第二行开始是优化后的总结
+
+当前总结：
+{current_summary}
+
+对话记录：
+{conversation_text}"""
+            
+            if tools_description:
+                base_prompt += tools_description
+                base_prompt += "\n【重要】如果对话记录中提到了工具调用，请使用上述工具列表来验证工具名称和参数的准确性。你可以调用工具来确认具体的工具名称和参数格式。"
+            
+            if optimization_prompt:
+                base_prompt += f"\n\n额外优化要求：\n{optimization_prompt}"
+            
+            prompt = base_prompt.format(
+                current_summary=current_summary or '（无）',
+                conversation_text=conversation_text
+            )
+            
+            # 调用LLM优化总结
+            llm_config_dict = {
+                'provider': llm_config['provider'],
+                'api_key': llm_config['api_key'],
+                'api_url': llm_config['api_url'],
+                'model': llm_config['model'],
+                'metadata': json.loads(llm_config['metadata']) if llm_config['metadata'] else None
+            }
+            
+            error_logs = []
+            def log_callback(msg):
+                print(f"[SkillPack Optimize LLM] {msg}")
+                error_logs.append(msg)
+            
+            # 将MCP工具转换为LLM Function格式（OpenAI兼容）
+            llm_functions = []
+            if all_tools:
+                for tool in all_tools:
+                    llm_function = {
+                        'type': 'function',
+                        'function': {
+                            'name': tool.get('name', ''),
+                            'description': tool.get('description', ''),
+                            'parameters': tool.get('inputSchema', {})
+                        }
+                    }
+                    llm_functions.append(llm_function)
+            
+            try:
+                # 如果提供了工具，使用支持工具调用的API
+                if llm_functions and llm_config['provider'] in ['openai', 'anthropic', 'gemini']:
+                    # 使用支持工具调用的方式调用LLM
+                    optimized_result = call_llm_with_tools_for_optimization(
+                        llm_config_dict=llm_config_dict,
+                        system_prompt="你是一个专业的技能总结优化助手，擅长改进技能包总结的清晰度和完整性。你可以使用提供的工具来验证工具名称和参数。",
+                        user_input=prompt,
+                        tools=llm_functions,
+                        tools_by_server=tools_by_server,
+                        add_log=log_callback
+                    )
+                    
+                    if not optimized_result:
+                        error_detail = f"LLM API调用失败。"
+                        if error_logs:
+                            error_detail += f" 详细信息: {'; '.join(error_logs[-3:])}"
+                        return jsonify({'error': error_detail}), 500
+                    
+                    # 解析优化后的响应
+                    response_content = optimized_result.strip() if isinstance(optimized_result, str) else str(optimized_result)
+                    lines = response_content.split('\n', 1)
+                    
+                    optimized_name = lines[0].strip()[:50] if lines else "未命名技能包"
+                    optimized_summary = lines[1].strip() if len(lines) > 1 else response_content
+                    
+                    return jsonify({
+                        'name': optimized_name,
+                        'summary': optimized_summary,
+                    }), 200
+                else:
+                    # 没有工具或LLM不支持工具调用，使用普通方式
+                    llm_response = call_llm_api(
+                        llm_config=llm_config_dict,
+                        system_prompt="你是一个专业的技能总结优化助手，擅长改进技能包总结的清晰度和完整性。",
+                        user_input=prompt,
+                        add_log=log_callback
+                    )
+                    
+                    if not llm_response:
+                        error_detail = f"LLM API调用失败。"
+                        if error_logs:
+                            error_detail += f" 详细信息: {'; '.join(error_logs[-3:])}"
+                        return jsonify({'error': error_detail}), 500
+                    
+                    # 解析优化后的响应
+                    response_content = llm_response.strip() if isinstance(llm_response, str) else str(llm_response)
+                    lines = response_content.split('\n', 1)
+                    
+                    optimized_name = lines[0].strip()[:50] if lines else "未命名技能包"
+                    optimized_summary = lines[1].strip() if len(lines) > 1 else response_content
+                    
+                    return jsonify({
+                        'name': optimized_name,
+                        'summary': optimized_summary,
+                    }), 200
+                
+            except Exception as llm_error:
+                error_detail = f"LLM调用异常: {str(llm_error)}"
+                if error_logs:
+                    error_detail += f" 日志: {'; '.join(error_logs[-3:])}"
+                return jsonify({'error': error_detail}), 500
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[SkillPack API] Error optimizing skill pack: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/skill-packs/<skill_pack_id>', methods=['GET', 'OPTIONS'])
+def get_skill_pack(skill_pack_id):
+    """获取技能包详情"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            cursor.execute("""
+                SELECT skill_pack_id, name, summary, source_session_id, source_messages,
+                       created_at, updated_at
+                FROM skill_packs
+                WHERE skill_pack_id = %s
+            """, (skill_pack_id,))
+            
+            skill_pack = cursor.fetchone()
+            if not skill_pack:
+                return jsonify({'error': 'Skill pack not found'}), 404
+            
+            # 处理JSON字段和datetime
+            if skill_pack['source_messages']:
+                try:
+                    skill_pack['source_messages'] = json.loads(skill_pack['source_messages']) if isinstance(skill_pack['source_messages'], str) else skill_pack['source_messages']
+                except:
+                    skill_pack['source_messages'] = []
+            if skill_pack['created_at']:
+                skill_pack['created_at'] = skill_pack['created_at'].isoformat()
+            if skill_pack['updated_at']:
+                skill_pack['updated_at'] = skill_pack['updated_at'].isoformat()
+            
+            return jsonify(skill_pack)
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[SkillPack API] Error getting skill pack: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/skill-packs/<skill_pack_id>', methods=['PUT', 'OPTIONS'])
+def update_skill_pack(skill_pack_id):
+    """更新技能包"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        data = request.json
+        name = data.get('name')
+        summary = data.get('summary')
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 构建更新语句
+            update_fields = []
+            update_values = []
+            
+            if name:
+                update_fields.append('name = %s')
+                update_values.append(name)
+            if summary:
+                update_fields.append('summary = %s')
+                update_values.append(summary)
+            
+            if not update_fields:
+                return jsonify({'error': 'No fields to update'}), 400
+            
+            update_values.append(skill_pack_id)
+            
+            cursor.execute(f"""
+                UPDATE skill_packs
+                SET {', '.join(update_fields)}
+                WHERE skill_pack_id = %s
+            """, update_values)
+            
+            if cursor.rowcount == 0:
+                return jsonify({'error': 'Skill pack not found'}), 404
+            
+            conn.commit()
+            
+            return jsonify({'message': 'Skill pack updated successfully'})
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[SkillPack API] Error updating skill pack: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/skill-packs/<skill_pack_id>', methods=['DELETE', 'OPTIONS'])
+def delete_skill_pack(skill_pack_id):
+    """删除技能包"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                DELETE FROM skill_packs
+                WHERE skill_pack_id = %s
+            """, (skill_pack_id,))
+            
+            if cursor.rowcount == 0:
+                return jsonify({'error': 'Skill pack not found'}), 404
+            
+            conn.commit()
+            
+            return jsonify({'message': 'Skill pack deleted successfully'})
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[SkillPack API] Error deleting skill pack: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/skill-packs/<skill_pack_id>/assign', methods=['POST', 'OPTIONS'])
+def assign_skill_pack(skill_pack_id):
+    """分配技能包到记忆体/智能体"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        data = request.json
+        target_session_id = data.get('target_session_id')
+        target_type = data.get('target_type')  # memory 或 agent
+        
+        if not target_session_id:
+            return jsonify({'error': 'target_session_id is required'}), 400
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 验证技能包存在
+            cursor.execute("SELECT skill_pack_id FROM skill_packs WHERE skill_pack_id = %s", (skill_pack_id,))
+            if not cursor.fetchone():
+                return jsonify({'error': 'Skill pack not found'}), 404
+            
+            # 验证目标会话存在并获取类型
+            cursor.execute("SELECT session_id, session_type FROM sessions WHERE session_id = %s", (target_session_id,))
+            session = cursor.fetchone()
+            if not session:
+                return jsonify({'error': 'Target session not found'}), 404
+            
+            # 如果未指定target_type，使用会话的实际类型
+            if not target_type:
+                target_type = session['session_type'] or 'memory'
+            
+            # 创建分配记录
+            assignment_id = str(uuid.uuid4())
+            
+            cursor.execute("""
+                INSERT INTO skill_pack_assignments
+                (assignment_id, skill_pack_id, target_type, target_session_id)
+                VALUES (%s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE created_at = CURRENT_TIMESTAMP
+            """, (assignment_id, skill_pack_id, target_type, target_session_id))
+            
+            conn.commit()
+            
+            return jsonify({
+                'assignment_id': assignment_id,
+                'skill_pack_id': skill_pack_id,
+                'target_session_id': target_session_id,
+                'target_type': target_type,
+            }), 201
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[SkillPack API] Error assigning skill pack: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/skill-packs/<skill_pack_id>/unassign', methods=['POST', 'OPTIONS'])
+def unassign_skill_pack(skill_pack_id):
+    """取消技能包分配"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        data = request.json
+        target_session_id = data.get('target_session_id')
+        
+        if not target_session_id:
+            return jsonify({'error': 'target_session_id is required'}), 400
+        
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                DELETE FROM skill_pack_assignments
+                WHERE skill_pack_id = %s AND target_session_id = %s
+            """, (skill_pack_id, target_session_id))
+            
+            if cursor.rowcount == 0:
+                return jsonify({'error': 'Assignment not found'}), 404
+            
+            conn.commit()
+            
+            return jsonify({'message': 'Skill pack unassigned successfully'})
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[SkillPack API] Error unassigning skill pack: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/sessions/<session_id>/skill-packs', methods=['GET', 'OPTIONS'])
+def get_session_skill_packs(session_id):
+    """获取某会话已分配的技能包列表"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            cursor.execute("""
+                SELECT sp.skill_pack_id, sp.name, sp.summary, sp.source_session_id,
+                       sp.created_at, sp.updated_at,
+                       spa.assignment_id, spa.target_type, spa.created_at as assigned_at
+                FROM skill_packs sp
+                INNER JOIN skill_pack_assignments spa ON sp.skill_pack_id = spa.skill_pack_id
+                WHERE spa.target_session_id = %s
+                ORDER BY spa.created_at DESC
+            """, (session_id,))
+            
+            skill_packs = cursor.fetchall()
+            
+            # 处理datetime
+            for sp in skill_packs:
+                if sp['created_at']:
+                    sp['created_at'] = sp['created_at'].isoformat()
+                if sp['updated_at']:
+                    sp['updated_at'] = sp['updated_at'].isoformat()
+                if sp['assigned_at']:
+                    sp['assigned_at'] = sp['assigned_at'].isoformat()
+            
+            return jsonify({'skill_packs': skill_packs})
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[SkillPack API] Error getting session skill packs: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/sessions/<session_id>/summaries/cache', methods=['DELETE', 'OPTIONS'])
 def clear_summarize_cache(session_id):
     """清除会话的总结缓存（Redis）"""
@@ -6841,12 +7769,11 @@ def call_llm_api(llm_config: dict, system_prompt: str, user_input: str, add_log=
         payload = {
             'contents': contents,
             'generationConfig': {
-                'temperature': 1.0,  # Gemini 3 推荐使用默认温度
-                'thinkingLevel': 'high',  # 默认使用高思考级别
+                'temperature': 1.0,  # Gemini 推荐使用默认温度
             },
         }
         
-        # 如果有 metadata 中的 thinking_level，使用它
+        # 只在metadata中明确指定thinking_level时才添加（某些模型不支持此字段）
         if llm_config.get('metadata') and llm_config['metadata'].get('thinking_level'):
             payload['generationConfig']['thinkingLevel'] = llm_config['metadata']['thinking_level']
         
@@ -6875,6 +7802,325 @@ def call_llm_api(llm_config: dict, system_prompt: str, user_input: str, add_log=
         if add_log:
             add_log(f"❌ 不支持的LLM提供商: {provider}")
         return None
+
+def call_llm_with_tools_for_optimization(llm_config_dict: dict, system_prompt: str, user_input: str, tools: list, tools_by_server: dict, add_log=None, max_iterations: int = 5):
+    """
+    使用工具调用优化技能包总结
+    支持多轮对话：LLM可以调用工具，然后基于工具结果继续优化
+    """
+    if add_log:
+        add_log(f"使用工具调用优化技能包（最多{max_iterations}轮）")
+    
+    provider = llm_config_dict['provider']
+    api_key = llm_config_dict.get('api_key', '')
+    api_url = llm_config_dict.get('api_url', '')
+    model = llm_config_dict.get('model', '')
+    
+    messages = [
+        {'role': 'system', 'content': system_prompt},
+        {'role': 'user', 'content': user_input}
+    ]
+    
+    iteration = 0
+    while iteration < max_iterations:
+        iteration += 1
+        if add_log:
+            add_log(f"第 {iteration} 轮优化...")
+        
+        if provider == 'openai':
+            default_url = 'https://api.openai.com/v1/chat/completions'
+            url = api_url or default_url
+            
+            payload = {
+                'model': model,
+                'messages': messages,
+                'temperature': 0.7,
+                'tools': tools if tools else None,
+                'tool_choice': 'auto' if tools else None,
+            }
+            
+            headers = {
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json',
+            }
+            
+            response = requests.post(url, json=payload, headers=headers, timeout=120)
+            if not response.ok:
+                if add_log:
+                    add_log(f"❌ LLM API调用失败: {response.status_code} - {response.text}")
+                return None
+            
+            data = response.json()
+            message = data['choices'][0]['message']
+            
+            # 检查是否有工具调用
+            if message.get('tool_calls'):
+                if add_log:
+                    add_log(f"LLM请求调用 {len(message['tool_calls'])} 个工具")
+                
+                # 添加助手消息（包含工具调用）
+                messages.append({
+                    'role': 'assistant',
+                    'content': message.get('content', ''),
+                    'tool_calls': message['tool_calls']
+                })
+                
+                # 执行工具调用
+                from mcp_server.mcp_common_logic import call_mcp_tool, prepare_mcp_headers
+                
+                for tool_call in message['tool_calls']:
+                    tool_name = tool_call['function']['name']
+                    tool_args = json.loads(tool_call['function']['arguments'])
+                    
+                    if add_log:
+                        add_log(f"执行工具: {tool_name}")
+                    
+                    # 找到工具对应的MCP服务器
+                    tool_result = None
+                    for server_name, server_tools in tools_by_server.items():
+                        for tool in server_tools:
+                            if tool.get('name') == tool_name:
+                                # 找到对应的服务器，执行工具调用
+                                # 需要从数据库获取服务器URL
+                                from database import get_mysql_connection
+                                conn = get_mysql_connection()
+                                if conn:
+                                    try:
+                                        cursor = conn.cursor(pymysql.cursors.DictCursor)
+                                        cursor.execute("""
+                                            SELECT url, metadata, ext
+                                            FROM mcp_servers
+                                            WHERE name = %s AND enabled = 1
+                                            LIMIT 1
+                                        """, (server_name,))
+                                        server_row = cursor.fetchone()
+                                        if server_row:
+                                            server_url = server_row['url']
+                                            base_headers = {
+                                                'Content-Type': 'application/json',
+                                                'Accept': 'application/json',
+                                                'mcp-protocol-version': '2025-06-18',
+                                            }
+                                            headers = prepare_mcp_headers(server_url, base_headers, base_headers)
+                                            
+                                            tool_result = call_mcp_tool(server_url, tool_name, tool_args, headers)
+                                            if add_log:
+                                                if tool_result:
+                                                    add_log(f"工具 {tool_name} 执行成功")
+                                                else:
+                                                    add_log(f"工具 {tool_name} 执行失败")
+                                        cursor.close()
+                                    except Exception as e:
+                                        if add_log:
+                                            add_log(f"执行工具 {tool_name} 时出错: {str(e)}")
+                                    finally:
+                                        if conn:
+                                            conn.close()
+                                break
+                        
+                        if tool_result is not None:
+                            break
+                    
+                    # 添加工具结果到消息历史
+                    messages.append({
+                        'role': 'tool',
+                        'tool_call_id': tool_call['id'],
+                        'content': json.dumps(tool_result, ensure_ascii=False) if tool_result else json.dumps({'error': 'Tool execution failed'}, ensure_ascii=False)
+                    })
+                
+                # 继续下一轮，让LLM基于工具结果继续优化
+                continue
+            else:
+                # 没有工具调用，返回最终结果
+                final_content = message.get('content', '')
+                if add_log:
+                    add_log(f"优化完成（共 {iteration} 轮）")
+                return final_content
+        
+        elif provider == 'anthropic':
+            # Anthropic Claude 支持工具调用
+            default_url = 'https://api.anthropic.com/v1/messages'
+            url = api_url or default_url
+            
+            # 转换消息格式
+            anthropic_messages = []
+            anthropic_system_prompt = system_prompt  # 使用传入的system_prompt
+            for msg in messages:
+                if msg['role'] == 'system':
+                    # Anthropic 的 system 消息需要单独处理
+                    anthropic_system_prompt = msg['content']
+                elif msg['role'] == 'user':
+                    anthropic_messages.append({'role': 'user', 'content': msg['content']})
+                elif msg['role'] == 'assistant':
+                    content = []
+                    if msg.get('content'):
+                        content.append({'type': 'text', 'text': msg['content']})
+                    if msg.get('tool_calls'):
+                        for tool_call in msg['tool_calls']:
+                            content.append({
+                                'type': 'tool_use',
+                                'id': tool_call['id'],
+                                'name': tool_call['function']['name'],
+                                'input': json.loads(tool_call['function']['arguments'])
+                            })
+                    anthropic_messages.append({'role': 'assistant', 'content': content})
+                elif msg['role'] == 'tool':
+                    anthropic_messages.append({
+                        'role': 'user',
+                        'content': [{
+                            'type': 'tool_result',
+                            'tool_use_id': msg['tool_call_id'],
+                            'content': msg['content']
+                        }]
+                    })
+            
+            # 转换工具格式
+            anthropic_tools = []
+            if tools:
+                for tool in tools:
+                    anthropic_tools.append({
+                        'name': tool['function']['name'],
+                        'description': tool['function']['description'],
+                        'input_schema': tool['function']['parameters']
+                    })
+            
+            payload = {
+                'model': model,
+                'max_tokens': 4096,
+                'messages': anthropic_messages,
+                'system': anthropic_system_prompt,
+            }
+            
+            if anthropic_tools:
+                payload['tools'] = anthropic_tools
+            
+            headers = {
+                'x-api-key': api_key,
+                'anthropic-version': '2023-06-01',
+                'Content-Type': 'application/json',
+            }
+            
+            response = requests.post(url, json=payload, headers=headers, timeout=120)
+            if not response.ok:
+                if add_log:
+                    add_log(f"❌ LLM API调用失败: {response.status_code} - {response.text}")
+                return None
+            
+            data = response.json()
+            content = data.get('content', [])
+            
+            # 检查是否有工具使用
+            tool_uses = [item for item in content if item.get('type') == 'tool_use']
+            if tool_uses:
+                if add_log:
+                    add_log(f"LLM请求调用 {len(tool_uses)} 个工具")
+                
+                # 添加助手消息
+                assistant_content = []
+                text_items = [item for item in content if item.get('type') == 'text']
+                if text_items:
+                    assistant_content.append({'type': 'text', 'text': text_items[0]['text']})
+                for tool_use in tool_uses:
+                    assistant_content.append(tool_use)
+                
+                messages.append({
+                    'role': 'assistant',
+                    'content': assistant_content,
+                    'tool_calls': [{
+                        'id': tool_use['id'],
+                        'function': {
+                            'name': tool_use['name'],
+                            'arguments': json.dumps(tool_use['input'], ensure_ascii=False)
+                        }
+                    } for tool_use in tool_uses]
+                })
+                
+                # 执行工具调用（类似 OpenAI 的处理）
+                from mcp_server.mcp_common_logic import call_mcp_tool, prepare_mcp_headers
+                
+                for tool_use in tool_uses:
+                    tool_name = tool_use['name']
+                    tool_args = tool_use['input']
+                    
+                    if add_log:
+                        add_log(f"执行工具: {tool_name}")
+                    
+                    # 找到工具对应的MCP服务器并执行
+                    tool_result = None
+                    for server_name, server_tools in tools_by_server.items():
+                        for tool in server_tools:
+                            if tool.get('name') == tool_name:
+                                from database import get_mysql_connection
+                                conn = get_mysql_connection()
+                                if conn:
+                                    try:
+                                        cursor = conn.cursor(pymysql.cursors.DictCursor)
+                                        cursor.execute("""
+                                            SELECT url, metadata, ext
+                                            FROM mcp_servers
+                                            WHERE name = %s AND enabled = 1
+                                            LIMIT 1
+                                        """, (server_name,))
+                                        server_row = cursor.fetchone()
+                                        if server_row:
+                                            server_url = server_row['url']
+                                            base_headers = {
+                                                'Content-Type': 'application/json',
+                                                'Accept': 'application/json',
+                                                'mcp-protocol-version': '2025-06-18',
+                                            }
+                                            headers = prepare_mcp_headers(server_url, base_headers, base_headers)
+                                            tool_result = call_mcp_tool(server_url, tool_name, tool_args, headers)
+                                        cursor.close()
+                                    except Exception as e:
+                                        if add_log:
+                                            add_log(f"执行工具 {tool_name} 时出错: {str(e)}")
+                                    finally:
+                                        if conn:
+                                            conn.close()
+                                break
+                        
+                        if tool_result is not None:
+                            break
+                    
+                    # 添加工具结果
+                    messages.append({
+                        'role': 'tool',
+                        'tool_call_id': tool_use['id'],
+                        'content': json.dumps(tool_result, ensure_ascii=False) if tool_result else json.dumps({'error': 'Tool execution failed'}, ensure_ascii=False)
+                    })
+                
+                continue
+            else:
+                # 没有工具使用，返回最终结果
+                text_items = [item for item in content if item.get('type') == 'text']
+                if text_items:
+                    final_content = text_items[0]['text']
+                    if add_log:
+                        add_log(f"优化完成（共 {iteration} 轮）")
+                    return final_content
+                return None
+        
+        elif provider == 'gemini':
+            # Gemini 目前不支持标准的工具调用格式，回退到普通调用
+            if add_log:
+                add_log("Gemini 暂不支持工具调用，使用普通模式")
+            return call_llm_api(llm_config_dict, system_prompt, user_input, add_log)
+        
+        else:
+            if add_log:
+                add_log(f"❌ 不支持的LLM提供商: {provider}")
+            return None
+    
+    # 达到最大迭代次数，返回最后一轮的结果
+    if add_log:
+        add_log(f"达到最大迭代次数 {max_iterations}，返回当前结果")
+    
+    # 尝试从最后一条消息中提取内容
+    if messages and messages[-1].get('role') == 'assistant':
+        return messages[-1].get('content', '')
+    
+    return None
 
 @app.route('/api/messages/<message_id>/execution', methods=['GET', 'OPTIONS'])
 def get_message_execution(message_id):

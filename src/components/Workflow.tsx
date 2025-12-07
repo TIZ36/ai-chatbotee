@@ -5,7 +5,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Send, Loader, Bot, User, Wrench, AlertCircle, CheckCircle, Brain, Plug, RefreshCw, Power, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Plus, History, Sparkles, Workflow as WorkflowIcon, GripVertical, Play, ArrowRight, Trash2, X, Edit2, RotateCw, Database, Paperclip, Type, Image, Video, Music, HelpCircle } from 'lucide-react';
+import { Send, Loader, Bot, User, Wrench, AlertCircle, CheckCircle, Brain, Plug, RefreshCw, Power, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Plus, History, Sparkles, Workflow as WorkflowIcon, GripVertical, Play, ArrowRight, Trash2, X, Edit2, RotateCw, Database, Paperclip, Type, Image, Video, Music, HelpCircle, Package, CheckSquare, Square } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { LLMClient, LLMMessage } from '../services/llmClient';
@@ -13,6 +13,7 @@ import { getLLMConfigs, getLLMConfig, getLLMConfigApiKey, LLMConfigFromDB } from
 import { mcpManager, MCPServer, MCPTool } from '../services/mcpClient';
 import { getMCPServers, MCPServerConfig } from '../services/mcpApi';
 import { getSessions, createSession, getSessionMessages, saveMessage, summarizeSession, getSessionSummaries, deleteSession, clearSummarizeCache, deleteMessage, executeMessageComponent, updateSessionAvatar, updateSessionName, updateSessionSystemPrompt, upgradeToAgent, Session, Summary } from '../services/sessionApi';
+import { createSkillPack, saveSkillPack, optimizeSkillPackSummary, getSkillPacks, getSessionSkillPacks, assignSkillPack, unassignSkillPack, SkillPack, SessionSkillPack, SkillPackCreationResult, SkillPackProcessInfo } from '../services/skillPackApi';
 import { estimate_messages_tokens, get_model_max_tokens, estimate_tokens } from '../services/tokenCounter';
 import { getWorkflows, getWorkflow, Workflow as WorkflowType, WorkflowNode, WorkflowConnection } from '../services/workflowApi';
 import { getBatch } from '../services/crawlerApi';
@@ -84,12 +85,37 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
   const [editAvatar, setEditAvatar] = useState<string | null>(avatarUrl);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isSaving, setIsSaving] = useState(false);
+  
+  // 技能包管理状态
+  const [showSkillPackTab, setShowSkillPackTab] = useState(false);
+  const [allSkillPacks, setAllSkillPacks] = useState<SkillPack[]>([]);
+  const [sessionSkillPacks, setSessionSkillPacks] = useState<SessionSkillPack[]>([]);
+  const [isLoadingSkillPacks, setIsLoadingSkillPacks] = useState(false);
+
+  // 加载技能包数据
+  const loadSkillPacks = async () => {
+    setIsLoadingSkillPacks(true);
+    try {
+      const [allPacks, sessionPacks] = await Promise.all([
+        getSkillPacks(),
+        getSessionSkillPacks(session.session_id),
+      ]);
+      setAllSkillPacks(allPacks);
+      setSessionSkillPacks(sessionPacks);
+    } catch (error) {
+      console.error('[SessionListItem] Failed to load skill packs:', error);
+    } finally {
+      setIsLoadingSkillPacks(false);
+    }
+  };
 
   const handleAvatarClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     setShowEditDialog(true);
     setEditName(session.name || '');
     setEditAvatar(avatarUrl);
+    setShowSkillPackTab(false);
+    loadSkillPacks();
   };
 
   const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -142,6 +168,23 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
     setShowEditDialog(false);
     setEditName(session.name || '');
     setEditAvatar(avatarUrl);
+    setShowSkillPackTab(false);
+  };
+
+  // 切换技能包分配状态
+  const toggleSkillPackAssignment = async (skillPackId: string, isAssigned: boolean) => {
+    try {
+      if (isAssigned) {
+        await unassignSkillPack(skillPackId, session.session_id);
+      } else {
+        const targetType = session.session_type === 'agent' ? 'agent' : 'memory';
+        await assignSkillPack(skillPackId, session.session_id, targetType);
+      }
+      await loadSkillPacks();
+    } catch (error: any) {
+      console.error('[SessionListItem] Failed to toggle skill pack assignment:', error);
+      alert(`操作失败: ${error.message}`);
+    }
   };
 
   // 默认头像 SVG（机器人图标）
@@ -229,7 +272,89 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
               </button>
             </div>
 
-            <div className="space-y-4">
+            {/* 标签页 */}
+            <div className="flex border-b border-gray-200 dark:border-gray-700 mb-4">
+              <button
+                onClick={() => setShowSkillPackTab(false)}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  !showSkillPackTab
+                    ? 'border-primary-500 text-primary-600 dark:text-primary-400'
+                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                }`}
+              >
+                基本信息
+              </button>
+              <button
+                onClick={() => {
+                  setShowSkillPackTab(true);
+                  loadSkillPacks();
+                }}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  showSkillPackTab
+                    ? 'border-primary-500 text-primary-600 dark:text-primary-400'
+                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                }`}
+              >
+                技能包
+              </button>
+            </div>
+
+            {showSkillPackTab ? (
+              /* 技能包管理 */
+              <div className="space-y-4">
+                {isLoadingSkillPacks ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader className="w-6 h-6 animate-spin text-primary-500" />
+                  </div>
+                ) : (
+                  <>
+                    <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                      为{session.session_type === 'agent' ? '智能体' : '记忆体'}分配技能包
+                    </div>
+                    {allSkillPacks.length === 0 ? (
+                      <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                        暂无技能包，请在聊天界面创建技能包
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-96 overflow-y-auto">
+                        {allSkillPacks.map((pack) => {
+                          const isAssigned = sessionSkillPacks.some(
+                            sp => sp.skill_pack_id === pack.skill_pack_id
+                          );
+                          return (
+                            <div
+                              key={pack.skill_pack_id}
+                              className={`flex items-start space-x-3 p-3 rounded-lg border ${
+                                isAssigned
+                                  ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-200 dark:border-primary-700'
+                                  : 'bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-600'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isAssigned}
+                                onChange={() => toggleSkillPackAssignment(pack.skill_pack_id, isAssigned)}
+                                className="mt-1 w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="font-medium text-sm text-gray-900 dark:text-white">
+                                  {pack.name}
+                                </div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">
+                                  {pack.summary}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            ) : (
+              /* 基本信息编辑 */
+              <div className="space-y-4">
               {/* 头像编辑 */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -323,7 +448,8 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                   人设可在聊天界面底部设置
                 </p>
               </div>
-            </div>
+              </div>
+            )}
 
             {/* 操作按钮 */}
             <div className="flex justify-end space-x-3 mt-6">
@@ -332,22 +458,24 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                 disabled={isSaving}
                 className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors disabled:opacity-50"
               >
-                取消
+                关闭
               </button>
-              <button
-                onClick={handleSave}
-                disabled={isSaving}
-                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 flex items-center space-x-2"
-              >
-                {isSaving ? (
-                  <>
-                    <Loader className="w-4 h-4 animate-spin" />
-                    <span>保存中...</span>
-                  </>
-                ) : (
-                  <span>保存</span>
-                )}
-              </button>
+              {!showSkillPackTab && (
+                <button
+                  onClick={handleSave}
+                  disabled={isSaving}
+                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 flex items-center space-x-2"
+                >
+                  {isSaving ? (
+                    <>
+                      <Loader className="w-4 h-4 animate-spin" />
+                      <span>保存中...</span>
+                    </>
+                  ) : (
+                    <span>保存</span>
+                  )}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -383,7 +511,7 @@ const Workflow: React.FC = () => {
   const [atSelectorQuery, setAtSelectorQuery] = useState('');
   const [atSelectorIndex, setAtSelectorIndex] = useState(-1); // @ 符号在输入中的位置
   const [selectedComponentIndex, setSelectedComponentIndex] = useState(0); // 当前选中的组件索引（用于键盘导航）
-  const [selectedComponents, setSelectedComponents] = useState<Array<{ type: 'mcp' | 'workflow'; id: string; name: string }>>([]); // 已选定的组件（tag）
+  const [selectedComponents, setSelectedComponents] = useState<Array<{ type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string }>>([]); // 已选定的组件（tag）
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const selectorRef = useRef<HTMLDivElement>(null);
   const blurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -431,6 +559,20 @@ const Workflow: React.FC = () => {
   const [showNewMessagePrompt, setShowNewMessagePrompt] = useState(false);
   const [unreadMessageCount, setUnreadMessageCount] = useState(0);
   
+  // 技能包相关状态
+  const [isCreatingSkillPack, setIsCreatingSkillPack] = useState(false);
+  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
+  const [skillPackSelectionMode, setSkillPackSelectionMode] = useState(false);
+  const [showSkillPackDialog, setShowSkillPackDialog] = useState(false);
+  const [skillPackResult, setSkillPackResult] = useState<SkillPackCreationResult | null>(null);
+  const [skillPackProcessInfo, setSkillPackProcessInfo] = useState<SkillPackProcessInfo | null>(null);
+  const [skillPackConversationText, setSkillPackConversationText] = useState<string>('');
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [optimizationPrompt, setOptimizationPrompt] = useState('');
+  const [selectedMCPForOptimization, setSelectedMCPForOptimization] = useState<string[]>([]); // 选中的MCP服务器ID列表
+  const [currentSessionSkillPacks, setCurrentSessionSkillPacks] = useState<SessionSkillPack[]>([]);
+  const [pendingSkillPackUse, setPendingSkillPackUse] = useState<{ skillPack: SessionSkillPack; messageId: string } | null>(null);
+  
   // LLM配置
   const [llmConfigs, setLlmConfigs] = useState<LLMConfigFromDB[]>([]);
   const [selectedLLMConfigId, setSelectedLLMConfigId] = useState<string | null>(null);
@@ -447,8 +589,11 @@ const Workflow: React.FC = () => {
   // 工作流列表
   const [workflows, setWorkflows] = useState<WorkflowType[]>([]);
   
+  // 技能包列表
+  const [allSkillPacks, setAllSkillPacks] = useState<SkillPack[]>([]);
+  
   // 拖拽状态
-  const [draggingComponent, setDraggingComponent] = useState<{ type: 'mcp' | 'workflow'; id: string; name: string } | null>(null);
+  const [draggingComponent, setDraggingComponent] = useState<{ type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string } | null>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -569,6 +714,7 @@ const Workflow: React.FC = () => {
     loadMCPServers();
     loadSessions();
     loadWorkflows();
+    loadSkillPacks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -616,6 +762,12 @@ const Workflow: React.FC = () => {
       }
       // 加载人设
       setCurrentSystemPrompt(session?.system_prompt || null);
+      // 加载技能包
+      getSessionSkillPacks(currentSessionId).then(packs => {
+        setCurrentSessionSkillPacks(packs);
+      }).catch(err => {
+        console.error('[Workflow] Failed to load skill packs:', err);
+      });
       }
     } else {
       // 新会话，清空消息（保留系统消息）
@@ -1355,6 +1507,19 @@ const Workflow: React.FC = () => {
       setWorkflows([]);
     }
   };
+  
+  // 加载技能包列表
+  const loadSkillPacks = async () => {
+    try {
+      console.log('[Workflow] Loading skill packs...');
+      const skillPacks = await getSkillPacks();
+      console.log('[Workflow] Loaded skill packs:', skillPacks);
+      setAllSkillPacks(skillPacks);
+    } catch (error) {
+      console.error('[Workflow] Failed to load skill packs:', error);
+      setAllSkillPacks([]);
+    }
+  };
 
 
   /**
@@ -1766,6 +1931,25 @@ const Workflow: React.FC = () => {
         console.log('[Workflow] 添加批次数据项到系统提示词:', { item, batchName });
       }
       
+      // 添加技能包信息（如果有）
+      // 合并会话分配的技能包和通过@选择器选择的技能包
+      const selectedSkillPacks = selectedComponents
+        .filter(c => c.type === 'skillpack')
+        .map(c => allSkillPacks.find(sp => sp.skill_pack_id === c.id))
+        .filter((sp): sp is SkillPack => sp !== undefined);
+      
+      const allAvailableSkillPacks = [
+        ...currentSessionSkillPacks,
+        ...selectedSkillPacks.filter(sp => !currentSessionSkillPacks.some(csp => csp.skill_pack_id === sp.skill_pack_id))
+      ];
+      
+      if (allAvailableSkillPacks.length > 0 && !isTemporarySession) {
+        systemPrompt += `\n\n【可用技能包】\n以下是你可以参考使用的技能包。如果决定使用某个技能包，请在响应中明确说明："我将使用技能包：[技能包名称]"。\n\n`;
+        allAvailableSkillPacks.forEach((pack, index) => {
+          systemPrompt += `技能包 ${index + 1}: ${pack.name}\n${pack.summary}\n\n`;
+        });
+      }
+      
       if (allTools.length > 0) {
         systemPrompt += `\n\n你可以使用以下 MCP 工具来帮助用户完成任务：\n\n${allTools.map(tool => `- ${tool.name}: ${tool.description}`).join('\n')}\n\n当用户需要执行操作时，使用相应的工具。用中文回复用户，并清晰地说明你执行的操作和结果。`;
       } else {
@@ -2135,6 +2319,24 @@ const Workflow: React.FC = () => {
             setCollapsedThinking(prev => new Set(prev).add(assistantMessageId));
           }
           
+          // 检测是否使用了技能包
+          if (currentSessionSkillPacks.length > 0 && finalContent) {
+            const skillPackUsePattern = /我将使用技能包[：:]\s*([^\n]+)/i;
+            const match = finalContent.match(skillPackUsePattern);
+            if (match) {
+              const skillPackName = match[1].trim();
+              const usedSkillPack = currentSessionSkillPacks.find(
+                pack => pack.name === skillPackName || finalContent.includes(pack.name)
+              );
+              if (usedSkillPack) {
+                setPendingSkillPackUse({
+                  skillPack: usedSkillPack,
+                  messageId: assistantMessageId,
+                });
+              }
+            }
+          }
+          
           // 保存助手消息到数据库（流式响应模式，包含思维签名和媒体内容，临时会话不保存）
           if (sessionId && !isTemporarySession) {
             try {
@@ -2260,6 +2462,24 @@ const Workflow: React.FC = () => {
               console.log('[Workflow] Saved assistant message to database:', assistantMessageId);
             } catch (error) {
               console.error('[Workflow] Failed to save assistant message:', error);
+            }
+          }
+          
+          // 检测是否使用了技能包（非流式模式）
+          if (currentSessionSkillPacks.length > 0 && response.content) {
+            const skillPackUsePattern = /我将使用技能包[：:]\s*([^\n]+)/i;
+            const match = response.content.match(skillPackUsePattern);
+            if (match) {
+              const skillPackName = match[1].trim();
+              const usedSkillPack = currentSessionSkillPacks.find(
+                pack => pack.name === skillPackName || response.content.includes(pack.name)
+              );
+              if (usedSkillPack) {
+                setPendingSkillPackUse({
+                  skillPack: usedSkillPack,
+                  messageId: assistantMessageId,
+                });
+              }
             }
           }
         }
@@ -2535,6 +2755,109 @@ const Workflow: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // 创建技能包
+  const handleCreateSkillPack = async () => {
+    if (!currentSessionId || selectedMessageIds.size === 0) {
+      alert('请先选择要创建技能包的消息');
+      return;
+    }
+    
+    if (!selectedLLMConfigId) {
+      alert('请先选择LLM模型用于生成技能包总结');
+      return;
+    }
+    
+    try {
+      setIsCreatingSkillPack(true);
+      
+      const result = await createSkillPack({
+        session_id: currentSessionId,
+        message_ids: Array.from(selectedMessageIds),
+        llm_config_id: selectedLLMConfigId,
+      });
+      
+      setSkillPackResult(result);
+      setSkillPackProcessInfo(result.process_info);
+      setSkillPackConversationText(result.conversation_text);
+      setShowSkillPackDialog(true);
+      setSkillPackSelectionMode(false);
+      setSelectedMessageIds(new Set());
+    } catch (error: any) {
+      console.error('[Workflow] Failed to create skill pack:', error);
+      alert(`创建技能包失败: ${error.message}`);
+    } finally {
+      setIsCreatingSkillPack(false);
+    }
+  };
+
+  // 保存技能包
+  const handleSaveSkillPack = async () => {
+    if (!skillPackResult) return;
+    
+    try {
+      const saved = await saveSkillPack({
+        name: skillPackResult.name,
+        summary: skillPackResult.summary,
+        source_session_id: skillPackResult.source_session_id,
+        source_messages: skillPackResult.source_messages,
+      });
+      
+      setShowSkillPackDialog(false);
+      setSkillPackResult(null);
+      setSkillPackProcessInfo(null);
+      setSkillPackConversationText('');
+      setOptimizationPrompt('');
+      alert(`技能包 "${saved.name}" 保存成功！`);
+    } catch (error: any) {
+      console.error('[Workflow] Failed to save skill pack:', error);
+      alert(`保存技能包失败: ${error.message}`);
+    }
+  };
+
+  // 优化技能包总结
+  const handleOptimizeSkillPack = async () => {
+    if (!skillPackResult || !selectedLLMConfigId) return;
+    
+    try {
+      setIsOptimizing(true);
+      
+      const optimized = await optimizeSkillPackSummary({
+        conversation_text: skillPackConversationText,
+        current_summary: skillPackResult.summary,
+        optimization_prompt: optimizationPrompt,
+        llm_config_id: selectedLLMConfigId,
+        mcp_server_ids: selectedMCPForOptimization,
+      });
+      
+      setSkillPackResult({
+        ...skillPackResult,
+        name: optimized.name,
+        summary: optimized.summary,
+      });
+      setOptimizationPrompt('');
+    } catch (error: any) {
+      console.error('[Workflow] Failed to optimize skill pack:', error);
+      alert(`优化技能包失败: ${error.message}`);
+    } finally {
+      setIsOptimizing(false);
+    }
+  };
+
+  // 切换消息选择状态
+  const toggleMessageSelection = (messageId: string) => {
+    if (!skillPackSelectionMode) return;
+    
+    setSelectedMessageIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(messageId)) {
+        newSet.delete(messageId);
+      } else {
+        newSet.add(messageId);
+      }
+      return newSet;
+    });
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -3078,8 +3401,12 @@ const Workflow: React.FC = () => {
       .filter(w => w.name.toLowerCase().includes(atSelectorQuery))
       .map(w => ({ type: 'workflow' as const, id: w.workflow_id, name: w.name }));
     
-    return [...mcpList, ...workflowList];
-  }, [mcpServers, connectedMcpServerIds, workflows, atSelectorQuery]);
+    const skillPackList = allSkillPacks
+      .filter(sp => sp.name.toLowerCase().includes(atSelectorQuery))
+      .map(sp => ({ type: 'skillpack' as const, id: sp.skill_pack_id, name: sp.name }));
+    
+    return [...mcpList, ...workflowList, ...skillPackList];
+  }, [mcpServers, connectedMcpServerIds, workflows, allSkillPacks, atSelectorQuery]);
   
   // 处理模块选择（/模块命令）
   const handleModuleSelect = async (moduleId: string, batchId: string, batchName: string) => {
@@ -3355,7 +3682,7 @@ const Workflow: React.FC = () => {
   };
   
   // 选择感知组件（添加为 tag）
-  const handleSelectComponent = (component: { type: 'mcp' | 'workflow'; id: string; name: string }) => {
+  const handleSelectComponent = (component: { type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string }) => {
     if (atSelectorIndex === -1) return;
     
     // 检查是否已经选择了组件（限制只能选择一个）
@@ -3448,7 +3775,7 @@ const Workflow: React.FC = () => {
   };
 
   // 处理拖拽组件到对话框
-  const handleDropComponent = async (component: { type: 'mcp' | 'workflow'; id: string; name: string }) => {
+  const handleDropComponent = async (component: { type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string }) => {
     if (!currentSessionId) {
       // 如果没有会话，先创建
       try {
@@ -3470,7 +3797,22 @@ const Workflow: React.FC = () => {
   };
   
   // 添加工作流消息（保存到数据库，以便后端API能够找到并执行）
-  const addWorkflowMessage = async (component: { type: 'mcp' | 'workflow'; id: string; name: string }) => {
+  const addWorkflowMessage = async (component: { type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string }) => {
+    // 如果是技能包，不需要执行工作流，只需要在系统提示词中包含技能包内容
+    if (component.type === 'skillpack') {
+      // 技能包通过selectedComponents管理，在构建systemPrompt时包含
+      // 这里只需要添加到selectedComponents中
+      setSelectedComponents(prev => {
+        const isAlreadySelected = prev.some(
+          c => c.id === component.id && c.type === component.type
+        );
+        if (!isAlreadySelected) {
+          return [...prev, component];
+        }
+        return prev;
+      });
+      return;
+    }
     const workflowMessageId = `workflow-${Date.now()}`;
     
     // 如果是工作流，获取详细信息（包括节点）
@@ -4358,6 +4700,26 @@ const Workflow: React.FC = () => {
           <h2 className="text-2xl font-semibold">智能聊天</h2>
         </div>
         <div className="flex items-center space-x-2">
+          {/* 创建技能包按钮 */}
+          {currentSessionId && messages.filter(m => m.role !== 'system').length > 0 && (
+            <button
+              onClick={() => {
+                setSkillPackSelectionMode(!skillPackSelectionMode);
+                if (skillPackSelectionMode) {
+                  setSelectedMessageIds(new Set());
+                }
+              }}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 text-sm ${
+                skillPackSelectionMode 
+                  ? 'bg-primary-500 text-white' 
+                  : 'btn-secondary'
+              }`}
+              title="创建技能包"
+            >
+              <Package className="w-4 h-4" />
+              <span>{skillPackSelectionMode ? '取消选择' : '创建技能包'}</span>
+            </button>
+          )}
           {/* Summarize 按钮 */}
           {currentSessionId && messages.filter(m => m.role !== 'system').length > 0 && (
             <button
@@ -4928,6 +5290,46 @@ const Workflow: React.FC = () => {
               </div>
             )}
         </div>
+        
+        {/* 技能包列表 */}
+        <div className="card p-3 flex-shrink-0">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <Package className="w-4 h-4 inline mr-1" />
+            技能包
+          </label>
+          <div className="space-y-1.5 border border-gray-200 dark:border-gray-700 rounded-lg p-2 max-h-64 overflow-y-auto">
+            {allSkillPacks.length === 0 ? (
+              <div className="text-xs text-gray-500 dark:text-gray-400 text-center py-2">
+                暂无技能包，请先创建
+              </div>
+            ) : (
+              allSkillPacks.map((skillPack) => (
+                <div
+                  key={skillPack.skill_pack_id}
+                  className="border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800/50 p-2 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+                  onClick={() => {
+                    const component = { type: 'skillpack' as const, id: skillPack.skill_pack_id, name: skillPack.name };
+                    handleSelectComponent(component);
+                  }}
+                >
+                  <div className="flex items-center space-x-2">
+                    <Package className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                        {skillPack.name}
+                      </div>
+                      {skillPack.summary && (
+                        <div className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5 line-clamp-2">
+                          {skillPack.summary}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       </div>
 
         {/* 右侧聊天界面 */}
@@ -5071,14 +5473,35 @@ const Workflow: React.FC = () => {
               );
             }
             
+            const isSelected = selectedMessageIds.has(message.id);
+            
             return (
             <div
               key={message.id}
               data-message-id={message.id}
+              onClick={() => toggleMessageSelection(message.id)}
               className={`flex items-start space-x-3 ${
                 message.role === 'user' ? 'flex-row-reverse space-x-reverse' : ''
+              } ${
+                skillPackSelectionMode 
+                  ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg p-2 -m-2 transition-colors' 
+                  : ''
+              } ${
+                isSelected && skillPackSelectionMode
+                  ? 'bg-primary-50 dark:bg-primary-900/20 ring-2 ring-primary-300 dark:ring-primary-700 rounded-lg p-2 -m-2' 
+                  : ''
               }`}
             >
+              {/* 选择复选框（仅在选择模式下显示） */}
+              {skillPackSelectionMode && (
+                <div className={`flex-shrink-0 mt-1 ${message.role === 'user' ? 'ml-2' : 'mr-2'}`}>
+                  {isSelected ? (
+                    <CheckSquare className="w-5 h-5 text-primary-500" />
+                  ) : (
+                    <Square className="w-5 h-5 text-gray-400" />
+                  )}
+                </div>
+              )}
               <div className="flex-shrink-0 flex items-center space-x-2">
               <div
                   className={`w-9 h-9 rounded-full flex items-center justify-center shadow-sm overflow-hidden ${
@@ -5239,6 +5662,46 @@ const Workflow: React.FC = () => {
             );
           })}
           <div ref={messagesEndRef} />
+          
+          {/* 技能包选择确认栏 */}
+          {skillPackSelectionMode && (
+            <div className="sticky bottom-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 p-3 flex items-center justify-between shadow-lg">
+              <div className="flex items-center space-x-2">
+                <Package className="w-5 h-5 text-primary-500" />
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  已选择 {selectedMessageIds.size} 条消息
+                </span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => {
+                    setSkillPackSelectionMode(false);
+                    setSelectedMessageIds(new Set());
+                  }}
+                  className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleCreateSkillPack}
+                  disabled={selectedMessageIds.size === 0 || isCreatingSkillPack || !selectedLLMConfigId}
+                  className="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center space-x-2"
+                >
+                  {isCreatingSkillPack ? (
+                    <>
+                      <Loader className="w-4 h-4 animate-spin" />
+                      <span>创建中...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Package className="w-4 h-4" />
+                      <span>创建技能包</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 输入框 */}
@@ -5262,6 +5725,8 @@ const Workflow: React.FC = () => {
                 >
                   {component.type === 'workflow' ? (
                     <WorkflowIcon className="w-3.5 h-3.5 text-purple-500 flex-shrink-0" />
+                  ) : component.type === 'skillpack' ? (
+                    <Package className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
                   ) : (
                     <Plug className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
                   )}
@@ -5715,7 +6180,7 @@ const Workflow: React.FC = () => {
                         .map((workflow) => {
                           const component = { type: 'workflow' as const, id: workflow.workflow_id, name: workflow.name };
                           const selectableComponents = getSelectableComponents();
-                          const componentIndex = selectableComponents.findIndex((c: { type: 'mcp' | 'workflow'; id: string; name: string }) => c.id === component.id && c.type === component.type);
+                          const componentIndex = selectableComponents.findIndex((c: { type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string }) => c.id === component.id && c.type === component.type);
                           const isSelected = componentIndex === selectedComponentIndex;
                           return (
                             <div
@@ -5733,6 +6198,37 @@ const Workflow: React.FC = () => {
                     </div>
                   )}
                   
+                  {/* 技能包列表 */}
+                  {allSkillPacks.filter(sp => 
+                    sp.name.toLowerCase().includes(atSelectorQuery)
+                  ).length > 0 && (
+                    <div className="py-1">
+                      <div className="text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-1.5">
+                        技能包
+                      </div>
+                      {allSkillPacks
+                        .filter(sp => sp.name.toLowerCase().includes(atSelectorQuery))
+                        .map((skillPack) => {
+                          const component = { type: 'skillpack' as const, id: skillPack.skill_pack_id, name: skillPack.name };
+                          const selectableComponents = getSelectableComponents();
+                          const componentIndex = selectableComponents.findIndex((c: { type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string }) => c.id === component.id && c.type === component.type);
+                          const isSelected = componentIndex === selectedComponentIndex;
+                          return (
+                            <div
+                              key={skillPack.skill_pack_id}
+                              onClick={() => handleSelectComponent(component)}
+                              className={`px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer flex items-center space-x-2 ${
+                                isSelected ? 'bg-blue-100 dark:bg-blue-900/30' : ''
+                              }`}
+                            >
+                              <Package className="w-4 h-4 text-amber-500 flex-shrink-0" />
+                              <span className="text-sm text-gray-900 dark:text-gray-100">{skillPack.name}</span>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  )}
+                  
                   {/* 无匹配结果 */}
                   {mcpServers.filter(s => 
                     connectedMcpServerIds.has(s.id) &&
@@ -5740,6 +6236,9 @@ const Workflow: React.FC = () => {
                   ).length === 0 &&
                   workflows.filter(w => 
                     w.name.toLowerCase().includes(atSelectorQuery)
+                  ).length === 0 &&
+                  allSkillPacks.filter(sp => 
+                    sp.name.toLowerCase().includes(atSelectorQuery)
                   ).length === 0 && (
                     <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 text-center">
                       未找到匹配的感知组件
@@ -6241,6 +6740,265 @@ const Workflow: React.FC = () => {
               </div>
             );
           })()}
+          
+          {/* 技能包制作过程对话框 */}
+          {showSkillPackDialog && skillPackResult && skillPackProcessInfo && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] flex flex-col">
+                <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <Package className="w-6 h-6 text-primary-500" />
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                      技能包制作完成
+                    </h3>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setShowSkillPackDialog(false);
+                      setSkillPackResult(null);
+                      setSkillPackProcessInfo(null);
+                      setSkillPackConversationText('');
+                      setOptimizationPrompt('');
+                      setSelectedMCPForOptimization([]);
+                    }}
+                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                
+                <div className="px-6 py-4 flex-1 overflow-y-auto">
+                  {/* 制作过程信息 */}
+                  <div className="mb-6">
+                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+                      制作过程
+                    </h4>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3">
+                        <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">消息数量</div>
+                        <div className="text-lg font-semibold text-blue-600 dark:text-blue-400">
+                          {skillPackProcessInfo.messages_count}
+                        </div>
+                      </div>
+                      <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3">
+                        <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">思考过程</div>
+                        <div className="text-lg font-semibold text-purple-600 dark:text-purple-400">
+                          {skillPackProcessInfo.thinking_count}
+                        </div>
+                      </div>
+                      <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-3">
+                        <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">工具调用</div>
+                        <div className="text-lg font-semibold text-green-600 dark:text-green-400">
+                          {skillPackProcessInfo.tool_calls_count}
+                        </div>
+                      </div>
+                      <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3">
+                        <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">媒体资源</div>
+                        <div className="text-lg font-semibold text-amber-600 dark:text-amber-400">
+                          {skillPackProcessInfo.media_count}
+                        </div>
+                        {skillPackProcessInfo.media_types.length > 0 && (
+                          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            {skillPackProcessInfo.media_types.join(', ')}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                      对话记录长度: {skillPackProcessInfo.conversation_length.toLocaleString()} 字符 | 
+                      提示词长度: {skillPackProcessInfo.prompt_length.toLocaleString()} 字符
+                    </div>
+                  </div>
+
+                  {/* 技能包名称 */}
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      技能包名称
+                    </label>
+                    <input
+                      type="text"
+                      value={skillPackResult.name}
+                      onChange={(e) => setSkillPackResult({ ...skillPackResult, name: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+                  
+                  {/* 技能包总结 */}
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      技能包总结
+                    </label>
+                    <textarea
+                      value={skillPackResult.summary}
+                      onChange={(e) => setSkillPackResult({ ...skillPackResult, summary: e.target.value })}
+                      rows={12}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500 font-mono text-sm"
+                    />
+                  </div>
+
+                  {/* 优化总结区域 */}
+                  <div className="mb-4 border-t border-gray-200 dark:border-gray-700 pt-4">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      优化总结（可选）
+                    </label>
+                    
+                    {/* MCP服务器选择 */}
+                    <div className="mb-3">
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
+                        连接感知模组（可选）- 用于验证工具名称和参数
+                      </label>
+                      <div className="space-y-2 max-h-32 overflow-y-auto border border-gray-200 dark:border-gray-600 rounded-lg p-2">
+                        {mcpServers.filter(s => s.enabled).length === 0 ? (
+                          <div className="text-xs text-gray-500 dark:text-gray-400 text-center py-2">
+                            暂无启用的MCP服务器
+                          </div>
+                        ) : (
+                          mcpServers
+                            .filter(s => s.enabled)
+                            .map(server => (
+                              <label
+                                key={server.server_id}
+                                className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 p-2 rounded"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selectedMCPForOptimization.includes(server.server_id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedMCPForOptimization([...selectedMCPForOptimization, server.server_id]);
+                                    } else {
+                                      setSelectedMCPForOptimization(selectedMCPForOptimization.filter(id => id !== server.server_id));
+                                    }
+                                  }}
+                                  className="w-4 h-4 text-primary-500 border-gray-300 rounded focus:ring-primary-500"
+                                />
+                                <Plug className="w-4 h-4 text-gray-400" />
+                                <span className="text-sm text-gray-700 dark:text-gray-300">{server.name}</span>
+                              </label>
+                            ))
+                        )}
+                      </div>
+                      <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        选择MCP服务器后，优化时将连接这些服务器来验证工具名称和参数，生成更准确的技能包描述
+                      </div>
+                    </div>
+                    
+                    <textarea
+                      value={optimizationPrompt}
+                      onChange={(e) => setOptimizationPrompt(e.target.value)}
+                      placeholder="例如：更详细地描述工具调用的参数，或者强调某个关键步骤..."
+                      rows={3}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm"
+                    />
+                    <button
+                      onClick={handleOptimizeSkillPack}
+                      disabled={isOptimizing || !selectedLLMConfigId}
+                      className="mt-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center space-x-2"
+                    >
+                      {isOptimizing ? (
+                        <>
+                          <Loader className="w-4 h-4 animate-spin" />
+                          <span>优化中...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-4 h-4" />
+                          <span>优化总结</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+                
+                <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-end space-x-3">
+                  <button
+                    onClick={() => {
+                      setShowSkillPackDialog(false);
+                      setSkillPackResult(null);
+                      setSkillPackProcessInfo(null);
+                      setSkillPackConversationText('');
+                      setOptimizationPrompt('');
+                      setSelectedMCPForOptimization([]);
+                    }}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={handleSaveSkillPack}
+                    className="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 text-sm font-medium"
+                  >
+                    保存技能包
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* 技能包使用确认弹窗 */}
+          {pendingSkillPackUse && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col">
+                <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <Package className="w-6 h-6 text-primary-500" />
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                      确认使用技能包
+                    </h3>
+                  </div>
+                  <button
+                    onClick={() => setPendingSkillPackUse(null)}
+                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                
+                <div className="px-6 py-4 flex-1 overflow-y-auto">
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      技能包名称
+                    </label>
+                    <div className="text-lg font-semibold text-gray-900 dark:text-white">
+                      {pendingSkillPackUse.skillPack.name}
+                    </div>
+                  </div>
+                  
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      技能包内容
+                    </label>
+                    <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-96 overflow-y-auto">
+                      {pendingSkillPackUse.skillPack.summary}
+                    </div>
+                  </div>
+                  
+                  <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg p-3 text-sm text-blue-700 dark:text-blue-300">
+                    <strong>提示：</strong>确认后，技能包内容将被注入到对话上下文中，AI将使用该技能包的能力来完成任务。
+                  </div>
+                </div>
+                
+                <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-end space-x-2">
+                  <button
+                    onClick={() => setPendingSkillPackUse(null)}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={() => {
+                      // 技能包内容已经在系统提示词中，用户确认后只需关闭弹窗
+                      // 如果需要重新发送请求，可以在这里实现
+                      setPendingSkillPackUse(null);
+                    }}
+                    className="px-4 py-2 text-sm font-medium text-white bg-primary-500 hover:bg-primary-600 rounded-lg transition-colors"
+                  >
+                    确认使用
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           </div>
         </div>
       </div>

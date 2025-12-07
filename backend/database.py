@@ -840,6 +840,50 @@ def create_tables():
         cursor.execute(create_round_table_responses_table)
         print("✓ Table 'round_table_responses' created/verified successfully")
         
+        # ==================== 技能包相关表 ====================
+        
+        # 技能包表
+        create_skill_packs_table = """
+        CREATE TABLE IF NOT EXISTS `skill_packs` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `skill_pack_id` VARCHAR(100) NOT NULL UNIQUE COMMENT '技能包ID',
+            `name` VARCHAR(255) NOT NULL COMMENT '技能包名称（LLM生成）',
+            `summary` TEXT NOT NULL COMMENT '技能包内容（LLM总结的执行步骤和能力描述）',
+            `source_session_id` VARCHAR(100) DEFAULT NULL COMMENT '来源会话ID',
+            `source_messages` JSON DEFAULT NULL COMMENT '来源消息ID列表',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+            INDEX `idx_skill_pack_id` (`skill_pack_id`),
+            INDEX `idx_source_session_id` (`source_session_id`),
+            INDEX `idx_created_at` (`created_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='技能包表';
+        """
+        
+        cursor.execute(create_skill_packs_table)
+        print("✓ Table 'skill_packs' created/verified successfully")
+        
+        # 技能包分配表（多对多关系：技能包与记忆体/智能体）
+        create_skill_pack_assignments_table = """
+        CREATE TABLE IF NOT EXISTS `skill_pack_assignments` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `assignment_id` VARCHAR(100) NOT NULL UNIQUE COMMENT '分配ID',
+            `skill_pack_id` VARCHAR(100) NOT NULL COMMENT '技能包ID',
+            `target_type` VARCHAR(20) NOT NULL COMMENT '目标类型：memory(记忆体)/agent(智能体)',
+            `target_session_id` VARCHAR(100) NOT NULL COMMENT '目标会话ID',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+            INDEX `idx_assignment_id` (`assignment_id`),
+            INDEX `idx_skill_pack_id` (`skill_pack_id`),
+            INDEX `idx_target_type` (`target_type`),
+            INDEX `idx_target_session_id` (`target_session_id`),
+            UNIQUE KEY `uk_skill_target` (`skill_pack_id`, `target_session_id`),
+            FOREIGN KEY (`skill_pack_id`) REFERENCES `skill_packs`(`skill_pack_id`) ON DELETE CASCADE,
+            FOREIGN KEY (`target_session_id`) REFERENCES `sessions`(`session_id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='技能包分配表';
+        """
+        
+        cursor.execute(create_skill_pack_assignments_table)
+        print("✓ Table 'skill_pack_assignments' created/verified successfully")
+        
         cursor.close()
         conn.close()  # 归还连接到连接池
         
