@@ -16,7 +16,7 @@ mysql:
   host: "localhost"
   port: 3306
   user: "root"
-  password: "root"
+  password: "201213"
   database: "workflow_manager"  # 工作流工具数据库
   charset: "utf8mb4"
   pool_size: 10
