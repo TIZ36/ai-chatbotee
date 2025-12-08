@@ -197,6 +197,9 @@ const App: React.FC = () => {
 
       {/* 主要内容 */}
       <main className="flex flex-col flex-1 min-h-0 transition-all duration-300 relative overflow-hidden">
+        {/* macOS 窗口拖动区域 - 顶部标题栏 */}
+        <div className="h-[52px] w-full app-drag flex-shrink-0 bg-gray-50 dark:bg-gray-950" />
+        
         <div className="flex flex-1 min-h-0 min-w-0">
           {/* 左侧内容区域 */}
           <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden bg-gray-50 dark:bg-gray-950">

@@ -1962,13 +1962,15 @@ const Workflow: React.FC = () => {
 
       // 创建流式响应的消息
       const assistantMessageId = `msg-${Date.now() + 1}`;
+      // 只有当模型配置中启用了思考模式时，才显示"思考中"状态
+      const enableThinkingMode = selectedLLMConfig.metadata?.enableThinking ?? false;
       const assistantMessage: Message = {
         id: assistantMessageId,
         role: 'assistant',
         content: '',
         thinking: '',
         isStreaming: true,
-        isThinking: true, // 初始状态为思考中
+        isThinking: enableThinkingMode, // 只有启用思考模式时才显示思考中
       };
       // 新消息追加到数组后面（显示在底部）
       setMessages(prev => [...prev, assistantMessage]);
@@ -2075,8 +2077,8 @@ const Workflow: React.FC = () => {
                 // 如果有思考内容但还没有开始输出内容，保持思考状态
                 updateMessage(fullResponse, fullThinking, true, true);
               } else {
-                // 既没有内容也没有思考，保持当前状态
-                updateMessage(fullResponse, fullThinking, true, true);
+                // 既没有内容也没有思考，只有启用思考模式时才显示思考状态
+                updateMessage(fullResponse, fullThinking, enableThinkingMode, true);
               }
             },
             messageHistoryWithUser, // 传递包含多模态内容的消息历史
@@ -2427,8 +2429,8 @@ const Workflow: React.FC = () => {
               // 如果有思考内容但还没有开始输出内容，保持思考状态
               updateMessage(fullResponse, fullThinking, true, true);
             } else {
-              // 既没有内容也没有思考，保持当前状态
-              updateMessage(fullResponse, fullThinking, true, true);
+              // 既没有内容也没有思考，只有启用思考模式时才显示思考状态
+              updateMessage(fullResponse, fullThinking, enableThinking, true);
             }
           },
           request.messageHistory,
