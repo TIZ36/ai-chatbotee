@@ -291,6 +291,7 @@ function createWindow() {
       webSecurity: true,
     },
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    trafficLightPosition: { x: 20, y: 18 }, // macOS 红绿灯按钮位置
     frame: true,
     show: true, // 立即显示窗口
   });

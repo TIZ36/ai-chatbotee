@@ -151,7 +151,10 @@ $RECYCLE.BIN/
 # ====================
 
 # 后端配置文件（如果包含敏感信息，取消注释）
-# backend/config.yaml
+backend/config.yaml
+
+# 本地启动脚本
+start.sh
 
 # 环境变量文件
 .env
