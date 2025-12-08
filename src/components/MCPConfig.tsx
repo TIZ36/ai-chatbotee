@@ -21,7 +21,7 @@ import {
 
 // 获取后端URL的辅助函数
 const getBackendUrl = (): string => {
-  return import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+  return import.meta.env.VITE_BACKEND_URL || 'http://localhost:3002';
 };
 
 interface MCPConfigProps {}
@@ -50,7 +50,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
   const [notionRegistrations, setNotionRegistrations] = useState<NotionRegistration[]>([]);
   const [registrationFormData, setRegistrationFormData] = useState({
     client_name: '',
-    redirect_uri_base: 'http://localhost:3001',
+    redirect_uri_base: 'http://localhost:3002',
   });
   const [isRegistering, setIsRegistering] = useState(false);
 
@@ -222,7 +222,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
     try {
       const result = await registerNotionClient({
         client_name: registrationFormData.client_name.trim(),
-        redirect_uri_base: registrationFormData.redirect_uri_base.trim() || 'http://localhost:3001',
+        redirect_uri_base: registrationFormData.redirect_uri_base.trim() || 'http://localhost:3002',
       });
 
       console.log('[Notion] Registration successful:', result);
@@ -232,7 +232,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
       
       // 关闭注册表单，使用新注册的 client_id 进行 OAuth 授权
       setShowRegistrationForm(false);
-      setRegistrationFormData({ client_name: '', redirect_uri_base: 'http://localhost:3001' });
+      setRegistrationFormData({ client_name: '', redirect_uri_base: 'http://localhost:3002' });
       
       // 使用新注册的 client_id 进行 OAuth 授权
       await performNotionOAuth(result.client_id);
@@ -1296,7 +1296,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
               <button
                 onClick={() => {
                   setShowRegistrationForm(false);
-                  setRegistrationFormData({ client_name: '', redirect_uri_base: 'http://localhost:3001' });
+                  setRegistrationFormData({ client_name: '', redirect_uri_base: 'http://localhost:3002' });
                 }}
                 className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
               >
@@ -1329,11 +1329,11 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                   type="text"
                   value={registrationFormData.redirect_uri_base}
                   onChange={(e) => setRegistrationFormData({ ...registrationFormData, redirect_uri_base: e.target.value })}
-                  placeholder="http://localhost:3001"
+                  placeholder="http://localhost:3002"
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  回调地址基础部分，默认: http://localhost:3001
+                  回调地址基础部分，默认: http://localhost:3002
                 </p>
               </div>
             </div>
@@ -1349,7 +1349,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
               <button
                 onClick={() => {
                   setShowRegistrationForm(false);
-                  setRegistrationFormData({ client_name: '', redirect_uri_base: 'http://localhost:3001' });
+                  setRegistrationFormData({ client_name: '', redirect_uri_base: 'http://localhost:3002' });
                 }}
                 disabled={isRegistering}
                 className="px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 disabled:opacity-50 text-gray-900 dark:text-gray-100 font-medium rounded transition-colors"
