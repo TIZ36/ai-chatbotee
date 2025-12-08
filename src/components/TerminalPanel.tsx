@@ -737,13 +737,13 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({
           <div className="relative">
             <button
               onClick={() => setIsThemeMenuOpen(!isThemeMenuOpen)}
-              className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200"
+              className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 hover:scale-110"
               title="切换主题"
             >
-              <Palette className="w-4 h-4" />
+              <Palette className="w-4 h-4 transition-transform duration-200" />
             </button>
             {isThemeMenuOpen && (
-              <div className="absolute right-0 top-full mt-2 bg-gray-900/95 backdrop-blur-xl rounded-xl shadow-2xl border border-gray-800 py-2 z-50 min-w-[180px]">
+              <div className="absolute right-0 top-full mt-2 bg-gray-900/95 backdrop-blur-xl rounded-xl shadow-2xl border border-gray-800 py-2 z-50 min-w-[180px] scale-in">
                 {Object.keys(themes).map((themeName) => (
                   <button
                     key={themeName}
@@ -765,26 +765,26 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({
           </div>
           <button
             onClick={() => setIsSearchOpen(!isSearchOpen)}
-            className={`p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 ${
-              isSearchOpen ? 'bg-white/10 text-white' : ''
+            className={`p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 hover:scale-110 ${
+              isSearchOpen ? 'bg-white/10 text-white scale-110' : ''
             }`}
             title="搜索 (Cmd/Ctrl+F)"
           >
-            <Search className="w-4 h-4" />
+            <Search className="w-4 h-4 transition-transform duration-200" />
           </button>
           <button
             onClick={handleClear}
-            className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200"
+            className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-all duration-200 hover:scale-110"
             title="清空终端"
           >
-            <Trash2 className="w-4 h-4" />
+            <Trash2 className="w-4 h-4 transition-transform duration-200" />
           </button>
         </div>
       </div>
 
       {/* 搜索栏 */}
       {isSearchOpen && (
-        <div className="px-4 py-3 bg-gray-900/50 backdrop-blur-sm border-b border-gray-800 flex-shrink-0 animate-fade-in">
+        <div className="px-4 py-3 bg-gray-900/50 backdrop-blur-sm border-b border-gray-800 flex-shrink-0 fade-in-down">
           <div className="flex items-center space-x-3">
             <Search className="w-4 h-4 text-gray-500 flex-shrink-0" />
             <input
@@ -806,7 +806,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({
             <div className="flex items-center space-x-2">
               <button
                 onClick={handleSearch}
-                className="px-3 py-1.5 bg-primary-600 hover:bg-primary-500 text-white text-xs font-medium rounded-lg transition-colors"
+                className="px-3 py-1.5 bg-primary-600 hover:bg-primary-500 text-white text-xs font-medium rounded-lg transition-all duration-200 hover:scale-105 btn-enhanced"
               >
                 查找
               </button>
@@ -815,7 +815,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({
                   setIsSearchOpen(false);
                   setSearchTerm('');
                 }}
-                className="p-1.5 text-gray-500 hover:text-gray-300 transition-colors"
+                className="p-1.5 text-gray-500 hover:text-gray-300 transition-all duration-200 hover:scale-110"
               >
                 <X className="w-4 h-4" />
               </button>

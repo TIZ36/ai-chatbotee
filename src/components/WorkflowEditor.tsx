@@ -6,7 +6,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   Brain, Plug, FileText, ArrowRight, Save, Play, Trash2, 
-  Plus, X, ChevronDown, ChevronUp, Loader, Settings, GitBranch, Maximize2, Minimize2, Terminal, Layout
+  Plus, X, ChevronDown, ChevronUp, Loader, Settings, GitBranch, Maximize2, Minimize2, Terminal, Layout, Workflow as WorkflowIcon
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -2866,21 +2866,24 @@ const WorkflowEditor: React.FC = () => {
           </div>
         </div>
       
-        <div className="flex-1 flex overflow-hidden min-h-0">
-          {/* 左侧：组件面板和MCP服务器列表 - 紧凑设计 */}
-          <div className="w-52 bg-white border-r border-gray-200 flex flex-col flex-shrink-0 h-full">
-            {/* 组件面板 */}
-            <div className="p-2 border-b border-gray-200 flex-shrink-0">
-              <h2 className="text-xs font-semibold text-gray-700 mb-1.5">组件</h2>
-        <div className="mb-4">
-          <div className="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wider">基础组件</div>
-          <div className="space-y-2">
+        <div className="flex-1 flex overflow-hidden min-h-0 bg-gray-50 dark:bg-gray-950">
+          {/* 左侧：组件面板和MCP服务器列表 - 优化布局 */}
+          <div className="w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col flex-shrink-0 h-full shadow-sm">
+            {/* 组件面板 - 优化样式 */}
+            <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex-shrink-0 bg-gray-50 dark:bg-gray-800/50">
+              <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center space-x-2">
+                <WorkflowIcon className="w-4 h-4" />
+                <span>组件库</span>
+              </h2>
+        <div className="mb-6">
+          <div className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-3 uppercase tracking-wider px-1">基础组件</div>
+          <div className="space-y-2.5">
             <div
               draggable
               onDragStart={(e) => handlePaletteDragStart(e, 'input')}
-              className="flex items-center space-x-2 p-2 border border-gray-200 rounded-lg cursor-move hover:border-primary-500 hover:shadow-sm hover:bg-primary-50 transition-all bg-white group"
+              className="flex items-center space-x-3 p-3 border border-gray-200 dark:border-gray-700 rounded-xl cursor-move hover:border-primary-500 dark:hover:border-primary-500 hover:shadow-md hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-all duration-300 bg-white dark:bg-gray-800 group card-hover-enhanced"
             >
-              <div className="w-8 h-8 rounded-md bg-purple-100 flex items-center justify-center text-purple-600 group-hover:bg-purple-200 transition-colors">
+              <div className="w-8 h-8 rounded-md bg-purple-100 flex items-center justify-center text-purple-600 group-hover:bg-purple-200 transition-all duration-300 group-hover:scale-110">
                 <FileText className="w-4 h-4" />
               </div>
               <div>
@@ -2892,9 +2895,9 @@ const WorkflowEditor: React.FC = () => {
             <div
               draggable
               onDragStart={(e) => handlePaletteDragStart(e, 'llm')}
-              className="flex items-center space-x-2 p-2 border border-gray-200 rounded-lg cursor-move hover:border-blue-500 hover:shadow-sm hover:bg-blue-50 transition-all bg-white group"
+              className="flex items-center space-x-2 p-2 border border-gray-200 rounded-lg cursor-move hover:border-blue-500 hover:shadow-md hover:bg-blue-50 transition-all duration-300 bg-white group card-hover-enhanced"
             >
-              <div className="w-8 h-8 rounded-md bg-blue-100 flex items-center justify-center text-blue-600 group-hover:bg-blue-200 transition-colors">
+              <div className="w-8 h-8 rounded-md bg-blue-100 flex items-center justify-center text-blue-600 group-hover:bg-blue-200 transition-all duration-300 group-hover:scale-110">
                 <Brain className="w-4 h-4" />
               </div>
               <div>
@@ -2906,9 +2909,9 @@ const WorkflowEditor: React.FC = () => {
             <div
               draggable
               onDragStart={(e) => handlePaletteDragStart(e, 'workflow')}
-              className="flex items-center space-x-2 p-2 border border-gray-200 rounded-lg cursor-move hover:border-red-500 hover:shadow-sm hover:bg-red-50 transition-all bg-white group"
+              className="flex items-center space-x-2 p-2 border border-gray-200 rounded-lg cursor-move hover:border-red-500 hover:shadow-md hover:bg-red-50 transition-all duration-300 bg-white group card-hover-enhanced"
             >
-              <div className="w-8 h-8 rounded-md bg-red-100 flex items-center justify-center text-red-600 group-hover:bg-red-200 transition-colors">
+              <div className="w-8 h-8 rounded-md bg-red-100 flex items-center justify-center text-red-600 group-hover:bg-red-200 transition-all duration-300 group-hover:scale-110">
                 <GitBranch className="w-4 h-4" />
               </div>
               <div>
@@ -2920,9 +2923,9 @@ const WorkflowEditor: React.FC = () => {
             <div
               draggable
               onDragStart={(e) => handlePaletteDragStart(e, 'output')}
-              className="flex items-center space-x-2 p-2 border border-gray-200 rounded-lg cursor-move hover:border-green-500 hover:shadow-sm hover:bg-green-50 transition-all bg-white group"
+              className="flex items-center space-x-2 p-2 border border-gray-200 rounded-lg cursor-move hover:border-green-500 hover:shadow-md hover:bg-green-50 transition-all duration-300 bg-white group card-hover-enhanced"
             >
-              <div className="w-8 h-8 rounded-md bg-green-100 flex items-center justify-center text-green-600 group-hover:bg-green-200 transition-colors">
+              <div className="w-8 h-8 rounded-md bg-green-100 flex items-center justify-center text-green-600 group-hover:bg-green-200 transition-all duration-300 group-hover:scale-110">
                 <FileText className="w-4 h-4" />
               </div>
               <div>
@@ -2933,15 +2936,15 @@ const WorkflowEditor: React.FC = () => {
           </div>
         </div>
 
-        <div className="mb-4">
-          <div className="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wider">展示与工具</div>
-          <div className="space-y-2">
+        <div className="mb-6">
+          <div className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-3 uppercase tracking-wider px-1">展示与工具</div>
+          <div className="space-y-2.5">
             <div
               draggable
               onDragStart={(e) => handlePaletteDragStart(e, 'visualization')}
-              className="flex items-center space-x-2 p-2 border border-gray-200 rounded-lg cursor-move hover:border-orange-500 hover:shadow-sm hover:bg-orange-50 transition-all bg-white group"
+              className="flex items-center space-x-2 p-2 border border-gray-200 rounded-lg cursor-move hover:border-orange-500 hover:shadow-md hover:bg-orange-50 transition-all duration-300 bg-white group card-hover-enhanced"
             >
-              <div className="w-8 h-8 rounded-md bg-orange-100 flex items-center justify-center text-orange-600 group-hover:bg-orange-200 transition-colors">
+              <div className="w-8 h-8 rounded-md bg-orange-100 flex items-center justify-center text-orange-600 group-hover:bg-orange-200 transition-all duration-300 group-hover:scale-110">
                 <Layout className="w-4 h-4" />
               </div>
               <div>
@@ -2953,9 +2956,9 @@ const WorkflowEditor: React.FC = () => {
             <div
               draggable
               onDragStart={(e) => handlePaletteDragStart(e, 'terminal')}
-              className="flex items-center space-x-2 p-2 border border-gray-200 rounded-lg cursor-move hover:border-gray-500 hover:shadow-sm hover:bg-gray-50 transition-all bg-white group"
+              className="flex items-center space-x-2 p-2 border border-gray-200 rounded-lg cursor-move hover:border-gray-500 hover:shadow-md hover:bg-gray-50 transition-all duration-300 bg-white group card-hover-enhanced"
             >
-              <div className="w-8 h-8 rounded-md bg-gray-100 flex items-center justify-center text-gray-600 group-hover:bg-gray-200 transition-colors">
+              <div className="w-8 h-8 rounded-md bg-gray-100 flex items-center justify-center text-gray-600 group-hover:bg-gray-200 transition-all duration-300 group-hover:scale-110">
                 <Terminal className="w-4 h-4" />
               </div>
               <div>

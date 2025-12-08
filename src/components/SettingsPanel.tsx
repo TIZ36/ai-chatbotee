@@ -19,15 +19,23 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   }; 
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center space-x-2 mb-2">
-        <Settings className="w-6 h-6 text-gray-600 dark:text-gray-400" />
-        <h1 className="text-2xl font-bold">设置</h1>
+    <div className="h-full flex flex-col fade-in">
+      {/* 标题栏 */}
+      <div className="flex items-center space-x-3 px-6 py-4 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 mb-6 flex-shrink-0">
+        <div className="w-10 h-10 rounded-xl bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
+          <Settings className="w-6 h-6 text-primary-600 dark:text-primary-400" />
+        </div>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">设置</h1>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">管理应用配置和偏好设置</p>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* 内容区域 */}
+      <div className="flex-1 overflow-y-auto px-6 pb-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6 max-w-7xl mx-auto">
         {/* 主题设置 */}
-        <div className="card p-4">
+        <div className="card p-4 card-enter stagger-item">
           <h2 className="text-lg font-semibold mb-3">外观设置</h2>
           
           <div className="space-y-3">
@@ -52,7 +60,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </div>
 
         {/* 自动刷新设置 */}
-        <div className="card p-4">
+        <div className="card p-4 card-enter stagger-item" style={{ animationDelay: '0.1s' }}>
           <h2 className="text-lg font-semibold mb-3">自动刷新</h2>
           
           <div className="space-y-3">
@@ -64,7 +72,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 type="checkbox"
                 checked={settings.autoRefresh}
                 onChange={(e) => onUpdateSettings({ autoRefresh: e.target.checked })}
-                className="w-4 h-4 text-primary-500 border-gray-300 rounded focus:ring-primary-500"
+                className="w-4 h-4 text-primary-500 border-gray-300 rounded focus:ring-primary-500 transition-all duration-200"
               />
             </div>
 
@@ -89,7 +97,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </div>
 
         {/* 视频设置 */}
-        <div className="card p-4">
+        <div className="card p-4 card-enter stagger-item" style={{ animationDelay: '0.2s' }}>
           <h2 className="text-lg font-semibold mb-3">视频设置</h2>
           
           <div className="space-y-3">
@@ -130,10 +138,9 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </div>
           </div>
         </div>
-      </div>
 
-      {/* API设置 */}
-      <div className="card p-4">
+        {/* API设置 */}
+        <div className="card p-4 card-enter stagger-item" style={{ animationDelay: '0.3s' }}>
         <h2 className="text-lg font-semibold mb-3">API设置</h2>
         
         <div className="space-y-3">
@@ -165,10 +172,10 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </ol>
           </div>
         </div>
-      </div>
+        </div>
 
-      {/* 数据管理 */}
-      <div className="card p-4">
+        {/* 数据管理 */}
+        <div className="card p-4 card-enter stagger-item" style={{ animationDelay: '0.4s' }}>
         <h2 className="text-lg font-semibold mb-3">数据管理</h2>
         
         <div className="space-y-3">
@@ -213,11 +220,10 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </button>
           </div>
         </div>
-      </div>
+        </div>
 
-
-      {/* 开发者工具 */}
-      <div className="card p-4">
+        {/* 开发者工具 */}
+        <div className="card p-4 card-enter stagger-item" style={{ animationDelay: '0.5s' }}>
         <h2 className="text-lg font-semibold mb-3">开发者工具</h2>
         
         <div className="space-y-3">
@@ -246,10 +252,10 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </button>
           </div>
         </div>
-      </div>
+        </div>
 
-      {/* 关于 */}
-      <div className="card p-4">
+        {/* 关于 */}
+        <div className="card p-4 card-enter stagger-item" style={{ animationDelay: '0.6s' }}>
         <h2 className="text-lg font-semibold mb-3">关于</h2>
         
         <div className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
@@ -263,6 +269,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <li>搜索YouTube视频</li>
             <li>MCP服务器集成</li>
           </ul>
+        </div>
+        </div>
         </div>
       </div>
     </div>

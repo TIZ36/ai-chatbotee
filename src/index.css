@@ -44,42 +44,52 @@
     @apply dark:bg-gray-900/80 dark:border-gray-800/50;
   }
   
-  /* 按钮组件 */
+  /* 按钮组件 - 增强版 */
   .btn-primary {
-    @apply bg-primary-600 hover:bg-primary-500 text-white font-medium py-2 px-4 rounded-lg transition-all duration-200 shadow-lg shadow-primary-600/20 hover:shadow-primary-600/40 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none;
-    @apply active:scale-95;
+    @apply bg-primary-600 hover:bg-primary-500 text-white font-medium py-2 px-4 rounded-lg shadow-lg shadow-primary-600/20 hover:shadow-primary-600/40 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none;
+    @apply btn-enhanced;
+    will-change: transform, box-shadow;
   }
   
   .btn-secondary {
-    @apply bg-white hover:bg-gray-50 text-gray-700 font-medium py-2 px-4 rounded-lg border border-gray-200 transition-all duration-200 shadow-sm hover:shadow disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none;
+    @apply bg-white hover:bg-gray-50 text-gray-700 font-medium py-2 px-4 rounded-lg border border-gray-200 shadow-sm hover:shadow disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none;
     @apply dark:bg-gray-800 dark:text-gray-200 dark:border-gray-700 dark:hover:bg-gray-700;
-    @apply active:scale-95;
+    @apply btn-enhanced;
+    will-change: transform, box-shadow;
   }
   
   .btn-ghost {
-    @apply bg-transparent hover:bg-gray-100 text-gray-600 font-medium py-2 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply bg-transparent hover:bg-gray-100 text-gray-600 font-medium py-2 px-4 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed;
     @apply dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200;
+    @apply transition-all duration-200 ease-out;
   }
   
-  /* 卡片组件 - Pro Style */
+  /* 卡片组件 - Pro Style 增强版 */
   .card {
     @apply bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden;
     @apply dark:bg-gray-900 dark:border-gray-800 dark:shadow-none;
-    @apply transition-all duration-300;
+    @apply transition-all duration-300 ease-out;
     @apply p-4;
+    will-change: transform, box-shadow;
   }
   
   .card-hover {
-    @apply card hover:shadow-lg hover:border-gray-300 hover:-translate-y-1;
-    @apply dark:hover:border-gray-700 dark:hover:bg-gray-800/80;
+    @apply card-hover-enhanced;
   }
   
-  /* 输入框组件 */
+  /* 输入框组件 - 增强动画 */
   .input-field {
-    @apply w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-gray-900 text-sm transition-all duration-200;
-    @apply focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 focus:bg-white;
+    @apply w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-gray-900 text-sm;
     @apply dark:bg-gray-900 dark:border-gray-800 dark:text-gray-100 dark:placeholder-gray-500;
+    @apply transition-all duration-200 ease-out;
+    @apply focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 focus:bg-white;
     @apply dark:focus:bg-gray-950 dark:focus:border-primary-500 dark:focus:ring-primary-500/20;
+    will-change: border-color, box-shadow;
+  }
+
+  .input-field:focus {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px -2px rgba(37, 99, 235, 0.1);
   }
   
   /* 状态指示器 */
@@ -122,7 +132,52 @@
     @apply dark:bg-gray-600;
   }
 
-  /* 动画效果 */
+  /* ========== 全局动画系统 ========== */
+  
+  /* 无障碍性支持：减少动画 */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  /* 页面切换动画 */
+  .page-transition-enter {
+    animation: pageEnter 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .page-transition-exit {
+    animation: pageExit 0.3s cubic-bezier(0.7, 0, 0.84, 0);
+  }
+
+  @keyframes pageEnter {
+    from {
+      opacity: 0;
+      transform: translateX(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  @keyframes pageExit {
+    from {
+      opacity: 1;
+      transform: translateX(0);
+    }
+    to {
+      opacity: 0;
+      transform: translateX(-8px);
+    }
+  }
+
+  /* 基础淡入动画 */
   .fade-in {
     animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
   }
@@ -130,6 +185,291 @@
   @keyframes fadeIn {
     from { opacity: 0; transform: translateY(4px); }
     to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* 淡入向上 */
+  .fade-in-up {
+    animation: fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* 淡入向下 */
+  .fade-in-down {
+    animation: fadeInDown 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes fadeInDown {
+    from {
+      opacity: 0;
+      transform: translateY(-12px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* 卡片悬停动画增强 */
+  .card-hover-enhanced {
+    @apply card;
+    @apply transition-all duration-300 ease-out;
+    will-change: transform, box-shadow;
+  }
+
+  .card-hover-enhanced:hover {
+    transform: translateY(-2px) scale(1.01);
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  }
+
+  .dark .card-hover-enhanced:hover {
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.2);
+  }
+
+  /* 卡片进入动画 */
+  .card-enter {
+    animation: cardEnter 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes cardEnter {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  /* 按钮增强动画 */
+  .btn-enhanced {
+    @apply transition-all duration-200 ease-out;
+    will-change: transform, box-shadow;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .btn-enhanced:hover {
+    transform: translateY(-1px);
+  }
+
+  .btn-enhanced:active {
+    transform: translateY(0) scale(0.98);
+  }
+
+  /* 按钮加载状态 */
+  .btn-loading {
+    position: relative;
+    color: transparent !important;
+    pointer-events: none;
+  }
+
+  .btn-loading::after {
+    content: '';
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    top: 50%;
+    left: 50%;
+    margin-left: -8px;
+    margin-top: -8px;
+    border: 2px solid currentColor;
+    border-radius: 50%;
+    border-top-color: transparent;
+    animation: spin 0.6s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* 骨架屏加载动画 */
+  .skeleton {
+    @apply bg-gray-200 dark:bg-gray-800 rounded;
+    background: linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.06) 25%,
+      rgba(0, 0, 0, 0.15) 50%,
+      rgba(0, 0, 0, 0.06) 75%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-loading 1.5s ease-in-out infinite;
+  }
+
+  .dark .skeleton {
+    background: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.05) 25%,
+      rgba(255, 255, 255, 0.1) 50%,
+      rgba(255, 255, 255, 0.05) 75%
+    );
+    background-size: 200% 100%;
+  }
+
+  @keyframes skeleton-loading {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
+  }
+
+  /* 列表项交错进入动画 */
+  .stagger-item {
+    opacity: 0;
+    animation: staggerFadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  .stagger-item:nth-child(1) { animation-delay: 0.05s; }
+  .stagger-item:nth-child(2) { animation-delay: 0.1s; }
+  .stagger-item:nth-child(3) { animation-delay: 0.15s; }
+  .stagger-item:nth-child(4) { animation-delay: 0.2s; }
+  .stagger-item:nth-child(5) { animation-delay: 0.25s; }
+  .stagger-item:nth-child(6) { animation-delay: 0.3s; }
+  .stagger-item:nth-child(7) { animation-delay: 0.35s; }
+  .stagger-item:nth-child(8) { animation-delay: 0.4s; }
+  .stagger-item:nth-child(n+9) { animation-delay: 0.45s; }
+
+  @keyframes staggerFadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* 脉冲动画 */
+  .pulse-soft {
+    animation: pulseSoft 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  @keyframes pulseSoft {
+    0%, 100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.7;
+    }
+  }
+
+  /* 缩放进入动画 */
+  .scale-in {
+    animation: scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes scaleIn {
+    from {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  /* 滑入动画 */
+  .slide-in-right {
+    animation: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes slideInRight {
+    from {
+      opacity: 0;
+      transform: translateX(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  .slide-in-left {
+    animation: slideInLeft 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes slideInLeft {
+    from {
+      opacity: 0;
+      transform: translateX(-20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  /* 弹跳动画（用于通知等） */
+  .bounce-in {
+    animation: bounceIn 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  }
+
+  @keyframes bounceIn {
+    0% {
+      opacity: 0;
+      transform: scale(0.3);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1.05);
+    }
+    70% {
+      transform: scale(0.9);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+
+  /* 闪烁动画（用于高亮） */
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.2),
+      transparent
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s infinite;
+  }
+
+  @keyframes shimmer {
+    0% {
+      background-position: -200% 0;
+    }
+    100% {
+      background-position: 200% 0;
+    }
+  }
+
+  /* 旋转动画 */
+  .rotate-in {
+    animation: rotateIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes rotateIn {
+    from {
+      opacity: 0;
+      transform: rotate(-180deg) scale(0.8);
+    }
+    to {
+      opacity: 1;
+      transform: rotate(0) scale(1);
+    }
   }
   
   /* 响应式容器 */
@@ -152,14 +492,33 @@
     overflow: hidden;
   }
 
-  /* 模态框 */
+  /* 模态框 - 增强动画 */
   .modal-overlay {
-    @apply fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 transition-opacity duration-300;
+    @apply fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50;
+    animation: modalOverlayEnter 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes modalOverlayEnter {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
   
   .modal-content {
-    @apply bg-white rounded-2xl shadow-2xl border border-gray-200 w-full max-w-md mx-4 overflow-hidden transform transition-all duration-300;
+    @apply bg-white rounded-2xl shadow-2xl border border-gray-200 w-full max-w-md mx-4 overflow-hidden;
     @apply dark:bg-gray-900 dark:border-gray-800;
+    animation: modalContentEnter 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: transform, opacity;
+  }
+
+  @keyframes modalContentEnter {
+    from {
+      opacity: 0;
+      transform: scale(0.95) translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
   }
 
   /* Markdown 内容样式优化 */

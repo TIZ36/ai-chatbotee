@@ -4694,14 +4694,52 @@ const Workflow: React.FC = () => {
   const totalTools = Array.from(mcpTools.values()).flat().length;
 
   return (
-    <div className="h-full flex flex-col">
-      {/* 标题栏 */}
-        <div className="flex items-center justify-between mb-3 flex-shrink-0">
-        <div className="flex items-center space-x-2">
-          <MessageCircle className="w-6 h-6 text-gray-600" />
-          <h2 className="text-2xl font-semibold">智能聊天</h2>
+    <div className="h-full flex flex-col bg-gray-50 dark:bg-gray-950">
+      {/* 标题栏 - 优化布局 */}
+      <div className="flex items-center justify-between px-6 py-4 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex-shrink-0 shadow-sm">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 rounded-xl bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
+            <MessageCircle className="w-6 h-6 text-primary-600 dark:text-primary-400" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">智能聊天</h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">与AI助手对话，使用工具完成复杂任务</p>
+          </div>
         </div>
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-3">
+          {/* LLM模型选择 - 移到标题栏 */}
+          <div className="flex items-center space-x-2">
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center space-x-1.5">
+              <Brain className="w-4 h-4" />
+              <span>模型:</span>
+            </label>
+            <select
+              value={selectedLLMConfigId || ''}
+              onChange={(e) => {
+                console.log('[Workflow] Select onChange:', e.target.value);
+                handleLLMConfigChange(e.target.value);
+              }}
+              className="input-field text-sm min-w-[200px] max-w-[300px]"
+            >
+              <option value="">请选择LLM模型...</option>
+              {llmConfigs.map((config) => (
+                <option key={config.config_id} value={config.config_id}>
+                  {config.name} {config.model && `(${config.model})`} [{config.provider}]
+                </option>
+              ))}
+            </select>
+            {/* 流式响应开关 */}
+            <label className="flex items-center space-x-1.5 cursor-pointer group px-2 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+              <input
+                type="checkbox"
+                checked={streamEnabled}
+                onChange={(e) => setStreamEnabled(e.target.checked)}
+                className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500 transition-all duration-200"
+              />
+              <span className="text-xs text-gray-600 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-200 transition-colors">流式</span>
+            </label>
+          </div>
+          
           {/* 创建技能包按钮 */}
           {currentSessionId && messages.filter(m => m.role !== 'system').length > 0 && (
             <button
@@ -4711,9 +4749,9 @@ const Workflow: React.FC = () => {
                   setSelectedMessageIds(new Set());
                 }
               }}
-              className={`flex items-center space-x-1.5 px-3 py-1.5 text-sm ${
+              className={`flex items-center space-x-1.5 px-4 py-2 text-sm rounded-lg transition-all duration-200 ${
                 skillPackSelectionMode 
-                  ? 'bg-primary-500 text-white' 
+                  ? 'bg-primary-500 text-white shadow-md shadow-primary-500/30' 
                   : 'btn-secondary'
               }`}
               title="创建技能包"
@@ -4727,7 +4765,7 @@ const Workflow: React.FC = () => {
             <button
               onClick={handleManualSummarize}
               disabled={isSummarizing}
-              className="btn-primary flex items-center space-x-1.5 px-3 py-1.5 text-sm disabled:opacity-50"
+              className="btn-primary flex items-center space-x-1.5 px-4 py-2 text-sm disabled:opacity-50"
               title="总结当前会话内容"
             >
               {isSummarizing ? (
@@ -4741,180 +4779,10 @@ const Workflow: React.FC = () => {
         </div>
       </div>
 
-      {/* 主要内容区域：左侧配置 + 右侧聊天 */}
-      <div className="flex-1 flex gap-3 min-h-0">
-        {/* 左侧配置面板 */}
-        <div className="w-80 flex-shrink-0 flex flex-col gap-3 overflow-y-auto">
-          {/* LLM模型选择模块 */}
-          <div className="card p-3 flex-shrink-0">
-            <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-medium text-gray-700">
-              <Brain className="w-4 h-4 inline mr-1" />
-              LLM 模型 *
-            </label>
-              <label className="flex items-center space-x-1.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={streamEnabled}
-                  onChange={(e) => setStreamEnabled(e.target.checked)}
-                  className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
-                />
-                <span className="text-xs text-gray-600">流式响应</span>
-              </label>
-            </div>
-            <div className="relative">
-            <select
-              value={selectedLLMConfigId || ''}
-              onChange={(e) => {
-                console.log('[Workflow] Select onChange:', e.target.value);
-                handleLLMConfigChange(e.target.value);
-              }}
-                className="input-field w-full text-sm appearance-none pr-8"
-            >
-              <option value="">请选择LLM模型...</option>
-              {llmConfigs.map((config) => (
-                <option key={config.config_id} value={config.config_id}>
-                  {config.name} {config.model && `(${config.model})`} [{config.provider}]
-                </option>
-              ))}
-            </select>
-              {selectedLLMConfig && (
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                  {(() => {
-                    const provider = selectedLLMConfig.provider.toLowerCase();
-                    switch (provider) {
-                      case 'openai':
-                        return <Brain className="w-4 h-4 text-[#10A37F]" />;
-                      case 'anthropic':
-                        return <Brain className="w-4 h-4 text-[#D4A574]" />;
-                      case 'ollama':
-                        return <Brain className="w-4 h-4 text-[#1D4ED8]" />;
-                      default:
-                        return <Brain className="w-4 h-4 text-gray-400" />;
-                    }
-                  })()}
-                </div>
-              )}
-            </div>
-            {selectedLLMConfig ? (
-              <div className="mt-2 text-xs text-gray-600">
-                <span className="font-medium">已选择:</span> {selectedLLMConfig.name}
-                {selectedLLMConfig.model && ` - ${selectedLLMConfig.model}`}
-              </div>
-            ) : selectedLLMConfigId ? (
-              <div className="mt-2 text-xs text-amber-600">
-                <span className="font-medium">加载中...</span>
-              </div>
-            ) : null}
-          </div>
-
-          {/* 模型名片显示栏目 */}
-          {selectedLLMConfig && (
-            <div className="card p-3 flex-shrink-0">
-              <div className="flex items-center space-x-2 mb-2">
-                <Brain className="w-4 h-4 text-primary-600" />
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">模型信息</h3>
-              </div>
-              <div className="space-y-2">
-                {/* 基本信息 */}
-                <div className="text-xs text-gray-600 dark:text-gray-400">
-                  <div className="flex items-center space-x-2">
-                    <span className="font-medium">提供商:</span>
-                    <span className="capitalize">{selectedLLMConfig.provider}</span>
-                  </div>
-                  {selectedLLMConfig.model && (
-                    <div className="flex items-center space-x-2 mt-1">
-                      <span className="font-medium">模型:</span>
-                      <span>{selectedLLMConfig.model}</span>
-                    </div>
-                  )}
-                  {selectedLLMConfig.description && (
-                    <div className="mt-1 text-gray-500 dark:text-gray-500">
-                      {selectedLLMConfig.description}
-                    </div>
-                  )}
-                </div>
-                
-                {/* 支持的输入输出类型 */}
-                {(() => {
-                  const supportedInputs = selectedLLMConfig.metadata?.supportedInputs || [];
-                  const supportedOutputs = selectedLLMConfig.metadata?.supportedOutputs || [];
-                  
-                  if (supportedInputs.length === 0 && supportedOutputs.length === 0) {
-                    return null;
-                  }
-                  
-                  const typeIcons = {
-                    text: Type,
-                    image: Image,
-                    video: Video,
-                    audio: Music,
-                  };
-                  
-                  const typeLabels = {
-                    text: '文字',
-                    image: '图片',
-                    video: '视频',
-                    audio: '音频',
-                  };
-                  
-                  const typeColors = {
-                    text: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800',
-                    image: 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800',
-                    video: 'text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800',
-                    audio: 'text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800',
-                  };
-                  
-                  return (
-                    <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
-                      <div className="space-y-2 text-xs">
-                        {supportedInputs.length > 0 && (
-                          <div>
-                            <span className="text-gray-500 dark:text-gray-400 font-medium">支持的输入:</span>
-                            <div className="flex flex-wrap gap-1.5 mt-1">
-                              {supportedInputs.map((type: string) => {
-                                const Icon = typeIcons[type as keyof typeof typeIcons];
-                                return Icon ? (
-                                  <span
-                                    key={type}
-                                    className={`inline-flex items-center space-x-1 px-2 py-1 rounded border ${typeColors[type as keyof typeof typeColors] || 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700'}`}
-                                    title={typeLabels[type as keyof typeof typeLabels] || type}
-                                  >
-                                    <Icon className="w-3 h-3" />
-                                    <span>{typeLabels[type as keyof typeof typeLabels] || type}</span>
-                                  </span>
-                                ) : null;
-                              })}
-                            </div>
-                          </div>
-                        )}
-                        {supportedOutputs.length > 0 && (
-                          <div>
-                            <span className="text-gray-500 dark:text-gray-400 font-medium">支持的输出:</span>
-                            <div className="flex flex-wrap gap-1.5 mt-1">
-                              {supportedOutputs.map((type: string) => {
-                                const Icon = typeIcons[type as keyof typeof typeIcons];
-                                return Icon ? (
-                                  <span
-                                    key={type}
-                                    className={`inline-flex items-center space-x-1 px-2 py-1 rounded border ${typeColors[type as keyof typeof typeColors] || 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700'}`}
-                                    title={typeLabels[type as keyof typeof typeLabels] || type}
-                                  >
-                                    <Icon className="w-3 h-3" />
-                                    <span>{typeLabels[type as keyof typeof typeLabels] || type}</span>
-                                  </span>
-                                ) : null;
-                              })}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-            </div>
-          )}
+      {/* 主要内容区域：左侧配置 + 右侧聊天 - 优化布局 */}
+      <div className="flex-1 flex gap-4 min-h-0 p-4">
+        {/* 左侧配置面板 - 优化宽度和样式 */}
+        <div className="w-[340px] flex-shrink-0 flex flex-col gap-4 overflow-y-auto pr-2">
 
           {/* 会话列表模块 */}
           <div className="card p-3 flex-shrink-0">
@@ -5334,38 +5202,43 @@ const Workflow: React.FC = () => {
         </div>
       </div>
 
-        {/* 右侧聊天界面 */}
-        <div className="flex-1 flex flex-col min-w-0 min-h-0 card">
-        {/* 状态栏 */}
-          <div className="border-b border-gray-200 dark:border-gray-700 px-4 py-2 bg-gray-50 dark:bg-gray-800/50 flex-shrink-0">
+        {/* 右侧聊天界面 - 优化布局 */}
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 overflow-hidden">
+        {/* 状态栏 - 优化样式 */}
+          <div className="border-b border-gray-200 dark:border-gray-700 px-6 py-3 bg-gradient-to-r from-gray-50 to-white dark:from-gray-800 dark:to-gray-900 flex-shrink-0">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2.5">
-              <Bot className="w-5 h-5 text-blue-500" />
-              <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">AI 工作流助手</span>
+            <div className="flex items-center space-x-3">
+              <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                <Bot className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              </div>
+              <div>
+                <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 block">AI 工作流助手</span>
+                <span className="text-xs text-gray-500 dark:text-gray-400">智能对话与任务处理</span>
+              </div>
             </div>
             <div className="flex items-center space-x-2.5">
               {selectedLLMConfig ? (
-                <div className="flex items-center space-x-1.5 text-green-600 dark:text-green-400 text-xs font-medium">
-                  <CheckCircle className="w-4 h-4" />
-                  <span>
+                <div className="flex items-center space-x-2 px-3 py-1.5 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+                  <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
+                  <span className="text-xs font-medium text-green-700 dark:text-green-400">
                     就绪
-                    {selectedMcpServerIds.size > 0 && ` (${selectedMcpServerIds.size} 个MCP服务器, ${totalTools} 个工具)`}
+                    {selectedMcpServerIds.size > 0 && ` · ${selectedMcpServerIds.size} 服务器 · ${totalTools} 工具`}
                   </span>
                 </div>
               ) : (
-                <div className="flex items-center space-x-1.5 text-amber-600 dark:text-amber-400 text-xs font-medium">
-                  <AlertCircle className="w-4 h-4" />
-                  <span>未配置</span>
+                <div className="flex items-center space-x-2 px-3 py-1.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                  <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  <span className="text-xs font-medium text-amber-700 dark:text-amber-400">未配置</span>
                 </div>
               )}
             </div>
           </div>
         </div>
 
-        {/* 消息列表 - 正常顺序显示（老消息在上，新消息在下） */}
+        {/* 消息列表 - 正常顺序显示（老消息在上，新消息在下） - 优化布局 */}
           <div 
             ref={chatContainerRef}
-            className="flex-1 overflow-y-auto p-4 space-y-4 relative"
+            className="flex-1 overflow-y-auto px-6 py-4 space-y-6 relative bg-gray-50/50 dark:bg-gray-950/50"
             style={{ scrollBehavior: 'auto' }}
             onScroll={(e) => {
               const container = e.currentTarget;
@@ -5482,11 +5355,11 @@ const Workflow: React.FC = () => {
               key={message.id}
               data-message-id={message.id}
               onClick={() => toggleMessageSelection(message.id)}
-              className={`flex items-start space-x-3 ${
+              className={`flex items-start space-x-3 fade-in-up stagger-item ${
                 message.role === 'user' ? 'flex-row-reverse space-x-reverse' : ''
               } ${
                 skillPackSelectionMode 
-                  ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg p-2 -m-2 transition-colors' 
+                  ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg p-2 -m-2 transition-all duration-200' 
                   : ''
               } ${
                 isSelected && skillPackSelectionMode
@@ -5605,7 +5478,7 @@ const Workflow: React.FC = () => {
               </div>
               <div className="flex-1 group relative">
                 <div
-                  className={`rounded-xl p-4 shadow-sm ${
+                  className={`rounded-xl p-4 shadow-sm transition-all duration-300 hover:shadow-md ${
                     message.role === 'user'
                       ? 'bg-primary-50 dark:bg-primary-900/20 text-gray-900 dark:text-gray-100'
                       : message.role === 'assistant'
@@ -5706,9 +5579,9 @@ const Workflow: React.FC = () => {
           )}
         </div>
 
-        {/* 输入框 */}
+        {/* 输入框 - 优化布局 */}
           <div 
-            className="border-t border-gray-200 p-3 flex-shrink-0 relative"
+            className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-6 py-4 flex-shrink-0 relative"
             onClick={(e) => {
               // 点击输入框区域外部时关闭选择器（但不包括选择器本身）
               const target = e.target as HTMLElement;
@@ -6050,7 +5923,7 @@ const Workflow: React.FC = () => {
                     ? `输入你的任务，我可以使用 ${totalTools} 个工具帮助你完成... (输入 @ 选择感知组件)`
                     : '输入你的问题，我会尽力帮助你... (输入 @ 选择感知组件，输入 / 引用爬虫数据)'
               }
-                className="flex-1 input-field resize-none text-sm w-full"
+                className="flex-1 input-field resize-none text-sm w-full transition-all duration-200"
               rows={3}
               disabled={isLoading || !selectedLLMConfig}
             />
@@ -6249,58 +6122,64 @@ const Workflow: React.FC = () => {
                 </div>
               )}
             </div>
-            <div className="flex items-center space-x-2">
-              {/* 图片/视频上传按钮 */}
-              <label className="cursor-pointer p-2 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors" title="上传图片或视频">
-                <Paperclip className="w-5 h-5" />
-                <input
-                  type="file"
-                  accept="image/*,video/*"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => {
-                    const files = Array.from(e.target.files || []);
-                    files.forEach(file => {
-                      const reader = new FileReader();
-                      reader.onload = (event) => {
-                        const result = event.target?.result as string;
-                        // 移除 data URL 前缀，只保留 base64 数据
-                        const base64Data = result.includes(',') ? result.split(',')[1] : result;
-                        const mimeType = file.type;
-                        const type = mimeType.startsWith('image/') ? 'image' : 'video';
-                        
-                        setAttachedMedia(prev => [...prev, {
-                          type,
-                          mimeType,
-                          data: base64Data,
-                          preview: result, // 用于预览
-                        }]);
-                      };
-                      reader.readAsDataURL(file);
-                    });
-                    // 清空 input，允许重复选择同一文件
-                    e.target.value = '';
-                  }}
-                />
-              </label>
+            <div className="flex items-center justify-between pt-3 border-t border-gray-200 dark:border-gray-700">
+              {/* 左侧：快捷操作按钮 */}
+              <div className="flex items-center space-x-2">
+                {/* 图片/视频上传按钮 */}
+                <label className="cursor-pointer p-2.5 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-all duration-200" title="上传图片或视频">
+                  <Paperclip className="w-5 h-5" />
+                  <input
+                    type="file"
+                    accept="image/*,video/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files || []);
+                      files.forEach(file => {
+                        const reader = new FileReader();
+                        reader.onload = (event) => {
+                          const result = event.target?.result as string;
+                          // 移除 data URL 前缀，只保留 base64 数据
+                          const base64Data = result.includes(',') ? result.split(',')[1] : result;
+                          const mimeType = file.type;
+                          const type = mimeType.startsWith('image/') ? 'image' : 'video';
+                          
+                          setAttachedMedia(prev => [...prev, {
+                            type,
+                            mimeType,
+                            data: base64Data,
+                            preview: result, // 用于预览
+                          }]);
+                        };
+                        reader.readAsDataURL(file);
+                      });
+                      // 清空 input，允许重复选择同一文件
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+              </div>
               
+              {/* 右侧：发送按钮 */}
               <button
                 onClick={handleSend}
                 disabled={isLoading || (!input.trim() && attachedMedia.length === 0) || !selectedLLMConfig}
-                className="btn-primary flex items-center space-x-2 self-end disabled:opacity-50"
+                className={`btn-primary flex items-center space-x-2 px-6 py-2.5 disabled:opacity-50 ${
+                  isLoading ? 'btn-loading' : ''
+                }`}
               >
                 {isLoading ? (
                   <Loader className="w-4 h-4 animate-spin" />
                 ) : (
-                  <Send className="w-4 h-4" />
+                  <Send className="w-4 h-4 transition-transform duration-200 group-hover:translate-x-0.5" />
                 )}
                 <span>{editingMessageId ? '保存并重新发送' : '发送'}</span>
               </button>
             </div>
           </div>
           
-          {/* 底部工具栏：人设 + Thinking 开关 + Token 计数 */}
-          <div className="flex items-center justify-between mt-1.5 px-0.5">
+          {/* 底部工具栏：人设 + Thinking 开关 + Token 计数 - 优化布局 */}
+          <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
             {/* 左侧：帮助图标 + 人设 + Thinking 模式开关 */}
             <div className="flex items-center space-x-2">
               {/* 帮助问号图标 */}
