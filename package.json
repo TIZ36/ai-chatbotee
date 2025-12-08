@@ -16,7 +16,7 @@
     "build:all": "npm run build && electron-builder"
   },
   "dependencies": {
-    "@google/genai": "^1.31.0",
+    "@google/genai": "^1.30.0",
     "@google/generative-ai": "^0.24.1",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@xterm/addon-search": "^0.14.0",
