@@ -6,7 +6,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
-import { Send, Loader, Bot, User, Wrench, AlertCircle, CheckCircle, Brain, Plug, RefreshCw, Power, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Plus, History, Sparkles, Workflow as WorkflowIcon, GripVertical, Play, ArrowRight, Trash2, X, Edit2, RotateCw, Database, Paperclip, Type, Image, Video, Music, HelpCircle, Package, CheckSquare, Square } from 'lucide-react';
+import { Send, Loader, Bot, User, Wrench, AlertCircle, CheckCircle, Brain, Plug, RefreshCw, Power, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Plus, History, Sparkles, Workflow as WorkflowIcon, GripVertical, Play, ArrowRight, Trash2, X, Edit2, RotateCw, Database, Paperclip, Type, Image, Video, Music, HelpCircle, Package, CheckSquare, Square, Quote, Lightbulb } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { LLMClient, LLMMessage } from '../services/llmClient';
@@ -20,6 +20,7 @@ import { getWorkflows, getWorkflow, Workflow as WorkflowType, WorkflowNode, Work
 import { getBatch } from '../services/crawlerApi';
 import CrawlerModuleSelector from './CrawlerModuleSelector';
 import CrawlerBatchItemSelector from './CrawlerBatchItemSelector';
+import ComponentThumbnails from './ComponentThumbnails';
 
 interface Message {
   id: string;
@@ -814,7 +815,11 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
   );
 };
 
-const Workflow: React.FC = () => {
+interface WorkflowProps {
+  sessionId?: string | null;
+}
+
+const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -834,6 +839,11 @@ const Workflow: React.FC = () => {
   const [streamEnabled, setStreamEnabled] = useState(true); // 流式响应开关
   const [collapsedThinking, setCollapsedThinking] = useState<Set<string>>(new Set()); // 已折叠的思考过程
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null); // 正在编辑的消息ID
+  const [quotedMessageId, setQuotedMessageId] = useState<string | null>(null); // 引用的消息ID
+  const [isDraggingOver, setIsDraggingOver] = useState(false); // 是否正在拖拽文件
+  const [isInputExpanded, setIsInputExpanded] = useState(false); // 输入框是否扩大
+  const [isInputFocused, setIsInputFocused] = useState(false); // 输入框是否聚焦
+  const [abortController, setAbortController] = useState<AbortController | null>(null); // 用于中断请求
   
   // @ 符号选择器状态
   const [showAtSelector, setShowAtSelector] = useState(false);
@@ -1051,6 +1061,17 @@ const Workflow: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 监听外部传入的sessionId（从左侧会话列表选择）
+  useEffect(() => {
+    if (externalSessionId && externalSessionId !== currentSessionId) {
+      handleSelectSession(externalSessionId);
+    } else if (externalSessionId === null && currentSessionId && currentSessionId !== temporarySessionId) {
+      // 如果外部sessionId为null，且当前不是临时会话，切换到临时会话
+      handleSelectSession(temporarySessionId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalSessionId]);
+
   // 从URL参数中加载会话
   useEffect(() => {
     const sessionIdFromUrl = searchParams.get('session');
@@ -1066,6 +1087,22 @@ const Workflow: React.FC = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, sessions]);
+
+  // 监听配置会话请求（通过URL参数）
+  useEffect(() => {
+    const configSessionId = searchParams.get('config');
+    if (configSessionId && configSessionId === currentSessionId && currentSessionId) {
+      // 延迟打开对话框，确保会话数据已加载
+      setTimeout(() => {
+        setShowConfigDialog(true);
+        // 清除URL参数
+        const newSearchParams = new URLSearchParams(searchParams);
+        newSearchParams.delete('config');
+        window.history.replaceState({}, '', `${window.location.pathname}${newSearchParams.toString() ? '?' + newSearchParams.toString() : ''}`);
+      }, 100);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSessionId, searchParams]);
   
   // 当选择会话时，加载历史消息、头像和人设
   useEffect(() => {
@@ -1591,7 +1628,23 @@ const Workflow: React.FC = () => {
         setCurrentSystemPrompt(session.system_prompt || null);
         // 如果是智能体，自动选择关联的LLM模型
         if (session.session_type === 'agent' && session.llm_config_id) {
-          setSelectedLLMConfigId(session.llm_config_id);
+          // 确保LLM配置已加载后再设置
+          if (llmConfigs.length > 0) {
+            const configExists = llmConfigs.some(c => c.config_id === session.llm_config_id);
+            if (configExists) {
+              setSelectedLLMConfigId(session.llm_config_id);
+            } else {
+              console.warn('[Workflow] Agent LLM config not found:', session.llm_config_id);
+            }
+          } else {
+            // 如果配置还没加载，延迟设置
+            setTimeout(() => {
+              const configExists = llmConfigs.some(c => c.config_id === session.llm_config_id);
+              if (configExists) {
+                setSelectedLLMConfigId(session.llm_config_id);
+              }
+            }, 100);
+          }
         }
       }
     }
@@ -2154,10 +2207,23 @@ const Workflow: React.FC = () => {
     // MCP 服务器是可选的，不需要强制选择
 
     const userMessageId = `msg-${Date.now()}`;
+    
+    // 如果有引用消息，在内容前添加引用信息
+    let messageContent = input.trim() || (attachedMedia.length > 0 ? '[包含媒体内容]' : '');
+    if (quotedMessageId) {
+      const quotedMsg = messages.find(m => m.id === quotedMessageId);
+      if (quotedMsg) {
+        const quotedContent = quotedMsg.content.length > 200 
+          ? quotedMsg.content.substring(0, 200) + '...' 
+          : quotedMsg.content;
+        messageContent = `[引用消息]\n${quotedContent}\n\n---\n\n${messageContent}`;
+      }
+    }
+    
     const userMessage: Message = {
       id: userMessageId,
       role: 'user',
-      content: input.trim() || (attachedMedia.length > 0 ? '[包含媒体内容]' : ''),
+      content: messageContent,
       // 添加多模态内容
       media: attachedMedia.length > 0 ? attachedMedia.map(m => ({
         type: m.type,
@@ -2178,6 +2244,7 @@ const Workflow: React.FC = () => {
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setAttachedMedia([]); // 清空已发送的媒体
+    setQuotedMessageId(null); // 清空引用消息
     setIsLoading(true);
     
     // 保存用户消息到数据库（临时会话不保存）
@@ -2494,6 +2561,10 @@ const Workflow: React.FC = () => {
       // 默认折叠思考过程
       setCollapsedThinking(prev => new Set(prev).add(assistantMessageId));
 
+      // 创建AbortController用于中断请求
+      const controller = new AbortController();
+      setAbortController(controller);
+      
       // 使用LLM客户端处理用户请求（自动调用MCP工具）
       let fullResponse = '';
       let fullThinking = '';
@@ -3196,9 +3267,15 @@ const Workflow: React.FC = () => {
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
+    // shift+Enter: 换行
+    // ctrl+Enter: 发送
+    if (e.key === 'Enter') {
+      if (e.ctrlKey || e.metaKey) {
+        // Ctrl+Enter 或 Cmd+Enter: 发送
+        e.preventDefault();
+        handleSend();
+      }
+      // shift+Enter: 默认行为（换行），不需要处理
     }
   };
 
@@ -4109,6 +4186,126 @@ const Workflow: React.FC = () => {
     setSelectedComponents(prev => prev.filter((_, i) => i !== index));
   };
 
+  // 处理文件拖拽
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(false);
+
+    const files = Array.from(e.dataTransfer.files);
+    files.forEach(file => {
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const result = event.target?.result as string;
+          const base64Data = result.includes(',') ? result.split(',')[1] : result;
+          const mimeType = file.type || 'image/png';
+          
+          setAttachedMedia(prev => [...prev, {
+            type: 'image',
+            mimeType,
+            data: base64Data,
+            preview: result,
+          }]);
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+  };
+
+  // 处理MCP和Workflow的选择（通过缩略图标）
+  const handleSelectMCPFromThumbnail = (serverId: string) => {
+    const server = mcpServers.find(s => s.id === serverId);
+    if (server && connectedMcpServerIds.has(serverId)) {
+      setSelectedMcpServerIds(prev => {
+        const newSet = new Set(prev);
+        newSet.add(serverId);
+        return newSet;
+      });
+    }
+  };
+
+  const handleDeselectMCPFromThumbnail = (serverId: string) => {
+    setSelectedMcpServerIds(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(serverId);
+      return newSet;
+    });
+  };
+
+  const handleSelectWorkflowFromThumbnail = (workflowId: string) => {
+    const workflow = workflows.find(w => w.workflow_id === workflowId);
+    if (workflow) {
+      const component = { type: 'workflow' as const, id: workflowId, name: workflow.name };
+      if (selectedComponents.length === 0) {
+        setSelectedComponents([component]);
+      }
+    }
+  };
+
+  const handleDeselectWorkflowFromThumbnail = (workflowId: string) => {
+    setSelectedComponents(prev => prev.filter(c => !(c.type === 'workflow' && c.id === workflowId)));
+  };
+
+  const handleSelectSkillPackFromThumbnail = (skillPackId: string) => {
+    const skillPack = allSkillPacks.find(sp => sp.skill_pack_id === skillPackId);
+    if (skillPack) {
+      const component = { type: 'skillpack' as const, id: skillPackId, name: skillPack.name };
+      if (!selectedComponents.some(c => c.type === 'skillpack' && c.id === skillPackId)) {
+        setSelectedComponents(prev => [...prev, component]);
+      }
+    }
+  };
+
+  const handleDeselectSkillPackFromThumbnail = (skillPackId: string) => {
+    setSelectedComponents(prev => prev.filter(c => !(c.type === 'skillpack' && c.id === skillPackId)));
+  };
+
+  // 处理附件上传
+  const handleAttachFile = (files: FileList) => {
+    const fileArray = Array.from(files);
+    fileArray.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const result = event.target?.result as string;
+        // 移除 data URL 前缀，只保留 base64 数据
+        const base64Data = result.includes(',') ? result.split(',')[1] : result;
+        const mimeType = file.type;
+        const type = mimeType.startsWith('image/') ? 'image' : 'video';
+        
+        setAttachedMedia(prev => [...prev, {
+          type,
+          mimeType,
+          data: base64Data,
+          preview: result, // 用于预览
+        }]);
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // 获取选中的workflow IDs
+  const selectedWorkflowIds = new Set(
+    selectedComponents.filter(c => c.type === 'workflow').map(c => c.id)
+  );
+
+  // 获取选中的skill pack IDs
+  const selectedSkillPackIds = new Set(
+    selectedComponents.filter(c => c.type === 'skillpack').map(c => c.id)
+  );
+
   // 处理拖拽组件到对话框
   const handleDropComponent = async (component: { type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string }) => {
     if (!currentSessionId) {
@@ -4356,78 +4553,69 @@ const Workflow: React.FC = () => {
   const renderMessageContent = (message: Message) => {
     // 思考/生成中的占位内容（当内容为空且正在处理时）
     if (message.role === 'assistant' && (!message.content || message.content.length === 0) && (message.isThinking || message.isStreaming)) {
-      const isGemini = selectedLLMConfig?.provider === 'gemini';
       const hasThinkingContent = message.thinking && message.thinking.trim().length > 0;
       
-      return (
-        <div className="flex flex-col items-center justify-center py-8 px-4">
-          {/* 思考动画 */}
-          <div className="relative mb-4">
-            <div className="w-16 h-16 rounded-full bg-gradient-to-r from-purple-500 via-blue-500 to-cyan-500 animate-spin" style={{ animationDuration: '3s' }}>
-              <div className="absolute inset-1 bg-white dark:bg-gray-800 rounded-full"></div>
-            </div>
-            <div className="absolute inset-0 flex items-center justify-center">
-              <Brain className="w-6 h-6 text-purple-500" />
-            </div>
-          </div>
-          
-          {/* 状态文字 */}
-          <div className="text-center space-y-2">
-            <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
-              {message.isThinking ? (
-                isGemini ? '🧠 Gemini 正在深度思考...' : '正在思考...'
-              ) : (
-                isGemini ? '✨ 正在生成回复...' : '正在处理...'
-              )}
-            </p>
-            {!hasThinkingContent && (
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              {isGemini ? (
-                message.isThinking 
-                  ? '模型正在进行推理，可能需要较长时间' 
-                  : '正在生成内容，请稍候'
-              ) : (
-                '请稍候...'
-              )}
-            </p>
-            )}
-          </div>
-          
-          {/* 思考内容显示 */}
-          {hasThinkingContent && (
-            <div className="w-full max-w-2xl mt-4">
-              <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-                <div className="flex items-center space-x-2 mb-2">
-                  <Brain className="w-4 h-4 text-purple-500 animate-pulse" />
-                  <span className="text-xs font-medium text-gray-600 dark:text-gray-400">思考过程</span>
-                  {message.isThinking && (
-                    <span className="inline-flex items-center space-x-1">
-                      <span className="w-1.5 h-1.5 bg-purple-500 rounded-full animate-pulse"></span>
-                      <span className="text-xs text-purple-600 dark:text-purple-400">思考中...</span>
-                    </span>
-                  )}
-                </div>
-                <div className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words max-h-96 overflow-y-auto">
-                  {message.thinking}
-                  {message.isThinking && (
-                    <span className="inline-block ml-1 w-1.5 h-4 bg-purple-500 dark:bg-purple-400 animate-pulse"></span>
-                  )}
-                </div>
+      // 如果有思考内容，直接显示流式思考过程，不显示动画
+      if (hasThinkingContent) {
+        return (
+          <div className="w-full">
+            <div className="mb-2">
+              <div className="flex items-center space-x-1 text-[10px] text-gray-400 dark:text-gray-500 mb-1">
+                <Lightbulb className="w-3 h-3" />
+                <span>思考过程</span>
+                {message.isThinking && (
+                  <>
+                    <span>思考中...</span>
+                    <span className="inline-block ml-1 w-1 h-1 bg-gray-400 dark:bg-gray-500 rounded-full animate-pulse"></span>
+                  </>
+                )}
+              </div>
+              <div className="text-[11px] text-gray-400 dark:text-gray-500 font-mono leading-relaxed whitespace-pre-wrap break-words bg-transparent">
+                {message.thinking}
               </div>
             </div>
-          )}
-          
-          {/* 进度条动画 */}
-          {!hasThinkingContent && (
-          <div className="w-48 h-1 bg-gray-200 dark:bg-gray-700 rounded-full mt-4 overflow-hidden">
-            <div 
-              className="h-full bg-gradient-to-r from-purple-500 via-blue-500 to-cyan-500 rounded-full"
-              style={{ 
-                width: '100%',
-                animation: 'pulse 2s ease-in-out infinite'
-              }}
-            ></div>
+            {/* 中断按钮 */}
+            {abortController && (
+              <button
+                onClick={() => {
+                  abortController.abort();
+                  setAbortController(null);
+                  // 删除当前正在生成的消息
+                  setMessages(prev => prev.filter(msg => msg.id !== message.id));
+                  setIsLoading(false);
+                }}
+                className="mt-2 px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg transition-colors"
+              >
+                <XCircle className="w-3.5 h-3.5 inline mr-1" />
+                中断生成
+              </button>
+            )}
           </div>
+        );
+      }
+      
+      // 如果没有思考内容，显示简单的加载提示
+      return (
+        <div className="flex flex-col items-center justify-center py-4 px-4">
+          <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
+            <Loader className="w-4 h-4 animate-spin" />
+            <span>思考中...</span>
+          </div>
+          {/* 中断按钮 */}
+          {abortController && (
+            <button
+              onClick={() => {
+                abortController.abort();
+                setAbortController(null);
+                // 删除当前正在生成的消息
+                setMessages(prev => prev.filter(msg => msg.id !== message.id));
+                setIsLoading(false);
+              }}
+              className="mt-3 px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg transition-colors"
+            >
+              <XCircle className="w-3.5 h-3.5 inline mr-1" />
+              中断生成
+            </button>
           )}
         </div>
       );
@@ -4854,30 +5042,49 @@ const Workflow: React.FC = () => {
 
     const isThinkingCollapsed = collapsedThinking.has(message.id);
     const hasThinking = message.thinking && message.thinking.trim().length > 0;
+    const isThinkingActive = message.isThinking && message.isStreaming; // 正在思考中
 
     return (
       <div>
         {hasThinking && (
-          <div className="mb-3 border-b border-gray-200 dark:border-gray-700 pb-3">
-            <button
-              onClick={() => toggleThinkingCollapse(message.id)}
-              className="flex items-center space-x-1.5 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors mb-2"
-            >
-              {isThinkingCollapsed ? (
-                <ChevronDown className="w-3.5 h-3.5" />
-              ) : (
-                <ChevronUp className="w-3.5 h-3.5" />
-              )}
-              <span className="font-medium">思考过程</span>
-            </button>
-            {!isThinkingCollapsed && (
-              <div className="mt-2 text-sm text-gray-500 dark:text-gray-400 font-mono leading-relaxed whitespace-pre-wrap break-words bg-gray-50 dark:bg-gray-800/50 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
-                {message.thinking}
-                {message.isStreaming && message.isThinking && (
-                  <span className="inline-block ml-2 w-1.5 h-1.5 bg-blue-500 dark:bg-blue-400 rounded-full animate-pulse"></span>
-                )}
+          <div className="mb-2">
+            {isThinkingCollapsed ? (
+              // 折叠状态：显示小灯泡按钮
+              <button
+                onClick={() => toggleThinkingCollapse(message.id)}
+                className="flex items-center space-x-1 text-[10px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 transition-colors"
+                title="展开思考过程"
+              >
+                <Lightbulb className="w-3 h-3" />
+                <span>思考过程</span>
+              </button>
+            ) : (
+              // 展开状态：显示思考内容
+              <div className="mb-2">
+                <button
+                  onClick={() => toggleThinkingCollapse(message.id)}
+                  className="flex items-center space-x-1 text-[10px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 transition-colors mb-1"
+                  title="折叠思考过程"
+                >
+                  <Lightbulb className="w-3 h-3" />
+                  <span>思考过程</span>
+                </button>
+                <div className="text-[11px] text-gray-400 dark:text-gray-500 font-mono leading-relaxed whitespace-pre-wrap break-words bg-transparent">
+                  {message.thinking}
+                  {isThinkingActive && (
+                    <span className="inline-block ml-1 w-1 h-1 bg-gray-400 dark:bg-gray-500 rounded-full animate-pulse"></span>
+                  )}
+                </div>
               </div>
             )}
+          </div>
+        )}
+        {/* 如果正在思考但还没有思考内容，显示流式思考提示 */}
+        {message.isThinking && !hasThinking && (
+          <div className="mb-2 text-[10px] text-gray-400 dark:text-gray-500 flex items-center space-x-1">
+            <Lightbulb className="w-3 h-3 animate-pulse" />
+            <span>思考中...</span>
+            <span className="inline-block w-1 h-1 bg-gray-400 dark:bg-gray-500 rounded-full animate-pulse"></span>
           </div>
         )}
         {/* 多模态内容显示 */}
@@ -5028,96 +5235,15 @@ const Workflow: React.FC = () => {
 
   return (
     <div className="h-full flex flex-col bg-gray-50 dark:bg-gray-950">
-      {/* 标题栏 - 优化布局 */}
-      <div className="flex items-center justify-between px-6 py-4 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex-shrink-0 shadow-sm">
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-xl bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
-            <MessageCircle className="w-6 h-6 text-primary-600 dark:text-primary-400" />
-          </div>
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">智能聊天</h2>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">与AI助手对话，使用工具完成复杂任务</p>
-          </div>
-        </div>
-        <div className="flex items-center space-x-3">
-          {/* LLM模型选择 - 移到标题栏 */}
-          <div className="flex items-center space-x-2">
-            <label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center space-x-1.5">
-              <Brain className="w-4 h-4" />
-              <span>模型:</span>
-            </label>
-            <select
-              value={selectedLLMConfigId || ''}
-              onChange={(e) => {
-                console.log('[Workflow] Select onChange:', e.target.value);
-                handleLLMConfigChange(e.target.value);
-              }}
-              className="input-field text-sm min-w-[200px] max-w-[300px]"
-            >
-              <option value="">请选择LLM模型...</option>
-              {llmConfigs.map((config) => (
-                <option key={config.config_id} value={config.config_id}>
-                  {config.name} {config.model && `(${config.model})`} [{config.provider}]
-                </option>
-              ))}
-            </select>
-            {/* 流式响应开关 */}
-            <label className="flex items-center space-x-1.5 cursor-pointer group px-2 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
-              <input
-                type="checkbox"
-                checked={streamEnabled}
-                onChange={(e) => setStreamEnabled(e.target.checked)}
-                className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500 transition-all duration-200"
-              />
-              <span className="text-xs text-gray-600 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-200 transition-colors">流式</span>
-            </label>
-          </div>
-          
-          {/* 创建技能包按钮 */}
-          {currentSessionId && messages.filter(m => m.role !== 'system').length > 0 && (
-            <button
-              onClick={() => {
-                setSkillPackSelectionMode(!skillPackSelectionMode);
-                if (skillPackSelectionMode) {
-                  setSelectedMessageIds(new Set());
-                }
-              }}
-              className={`flex items-center space-x-1.5 px-4 py-2 text-sm rounded-lg transition-all duration-200 ${
-                skillPackSelectionMode 
-                  ? 'bg-primary-500 text-white shadow-md shadow-primary-500/30' 
-                  : 'btn-secondary'
-              }`}
-              title="创建技能包"
-            >
-              <Package className="w-4 h-4" />
-              <span>{skillPackSelectionMode ? '取消选择' : '创建技能包'}</span>
-            </button>
-          )}
-          {/* Summarize 按钮 */}
-          {currentSessionId && messages.filter(m => m.role !== 'system').length > 0 && (
-            <button
-              onClick={handleManualSummarize}
-              disabled={isSummarizing}
-              className="btn-primary flex items-center space-x-1.5 px-4 py-2 text-sm disabled:opacity-50"
-              title="总结当前会话内容"
-            >
-              {isSummarizing ? (
-                <Loader className="w-4 h-4 animate-spin" />
-              ) : (
-                <Sparkles className="w-4 h-4" />
-              )}
-              <span>总结</span>
-            </button>
-          )}
-        </div>
-      </div>
 
-      {/* 主要内容区域：左侧配置 + 右侧聊天 - 优化布局 */}
-      <div className="flex-1 flex gap-4 min-h-0 p-4">
-        {/* 左侧配置面板 - 优化宽度和样式 */}
-        <div className="w-[340px] flex-shrink-0 flex flex-col gap-4 overflow-y-auto pr-2">
+      {/* 主要内容区域：聊天界面 - 全屏布局 */}
+      <div className="flex-1 flex min-h-0 p-4">
+        {/* 左侧配置面板 - 已隐藏，功能移至底部工具栏 */}
+        {false && (
+          <div className="w-[340px] flex-shrink-0 flex flex-col gap-4 overflow-y-auto pr-2">
 
-          {/* 会话列表模块 */}
+          {/* 会话列表模块 - 已移至左侧边栏，此处隐藏 */}
+          {false && (
           <div className="card p-3 flex-shrink-0">
             <div className="flex items-center justify-between mb-2">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -5253,6 +5379,7 @@ const Workflow: React.FC = () => {
               )}
             </div>
           </div>
+          )}
 
           {/* 感知组件列表（MCP + 工作流） */}
           <div className="card p-3 flex-1 flex flex-col min-h-0">
@@ -5546,18 +5673,19 @@ const Workflow: React.FC = () => {
               ))
             )}
           </div>
+          </div>
         </div>
-      </div>
+        )}
 
-        {/* 右侧聊天界面 - 优化布局 */}
+        {/* 聊天界面 - 全屏布局 */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 overflow-hidden">
         {/* 状态栏 - 优化样式 */}
-          <div className="border-b border-gray-200 dark:border-gray-700 px-6 py-3 bg-gradient-to-r from-gray-50 to-white dark:from-gray-800 dark:to-gray-900 flex-shrink-0">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
+          <div className="border-b border-gray-200 dark:border-gray-700 px-3 py-1 bg-gradient-to-r from-gray-50 to-white dark:from-gray-800 dark:to-gray-900 flex-shrink-0">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center space-x-2">
               {/* 头像 - 可点击配置 */}
               <div 
-                className="w-9 h-9 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary-400 hover:ring-offset-1 transition-all overflow-hidden"
+                className="w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary-400 hover:ring-offset-1 transition-all overflow-hidden"
                 onClick={() => {
                   if (currentSessionId && !isTemporarySession) {
                     setAvatarConfigDraft(currentSessionAvatar);
@@ -5569,11 +5697,11 @@ const Workflow: React.FC = () => {
                 {currentSessionAvatar ? (
                   <img src={currentSessionAvatar} alt="Avatar" className="w-full h-full object-cover" />
                 ) : (
-                  <Bot className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                  <Bot className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                 )}
               </div>
               <div>
-                <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 block">
+                <span className="text-xs font-semibold text-gray-900 dark:text-gray-100 block leading-tight">
                   {(() => {
                     const currentSession = sessions.find(s => s.session_id === currentSessionId);
                     if (isTemporarySession) return '临时会话';
@@ -5582,24 +5710,94 @@ const Workflow: React.FC = () => {
                     return 'AI 工作流助手';
                   })()}
                 </span>
-                <span className="text-xs text-gray-500 dark:text-gray-400">
+                <span className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">
                   {currentSessionId && !isTemporarySession ? '点击头像配置' : '智能对话与任务处理'}
                 </span>
               </div>
             </div>
-            <div className="flex items-center space-x-2.5">
+            <div className="flex items-center space-x-2">
+              {/* LLM模型选择 */}
+              <div className="flex items-center space-x-2">
+                <label className="text-[10px] font-medium text-gray-700 dark:text-gray-300 flex items-center space-x-1">
+                  <Brain className="w-3 h-3" />
+                  <span>模型:</span>
+                </label>
+                <select
+                  value={selectedLLMConfigId || ''}
+                  onChange={(e) => {
+                    console.log('[Workflow] Select onChange:', e.target.value);
+                    handleLLMConfigChange(e.target.value);
+                  }}
+                  className="input-field text-[10px] min-w-[140px] max-w-[180px] py-0.5 px-1.5 h-6"
+                >
+                  <option value="">请选择模型...</option>
+                  {llmConfigs.map((config) => (
+                    <option key={config.config_id} value={config.config_id}>
+                      {config.name} {config.model && `(${config.model})`}
+                    </option>
+                  ))}
+                </select>
+                {/* 流式响应开关 */}
+                <label className="flex items-center space-x-1 cursor-pointer group px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={streamEnabled}
+                    onChange={(e) => setStreamEnabled(e.target.checked)}
+                    className="w-3 h-3 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                  />
+                  <span className="text-[10px] text-gray-600 dark:text-gray-400">流式</span>
+                </label>
+              </div>
+              
+              {/* 创建技能包按钮 */}
+              {currentSessionId && messages.filter(m => m.role !== 'system').length > 0 && (
+                <button
+                  onClick={() => {
+                    setSkillPackSelectionMode(!skillPackSelectionMode);
+                    if (skillPackSelectionMode) {
+                      setSelectedMessageIds(new Set());
+                    }
+                  }}
+                  className={`flex items-center space-x-1 px-2.5 py-1 text-xs rounded transition-all ${
+                    skillPackSelectionMode 
+                      ? 'bg-primary-500 text-white' 
+                      : 'btn-secondary text-xs'
+                  }`}
+                  title="创建技能包"
+                >
+                  <Package className="w-3.5 h-3.5" />
+                  <span>{skillPackSelectionMode ? '取消' : '技能包'}</span>
+                </button>
+              )}
+              {/* Summarize 按钮 */}
+              {currentSessionId && messages.filter(m => m.role !== 'system').length > 0 && (
+                <button
+                  onClick={handleManualSummarize}
+                  disabled={isSummarizing}
+                  className="btn-primary flex items-center space-x-1 px-2.5 py-1 text-xs disabled:opacity-50"
+                  title="总结当前会话内容"
+                >
+                  {isSummarizing ? (
+                    <Loader className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-3.5 h-3.5" />
+                  )}
+                  <span>总结</span>
+                </button>
+              )}
+              
+              {/* 模型状态显示 */}
               {selectedLLMConfig ? (
-                <div className="flex items-center space-x-2 px-3 py-1.5 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
-                  <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />
-                  <span className="text-xs font-medium text-green-700 dark:text-green-400">
-                    就绪
-                    {selectedMcpServerIds.size > 0 && ` · ${selectedMcpServerIds.size} 服务器 · ${totalTools} 工具`}
+                <div className="flex items-center space-x-1.5 px-2 py-1 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded text-xs">
+                  <CheckCircle className="w-3.5 h-3.5 text-green-600 dark:text-green-400" />
+                  <span className="text-green-700 dark:text-green-400 font-medium">
+                    {selectedLLMConfig.name} {selectedLLMConfig.model && `(${selectedLLMConfig.model})`}
                   </span>
                 </div>
               ) : (
-                <div className="flex items-center space-x-2 px-3 py-1.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-                  <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                  <span className="text-xs font-medium text-amber-700 dark:text-amber-400">未配置</span>
+                <div className="flex items-center space-x-1.5 px-2 py-1 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded text-xs">
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                  <span className="text-amber-700 dark:text-amber-400">未配置</span>
                 </div>
               )}
             </div>
@@ -5609,7 +5807,7 @@ const Workflow: React.FC = () => {
         {/* 消息列表 - 正常顺序显示（老消息在上，新消息在下） - 优化布局 */}
           <div 
             ref={chatContainerRef}
-            className="flex-1 overflow-y-auto px-6 py-4 space-y-6 relative bg-gray-50/50 dark:bg-gray-950/50"
+            className="flex-1 overflow-y-auto px-4 py-3 space-y-4 relative bg-gray-50/50 dark:bg-gray-950/50"
             style={{ scrollBehavior: 'auto' }}
             onScroll={(e) => {
               const container = e.currentTarget;
@@ -5726,7 +5924,7 @@ const Workflow: React.FC = () => {
               key={message.id}
               data-message-id={message.id}
               onClick={() => toggleMessageSelection(message.id)}
-              className={`flex items-start space-x-3 fade-in-up stagger-item ${
+              className={`flex items-start space-x-2 fade-in-up stagger-item ${
                 message.role === 'user' ? 'flex-row-reverse space-x-reverse' : ''
               } ${
                 skillPackSelectionMode 
@@ -5740,17 +5938,17 @@ const Workflow: React.FC = () => {
             >
               {/* 选择复选框（仅在选择模式下显示） */}
               {skillPackSelectionMode && (
-                <div className={`flex-shrink-0 mt-1 ${message.role === 'user' ? 'ml-2' : 'mr-2'}`}>
+                <div className={`flex-shrink-0 mt-0.5 ${message.role === 'user' ? 'ml-1.5' : 'mr-1.5'}`}>
                   {isSelected ? (
-                    <CheckSquare className="w-5 h-5 text-primary-500" />
+                    <CheckSquare className="w-4 h-4 text-primary-500" />
                   ) : (
-                    <Square className="w-5 h-5 text-gray-400" />
+                    <Square className="w-4 h-4 text-gray-400" />
                   )}
                 </div>
               )}
-              <div className="flex-shrink-0 flex items-center space-x-2">
+              <div className="flex-shrink-0 flex items-center space-x-1.5">
               <div
-                  className={`w-9 h-9 rounded-full flex items-center justify-center shadow-sm overflow-hidden ${
+                  className={`w-7 h-7 rounded-full flex items-center justify-center shadow-sm overflow-hidden ${
                   message.role === 'user'
                     ? 'bg-primary-500 text-white'
                     : message.role === 'assistant'
@@ -5765,7 +5963,7 @@ const Workflow: React.FC = () => {
                 }`}
               >
                 {message.role === 'user' ? (
-                    <User className="w-5 h-5" />
+                    <User className="w-4 h-4" />
                 ) : message.role === 'assistant' ? (
                     // 如果有头像，显示头像；否则显示Bot图标
                     currentSessionAvatar ? (
@@ -5775,18 +5973,18 @@ const Workflow: React.FC = () => {
                         className="w-full h-full object-cover"
                       />
                     ) : (
-                      <Bot className="w-5 h-5" />
+                      <Bot className="w-4 h-4" />
                     )
                 ) : message.role === 'tool' ? (
                     message.toolType === 'workflow' ? (
-                      <WorkflowIcon className="w-5 h-5" />
+                      <WorkflowIcon className="w-4 h-4" />
                     ) : message.toolType === 'mcp' ? (
-                      <Plug className="w-5 h-5" />
+                      <Plug className="w-4 h-4" />
                     ) : (
-                      <Wrench className="w-5 h-5" />
+                      <Wrench className="w-4 h-4" />
                     )
                   ) : (
-                    <Bot className="w-5 h-5" />
+                    <Bot className="w-4 h-4" />
                   )}
                 </div>
                 {/* 思考/回答状态指示器 */}
@@ -5849,25 +6047,36 @@ const Workflow: React.FC = () => {
               </div>
               <div className="flex-1 group relative">
                 <div
-                  className={`rounded-xl p-4 shadow-sm transition-all duration-300 hover:shadow-md ${
+                  className={`rounded-lg p-2.5 transition-all duration-300 ${
                     message.role === 'user'
-                      ? 'bg-primary-50 dark:bg-primary-900/20 text-gray-900 dark:text-gray-100'
+                      ? 'bg-primary-50 dark:bg-primary-900/20 text-gray-900 dark:text-gray-100 shadow-sm hover:shadow-md'
                       : message.role === 'assistant'
-                      ? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700'
+                      ? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700 shadow-lg hover:shadow-xl' // 更立体的阴影
                       : message.role === 'tool'
                       ? message.toolType === 'workflow'
-                        ? 'bg-purple-50 dark:bg-purple-900/20 text-gray-900 dark:text-gray-100 border border-purple-200 dark:border-purple-700'
+                        ? 'bg-purple-50 dark:bg-purple-900/20 text-gray-900 dark:text-gray-100 border border-purple-200 dark:border-purple-700 shadow-sm hover:shadow-md'
                         : message.toolType === 'mcp'
-                        ? 'bg-green-50 dark:bg-green-900/20 text-gray-900 dark:text-gray-100 border border-green-200 dark:border-green-700'
-                        : 'bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
-                      : 'bg-yellow-50 dark:bg-yellow-900/20 text-gray-700 dark:text-gray-300'
+                        ? 'bg-green-50 dark:bg-green-900/20 text-gray-900 dark:text-gray-100 border border-green-200 dark:border-green-700 shadow-sm hover:shadow-md'
+                        : 'bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm hover:shadow-md'
+                      : 'bg-yellow-50 dark:bg-yellow-900/20 text-gray-700 dark:text-gray-300 shadow-sm hover:shadow-md'
                   }`}
+                  style={{
+                    fontSize: message.role === 'assistant' ? '13px' : '12px', // 减小字体
+                    lineHeight: message.role === 'assistant' ? '1.6' : '1.5', // 减小行高
+                  }}
                 >
                   {renderMessageContent(message)}
                 </div>
-                {/* 用户消息的编辑和重新发送按钮 */}
+                {/* 用户消息的编辑、重新发送和引用按钮 */}
                 {message.role === 'user' && !isLoading && (
                   <div className="absolute top-2 right-2 flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => setQuotedMessageId(message.id)}
+                      className="p-1.5 text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded transition-all"
+                      title="引用此消息"
+                    >
+                      <Quote className="w-3.5 h-3.5" />
+                    </button>
                     <button
                       onClick={() => handleStartEdit(message.id)}
                       className="p-1.5 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-all"
@@ -5952,7 +6161,12 @@ const Workflow: React.FC = () => {
 
         {/* 输入框 - 优化布局 */}
           <div 
-            className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-6 py-4 flex-shrink-0 relative"
+            className={`border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-3 flex-shrink-0 relative transition-colors ${
+              isDraggingOver ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-700' : ''
+            }`}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
             onClick={(e) => {
               // 点击输入框区域外部时关闭选择器（但不包括选择器本身）
               const target = e.target as HTMLElement;
@@ -5961,6 +6175,15 @@ const Workflow: React.FC = () => {
               }
             }}
           >
+            {/* 拖拽提示 */}
+            {isDraggingOver && (
+              <div className="absolute inset-0 flex items-center justify-center bg-blue-100/50 dark:bg-blue-900/30 rounded-lg z-10 pointer-events-none">
+                <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 font-medium">
+                  <Image className="w-5 h-5" />
+                  <span>松开以添加图片</span>
+                </div>
+              </div>
+            )}
           {/* 已选定的组件 tag */}
           {selectedComponents.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-2">
@@ -6104,6 +6327,31 @@ const Workflow: React.FC = () => {
             </div>
           )}
           
+
+          {/* 引用消息显示 */}
+          {quotedMessageId && (() => {
+            const quotedMsg = messages.find(m => m.id === quotedMessageId);
+            if (!quotedMsg) return null;
+            return (
+              <div className="mb-2 p-2 bg-gray-50 dark:bg-gray-800 border-l-4 border-primary-500 rounded-r-lg">
+                <div className="flex items-start justify-between">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">引用消息</div>
+                    <div className="text-sm text-gray-700 dark:text-gray-300 line-clamp-2">
+                      {quotedMsg.content.substring(0, 100)}{quotedMsg.content.length > 100 ? '...' : ''}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setQuotedMessageId(null)}
+                    className="ml-2 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+
           <div className="flex space-x-2">
             {/* 附件预览区域 */}
             {attachedMedia.length > 0 && (
@@ -6138,11 +6386,72 @@ const Workflow: React.FC = () => {
             )}
             
             <div className="flex-1 relative at-selector-container">
+              {/* 输入框扩大按钮 - 当输入框聚焦时显示 */}
+              {isInputFocused && (
+                <button
+                  onClick={() => setIsInputExpanded(!isInputExpanded)}
+                  className="absolute -top-8 left-1/2 transform -translate-x-1/2 z-10 p-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-all"
+                  title={isInputExpanded ? "缩小输入框" : "扩大输入框"}
+                >
+                  <ChevronUp className={`w-4 h-4 text-gray-600 dark:text-gray-400 transition-transform ${isInputExpanded ? 'rotate-180' : ''}`} />
+                </button>
+              )}
             <textarea
                 ref={inputRef}
               value={input}
                 onChange={handleInputChange}
               onKeyPress={handleKeyPress}
+              onFocus={(e) => {
+                setIsInputFocused(true);
+                // 保留原有的focus处理逻辑
+                if (inputRef.current) {
+                  const value = inputRef.current.value;
+                  const cursorPosition = inputRef.current.selectionStart || 0;
+                  const textBeforeCursor = value.substring(0, cursorPosition);
+                  const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+                  
+                  if (lastAtIndex !== -1) {
+                    const textAfterAt = textBeforeCursor.substring(lastAtIndex + 1);
+                    const hasSpaceOrNewline = textAfterAt.includes(' ') || textAfterAt.includes('\n');
+                    
+                    if (!hasSpaceOrNewline && selectedComponents.length === 0) {
+                      // 触发位置重新计算
+                      handleInputChange({ target: inputRef.current } as React.ChangeEvent<HTMLTextAreaElement>);
+                    }
+                  }
+                }
+              }}
+              onBlur={(e) => {
+                setIsInputFocused(false);
+                // 保留原有的blur处理逻辑
+                if (showBatchItemSelector) {
+                  return;
+                }
+                
+                if (showModuleSelector) {
+                  return;
+                }
+                
+                if (!showAtSelector) {
+                  return;
+                }
+                
+                if (blurTimeoutRef.current) {
+                  clearTimeout(blurTimeoutRef.current);
+                  blurTimeoutRef.current = null;
+                }
+                
+                blurTimeoutRef.current = setTimeout(() => {
+                  const activeElement = document.activeElement;
+                  const isFocusInSelector = activeElement?.closest('.at-selector-container');
+                  
+                  if (!isFocusInSelector) {
+                    setShowAtSelector(false);
+                  }
+                  
+                  blurTimeoutRef.current = null;
+                }, 300);
+              }}
               onPaste={(e) => {
                 // 检查粘贴板中是否有图片
                 const items = e.clipboardData?.items;
@@ -6266,25 +6575,6 @@ const Workflow: React.FC = () => {
                     blurTimeoutRef.current = null;
                   }, 300); // 增加延迟时间
                 }}
-                onFocus={() => {
-                  // 如果输入框获得焦点且当前有@符号，显示选择器
-                  if (inputRef.current) {
-                    const value = inputRef.current.value;
-                    const cursorPosition = inputRef.current.selectionStart || 0;
-                    const textBeforeCursor = value.substring(0, cursorPosition);
-                    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
-                    
-                    if (lastAtIndex !== -1) {
-                      const textAfterAt = textBeforeCursor.substring(lastAtIndex + 1);
-                      const hasSpaceOrNewline = textAfterAt.includes(' ') || textAfterAt.includes('\n');
-                      
-                      if (!hasSpaceOrNewline && selectedComponents.length === 0) {
-                        // 触发位置重新计算
-                        handleInputChange({ target: inputRef.current } as React.ChangeEvent<HTMLTextAreaElement>);
-                      }
-                    }
-                  }
-                }}
               placeholder={
                 editingMessageId
                   ? '编辑消息...'
@@ -6294,7 +6584,12 @@ const Workflow: React.FC = () => {
                     ? `输入你的任务，我可以使用 ${totalTools} 个工具帮助你完成... (输入 @ 选择感知组件)`
                     : '输入你的问题，我会尽力帮助你... (输入 @ 选择感知组件，输入 / 引用爬虫数据)'
               }
-                className="flex-1 input-field resize-none text-sm w-full transition-all duration-200"
+                className={`flex-1 input-field resize-none w-full transition-all duration-200 ${
+                  isInputExpanded 
+                    ? 'min-h-[300px] max-h-[500px]' 
+                    : 'min-h-[80px] max-h-[200px]'
+                }`}
+              style={{ fontSize: '15px', lineHeight: '1.6' }}
               rows={3}
               disabled={isLoading || !selectedLLMConfig}
             />
@@ -6494,43 +6789,6 @@ const Workflow: React.FC = () => {
               )}
             </div>
             <div className="flex items-center justify-between pt-3 border-t border-gray-200 dark:border-gray-700">
-              {/* 左侧：快捷操作按钮 */}
-              <div className="flex items-center space-x-2">
-                {/* 图片/视频上传按钮 */}
-                <label className="cursor-pointer p-2.5 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-all duration-200" title="上传图片或视频">
-                  <Paperclip className="w-5 h-5" />
-                  <input
-                    type="file"
-                    accept="image/*,video/*"
-                    multiple
-                    className="hidden"
-                    onChange={(e) => {
-                      const files = Array.from(e.target.files || []);
-                      files.forEach(file => {
-                        const reader = new FileReader();
-                        reader.onload = (event) => {
-                          const result = event.target?.result as string;
-                          // 移除 data URL 前缀，只保留 base64 数据
-                          const base64Data = result.includes(',') ? result.split(',')[1] : result;
-                          const mimeType = file.type;
-                          const type = mimeType.startsWith('image/') ? 'image' : 'video';
-                          
-                          setAttachedMedia(prev => [...prev, {
-                            type,
-                            mimeType,
-                            data: base64Data,
-                            preview: result, // 用于预览
-                          }]);
-                        };
-                        reader.readAsDataURL(file);
-                      });
-                      // 清空 input，允许重复选择同一文件
-                      e.target.value = '';
-                    }}
-                  />
-                </label>
-              </div>
-              
               {/* 右侧：发送按钮 */}
               <button
                 onClick={handleSend}
@@ -6551,7 +6809,7 @@ const Workflow: React.FC = () => {
           
           {/* 底部工具栏：人设 + Thinking 开关 + Token 计数 - 优化布局 */}
           <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
-            {/* 左侧：帮助图标 + 人设 + Thinking 模式开关 */}
+            {/* 左侧：帮助图标 + MCP/Workflow缩略图标 + 人设 + Thinking 模式开关 */}
             <div className="flex items-center space-x-2">
               {/* 帮助问号图标 */}
               <div className="relative">
@@ -6593,6 +6851,24 @@ const Workflow: React.FC = () => {
                   </>
                 )}
               </div>
+
+              {/* MCP、Workflow、技能包、附件缩略图标 - Tag样式 */}
+              <ComponentThumbnails
+                mcpServers={mcpServers}
+                workflows={workflows}
+                skillPacks={allSkillPacks}
+                selectedMcpServerIds={selectedMcpServerIds}
+                selectedWorkflowIds={selectedWorkflowIds}
+                selectedSkillPackIds={selectedSkillPackIds}
+                connectedMcpServerIds={connectedMcpServerIds}
+                onSelectMCP={handleSelectMCPFromThumbnail}
+                onDeselectMCP={handleDeselectMCPFromThumbnail}
+                onSelectWorkflow={handleSelectWorkflowFromThumbnail}
+                onDeselectWorkflow={handleDeselectWorkflowFromThumbnail}
+                onSelectSkillPack={handleSelectSkillPackFromThumbnail}
+                onDeselectSkillPack={handleDeselectSkillPackFromThumbnail}
+                onAttachFile={handleAttachFile}
+              />
               
               {/* 人设按钮 */}
               {currentSessionId && (

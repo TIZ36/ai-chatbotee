@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Routes, Route, Link, useLocation } from 'react-router-dom';
-import { Brain, Plug, Workflow as WorkflowIcon, Settings, Code, Terminal, MessageCircle, Globe, Sparkles } from 'lucide-react';
+import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
+import { Brain, Plug, Workflow as WorkflowIcon, Settings, Code, Terminal, MessageCircle, Globe, Sparkles, Bot, Users } from 'lucide-react';
 import TerminalPanel from './components/TerminalPanel';
 import { setTerminalExecutor } from './utils/terminalExecutor';
 import SettingsPanel from './components/SettingsPanel';
@@ -10,6 +10,8 @@ import WorkflowEditor from './components/WorkflowEditor';
 import Workflow from './components/Workflow';
 import CrawlerConfigPage from './components/CrawlerConfigPage';
 import AgentsPage from './components/AgentsPage';
+import SessionSidebar from './components/SessionSidebar';
+import RoundTableChat from './components/RoundTableChat';
 
 // 导航项组件 - 带动画和tooltip
 interface NavItemProps {
@@ -67,9 +69,12 @@ interface Settings {
 
 const App: React.FC = () => {
   const location = useLocation();
-  const [isTerminalOpen, setIsTerminalOpen] = useState(true);
+  const navigate = useNavigate();
+  const [isTerminalOpen, setIsTerminalOpen] = useState(false);
   const [, setTerminalState] = useState({ isMinimized: false, isMaximized: false });
   const terminalExecuteCommandRef = React.useRef<((command: string) => void) | null>(null);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [selectedRoundTableId, setSelectedRoundTableId] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(() => {
     const saved = localStorage.getItem('settings');
     if (saved) {
@@ -104,28 +109,110 @@ const App: React.FC = () => {
     setSettings(prev => ({ ...prev, ...newSettings }));
   };
 
-  const getContainerClasses = () => {
-    if (isTerminalOpen) {
-      return 'container-responsive';
+  const handleSelectSession = (sessionId: string) => {
+    setSelectedSessionId(sessionId);
+    // 如果当前不在聊天页面，导航到聊天页面
+    if (location.pathname !== '/') {
+      navigate('/');
+    }
+  };
+
+  // 配置会话（打开配置对话框）
+  const handleConfigSession = (sessionId: string) => {
+    setSelectedSessionId(sessionId);
+    // 导航到聊天页面并触发配置对话框
+    if (location.pathname !== '/') {
+      navigate(`/?config=${sessionId}`);
     } else {
-      return 'w-full px-3 sm:px-4 lg:px-6';
+      // 如果已经在聊天页面，通过URL参数触发
+      navigate(`/?config=${sessionId}`, { replace: true });
+    }
+  };
+
+  const handleNewSession = () => {
+    // 新会话创建后的回调
+  };
+
+  const handleSelectRoundTable = (roundTableId: string) => {
+    setSelectedRoundTableId(roundTableId);
+    // 导航到圆桌会议页面（使用agents页面）
+    navigate('/agents');
+  };
+
+  // 判断是否显示terminal独占页面
+  const isTerminalPage = location.pathname === '/terminal';
+  
+  // 判断是否为聊天页面
+  const isChatPage = location.pathname === '/';
+  
+  // 圆桌模式状态
+  const [isRoundTableMode, setIsRoundTableMode] = useState(false);
+  const [currentRoundTableId, setCurrentRoundTableId] = useState<string | null>(null);
+
+  const handleToggleRoundTable = async () => {
+    if (!isRoundTableMode) {
+      // 切换到圆桌模式
+      setIsRoundTableMode(true);
+      // 如果没有当前圆桌会议，创建一个新的
+      if (!currentRoundTableId) {
+        try {
+          const { createRoundTable } = await import('./services/roundTableApi');
+          const newTable = await createRoundTable();
+          setCurrentRoundTableId(newTable.round_table_id);
+        } catch (error) {
+          console.error('Failed to create round table:', error);
+        }
+      }
+    } else {
+      // 退出圆桌模式
+      setIsRoundTableMode(false);
+      setCurrentRoundTableId(null);
+    }
+  };
+
+  const handleAddToRoundTable = async (sessionId: string) => {
+    // 添加到圆桌会议的逻辑
+    if (!currentRoundTableId) {
+      // 如果没有当前圆桌会议，创建一个新的
+      try {
+        const { createRoundTable, addParticipant } = await import('./services/roundTableApi');
+        const newTable = await createRoundTable();
+        setCurrentRoundTableId(newTable.round_table_id);
+        // 添加参与者
+        await addParticipant(newTable.round_table_id, sessionId);
+      } catch (error) {
+        console.error('Failed to add to round table:', error);
+      }
+    } else {
+      // 添加参与者到现有圆桌会议
+      try {
+        const { addParticipant } = await import('./services/roundTableApi');
+        await addParticipant(currentRoundTableId, sessionId);
+      } catch (error) {
+        console.error('Failed to add participant:', error);
+      }
     }
   };
 
   return (
     <div className="h-screen bg-gray-50 dark:bg-gray-950 flex transition-colors duration-300 overflow-hidden">
-      {/* 左侧导航栏 - 优化版 */}
-      <nav className="w-[72px] bg-white dark:bg-gray-900 shadow-sm border-r border-gray-200 dark:border-gray-800 flex flex-col items-center pb-6 flex-shrink-0 z-50">
-        {/* macOS 窗口拖动区域 & 顶部占位 */}
-        <div className="w-full h-[52px] flex-shrink-0 app-drag" />
+      {/* 中间导航栏 */}
+      <nav className="w-[72px] bg-white dark:bg-gray-900 shadow-sm border-r border-gray-200 dark:border-gray-800 flex flex-col items-center flex-shrink-0 z-50">
 
-        {/* 主要功能导航 */}
-        <div className="flex flex-col items-center space-y-2 w-full px-2 app-no-drag overflow-y-auto hide-scrollbar">
+        {/* 上方导航：聊天、MCP、Workflow */}
+        <div className="flex flex-col items-center space-y-2 w-full px-2 app-no-drag">
           <NavItem
             to="/"
-            icon={<MessageCircle className="w-[22px] h-[22px]" strokeWidth={2} />}
-            title="大语言模型聊天模式"
+            icon={<Bot className="w-[22px] h-[22px]" strokeWidth={2} />}
+            title="聊天"
             isActive={location.pathname === '/'}
+          />
+
+          <NavItem
+            to="/mcp-config"
+            icon={<Plug className="w-[22px] h-[22px]" strokeWidth={2} />}
+            title="MCP配置"
+            isActive={location.pathname === '/mcp-config'}
           />
 
           <NavItem
@@ -134,13 +221,6 @@ const App: React.FC = () => {
             title="工作流编辑器"
             isActive={location.pathname === '/workflow-editor'}
           />
-
-          <NavItem
-            to="/agents"
-            icon={<Sparkles className="w-[22px] h-[22px]" strokeWidth={2} />}
-            title="智能体"
-            isActive={location.pathname === '/agents'}
-          />
         </div>
         
         <div className="flex-1 app-drag" />
@@ -148,7 +228,7 @@ const App: React.FC = () => {
         {/* 分隔线 */}
         <div className="w-8 h-px bg-gray-200 dark:bg-gray-700 my-2 app-no-drag" />
         
-        {/* 配置和工具导航 */}
+        {/* 下方导航：设置、模型录入及其他功能 */}
         <div className="flex flex-col items-center space-y-2 w-full px-2 app-no-drag flex-shrink-0 mb-2">
           <NavItem
             to="/settings"
@@ -165,41 +245,33 @@ const App: React.FC = () => {
           />
 
           <NavItem
-            to="/mcp-config"
-            icon={<Plug className="w-[22px] h-[22px]" strokeWidth={2} />}
-            title="MCP配置"
-            isActive={location.pathname === '/mcp-config'}
-          />
-
-          <NavItem
             to="/crawler-config"
             icon={<Globe className="w-[22px] h-[22px]" strokeWidth={2} />}
             title="爬虫配置"
             isActive={location.pathname === '/crawler-config'}
           />
           
-          {/* 终端切换按钮 - 增强版 */}
+          {/* 终端按钮 - 点击时独占右侧 */}
           <div className="relative group">
-            <button
-              onClick={() => setIsTerminalOpen(!isTerminalOpen)}
+            <Link
+              to="/terminal"
               className={`
                 w-11 h-11 flex items-center justify-center rounded-xl 
                 transition-all duration-300 ease-out relative
-                ${isTerminalOpen
+                ${isTerminalPage
                   ? 'bg-primary-600 text-white shadow-lg shadow-primary-600/30 scale-105' 
                   : 'text-gray-400 dark:text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-800/60 hover:text-gray-900 dark:hover:text-gray-200 hover:scale-105'
                 }
               `}
-              onMouseEnter={() => {}}
-              title={isTerminalOpen ? '隐藏终端' : '显示终端'}
+              title="终端"
             >
-              <div className={`transition-transform duration-300 ${isTerminalOpen ? 'scale-110' : 'group-hover:scale-110'}`}>
+              <div className={`transition-transform duration-300 ${isTerminalPage ? 'scale-110' : 'group-hover:scale-110'}`}>
                 <Terminal className="w-[22px] h-[22px]" strokeWidth={2} />
               </div>
-              {isTerminalOpen && (
+              {isTerminalPage && (
                 <div className="absolute inset-0 rounded-xl bg-primary-600/20 animate-pulse-soft" />
               )}
-            </button>
+            </Link>
           </div>
 
           {/* DevTools 按钮 - 增强版 */}
@@ -227,64 +299,126 @@ const App: React.FC = () => {
         </div>
       </nav>
 
-      {/* 主要内容 */}
+      {/* 主要内容区域 - 全屏显示 */}
       <main className="flex flex-col flex-1 min-h-0 transition-all duration-300 relative overflow-hidden bg-gray-50 dark:bg-gray-950">
-{/* macOS 窗口拖动区域 - 顶部标题栏 */}
-<div className="h-[52px] w-full app-drag flex-shrink-0 bg-gray-50 dark:bg-gray-950" />
         
-        <div className="flex flex-1 min-h-0 min-w-0">
-          {/* 左侧内容区域 - 优化容器 */}
+        {isTerminalPage ? (
+          /* Terminal 独占页面 */
           <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
-            <div className="flex-1 overflow-hidden min-w-0 flex flex-col relative">
-              <div className={`h-full flex flex-col page-transition-enter`}>
-                <Routes>
-                  {/* 工作流聊天界面 */}
-                  <Route path="/" element={<Workflow />} />
-
-                  {/* 工作流编辑器 */}
-                  <Route path="/workflow-editor" element={<WorkflowEditor />} />
-
-                  {/* LLM配置页面 */}
-                  <Route path="/llm-config" element={<LLMConfigPanel />} />
-
-                  {/* MCP配置页面 */}
-                  <Route path="/mcp-config" element={<MCPConfig />} />
-
-                  {/* 爬虫配置页面 */}
-                  <Route path="/crawler-config" element={<CrawlerConfigPage />} />
-
-                  {/* 智能体页面 */}
-                  <Route path="/agents" element={<AgentsPage />} />
-
-                  {/* 设置页面 */}
-                  <Route path="/settings" element={
-                    <SettingsPanel
-                      settings={settings}
-                      onUpdateSettings={updateSettings}
-                    />
-                  } />
-                </Routes>
-              </div>
+            <TerminalPanel
+              isOpen={true}
+              onClose={() => navigate('/')}
+              onStateChange={(isMinimized, isMaximized) => {
+                setTerminalState({ isMinimized, isMaximized });
+              }}
+              onExecuteCommandReady={(executeCommand) => {
+                terminalExecuteCommandRef.current = executeCommand;
+                setTerminalExecutor(executeCommand);
+              }}
+            />
+          </div>
+        ) : isChatPage ? (
+          /* 聊天页面 - 左右布局 */
+          <div className="flex flex-1 min-h-0 min-w-0">
+            {/* 左侧会话列表 */}
+            <SessionSidebar
+              selectedSessionId={selectedSessionId}
+              onSelectSession={handleSelectSession}
+              onNewSession={handleNewSession}
+              isRoundTableMode={isRoundTableMode}
+              onAddToRoundTable={handleAddToRoundTable}
+              onConfigSession={handleConfigSession}
+            />
+            
+            {/* 中间会议按钮 */}
+            <div className="w-1 flex items-center justify-center bg-gray-100 dark:bg-gray-800 relative group">
+              <button
+                onClick={handleToggleRoundTable}
+                className={`
+                  absolute left-1/2 -translate-x-1/2 w-8 h-16 rounded-r-lg transition-all
+                  ${isRoundTableMode
+                    ? 'bg-primary-600 text-white shadow-lg'
+                    : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-primary-100 dark:hover:bg-primary-900/20'
+                  }
+                `}
+                title={isRoundTableMode ? '退出圆桌会议' : '进入圆桌会议'}
+              >
+                <Users className="w-4 h-4 mx-auto" />
+              </button>
+            </div>
+            
+            {/* 右侧聊天区域 */}
+            <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
+              {isRoundTableMode ? (
+                /* 圆桌聊天 */
+                <RoundTableChat
+                  roundTableId={currentRoundTableId}
+                  onRoundTableChange={setCurrentRoundTableId}
+                />
+              ) : (
+                /* 普通聊天 */
+                <Workflow sessionId={selectedSessionId} />
+              )}
             </div>
           </div>
+        ) : (
+          <div className="flex flex-1 min-h-0 min-w-0">
+            {/* 主内容区域 - 全屏 */}
+            <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
+              <div className="flex-1 overflow-hidden min-w-0 flex flex-col relative">
+                <div className={`h-full flex flex-col page-transition-enter`}>
+                  <Routes>
+                    {/* 工作流聊天界面 - 全屏显示 */}
+                    <Route path="/" element={<Workflow sessionId={selectedSessionId} />} />
 
-          {/* 右侧终端区域 - 带动画 - 优化布局 */}
-          {isTerminalOpen && (
-            <div className="w-[45%] min-w-[400px] flex flex-col min-h-0 min-w-0 border-l border-gray-200 dark:border-gray-800 bg-gray-900 flex-shrink-0 slide-in-right shadow-lg">
-              <TerminalPanel
-                isOpen={true}
-                onClose={() => setIsTerminalOpen(false)}
-                onStateChange={(isMinimized, isMaximized) => {
-                  setTerminalState({ isMinimized, isMaximized });
-                }}
-                onExecuteCommandReady={(executeCommand) => {
-                  terminalExecuteCommandRef.current = executeCommand;
-                  setTerminalExecutor(executeCommand);
-                }}
-              />
+                    {/* 工作流编辑器 */}
+                    <Route path="/workflow-editor" element={<WorkflowEditor />} />
+
+                    {/* LLM配置页面 */}
+                    <Route path="/llm-config" element={<LLMConfigPanel />} />
+
+                    {/* MCP配置页面 */}
+                    <Route path="/mcp-config" element={<MCPConfig />} />
+
+                    {/* 爬虫配置页面 */}
+                    <Route path="/crawler-config" element={<CrawlerConfigPage />} />
+
+                  {/* 智能体页面 */}
+                  <Route path="/agents" element={<AgentsPage selectedRoundTableId={selectedRoundTableId} />} />
+
+                  {/* Terminal 页面 */}
+                  <Route path="/terminal" element={<div />} />
+
+                    {/* 设置页面 */}
+                    <Route path="/settings" element={
+                      <SettingsPanel
+                        settings={settings}
+                        onUpdateSettings={updateSettings}
+                      />
+                    } />
+                  </Routes>
+                </div>
+              </div>
             </div>
-          )}
-        </div>
+
+            {/* 右侧终端区域 - 带动画 - 优化布局（仅在非terminal页面且isTerminalOpen时显示） */}
+            {isTerminalOpen && !isTerminalPage && (
+              <div className="w-[45%] min-w-[400px] flex flex-col min-h-0 min-w-0 border-l border-gray-200 dark:border-gray-800 bg-gray-900 flex-shrink-0 slide-in-right shadow-lg">
+                <TerminalPanel
+                  isOpen={true}
+                  onClose={() => setIsTerminalOpen(false)}
+                  onStateChange={(isMinimized, isMaximized) => {
+                    setTerminalState({ isMinimized, isMaximized });
+                  }}
+                  onExecuteCommandReady={(executeCommand) => {
+                    terminalExecuteCommandRef.current = executeCommand;
+                    setTerminalExecutor(executeCommand);
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        )}
       </main>
     </div>
   );

@@ -27,7 +27,11 @@ import {
 } from '../services/roundTableApi';
 import RoundTablePanel from './RoundTablePanel';
 
-const AgentsPage: React.FC = () => {
+interface AgentsPageProps {
+  selectedRoundTableId?: string | null;
+}
+
+const AgentsPage: React.FC<AgentsPageProps> = ({ selectedRoundTableId }) => {
   const navigate = useNavigate();
   
   // 智能体列表状态
@@ -93,6 +97,17 @@ const AgentsPage: React.FC = () => {
     loadLLMConfigs();
     loadRoundTables();
   }, []);
+
+  // 监听外部传入的selectedRoundTableId，自动选中圆桌会议
+  useEffect(() => {
+    if (selectedRoundTableId && roundTables.length > 0) {
+      const roundTable = roundTables.find(rt => rt.round_table_id === selectedRoundTableId);
+      if (roundTable) {
+        handleSelectRoundTable(selectedRoundTableId);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRoundTableId, roundTables]);
 
   // 删除智能体
   const handleDeleteAgent = async (sessionId: string, e: React.MouseEvent) => {
