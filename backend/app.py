@@ -4730,6 +4730,7 @@ def list_sessions():
                     s.llm_config_id,
                     s.avatar,
                     s.system_prompt,
+                    s.media_output_path,
                     s.session_type,
                     s.created_at,
                     s.updated_at,
@@ -4766,6 +4767,7 @@ def list_sessions():
                     'llm_config_id': row['llm_config_id'],
                     'avatar': row['avatar'],
                     'system_prompt': row.get('system_prompt'),  # 人设
+                    'media_output_path': row.get('media_output_path'),  # 多媒体保存地址
                     'session_type': row.get('session_type', 'memory'),  # 会话类型
                     'created_at': row['created_at'].isoformat() if row['created_at'] else None,
                     'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,

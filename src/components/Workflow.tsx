@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { Send, Loader, Bot, User, Wrench, AlertCircle, CheckCircle, Brain, Plug, RefreshCw, Power, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Plus, History, Sparkles, Workflow as WorkflowIcon, GripVertical, Play, ArrowRight, Trash2, X, Edit2, RotateCw, Database, Paperclip, Type, Image, Video, Music, HelpCircle, Package, CheckSquare, Square } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -12,7 +13,7 @@ import { LLMClient, LLMMessage } from '../services/llmClient';
 import { getLLMConfigs, getLLMConfig, getLLMConfigApiKey, LLMConfigFromDB } from '../services/llmApi';
 import { mcpManager, MCPServer, MCPTool } from '../services/mcpClient';
 import { getMCPServers, MCPServerConfig } from '../services/mcpApi';
-import { getSessions, createSession, getSessionMessages, saveMessage, summarizeSession, getSessionSummaries, deleteSession, clearSummarizeCache, deleteMessage, executeMessageComponent, updateSessionAvatar, updateSessionName, updateSessionSystemPrompt, upgradeToAgent, Session, Summary } from '../services/sessionApi';
+import { getSessions, createSession, getSessionMessages, saveMessage, summarizeSession, getSessionSummaries, deleteSession, clearSummarizeCache, deleteMessage, executeMessageComponent, updateSessionAvatar, updateSessionName, updateSessionSystemPrompt, updateSessionMediaOutputPath, upgradeToAgent, Session, Summary } from '../services/sessionApi';
 import { createSkillPack, saveSkillPack, optimizeSkillPackSummary, getSkillPacks, getSessionSkillPacks, assignSkillPack, unassignSkillPack, SkillPack, SessionSkillPack, SkillPackCreationResult, SkillPackProcessInfo } from '../services/skillPackApi';
 import { estimate_messages_tokens, get_model_max_tokens, estimate_tokens } from '../services/tokenCounter';
 import { getWorkflows, getWorkflow, Workflow as WorkflowType, WorkflowNode, WorkflowConnection } from '../services/workflowApi';
@@ -68,6 +69,7 @@ interface SessionListItemProps {
   onDelete: (e: React.MouseEvent) => void;
   onUpdateName: (name: string) => Promise<void>;
   onUpdateAvatar: (avatar: string) => Promise<void>;
+  onConfigSaved?: () => Promise<Session | null>; // 配置保存后的回调，用于刷新会话列表，返回更新后的会话数据
 }
 
 const SessionListItem: React.FC<SessionListItemProps> = ({
@@ -79,12 +81,19 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
   onDelete,
   onUpdateName,
   onUpdateAvatar,
+  onConfigSaved,
 }) => {
   const [showEditDialog, setShowEditDialog] = useState(false);
+  const [showConfigDialog, setShowConfigDialog] = useState(false); // 会话配置对话框（包含头像、昵称、人设、技能包、多媒体保存地址）
   const [editName, setEditName] = useState(session.name || '');
   const [editAvatar, setEditAvatar] = useState<string | null>(avatarUrl);
+  const [editSystemPrompt, setEditSystemPrompt] = useState(session.system_prompt || '');
+  const [editMediaOutputPath, setEditMediaOutputPath] = useState(session.media_output_path || '');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const configFileInputRef = useRef<HTMLInputElement>(null); // 配置对话框的文件输入
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingConfig, setIsSavingConfig] = useState(false); // 配置保存状态
+  const [activeConfigTab, setActiveConfigTab] = useState<'basic' | 'skillpack' | 'media'>('basic'); // 配置对话框的标签页
   
   // 技能包管理状态
   const [showSkillPackTab, setShowSkillPackTab] = useState(false);
@@ -109,8 +118,42 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
     }
   };
 
-  const handleAvatarClick = (e: React.MouseEvent) => {
+  // 点击头像弹出完整配置对话框
+  const handleAvatarClick = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    // 如果提供了刷新回调，先刷新会话数据以确保获取最新值（例如从圆桌面板修改的配置）
+    let currentSession = session;
+    if (onConfigSaved) {
+      const updatedSession = await onConfigSaved();
+      // 如果返回了更新后的会话数据，使用它；否则使用当前的 session prop
+      if (updatedSession) {
+        currentSession = updatedSession;
+      }
+    }
+    // 从最新的会话数据加载值
+    setEditName(currentSession.name || '');
+    setEditAvatar(currentSession.avatar || null);
+    setEditSystemPrompt(currentSession.system_prompt || '');
+    setEditMediaOutputPath(currentSession.media_output_path || '');
+    setActiveConfigTab('basic');
+    loadSkillPacks();
+    setShowConfigDialog(true);
+  };
+
+  // 当 session prop 变化时，同步更新编辑状态（如果对话框已打开）
+  // 这确保当父组件刷新会话列表后，对话框中的值也会更新
+  useEffect(() => {
+    if (showConfigDialog) {
+      setEditName(session.name || '');
+      setEditAvatar(session.avatar || null);
+      setEditSystemPrompt(session.system_prompt || '');
+      setEditMediaOutputPath(session.media_output_path || '');
+    }
+  }, [session.name, session.avatar, session.system_prompt, session.media_output_path, showConfigDialog]);
+
+  // 打开完整编辑对话框（通过其他方式触发，如右键菜单等）
+  const handleOpenFullEditDialog = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
     setShowEditDialog(true);
     setEditName(session.name || '');
     setEditAvatar(avatarUrl);
@@ -480,6 +523,293 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
           </div>
         </div>
       )}
+
+      {/* 会话配置对话框 - 使用 Portal 渲染到 body 下，确保在主界面中心显示 */}
+      {showConfigDialog && createPortal(
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]" onClick={() => setShowConfigDialog(false)}>
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between flex-shrink-0">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                配置会话
+              </h3>
+              <button
+                onClick={() => setShowConfigDialog(false)}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* 标签页 */}
+            <div className="flex border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+              <button
+                onClick={() => setActiveConfigTab('basic')}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  activeConfigTab === 'basic'
+                    ? 'border-primary-500 text-primary-600 dark:text-primary-400'
+                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                }`}
+              >
+                基本信息
+              </button>
+              <button
+                onClick={() => {
+                  setActiveConfigTab('skillpack');
+                  loadSkillPacks();
+                }}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  activeConfigTab === 'skillpack'
+                    ? 'border-primary-500 text-primary-600 dark:text-primary-400'
+                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                }`}
+              >
+                技能包
+              </button>
+              <button
+                onClick={() => setActiveConfigTab('media')}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  activeConfigTab === 'media'
+                    ? 'border-primary-500 text-primary-600 dark:text-primary-400'
+                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                }`}
+              >
+                多媒体设置
+              </button>
+            </div>
+
+            {/* 内容区域 */}
+            <div className="flex-1 overflow-y-auto p-5">
+              {activeConfigTab === 'basic' && (
+                <div className="space-y-4">
+                  {/* 头像配置 */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      头像
+                    </label>
+                    <div className="flex items-center space-x-4">
+                      <div className="relative">
+                        <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-gray-200 dark:border-gray-700 flex items-center justify-center bg-gray-100 dark:bg-gray-700">
+                          {editAvatar ? (
+                            <img src={editAvatar} alt="Avatar" className="w-full h-full object-cover" />
+                          ) : (
+                            <Bot className="w-10 h-10 text-gray-400" />
+                          )}
+                        </div>
+                        <input
+                          ref={configFileInputRef}
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            if (!file.type.startsWith('image/')) {
+                              alert('请选择图片文件');
+                              return;
+                            }
+                            if (file.size > 2 * 1024 * 1024) {
+                              alert('图片大小不能超过 2MB');
+                              return;
+                            }
+                            const reader = new FileReader();
+                            reader.onload = (event) => {
+                              setEditAvatar(event.target?.result as string);
+                            };
+                            reader.readAsDataURL(file);
+                          }}
+                        />
+                      </div>
+                      <div className="flex flex-col space-y-2">
+                        <button
+                          onClick={() => configFileInputRef.current?.click()}
+                          className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded transition-colors"
+                        >
+                          选择图片
+                        </button>
+                        {editAvatar && (
+                          <button
+                            onClick={() => setEditAvatar(null)}
+                            className="px-3 py-1.5 text-sm bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50 text-red-700 dark:text-red-400 rounded transition-colors"
+                          >
+                            清除头像
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                      支持 JPG、PNG 等格式，建议大小不超过 2MB
+                    </p>
+                  </div>
+
+                  {/* 昵称配置 */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      昵称
+                    </label>
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-400"
+                      placeholder="输入会话昵称（留空则使用默认名称）"
+                    />
+                  </div>
+
+                  {/* 人设配置 */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      人设
+                    </label>
+                    <textarea
+                      value={editSystemPrompt}
+                      onChange={(e) => setEditSystemPrompt(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-400 resize-none"
+                      rows={6}
+                      placeholder="输入系统提示词（人设），用于定义AI的角色和行为..."
+                    />
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      人设定义了AI的角色、风格和行为特征
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {activeConfigTab === 'skillpack' && (
+                <div className="space-y-4">
+                  {isLoadingSkillPacks ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader className="w-6 h-6 animate-spin text-primary-500" />
+                    </div>
+                  ) : (
+                    <>
+                      <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                        为{session.session_type === 'agent' ? '智能体' : '记忆体'}分配技能包
+                      </div>
+                      {allSkillPacks.length === 0 ? (
+                        <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                          暂无技能包，请在聊天界面创建技能包
+                        </div>
+                      ) : (
+                        <div className="space-y-2 max-h-96 overflow-y-auto">
+                          {allSkillPacks.map((pack) => {
+                            const isAssigned = sessionSkillPacks.some(
+                              sp => sp.skill_pack_id === pack.skill_pack_id
+                            );
+                            return (
+                              <div
+                                key={pack.skill_pack_id}
+                                className={`flex items-start space-x-3 p-3 rounded-lg border ${
+                                  isAssigned
+                                    ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-200 dark:border-primary-700'
+                                    : 'bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-600'
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isAssigned}
+                                  onChange={() => toggleSkillPackAssignment(pack.skill_pack_id, isAssigned)}
+                                  className="mt-1 w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-medium text-sm text-gray-900 dark:text-white">
+                                    {pack.name}
+                                  </div>
+                                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">
+                                    {pack.summary}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {activeConfigTab === 'media' && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      多媒体保存地址
+                    </label>
+                    <input
+                      type="text"
+                      value={editMediaOutputPath}
+                      onChange={(e) => setEditMediaOutputPath(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-400"
+                      placeholder="输入本地路径，例如：/Users/username/Documents/media 或 C:\Users\username\Documents\media"
+                    />
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      设置图片、视频、音频等多媒体文件的保存路径。留空则使用默认路径。
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 底部按钮 */}
+            <div className="px-5 py-4 bg-gray-50 dark:bg-gray-900/50 flex items-center justify-end space-x-3 flex-shrink-0">
+              <button
+                onClick={() => setShowConfigDialog(false)}
+                className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100"
+              >
+                取消
+              </button>
+              <button
+                onClick={async () => {
+                  setIsSavingConfig(true);
+                  try {
+                    // 保存所有配置
+                    const promises: Promise<void>[] = [];
+                    
+                    if (editName !== (session.name || '')) {
+                      promises.push(onUpdateName(editName.trim()));
+                    }
+                    
+                    if (editAvatar !== avatarUrl) {
+                      promises.push(onUpdateAvatar(editAvatar || ''));
+                    }
+                    
+                    if (editSystemPrompt !== (session.system_prompt || '')) {
+                      promises.push(updateSessionSystemPrompt(session.session_id, editSystemPrompt.trim() || null));
+                    }
+                    
+                    if (editMediaOutputPath !== (session.media_output_path || '')) {
+                      promises.push(updateSessionMediaOutputPath(session.session_id, editMediaOutputPath.trim() || null));
+                    }
+                    
+                    await Promise.all(promises);
+                    // 保存成功后，刷新会话列表以获取最新数据
+                    if (onConfigSaved) {
+                      await onConfigSaved();
+                    }
+                    setShowConfigDialog(false);
+                  } catch (error) {
+                    console.error('Failed to save config:', error);
+                    alert('保存配置失败，请重试');
+                  } finally {
+                    setIsSavingConfig(false);
+                  }
+                }}
+                disabled={isSavingConfig}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 flex items-center space-x-2"
+              >
+                {isSavingConfig ? (
+                  <>
+                    <Loader className="w-4 h-4 animate-spin" />
+                    <span>保存中...</span>
+                  </>
+                ) : (
+                  <span>保存</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </>
   );
 };
@@ -538,6 +868,9 @@ const Workflow: React.FC = () => {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [currentSessionAvatar, setCurrentSessionAvatar] = useState<string | null>(null); // 当前会话的头像
   const [currentSystemPrompt, setCurrentSystemPrompt] = useState<string | null>(null); // 当前会话的系统提示词（人设）
+  const [showAvatarConfigDialog, setShowAvatarConfigDialog] = useState(false); // 是否显示头像配置对话框
+  const [avatarConfigDraft, setAvatarConfigDraft] = useState<string | null>(null); // 头像配置草稿
+  const avatarConfigFileInputRef = useRef<HTMLInputElement>(null); // 头像配置对话框的文件输入
   const [isEditingSystemPrompt, setIsEditingSystemPrompt] = useState(false); // 是否正在编辑人设
   const [systemPromptDraft, setSystemPromptDraft] = useState(''); // 人设编辑草稿
   const [showHelpTooltip, setShowHelpTooltip] = useState(false); // 是否显示帮助提示
@@ -4858,6 +5191,20 @@ const Workflow: React.FC = () => {
                           setCurrentSessionAvatar(avatar || null);
                         }
                       }}
+                      onConfigSaved={async () => {
+                        // 直接从 API 获取最新数据（包括从圆桌面板修改的配置）
+                        const allSessions = await getSessions();
+                        const updatedSession = allSessions.find(s => s.session_id === session.session_id);
+                        // 更新会话列表状态
+                        setSessions(allSessions);
+                        // 如果当前会话，也更新当前会话的状态
+                        if (currentSessionId === session.session_id && updatedSession) {
+                          setCurrentSessionAvatar(updatedSession.avatar || null);
+                          setCurrentSystemPrompt(updatedSession.system_prompt || null);
+                        }
+                        // 返回更新后的会话数据，供对话框使用
+                        return updatedSession || null;
+                      }}
                     />
                       {/* 会话类型标签和升级按钮 */}
                       {sessionTypeLabel && (
@@ -5208,12 +5555,36 @@ const Workflow: React.FC = () => {
           <div className="border-b border-gray-200 dark:border-gray-700 px-6 py-3 bg-gradient-to-r from-gray-50 to-white dark:from-gray-800 dark:to-gray-900 flex-shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
-                <Bot className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              {/* 头像 - 可点击配置 */}
+              <div 
+                className="w-9 h-9 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary-400 hover:ring-offset-1 transition-all overflow-hidden"
+                onClick={() => {
+                  if (currentSessionId && !isTemporarySession) {
+                    setAvatarConfigDraft(currentSessionAvatar);
+                    setShowAvatarConfigDialog(true);
+                  }
+                }}
+                title={currentSessionId && !isTemporarySession ? "点击配置头像" : "请先选择或创建会话"}
+              >
+                {currentSessionAvatar ? (
+                  <img src={currentSessionAvatar} alt="Avatar" className="w-full h-full object-cover" />
+                ) : (
+                  <Bot className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                )}
               </div>
               <div>
-                <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 block">AI 工作流助手</span>
-                <span className="text-xs text-gray-500 dark:text-gray-400">智能对话与任务处理</span>
+                <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 block">
+                  {(() => {
+                    const currentSession = sessions.find(s => s.session_id === currentSessionId);
+                    if (isTemporarySession) return '临时会话';
+                    if (currentSession?.name) return currentSession.name;
+                    if (currentSession?.session_type === 'agent') return '智能体';
+                    return 'AI 工作流助手';
+                  })()}
+                </span>
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  {currentSessionId && !isTemporarySession ? '点击头像配置' : '智能对话与任务处理'}
+                </span>
               </div>
             </div>
             <div className="flex items-center space-x-2.5">
@@ -6621,6 +6992,108 @@ const Workflow: React.FC = () => {
               </div>
             );
           })()}
+
+          {/* 头像配置对话框 */}
+          {showAvatarConfigDialog && currentSessionId && !isTemporarySession && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowAvatarConfigDialog(false)}>
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-sm w-full mx-4" onClick={(e) => e.stopPropagation()}>
+                <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                    配置会话头像
+                  </h3>
+                  <button
+                    onClick={() => setShowAvatarConfigDialog(false)}
+                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="p-5 space-y-4">
+                  {/* 头像预览和上传 */}
+                  <div className="flex flex-col items-center space-y-4">
+                    <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-gray-200 dark:border-gray-700 flex items-center justify-center bg-gray-100 dark:bg-gray-700">
+                      {avatarConfigDraft ? (
+                        <img src={avatarConfigDraft} alt="Avatar" className="w-full h-full object-cover" />
+                      ) : (
+                        <Bot className="w-12 h-12 text-gray-400" />
+                      )}
+                    </div>
+                    <div className="flex items-center space-x-3">
+                      <button
+                        onClick={() => avatarConfigFileInputRef.current?.click()}
+                        className="btn-secondary text-sm"
+                      >
+                        选择图片
+                      </button>
+                      {avatarConfigDraft && (
+                        <button
+                          onClick={() => setAvatarConfigDraft(null)}
+                          className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
+                        >
+                          清除头像
+                        </button>
+                      )}
+                    </div>
+                    <input
+                      ref={avatarConfigFileInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        if (!file.type.startsWith('image/')) {
+                          alert('请选择图片文件');
+                          return;
+                        }
+                        if (file.size > 2 * 1024 * 1024) {
+                          alert('图片大小不能超过 2MB');
+                          return;
+                        }
+                        const reader = new FileReader();
+                        reader.onload = (event) => {
+                          setAvatarConfigDraft(event.target?.result as string);
+                        };
+                        reader.readAsDataURL(file);
+                      }}
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
+                    支持 JPG、PNG 等格式，建议大小不超过 2MB
+                  </p>
+                </div>
+                <div className="px-5 py-4 bg-gray-50 dark:bg-gray-900/50 flex items-center justify-end space-x-3">
+                  <button
+                    onClick={() => setShowAvatarConfigDialog(false)}
+                    className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100"
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await updateSessionAvatar(currentSessionId, avatarConfigDraft || '');
+                        setCurrentSessionAvatar(avatarConfigDraft);
+                        // 更新会话列表中的头像
+                        setSessions(prev => prev.map(s => 
+                          s.session_id === currentSessionId 
+                            ? { ...s, avatar: avatarConfigDraft || undefined }
+                            : s
+                        ));
+                        setShowAvatarConfigDialog(false);
+                      } catch (error) {
+                        console.error('Failed to update avatar:', error);
+                        alert('保存头像失败，请重试');
+                      }
+                    }}
+                    className="btn-primary text-sm"
+                  >
+                    保存
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           
           {/* 技能包制作过程对话框 */}
           {showSkillPackDialog && skillPackResult && skillPackProcessInfo && (
