@@ -1482,11 +1482,11 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
   }
   
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+    <div className="flex flex-col h-full bg-white dark:bg-[#2d2d2d] rounded-lg border border-gray-200 dark:border-[#404040] overflow-hidden">
       {/* 顶部：标题栏 + 参会者列表 */}
-      <div className="flex-shrink-0 border-b border-gray-200 dark:border-gray-700">
+      <div className="flex-shrink-0 border-b border-gray-200 dark:border-[#404040]">
         {/* 标题栏 */}
-        <div className="px-3 py-2 flex items-center justify-between border-b border-gray-100 dark:border-gray-800">
+        <div className="px-3 py-2 flex items-center justify-between border-b border-gray-100 dark:border-[#404040]">
           <div className="flex items-center space-x-2">
             <MessageCircle className="w-4 h-4 text-primary-500" />
             <span className="font-medium text-gray-900 dark:text-white text-sm">
@@ -1535,7 +1535,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
                   {/* 头像容器 - 包含头像和外部状态指示器 */}
                   <div className="relative">
                     {/* 紧凑头像 */}
-                    <div className="w-8 h-8 rounded-full overflow-hidden border-2 border-gray-200 dark:border-gray-700 flex items-center justify-center bg-purple-100 dark:bg-purple-900/30 cursor-pointer hover:border-primary-400 transition-colors">
+                    <div className="w-8 h-8 rounded-full overflow-hidden border-2 border-gray-200 dark:border-[#404040] flex items-center justify-center bg-purple-100 dark:bg-purple-900/30 cursor-pointer hover:border-primary-400 transition-colors">
                       {participant.avatar ? (
                         <img 
                           src={participant.avatar} 
@@ -1588,9 +1588,9 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
                   
                   {/* 悬浮详情卡片 */}
                   {hoveredParticipant === participant.session_id && (
-                    <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 z-50 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 p-3">
+                    <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 z-50 w-48 bg-white dark:bg-[#2d2d2d] rounded-lg shadow-lg border border-gray-200 dark:border-[#404040] p-3">
                       <div className="flex items-start space-x-2">
-                        <div className="w-10 h-10 rounded-full overflow-hidden border border-gray-200 dark:border-gray-700 flex items-center justify-center bg-purple-100 dark:bg-purple-900/30 flex-shrink-0">
+                        <div className="w-10 h-10 rounded-full overflow-hidden border border-gray-200 dark:border-[#404040] flex items-center justify-center bg-purple-100 dark:bg-purple-900/30 flex-shrink-0">
                           {participant.avatar ? (
                             <img src={participant.avatar} alt={participant.name} className="w-full h-full object-cover" />
                           ) : (
@@ -1676,7 +1676,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
           </div>
           
           {/* 输入区 */}
-          <div className="p-3 border-t border-gray-200 dark:border-gray-700">
+          <div className="p-3 border-t border-gray-200 dark:border-[#404040]">
             {/* 发言模式和能力配置 */}
             <div className="flex flex-wrap items-center gap-3 mb-2 text-xs">
               {/* 目标模式 */}
@@ -1780,7 +1780,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
           
           {/* 引用消息预览 */}
           {replyingTo && (
-            <div className="mb-2 flex items-start gap-2 p-2 bg-gray-100 dark:bg-gray-800 rounded-lg border-l-2 border-primary-500">
+            <div className="mb-2 flex items-start gap-2 p-2 bg-gray-100 dark:bg-[#2d2d2d] rounded-lg border-l-2 border-primary-500">
               <CornerDownRight className="w-4 h-4 text-primary-500 flex-shrink-0 mt-0.5" />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1 text-xs text-gray-500 mb-0.5">
@@ -1872,7 +1872,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
                 }
               }}
               placeholder={isTargetMode ? "🎯 目标式发言：描述你的目标，AI会协作完成..." : "输入消息，使用 @ 提及特定智能体，粘贴图片..."}
-              className="w-full px-3 py-2 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-gray-800 dark:text-white resize-none"
+              className="w-full px-3 py-2 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2d2d2d] dark:text-white resize-none"
               rows={2}
               disabled={isSending}
             />
@@ -1899,7 +1899,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
             
             {/* @ 提及下拉菜单 */}
             {showMentionDropdown && roundTable.participants.length > 0 && (
-              <div className="absolute bottom-full left-0 mb-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-40 overflow-y-auto z-10">
+              <div className="absolute bottom-full left-0 mb-1 w-48 bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] rounded-lg shadow-lg max-h-40 overflow-y-auto z-10">
                 {getFilteredParticipants().length === 0 ? (
                   <div className="px-3 py-2 text-sm text-gray-500">无匹配的智能体</div>
                 ) : (
@@ -1913,7 +1913,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
                           : 'hover:bg-gray-100 dark:hover:bg-gray-700'
                       }`}
                     >
-                      <div className="w-6 h-6 rounded-full overflow-hidden border border-gray-200 dark:border-gray-700 flex items-center justify-center bg-purple-100 dark:bg-purple-900/30 flex-shrink-0">
+                      <div className="w-6 h-6 rounded-full overflow-hidden border border-gray-200 dark:border-[#404040] flex items-center justify-center bg-purple-100 dark:bg-purple-900/30 flex-shrink-0">
                         {participant.avatar ? (
                           <img 
                             src={participant.avatar} 
@@ -1938,9 +1938,9 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
       
       {/* 右侧工具边栏 */}
       {showToolsSidebar && (enableMCP || enableWorkflow) && (
-        <div className="w-56 flex-shrink-0 border-l border-gray-200 dark:border-gray-700 flex flex-col bg-gray-50 dark:bg-gray-800/50">
+        <div className="w-56 flex-shrink-0 border-l border-gray-200 dark:border-[#404040] flex flex-col bg-gray-50 dark:bg-[#2d2d2d]/50">
           {/* 边栏头部 */}
-          <div className="p-2 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+          <div className="p-2 border-b border-gray-200 dark:border-[#404040] flex items-center justify-between">
             <div className="flex items-center space-x-1.5">
               <Wrench className="w-4 h-4 text-primary-500" />
               <span className="text-xs font-medium text-gray-900 dark:text-white">工具箱</span>
@@ -1975,7 +1975,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
                     return (
                       <div 
                         key={serverId}
-                        className="p-1.5 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 hover:border-green-300 dark:hover:border-green-700 transition-colors"
+                        className="p-1.5 bg-white dark:bg-[#2d2d2d] rounded border border-gray-200 dark:border-[#404040] hover:border-green-300 dark:hover:border-green-700 transition-colors"
                       >
                         <div className="flex items-center space-x-1.5">
                           <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 ${
@@ -2021,7 +2021,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
             
             {/* 工作流 */}
             {enableWorkflow && workflows.length > 0 && (
-              <div className="p-2 border-t border-gray-200 dark:border-gray-700">
+              <div className="p-2 border-t border-gray-200 dark:border-[#404040]">
                 <div className="flex items-center space-x-1 mb-2">
                   <Zap className="w-3 h-3 text-blue-500" />
                   <span className="text-[10px] font-medium text-gray-600 dark:text-gray-400">
@@ -2032,7 +2032,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
                   {workflows.map((workflow) => (
                     <div 
                       key={workflow.workflow_id}
-                      className="p-1.5 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
+                      className="p-1.5 bg-white dark:bg-[#2d2d2d] rounded border border-gray-200 dark:border-[#404040] hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
                     >
                       <div className="flex items-center space-x-1.5">
                         <div className="w-5 h-5 rounded bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
@@ -2067,7 +2067,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
       {!showToolsSidebar && (enableMCP || enableWorkflow) && (
         <button
           onClick={() => setShowToolsSidebar(true)}
-          className="absolute right-0 top-1/2 transform -translate-y-1/2 p-1.5 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-l-lg hover:bg-gray-200 dark:hover:bg-gray-700 shadow-sm z-10"
+          className="absolute right-0 top-1/2 transform -translate-y-1/2 p-1.5 bg-gray-100 dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] rounded-l-lg hover:bg-gray-200 dark:hover:bg-gray-700 shadow-sm z-10"
           title="展开工具箱"
         >
           <ChevronLeft className="w-4 h-4 text-gray-500" />
@@ -2241,7 +2241,7 @@ const MarkdownContent: React.FC<{ content: string; className?: string }> = ({ co
               </table>
             </div>
           ),
-          thead: ({ children }: any) => <thead className="bg-gray-100 dark:bg-gray-800">{children}</thead>,
+          thead: ({ children }: any) => <thead className="bg-gray-100 dark:bg-[#2d2d2d]">{children}</thead>,
           th: ({ children }: any) => <th className="border border-gray-300 dark:border-gray-600 px-2 py-1 font-semibold text-left">{children}</th>,
           td: ({ children }: any) => <td className="border border-gray-300 dark:border-gray-600 px-2 py-1">{children}</td>,
           // 链接样式
@@ -2299,7 +2299,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   if (isSystemMessage) {
     return (
       <div className="flex justify-center">
-        <div className="px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-500 text-xs rounded-full">
+        <div className="px-3 py-1 bg-gray-100 dark:bg-[#2d2d2d] text-gray-500 text-xs rounded-full">
           {message.content}
         </div>
       </div>
@@ -2313,7 +2313,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
         {/* 发送者信息（AI消息显示在左侧） */}
         {!isUserMessage && (
           <div className="flex items-center space-x-2 mb-1">
-            <div className="w-6 h-6 rounded-full overflow-hidden border border-gray-200 dark:border-gray-700 flex items-center justify-center bg-purple-100 dark:bg-purple-900/30">
+            <div className="w-6 h-6 rounded-full overflow-hidden border border-gray-200 dark:border-[#404040] flex items-center justify-center bg-purple-100 dark:bg-purple-900/30">
               {message.agent_avatar ? (
                 <img 
                   src={message.agent_avatar} 
@@ -2338,7 +2338,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
         {isUserMessage && (
           <div className="flex items-center justify-end space-x-2 mb-1">
             <span className="text-xs text-gray-500">我</span>
-            <div className="w-6 h-6 rounded-full overflow-hidden border border-gray-200 dark:border-gray-700 flex items-center justify-center bg-primary-100 dark:bg-primary-900/30">
+            <div className="w-6 h-6 rounded-full overflow-hidden border border-gray-200 dark:border-[#404040] flex items-center justify-center bg-primary-100 dark:bg-primary-900/30">
               <span className="text-xs text-primary-500 font-bold">U</span>
             </div>
           </div>
@@ -2349,7 +2349,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
           className={`px-3 py-2 rounded-lg group/msg relative ${
             isUserMessage
               ? 'bg-primary-500 text-white rounded-tr-none'
-              : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white rounded-tl-none'
+              : 'bg-gray-100 dark:bg-[#2d2d2d] text-gray-900 dark:text-white rounded-tl-none'
           }`}
         >
           {/* 引用消息显示 */}
@@ -2490,7 +2490,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
                   {/* 头部 */}
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center space-x-2">
-                      <div className="relative w-5 h-5 rounded-full overflow-hidden border border-gray-200 dark:border-gray-700 flex items-center justify-center bg-purple-100 dark:bg-purple-900/30">
+                      <div className="relative w-5 h-5 rounded-full overflow-hidden border border-gray-200 dark:border-[#404040] flex items-center justify-center bg-purple-100 dark:bg-purple-900/30">
                         {agent?.avatar ? (
                           <img src={agent.avatar} alt={agent.name} className="w-full h-full object-cover" />
                         ) : (
@@ -2518,7 +2518,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
                   
                   {/* 思考内容 */}
                   {streamThinking && (
-                    <div className="mb-2 p-2 bg-gray-100 dark:bg-gray-800 rounded text-xs text-gray-500 italic">
+                    <div className="mb-2 p-2 bg-gray-100 dark:bg-[#2d2d2d] rounded text-xs text-gray-500 italic">
                       💭 {streamThinking.substring(0, 200)}{streamThinking.length > 200 ? '...' : ''}
                     </div>
                   )}
@@ -2615,13 +2615,13 @@ const ResponseCard: React.FC<ResponseCardProps> = ({ response, isSelected, onSel
       className={`p-3 rounded-lg border ${
         isSelected 
           ? 'border-green-500 bg-green-50 dark:bg-green-900/20' 
-          : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800'
+          : 'border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d]'
       }`}
     >
       {/* 头部 */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center space-x-2">
-          <div className="w-5 h-5 rounded-full overflow-hidden border border-gray-200 dark:border-gray-700 flex items-center justify-center bg-purple-100 dark:bg-purple-900/30">
+          <div className="w-5 h-5 rounded-full overflow-hidden border border-gray-200 dark:border-[#404040] flex items-center justify-center bg-purple-100 dark:bg-purple-900/30">
             {response.agent_avatar ? (
               <img 
                 src={response.agent_avatar} 
@@ -2673,7 +2673,7 @@ const ResponseCard: React.FC<ResponseCardProps> = ({ response, isSelected, onSel
           <summary className="text-xs text-gray-500 cursor-pointer">
             查看思考过程
           </summary>
-          <div className="mt-1 p-2 bg-gray-50 dark:bg-gray-900 rounded text-xs text-gray-600 dark:text-gray-400">
+          <div className="mt-1 p-2 bg-gray-50 dark:bg-[#2d2d2d] rounded text-xs text-gray-600 dark:text-gray-400">
             {response.thinking}
           </div>
         </details>
@@ -2742,9 +2742,9 @@ const ParticipantConfigModal: React.FC<ParticipantConfigModalProps> = ({
       className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
       onClick={handleBackdropClick}
     >
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+      <div className="bg-white dark:bg-[#2d2d2d] rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
         {/* 头部 */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-[#404040]">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-purple-200 dark:border-purple-800 flex items-center justify-center bg-purple-100 dark:bg-purple-900/30">
               {participant.avatar ? (
@@ -2852,7 +2852,7 @@ const ParticipantConfigModal: React.FC<ParticipantConfigModalProps> = ({
         </div>
         
         {/* 操作按钮 */}
-        <div className="flex items-center justify-between px-5 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+        <div className="flex items-center justify-between px-5 py-4 border-t border-gray-200 dark:border-[#404040] bg-gray-50 dark:bg-[#2d2d2d]/50">
           <button
             onClick={handleReset}
             className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors"

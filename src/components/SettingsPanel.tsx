@@ -1,6 +1,7 @@
 import React from 'react';
 import { Settings, Trash2, Save, Code } from 'lucide-react';
 import { Settings as SettingsType } from '../services/storage';
+import PageLayout, { Card } from './ui/PageLayout';
 
 interface SettingsPanelProps {
   settings: SettingsType;
@@ -19,65 +20,52 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   }; 
 
   return (
-    <div className="h-full flex flex-col fade-in">
-      {/* 标题栏 */}
-      <div className="flex items-center space-x-3 px-6 py-4 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 mb-6 flex-shrink-0">
-        <div className="w-10 h-10 rounded-xl bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
-          <Settings className="w-6 h-6 text-primary-600 dark:text-primary-400" />
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">设置</h1>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">管理应用配置和偏好设置</p>
-        </div>
-      </div>
-
-      {/* 内容区域 */}
-      <div className="flex-1 overflow-y-auto px-6 pb-6">
-        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6 max-w-7xl mx-auto">
+    <PageLayout
+      title="设置"
+      description="管理应用配置和偏好设置"
+      icon={Settings}
+    >
+      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 max-w-7xl">
         {/* 主题设置 */}
-        <div className="card p-4 card-enter stagger-item">
-          <h2 className="text-lg font-semibold mb-3">外观设置</h2>
-          
+        <Card title="外观设置">
           <div className="space-y-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 dark:text-gray-300 mb-1.5">
+              <label className="block text-sm font-medium text-gray-700 dark:text-[#e0e0e0] mb-1.5">
                 主题模式
               </label>
               <select
                 value={settings.theme || 'system'}
-                onChange={(e) => onUpdateSettings({ theme: e.target.value as any })}
-                className="input-field"
+                onChange={(e) => onUpdateSettings({ theme: e.target.value as 'light' | 'dark' | 'system' })}
+                className="w-full px-3 py-2 text-sm rounded-lg bg-white dark:bg-[#2d2d2d] border border-gray-300 dark:border-[#505050] text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/50 focus:border-[#7c3aed] transition-all duration-150"
               >
                 <option value="system">跟随系统</option>
                 <option value="light">浅色模式</option>
                 <option value="dark">深色模式</option>
               </select>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              <p className="text-xs text-gray-500 dark:text-[#a0a0a0] mt-1">
                 选择界面的显示模式
               </p>
             </div>
           </div>
-        </div>
+        </Card>
 
         {/* 自动刷新设置 */}
-        <div className="card p-4 card-enter stagger-item" style={{ animationDelay: '0.1s' }}>
-          <h2 className="text-lg font-semibold mb-3">自动刷新</h2>
-          
+        <Card title="自动刷新">
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              <label className="text-sm font-medium text-gray-700 dark:text-[#e0e0e0]">
                 启用自动刷新
               </label>
               <input
                 type="checkbox"
                 checked={settings.autoRefresh}
                 onChange={(e) => onUpdateSettings({ autoRefresh: e.target.checked })}
-                className="w-4 h-4 text-primary-500 border-gray-300 rounded focus:ring-primary-500 transition-all duration-200"
+                className="w-4 h-4 text-[#7c3aed] border-gray-300 dark:border-[#505050] rounded focus:ring-[#7c3aed] bg-white dark:bg-[#2d2d2d]"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+              <label className="block text-sm font-medium text-gray-700 dark:text-[#e0e0e0] mb-1.5">
                 刷新间隔 (分钟)
               </label>
               <input
@@ -86,23 +74,21 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 max="1440"
                 value={settings.refreshInterval}
                 onChange={(e) => onUpdateSettings({ refreshInterval: parseInt(e.target.value) })}
-                className="input-field"
+                className="w-full px-3 py-2 text-sm rounded-lg bg-white dark:bg-[#2d2d2d] border border-gray-300 dark:border-[#505050] text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/50 focus:border-[#7c3aed] transition-all duration-150 disabled:opacity-50"
                 disabled={!settings.autoRefresh}
               />
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-xs text-gray-500 dark:text-[#a0a0a0] mt-1">
                 最小5分钟，最大24小时 (1440分钟)
               </p>
             </div>
           </div>
-        </div>
+        </Card>
 
         {/* 视频设置 */}
-        <div className="card p-4 card-enter stagger-item" style={{ animationDelay: '0.2s' }}>
-          <h2 className="text-lg font-semibold mb-3">视频设置</h2>
-          
+        <Card title="视频设置">
           <div className="space-y-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+              <label className="block text-sm font-medium text-gray-700 dark:text-[#e0e0e0] mb-1.5">
                 每个频道最大视频数量
               </label>
               <input
@@ -111,126 +97,117 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 max="50"
                 value={settings.maxVideosPerChannel}
                 onChange={(e) => onUpdateSettings({ maxVideosPerChannel: parseInt(e.target.value) })}
-                className="input-field"
+                className="w-full px-3 py-2 text-sm rounded-lg bg-white dark:bg-[#2d2d2d] border border-gray-300 dark:border-[#505050] text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/50 focus:border-[#7c3aed] transition-all duration-150"
               />
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-xs text-gray-500 dark:text-[#a0a0a0] mt-1">
                 获取频道视频时的最大数量限制
               </p>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+              <label className="block text-sm font-medium text-gray-700 dark:text-[#e0e0e0] mb-1.5">
                 频道页面视频列数
               </label>
               <select
                 value={settings.videoColumns}
                 onChange={(e) => onUpdateSettings({ videoColumns: parseInt(e.target.value) })}
-                className="input-field"
+                className="w-full px-3 py-2 text-sm rounded-lg bg-white dark:bg-[#2d2d2d] border border-gray-300 dark:border-[#505050] text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/50 focus:border-[#7c3aed] transition-all duration-150"
               >
                 <option value={1}>1列 (适合小屏幕)</option>
                 <option value={2}>2列 (默认)</option>
                 <option value={3}>3列 (适合大屏幕)</option>
                 <option value={4}>4列 (适合超大屏幕)</option>
               </select>
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-xs text-gray-500 dark:text-[#a0a0a0] mt-1">
                 设置频道页面右侧视频的显示列数
               </p>
             </div>
           </div>
-        </div>
+        </Card>
 
         {/* API设置 */}
-        <div className="card p-4 card-enter stagger-item" style={{ animationDelay: '0.3s' }}>
-        <h2 className="text-lg font-semibold mb-3">API设置</h2>
-        
-        <div className="space-y-3">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              YouTube Data API 密钥
-            </label>
-            <input
-              type="password"
-              placeholder="输入你的YouTube API密钥"
-              className="input-field"
-              defaultValue={import.meta.env.VITE_YOUTUBE_API_KEY || ''}
-              readOnly
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              请在环境变量中设置 VITE_YOUTUBE_API_KEY
-            </p>
-          </div>
+        <Card title="API设置">
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-[#e0e0e0] mb-2">
+                YouTube Data API 密钥
+              </label>
+              <input
+                type="password"
+                placeholder="输入你的YouTube API密钥"
+                className="w-full px-3 py-2 text-sm rounded-lg bg-white dark:bg-[#2d2d2d] border border-gray-300 dark:border-[#505050] text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/50 focus:border-[#7c3aed] transition-all duration-150"
+                defaultValue={import.meta.env.VITE_YOUTUBE_API_KEY || ''}
+                readOnly
+              />
+              <p className="text-xs text-gray-500 dark:text-[#a0a0a0] mt-1">
+                请在环境变量中设置 VITE_YOUTUBE_API_KEY
+              </p>
+            </div>
 
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-            <h3 className="font-medium text-blue-900 mb-1.5">如何获取API密钥？</h3>
-            <ol className="text-sm text-blue-800 space-y-1">
-              <li>1. 访问 <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer" className="underline">Google Cloud Console</a></li>
-              <li>2. 创建新项目或选择现有项目</li>
-              <li>3. 启用 YouTube Data API v3</li>
-              <li>4. 创建API密钥</li>
-              <li>5. 在项目根目录创建 .env.local 文件</li>
-              <li>6. 添加: VITE_YOUTUBE_API_KEY=你的密钥</li>
-            </ol>
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/50 rounded-lg p-3">
+              <h3 className="font-medium text-blue-900 dark:text-blue-300 mb-1.5 text-sm">如何获取API密钥？</h3>
+              <ol className="text-xs text-blue-800 dark:text-blue-400 space-y-1">
+                <li>1. 访问 <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer" className="underline">Google Cloud Console</a></li>
+                <li>2. 创建新项目或选择现有项目</li>
+                <li>3. 启用 YouTube Data API v3</li>
+                <li>4. 创建API密钥</li>
+              </ol>
+            </div>
           </div>
-        </div>
-        </div>
+        </Card>
 
         {/* 数据管理 */}
-        <div className="card p-4 card-enter stagger-item" style={{ animationDelay: '0.4s' }}>
-        <h2 className="text-lg font-semibold mb-3">数据管理</h2>
-        
-        <div className="space-y-3">
-          <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-            <div>
-              <h3 className="text-sm font-medium text-gray-900 dark:text-white">清除所有数据</h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">删除所有收藏的频道、视频和设置</p>
+        <Card title="数据管理">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-[#2d2d2d] rounded-lg border border-gray-200 dark:border-[#404040]">
+              <div>
+                <h3 className="text-sm font-medium text-gray-900 dark:text-white">清除所有数据</h3>
+                <p className="text-xs text-gray-600 dark:text-[#a0a0a0]">删除所有收藏的频道、视频和设置</p>
+              </div>
+              <button
+                onClick={handleClearData}
+                className="px-3 py-1.5 text-sm font-medium rounded-lg bg-red-500 text-white hover:bg-red-600 active:bg-red-700 transition-all duration-150 flex items-center space-x-1.5"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>清除</span>
+              </button>
             </div>
-            <button
-              onClick={handleClearData}
-              className="btn-secondary flex items-center space-x-2 text-red-600 hover:text-red-700 hover:bg-red-50"
-            >
-              <Trash2 className="w-4 h-4" />
-              <span>清除数据</span>
-            </button>
-          </div>
 
-          <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-            <div>
-              <h3 className="text-sm font-medium text-gray-900 dark:text-white">导出数据</h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">下载所有数据为JSON文件</p>
+            <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-[#2d2d2d] rounded-lg border border-gray-200 dark:border-[#404040]">
+              <div>
+                <h3 className="text-sm font-medium text-gray-900 dark:text-white">导出数据</h3>
+                <p className="text-xs text-gray-600 dark:text-[#a0a0a0]">下载所有数据为JSON文件</p>
+              </div>
+              <button
+                onClick={() => {
+                  const data = {
+                    favoriteChannels: JSON.parse(localStorage.getItem('youtube_favorite_channels') || '[]'),
+                    favoriteVideos: JSON.parse(localStorage.getItem('youtube_favorite_videos') || '[]'),
+                    settings: JSON.parse(localStorage.getItem('youtube_settings') || '{}'),
+                  };
+                  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `youtube-manager-backup-${new Date().toISOString().split('T')[0]}.json`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+                className="px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-100 dark:bg-[#404040] text-gray-700 dark:text-[#e0e0e0] hover:bg-gray-200 dark:hover:bg-[#4a4a4a] border border-gray-300 dark:border-[#505050] transition-all duration-150 flex items-center space-x-1.5"
+              >
+                <Save className="w-4 h-4" />
+                <span>导出</span>
+              </button>
             </div>
-            <button
-              onClick={() => {
-                const data = {
-                  favoriteChannels: JSON.parse(localStorage.getItem('youtube_favorite_channels') || '[]'),
-                  favoriteVideos: JSON.parse(localStorage.getItem('youtube_favorite_videos') || '[]'),
-                  settings: JSON.parse(localStorage.getItem('youtube_settings') || '{}'),
-                };
-                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `youtube-manager-backup-${new Date().toISOString().split('T')[0]}.json`;
-                a.click();
-                URL.revokeObjectURL(url);
-              }}
-              className="btn-secondary flex items-center space-x-2"
-            >
-              <Save className="w-4 h-4" />
-              <span>导出</span>
-            </button>
           </div>
-        </div>
-        </div>
+        </Card>
 
         {/* 开发者工具 */}
-        <div className="card p-4 card-enter stagger-item" style={{ animationDelay: '0.5s' }}>
-        <h2 className="text-lg font-semibold mb-3">开发者工具</h2>
-        
-        <div className="space-y-3">
-          <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+        <Card title="开发者工具">
+          <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-[#2d2d2d] rounded-lg border border-gray-200 dark:border-[#404040]">
             <div>
               <h3 className="text-sm font-medium text-gray-900 dark:text-white">打开开发者工具</h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">打开或关闭浏览器开发者工具窗口</p>
+              <p className="text-xs text-gray-600 dark:text-[#a0a0a0]">打开或关闭浏览器开发者工具窗口</p>
             </div>
             <button
               onClick={async () => {
@@ -241,40 +218,34 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     console.error('Failed to toggle dev tools:', error);
                   }
                 } else {
-                  // 非 Electron 环境，使用浏览器原生方式
                   console.log('Not in Electron environment');
                 }
               }}
-              className="btn-primary flex items-center space-x-2"
+              className="px-3 py-1.5 text-sm font-medium rounded-lg bg-[#7c3aed] text-white hover:bg-[#6d28d9] active:bg-[#5b21b6] transition-all duration-150 flex items-center space-x-1.5"
             >
               <Code className="w-4 h-4" />
-              <span>切换开发者工具</span>
+              <span>切换</span>
             </button>
           </div>
-        </div>
-        </div>
+        </Card>
 
         {/* 关于 */}
-        <div className="card p-4 card-enter stagger-item" style={{ animationDelay: '0.6s' }}>
-        <h2 className="text-lg font-semibold mb-3">关于</h2>
-        
-        <div className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
-          <p>YouTube视频管理器 v0.1.0</p>
-          <p>一个帮助你管理YouTube视频和频道的工具</p>
-          <p>功能包括：</p>
-          <ul className="list-disc list-inside space-y-1 ml-4">
-            <li>获取视频和频道信息</li>
-            <li>收藏喜爱的视频和频道</li>
-            <li>自动刷新频道更新</li>
-            <li>搜索YouTube视频</li>
-            <li>MCP服务器集成</li>
-          </ul>
-        </div>
-        </div>
-        </div>
+        <Card title="关于">
+          <div className="space-y-2 text-sm text-gray-600 dark:text-[#b0b0b0]">
+            <p className="font-medium text-gray-900 dark:text-white">AI-Chatbotee v0.1.0</p>
+            <p>一个帮助你管理 LLM 和 MCP 工作流的工具</p>
+            <p className="mt-2">功能包括：</p>
+            <ul className="list-disc list-inside space-y-1 ml-2 text-xs">
+              <li>多 LLM 提供商集成</li>
+              <li>MCP 服务器管理</li>
+              <li>可视化工作流编辑器</li>
+              <li>智能对话会话管理</li>
+            </ul>
+          </div>
+        </Card>
       </div>
-    </div>
+    </PageLayout>
   );
 };
 
-export default SettingsPanel; 
+export default SettingsPanel;

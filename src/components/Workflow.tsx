@@ -17,6 +17,7 @@ import { getSessions, createSession, getSessionMessages, saveMessage, summarizeS
 import { createSkillPack, saveSkillPack, optimizeSkillPackSummary, getSkillPacks, getSessionSkillPacks, assignSkillPack, unassignSkillPack, SkillPack, SessionSkillPack, SkillPackCreationResult, SkillPackProcessInfo } from '../services/skillPackApi';
 import { estimate_messages_tokens, get_model_max_tokens, estimate_tokens } from '../services/tokenCounter';
 import { getWorkflows, getWorkflow, Workflow as WorkflowType, WorkflowNode, WorkflowConnection } from '../services/workflowApi';
+import { workflowPool } from '../services/workflowPool';
 import { getBatch } from '../services/crawlerApi';
 import CrawlerModuleSelector from './CrawlerModuleSelector';
 import CrawlerBatchItemSelector from './CrawlerBatchItemSelector';
@@ -243,8 +244,8 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
       <div
         className={`group relative w-full text-left px-2.5 py-2 rounded-lg text-sm transition-colors ${
           isSelected
-            ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 border border-primary-300 dark:border-primary-700'
-            : 'bg-gray-50 dark:bg-gray-800/50 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 border border-gray-200 dark:border-gray-700'
+            ? 'bg-primary-100 dark:bg-[#7c3aed] text-primary-700 dark:text-[#ffffff] border border-primary-300 dark:border-[#7c3aed]'
+            : 'bg-gray-50 dark:bg-[#363636] text-gray-700 dark:text-[#ffffff] hover:bg-gray-100 dark:hover:bg-[#404040] border border-gray-200 dark:border-[#404040]'
         }`}
       >
         <button
@@ -271,7 +272,7 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                 {displayName}
               </div>
               
-              <div className="flex items-center space-x-2 mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+              <div className="flex items-center space-x-2 mt-0.5 text-xs text-gray-500 dark:text-[#b0b0b0]">
                 {session.message_count ? (
                   <span>{session.message_count} 条消息</span>
                 ) : null}
@@ -303,27 +304,27 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
       {/* 编辑对话框 */}
       {showEditDialog && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={handleCancel}>
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white dark:bg-[#2d2d2d] rounded-lg shadow-xl p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-[#ffffff]">
                 编辑会话
               </h3>
               <button
                 onClick={handleCancel}
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* 标签页 */}
-            <div className="flex border-b border-gray-200 dark:border-gray-700 mb-4">
+            <div className="flex border-b border-gray-200 dark:border-[#404040] mb-4">
               <button
                 onClick={() => setShowSkillPackTab(false)}
                 className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                   !showSkillPackTab
-                    ? 'border-primary-500 text-primary-600 dark:text-primary-400'
-                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                    ? 'border-primary-500 dark:border-[#7c3aed] text-primary-600 dark:text-[#a78bfa]'
+                    : 'border-transparent text-gray-500 dark:text-[#b0b0b0] hover:text-gray-700 dark:hover:text-[#cccccc]'
                 }`}
               >
                 基本信息
@@ -335,8 +336,8 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                 }}
                 className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                   showSkillPackTab
-                    ? 'border-primary-500 text-primary-600 dark:text-primary-400'
-                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                    ? 'border-primary-500 dark:border-[#7c3aed] text-primary-600 dark:text-[#a78bfa]'
+                    : 'border-transparent text-gray-500 dark:text-[#b0b0b0] hover:text-gray-700 dark:hover:text-[#cccccc]'
                 }`}
               >
                 技能包
@@ -352,11 +353,11 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                   </div>
                 ) : (
                   <>
-                    <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                    <div className="text-sm text-gray-600 dark:text-[#b0b0b0] mb-2">
                       为{session.session_type === 'agent' ? '智能体' : '记忆体'}分配技能包
                     </div>
                     {allSkillPacks.length === 0 ? (
-                      <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                      <div className="text-center py-8 text-gray-500 dark:text-[#b0b0b0]">
                         暂无技能包，请在聊天界面创建技能包
                       </div>
                     ) : (
@@ -370,8 +371,8 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                               key={pack.skill_pack_id}
                               className={`flex items-start space-x-3 p-3 rounded-lg border ${
                                 isAssigned
-                                  ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-200 dark:border-primary-700'
-                                  : 'bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-600'
+                                  ? 'bg-primary-50 dark:bg-[#7c3aed]/30 border-primary-200 dark:border-[#7c3aed]'
+                                  : 'bg-gray-50 dark:bg-[#363636] border-gray-200 dark:border-[#404040]'
                               }`}
                             >
                               <input
@@ -384,7 +385,7 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                                 <div className="font-medium text-sm text-gray-900 dark:text-white">
                                   {pack.name}
                                 </div>
-                                <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">
+                                <div className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-1 line-clamp-2">
                                   {pack.summary}
                                 </div>
                               </div>
@@ -401,7 +402,7 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
               <div className="space-y-4">
               {/* 头像编辑 */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
                   头像
                 </label>
                 <div className="flex items-center space-x-4">
@@ -410,10 +411,10 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                       <img
                         src={editAvatar}
                         alt="Avatar"
-                        className="w-16 h-16 rounded-full object-cover border-2 border-gray-200 dark:border-gray-700"
+                        className="w-16 h-16 rounded-full object-cover border-2 border-gray-200 dark:border-[#404040]"
                       />
                     ) : (
-                      <div className="w-16 h-16 rounded-full bg-blue-500 flex items-center justify-center border-2 border-gray-200 dark:border-gray-700">
+                      <div className="w-16 h-16 rounded-full bg-blue-500 flex items-center justify-center border-2 border-gray-200 dark:border-[#404040]">
                         <Bot className="w-8 h-8 text-white" />
                       </div>
                     )}
@@ -428,7 +429,7 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                   <div className="flex flex-col space-y-2">
                     <button
                       onClick={() => fileInputRef.current?.click()}
-                      className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded transition-colors"
+                      className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-[#363636] hover:bg-gray-200 dark:hover:bg-[#4a4a4a] text-gray-700 dark:text-[#ffffff] rounded transition-colors"
                     >
                       选择图片
                     </button>
@@ -442,14 +443,14 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                     )}
                   </div>
                 </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                <p className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-2">
                   支持 JPG、PNG 等图片格式，建议大小不超过 2MB
                 </p>
               </div>
 
               {/* 名称编辑 */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
                   会话名称
                 </label>
                 <input
@@ -463,32 +464,32 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                       handleCancel();
                     }
                   }}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-[#7c3aed]"
                   placeholder="输入会话名称（留空则使用默认名称）"
                 />
               </div>
 
               {/* 人设显示 */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
                   人设
                 </label>
                 <div className={`px-3 py-2.5 rounded-lg text-sm ${
                   session.system_prompt 
                     ? 'bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-700' 
-                    : 'bg-gray-50 dark:bg-gray-700/50 border border-dashed border-gray-300 dark:border-gray-600'
+                    : 'bg-gray-50 dark:bg-[#363636] border border-dashed border-gray-300 dark:border-[#404040]'
                 }`}>
                   {session.system_prompt ? (
-                    <p className="text-gray-700 dark:text-gray-300 line-clamp-3">
+                    <p className="text-gray-700 dark:text-[#ffffff] line-clamp-3">
                       {session.system_prompt}
                     </p>
                   ) : (
-                    <p className="text-gray-400 dark:text-gray-500 italic">
+                    <p className="text-gray-400 dark:text-[#808080] italic">
                       人设为空
                     </p>
                   )}
                 </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                <p className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-1">
                   人设可在聊天界面底部设置
                 </p>
               </div>
@@ -500,7 +501,7 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
               <button
                 onClick={handleCancel}
                 disabled={isSaving}
-                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors disabled:opacity-50"
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-[#ffffff] bg-gray-100 dark:bg-[#363636] hover:bg-gray-200 dark:hover:bg-[#4a4a4a] rounded-lg transition-colors disabled:opacity-50"
               >
                 关闭
               </button>
@@ -528,27 +529,27 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
       {/* 会话配置对话框 - 使用 Portal 渲染到 body 下，确保在主界面中心显示 */}
       {showConfigDialog && createPortal(
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]" onClick={() => setShowConfigDialog(false)}>
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between flex-shrink-0">
+          <div className="bg-white dark:bg-[#2d2d2d] rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-gray-200 dark:border-[#404040] flex items-center justify-between flex-shrink-0">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
                 配置会话
               </h3>
               <button
                 onClick={() => setShowConfigDialog(false)}
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* 标签页 */}
-            <div className="flex border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+            <div className="flex border-b border-gray-200 dark:border-[#404040] flex-shrink-0">
               <button
                 onClick={() => setActiveConfigTab('basic')}
                 className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                   activeConfigTab === 'basic'
-                    ? 'border-primary-500 text-primary-600 dark:text-primary-400'
-                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                    ? 'border-primary-500 dark:border-[#7c3aed] text-primary-600 dark:text-[#a78bfa]'
+                    : 'border-transparent text-gray-500 dark:text-[#b0b0b0] hover:text-gray-700 dark:hover:text-[#cccccc]'
                 }`}
               >
                 基本信息
@@ -560,8 +561,8 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                 }}
                 className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                   activeConfigTab === 'skillpack'
-                    ? 'border-primary-500 text-primary-600 dark:text-primary-400'
-                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                    ? 'border-primary-500 dark:border-[#7c3aed] text-primary-600 dark:text-[#a78bfa]'
+                    : 'border-transparent text-gray-500 dark:text-[#b0b0b0] hover:text-gray-700 dark:hover:text-[#cccccc]'
                 }`}
               >
                 技能包
@@ -570,8 +571,8 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                 onClick={() => setActiveConfigTab('media')}
                 className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                   activeConfigTab === 'media'
-                    ? 'border-primary-500 text-primary-600 dark:text-primary-400'
-                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                    ? 'border-primary-500 dark:border-[#7c3aed] text-primary-600 dark:text-[#a78bfa]'
+                    : 'border-transparent text-gray-500 dark:text-[#b0b0b0] hover:text-gray-700 dark:hover:text-[#cccccc]'
                 }`}
               >
                 多媒体设置
@@ -584,12 +585,12 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                 <div className="space-y-4">
                   {/* 头像配置 */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
                       头像
                     </label>
                     <div className="flex items-center space-x-4">
                       <div className="relative">
-                        <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-gray-200 dark:border-gray-700 flex items-center justify-center bg-gray-100 dark:bg-gray-700">
+                        <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-gray-200 dark:border-[#404040] flex items-center justify-center bg-gray-100 dark:bg-[#363636]">
                           {editAvatar ? (
                             <img src={editAvatar} alt="Avatar" className="w-full h-full object-cover" />
                           ) : (
@@ -623,7 +624,7 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                       <div className="flex flex-col space-y-2">
                         <button
                           onClick={() => configFileInputRef.current?.click()}
-                          className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded transition-colors"
+                          className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-[#363636] hover:bg-gray-200 dark:hover:bg-[#4a4a4a] text-gray-700 dark:text-[#ffffff] rounded transition-colors"
                         >
                           选择图片
                         </button>
@@ -637,38 +638,38 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                         )}
                       </div>
                     </div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                    <p className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-2">
                       支持 JPG、PNG 等格式，建议大小不超过 2MB
                     </p>
                   </div>
 
                   {/* 昵称配置 */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
                       昵称
                     </label>
                     <input
                       type="text"
                       value={editName}
                       onChange={(e) => setEditName(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-400"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-[#7c3aed]"
                       placeholder="输入会话昵称（留空则使用默认名称）"
                     />
                   </div>
 
                   {/* 人设配置 */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
                       人设
                     </label>
                     <textarea
                       value={editSystemPrompt}
                       onChange={(e) => setEditSystemPrompt(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-400 resize-none"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-[#7c3aed] resize-none"
                       rows={6}
                       placeholder="输入系统提示词（人设），用于定义AI的角色和行为..."
                     />
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    <p className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-1">
                       人设定义了AI的角色、风格和行为特征
                     </p>
                   </div>
@@ -683,11 +684,11 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                     </div>
                   ) : (
                     <>
-                      <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                      <div className="text-sm text-gray-600 dark:text-[#b0b0b0] mb-2">
                         为{session.session_type === 'agent' ? '智能体' : '记忆体'}分配技能包
                       </div>
                       {allSkillPacks.length === 0 ? (
-                        <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                        <div className="text-center py-8 text-gray-500 dark:text-[#b0b0b0]">
                           暂无技能包，请在聊天界面创建技能包
                         </div>
                       ) : (
@@ -701,8 +702,8 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                                 key={pack.skill_pack_id}
                                 className={`flex items-start space-x-3 p-3 rounded-lg border ${
                                   isAssigned
-                                    ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-200 dark:border-primary-700'
-                                    : 'bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-600'
+                                    ? 'bg-primary-50 dark:bg-[#7c3aed]/30 border-primary-200 dark:border-[#7c3aed]'
+                                    : 'bg-gray-50 dark:bg-[#363636] border-gray-200 dark:border-[#404040]'
                                 }`}
                               >
                                 <input
@@ -715,7 +716,7 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                                   <div className="font-medium text-sm text-gray-900 dark:text-white">
                                     {pack.name}
                                   </div>
-                                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">
+                                  <div className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-1 line-clamp-2">
                                     {pack.summary}
                                   </div>
                                 </div>
@@ -732,17 +733,17 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
               {activeConfigTab === 'media' && (
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
                       多媒体保存地址
                     </label>
                     <input
                       type="text"
                       value={editMediaOutputPath}
                       onChange={(e) => setEditMediaOutputPath(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-400"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-[#7c3aed]"
                       placeholder="输入本地路径，例如：/Users/username/Documents/media 或 C:\Users\username\Documents\media"
                     />
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    <p className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-1">
                       设置图片、视频、音频等多媒体文件的保存路径。留空则使用默认路径。
                     </p>
                   </div>
@@ -751,10 +752,10 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
             </div>
 
             {/* 底部按钮 */}
-            <div className="px-5 py-4 bg-gray-50 dark:bg-gray-900/50 flex items-center justify-end space-x-3 flex-shrink-0">
+            <div className="px-5 py-4 bg-gray-50 dark:bg-[#1a1a1a] flex items-center justify-end space-x-3 flex-shrink-0">
               <button
                 onClick={() => setShowConfigDialog(false)}
-                className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100"
+                className="text-sm text-gray-600 dark:text-[#b0b0b0] hover:text-gray-900 dark:hover:text-[#cccccc]"
               >
                 取消
               </button>
@@ -824,7 +825,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
     {
       id: '1',
       role: 'system',
-      content: '你好！我是你的 AI 工作流助手。请先选择 LLM 模型，然后开始对话。如果需要使用工具，可以选择 MCP 服务器。',
+      content: '你好！我是你的 AI 工作流助手。这是临时会话，不会保存历史记录。',
     },
   ]);
   const [input, setInput] = useState('');
@@ -875,7 +876,8 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   
   // 会话管理
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [temporarySessionId] = useState('temporary-session'); // 临时会话ID（固定）
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(temporarySessionId);
   const [currentSessionAvatar, setCurrentSessionAvatar] = useState<string | null>(null); // 当前会话的头像
   const [currentSystemPrompt, setCurrentSystemPrompt] = useState<string | null>(null); // 当前会话的系统提示词（人设）
   const [showAvatarConfigDialog, setShowAvatarConfigDialog] = useState(false); // 是否显示头像配置对话框
@@ -886,8 +888,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   const [showHelpTooltip, setShowHelpTooltip] = useState(false); // 是否显示帮助提示
   const [showSessionTypeDialog, setShowSessionTypeDialog] = useState(false); // 是否显示会话类型选择对话框
   const [showUpgradeToAgentDialog, setShowUpgradeToAgentDialog] = useState(false); // 是否显示升级为智能体对话框
-  const [isTemporarySession, setIsTemporarySession] = useState(false); // 当前是否为临时会话
-  const [temporarySessionId] = useState('temporary-session'); // 临时会话ID（固定）
+  const [isTemporarySession, setIsTemporarySession] = useState(true); // 当前是否为临时会话（默认是临时会话）
   const [agentName, setAgentName] = useState(''); // 升级为智能体时的名称
   const [agentAvatar, setAgentAvatar] = useState<string | null>(null); // 升级为智能体时的头像
   const [agentSystemPrompt, setAgentSystemPrompt] = useState(''); // 升级为智能体时的人设
@@ -1065,9 +1066,11 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   useEffect(() => {
     if (externalSessionId && externalSessionId !== currentSessionId) {
       handleSelectSession(externalSessionId);
-    } else if (externalSessionId === null && currentSessionId && currentSessionId !== temporarySessionId) {
-      // 如果外部sessionId为null，且当前不是临时会话，切换到临时会话
-      handleSelectSession(temporarySessionId);
+    } else if (externalSessionId === null || externalSessionId === 'temporary-session') {
+      // 如果外部sessionId为null或者是临时会话，切换到临时会话
+      if (currentSessionId !== temporarySessionId) {
+        handleSelectSession(temporarySessionId);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalSessionId]);
@@ -4094,7 +4097,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   };
   
   // 选择感知组件（添加为 tag）
-  const handleSelectComponent = (component: { type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string }) => {
+  const handleSelectComponent = async (component: { type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string }) => {
     if (atSelectorIndex === -1) return;
     
     // 检查是否已经选择了组件（限制只能选择一个）
@@ -4120,6 +4123,18 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
     );
     
     if (!isAlreadySelected) {
+      // 如果是workflow，自动初始化（使用池化管理）
+      if (component.type === 'workflow') {
+        try {
+          console.log(`[Workflow] Auto-initializing workflow: ${component.name} (${component.id})`);
+          const instance = await workflowPool.acquireWorkflow(component.id);
+          console.log(`[Workflow] Workflow initialized with ${instance.mcpClients.size} MCP clients`);
+        } catch (error) {
+          console.error(`[Workflow] Failed to initialize workflow:`, error);
+          // 即使初始化失败，也允许添加组件（可能后续会重试）
+        }
+      }
+      
       // 添加到已选定的组件列表
       setSelectedComponents(prev => [...prev, component]);
       
@@ -4173,6 +4188,12 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   const handleRemoveComponent = (index: number) => {
     const component = selectedComponents[index];
     if (component) {
+      // 如果是workflow，将实例放回池中
+      if (component.type === 'workflow') {
+        workflowPool.returnToPool(component.id);
+        console.log(`[Workflow] Returned workflow instance to pool: ${component.name} (${component.id})`);
+      }
+      
       // 如果是MCP服务器，从selectedMcpServerIds中移除
       if (component.type === 'mcp') {
         setSelectedMcpServerIds(prev => {
@@ -4476,6 +4497,12 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
       
       // 注意：错误信息已通过 message_execution 表记录
       console.error('[Workflow] Execution error:', errorMsg);
+    } finally {
+      // 执行完成后，将workflow实例放回池中
+      if (message?.workflowId) {
+        workflowPool.returnToPool(message.workflowId);
+        console.log(`[Workflow] Returned workflow instance to pool: ${message.workflowId}`);
+      }
     }
   };
 
@@ -4560,7 +4587,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
         return (
           <div className="w-full">
             <div className="mb-2">
-              <div className="flex items-center space-x-1 text-[10px] text-gray-400 dark:text-gray-500 mb-1">
+              <div className="flex items-center space-x-1 text-[10px] text-gray-400 dark:text-[#808080] mb-1">
                 <Lightbulb className="w-3 h-3" />
                 <span>思考过程</span>
                 {message.isThinking && (
@@ -4570,7 +4597,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   </>
                 )}
               </div>
-              <div className="text-[11px] text-gray-400 dark:text-gray-500 font-mono leading-relaxed whitespace-pre-wrap break-words bg-transparent">
+              <div className="text-[11px] text-gray-400 dark:text-[#808080] font-mono leading-relaxed whitespace-pre-wrap break-words bg-transparent">
                 {message.thinking}
               </div>
             </div>
@@ -4597,7 +4624,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
       // 如果没有思考内容，显示简单的加载提示
       return (
         <div className="flex flex-col items-center justify-center py-4 px-4">
-          <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
+          <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-[#b0b0b0]">
             <Loader className="w-4 h-4 animate-spin" />
             <span>思考中...</span>
           </div>
@@ -4698,7 +4725,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   <img
                     src={media.url || `data:${media.mimeType};base64,${media.data}`}
                     alt={`图片 ${index + 1}`}
-                    className="max-w-full max-h-96 rounded-lg border border-gray-300 dark:border-gray-600 object-contain cursor-pointer hover:opacity-90 transition-opacity"
+                    className="max-w-full max-h-96 rounded-lg border border-gray-300 dark:border-[#404040] object-contain cursor-pointer hover:opacity-90 transition-opacity"
                     onClick={() => {
                       // 点击图片可以放大查看
                       const imgSrc = media.url || `data:${media.mimeType};base64,${media.data}`;
@@ -4740,7 +4767,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   <video
                     src={media.url || `data:${media.mimeType};base64,${media.data}`}
                     controls
-                    className="max-w-full max-h-96 rounded-lg border border-gray-300 dark:border-gray-600"
+                    className="max-w-full max-h-96 rounded-lg border border-gray-300 dark:border-[#404040]"
                   />
                   {/* 悬浮操作按钮 */}
                   <div className="absolute bottom-12 right-2 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -4779,7 +4806,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
       }, {} as Record<string, number>);
       
       return (
-        <div className="w-full bg-gradient-to-br from-gray-50 to-white dark:from-gray-900 dark:to-gray-800 rounded-xl p-5 border border-gray-200 dark:border-gray-700 shadow-lg">
+        <div className="w-full bg-gradient-to-br from-gray-50 to-white dark:from-gray-900 dark:to-gray-800 rounded-xl p-5 border border-gray-200 dark:border-[#404040] shadow-lg">
           {/* 标题栏和删除按钮 */}
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center space-x-3">
@@ -4789,16 +4816,16 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   : 'bg-gray-800 dark:bg-gray-200'
               }`}>
                 {message.toolType === 'workflow' ? (
-                  <WorkflowIcon className="w-5 h-5 text-white dark:text-gray-900" />
+                  <WorkflowIcon className="w-5 h-5 text-white dark:text-[#1e1e1e]" />
                 ) : (
-                  <Plug className="w-5 h-5 text-white dark:text-gray-900" />
+                  <Plug className="w-5 h-5 text-white dark:text-[#1e1e1e]" />
                 )}
               </div>
               <div>
-                <div className="font-semibold text-base text-gray-900 dark:text-gray-100">
+                <div className="font-semibold text-base text-gray-900 dark:text-[#ffffff]">
                   {message.workflowName || '感知组件'}
                 </div>
-                <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                <div className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-0.5">
                   {message.toolType === 'workflow' ? '工作流组件' : message.toolType === 'mcp' ? 'MCP服务器' : '感知组件'}
                 </div>
               </div>
@@ -4813,14 +4840,14 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
           </div>
           
           {/* 工作流执行流程图 - 优化设计 */}
-          <div className="w-full bg-white dark:bg-gray-900 rounded-lg p-5 border-2 border-gray-200 dark:border-gray-700 mb-4 shadow-inner">
+          <div className="w-full bg-white dark:bg-[#2d2d2d] rounded-lg p-5 border-2 border-gray-200 dark:border-[#404040] mb-4 shadow-inner">
             <div className="flex items-center justify-between w-full">
               {/* 输入节点 */}
               <div className="flex flex-col items-center flex-1">
-                <div className="w-20 h-20 rounded-2xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 flex items-center justify-center text-sm font-bold shadow-lg mb-3 transition-all">
+                <div className="w-20 h-20 rounded-2xl bg-gray-900 dark:bg-gray-100 text-white dark:text-[#1e1e1e] flex items-center justify-center text-sm font-bold shadow-lg mb-3 transition-all">
                   输入
                 </div>
-                <div className="text-xs text-gray-600 dark:text-gray-400 text-center max-w-[120px] px-2 py-1 bg-gray-50 dark:bg-gray-800 rounded">
+                <div className="text-xs text-gray-600 dark:text-[#b0b0b0] text-center max-w-[120px] px-2 py-1 bg-gray-50 dark:bg-[#2d2d2d] rounded">
                   {(() => {
                     const messageIndex = messages.findIndex(m => m.id === message.id);
                     const prevMessage = messageIndex > 0 ? messages[messageIndex - 1] : null;
@@ -4830,7 +4857,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
               </div>
               
               {/* 箭头 */}
-              <ArrowRight className="w-10 h-10 text-gray-400 dark:text-gray-600 mx-3 flex-shrink-0" />
+              <ArrowRight className="w-10 h-10 text-gray-400 dark:text-[#b0b0b0] mx-3 flex-shrink-0" />
               
               {/* 工作流节点 */}
               <div className="flex flex-col items-center flex-1">
@@ -4842,11 +4869,11 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                     : message.workflowStatus === 'error'
                     ? 'bg-gray-600 dark:bg-gray-500 shadow-lg'
                     : 'bg-gray-800 dark:bg-gray-200 shadow-lg'
-                } text-white dark:text-gray-900 flex items-center justify-center text-xs font-bold text-center px-3 mb-3 transition-all`}>
+                } text-white dark:text-[#1e1e1e] flex items-center justify-center text-xs font-bold text-center px-3 mb-3 transition-all`}>
                   <div className="truncate">{message.workflowName || '工作流'}</div>
                 </div>
                 <div className={`text-xs font-medium px-2 py-1 rounded ${
-                  message.workflowStatus === 'pending' ? 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300' :
+                  message.workflowStatus === 'pending' ? 'bg-gray-100 dark:bg-[#2d2d2d] text-gray-700 dark:text-[#ffffff]' :
                   message.workflowStatus === 'running' ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' :
                   message.workflowStatus === 'completed' ? 'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300' :
                   'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300'
@@ -4859,7 +4886,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
               </div>
               
               {/* 箭头 */}
-              <ArrowRight className="w-10 h-10 text-gray-400 dark:text-gray-600 mx-3 flex-shrink-0" />
+              <ArrowRight className="w-10 h-10 text-gray-400 dark:text-[#b0b0b0] mx-3 flex-shrink-0" />
               
               {/* 输出节点 */}
               <div className="flex flex-col items-center flex-1">
@@ -4868,11 +4895,11 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                     ? 'bg-gray-900 dark:bg-gray-100 shadow-xl' 
                     : message.workflowStatus === 'error'
                     ? 'bg-gray-600 dark:bg-gray-500 shadow-lg'
-                    : 'bg-gray-300 dark:bg-gray-700 shadow-md'
-                } text-white dark:text-gray-900 flex items-center justify-center text-sm font-bold mb-3 transition-all`}>
+                    : 'bg-gray-300 dark:bg-[#363636] shadow-md'
+                } text-white dark:text-[#1e1e1e] flex items-center justify-center text-sm font-bold mb-3 transition-all`}>
                   输出
                 </div>
-                <div className="text-xs text-gray-600 dark:text-gray-400 text-center max-w-[120px] px-2 py-1 bg-gray-50 dark:bg-gray-800 rounded">
+                <div className="text-xs text-gray-600 dark:text-[#b0b0b0] text-center max-w-[120px] px-2 py-1 bg-gray-50 dark:bg-[#2d2d2d] rounded">
                   {message.workflowStatus === 'completed' ? '已生成结果' :
                    message.workflowStatus === 'error' ? '执行失败' :
                    '等待输出...'}
@@ -4883,8 +4910,8 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
           
           {/* 工作流内部细节（节点信息） */}
           {message.toolType === 'workflow' && nodes.length > 0 && (
-            <div className="w-full bg-gray-50 dark:bg-gray-800/50 rounded-lg p-3 border border-gray-200 dark:border-gray-700 mb-3">
-              <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2 uppercase tracking-wide">
+            <div className="w-full bg-gray-50 dark:bg-[#363636] rounded-lg p-3 border border-gray-200 dark:border-[#404040] mb-3">
+              <div className="text-xs font-semibold text-gray-700 dark:text-[#ffffff] mb-2 uppercase tracking-wide">
                 工作流内部结构
               </div>
               <div className="space-y-2">
@@ -4893,7 +4920,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   {Object.entries(nodeTypeCounts).map(([type, count]) => (
                     <div
                       key={type}
-                      className="px-2.5 py-1 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded text-xs text-gray-700 dark:text-gray-300"
+                      className="px-2.5 py-1 bg-white dark:bg-[#2d2d2d] border border-gray-300 dark:border-[#404040] rounded text-xs text-gray-700 dark:text-[#ffffff]"
                     >
                       <span className="font-medium">{type}:</span> {count}
                     </div>
@@ -4902,18 +4929,18 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 
                 {/* 节点列表 */}
                 <div className="mt-3 space-y-1.5">
-                  <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">
+                  <div className="text-xs font-medium text-gray-600 dark:text-[#b0b0b0] mb-1.5">
                     节点详情:
                   </div>
                   {nodes.map((node) => (
                     <div
                       key={node.id}
-                      className="flex items-center space-x-2 px-2 py-1.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded text-xs"
+                      className="flex items-center space-x-2 px-2 py-1.5 bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] rounded text-xs"
                     >
                       <div className="w-2 h-2 rounded-full bg-gray-600 dark:bg-gray-400 flex-shrink-0"></div>
-                      <span className="text-gray-700 dark:text-gray-300 font-medium">{node.type}</span>
+                      <span className="text-gray-700 dark:text-[#ffffff] font-medium">{node.type}</span>
                       {node.data.label && (
-                        <span className="text-gray-500 dark:text-gray-500 truncate">- {node.data.label}</span>
+                        <span className="text-gray-500 dark:text-[#808080] truncate">- {node.data.label}</span>
                       )}
                     </div>
                   ))}
@@ -4922,7 +4949,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 {/* 连接信息 */}
                 {connections.length > 0 && (
                   <div className="mt-3">
-                    <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">
+                    <div className="text-xs font-medium text-gray-600 dark:text-[#b0b0b0] mb-1.5">
                       连接关系: {connections.length} 条
                     </div>
                   </div>
@@ -4936,21 +4963,21 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
             message.workflowStatus === 'pending' ? (
               <button
                 onClick={() => handleExecuteWorkflow(message.id)}
-                className="w-full bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-200 px-4 py-2.5 rounded-lg font-medium text-sm transition-colors flex items-center justify-center space-x-2 shadow-sm"
+                className="w-full bg-gray-900 dark:bg-gray-100 text-white dark:text-[#1e1e1e] hover:bg-gray-800 dark:hover:bg-gray-200 px-4 py-2.5 rounded-lg font-medium text-sm transition-colors flex items-center justify-center space-x-2 shadow-sm"
               >
                 <Play className="w-4 h-4" />
                 <span>开始执行</span>
               </button>
             ) : message.workflowStatus === 'running' ? (
-              <div className="flex items-center justify-center space-x-2 text-gray-700 dark:text-gray-300 py-2.5">
+              <div className="flex items-center justify-center space-x-2 text-gray-700 dark:text-[#ffffff] py-2.5">
                 <Loader className="w-4 h-4 animate-spin" />
                 <span className="text-sm font-medium">执行中...</span>
               </div>
             ) : message.workflowStatus === 'completed' || message.workflowStatus === 'error' ? (
               <div className="space-y-3">
                 {/* 执行结果 */}
-                <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
-                  <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2 uppercase tracking-wide">
+                <div className="bg-gray-50 dark:bg-[#363636] rounded-lg p-3 border border-gray-200 dark:border-[#404040]">
+                  <div className="text-xs font-semibold text-gray-700 dark:text-[#ffffff] mb-2 uppercase tracking-wide">
                     {message.workflowStatus === 'completed' ? '执行结果' : '执行失败'}
                   </div>
                   {(() => {
@@ -4963,18 +4990,18 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                       <div className="space-y-3">
                         {/* 主要内容 */}
                         {mainContent && (
-                          <div className="text-sm text-gray-900 dark:text-gray-100 whitespace-pre-wrap break-words">
+                          <div className="text-sm text-gray-900 dark:text-[#ffffff] whitespace-pre-wrap break-words">
                             {mainContent.trim()}
                           </div>
                         )}
                         
                         {/* 执行日志 */}
                         {logs.length > 0 && (
-                          <div className="border-t border-gray-200 dark:border-gray-700 pt-3 mt-3">
-                            <div className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2">
+                          <div className="border-t border-gray-200 dark:border-[#404040] pt-3 mt-3">
+                            <div className="text-xs font-semibold text-gray-600 dark:text-[#b0b0b0] mb-2">
                               执行日志
                             </div>
-                            <div className="bg-gray-900 dark:bg-gray-950 text-green-400 dark:text-green-300 font-mono text-xs p-3 rounded border border-gray-700 dark:border-gray-600 max-h-64 overflow-y-auto">
+                            <div className="bg-gray-900 dark:bg-gray-950 text-green-400 dark:text-green-300 font-mono text-xs p-3 rounded border border-gray-700 dark:border-[#404040] max-h-64 overflow-y-auto">
                               {logs.map((log, idx) => (
                                 <div key={idx} className="mb-1">
                                   {log}
@@ -4991,7 +5018,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 {/* 重新执行按钮 */}
                 <button
                   onClick={() => handleExecuteWorkflow(message.id)}
-                  className="w-full bg-gray-800 dark:bg-gray-200 text-white dark:text-gray-900 hover:bg-gray-700 dark:hover:bg-gray-300 px-4 py-2.5 rounded-lg font-medium text-sm transition-colors flex items-center justify-center space-x-2 shadow-sm"
+                  className="w-full bg-gray-800 dark:bg-gray-200 text-white dark:text-[#1e1e1e] hover:bg-gray-700 dark:hover:bg-gray-300 px-4 py-2.5 rounded-lg font-medium text-sm transition-colors flex items-center justify-center space-x-2 shadow-sm"
                 >
                   <Play className="w-4 h-4" />
                   <span>重新执行</span>
@@ -4999,7 +5026,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
               </div>
             ) : null
           ) : (
-            <div className="text-xs text-gray-500 dark:text-gray-400 text-center py-2">
+            <div className="text-xs text-gray-500 dark:text-[#b0b0b0] text-center py-2">
               无法执行：缺少工作流信息
             </div>
           )}
@@ -5013,23 +5040,23 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
         <div>
           <div className="font-medium text-sm mb-2">工具调用:</div>
           {Array.isArray(message.toolCalls) && message.toolCalls.map((toolCall: any, idx: number) => (
-            <div key={idx} className="mb-3 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+            <div key={idx} className="mb-3 p-3 bg-gray-50 dark:bg-[#363636] rounded-lg">
               <div className="flex items-center space-x-2 mb-2">
                 <Wrench className="w-4 h-4 text-blue-500" />
                 <span className="font-medium text-sm">{toolCall.name}</span>
               </div>
               {toolCall.arguments && (
-                <div className="text-xs text-gray-600 dark:text-gray-400 mb-2">
+                <div className="text-xs text-gray-600 dark:text-[#b0b0b0] mb-2">
                   <span className="font-medium">参数:</span>
-                  <pre className="mt-1 bg-white dark:bg-gray-900 p-2 rounded border text-xs overflow-auto">
+                  <pre className="mt-1 bg-white dark:bg-[#2d2d2d] p-2 rounded border text-xs overflow-auto">
                     {JSON.stringify(toolCall.arguments, null, 2)}
                   </pre>
                 </div>
               )}
               {toolCall.result && (
-                <div className="text-xs text-gray-600 dark:text-gray-400">
+                <div className="text-xs text-gray-600 dark:text-[#b0b0b0]">
                   <span className="font-medium">结果:</span>
-                  <pre className="mt-1 bg-white dark:bg-gray-900 p-2 rounded border text-xs overflow-auto">
+                  <pre className="mt-1 bg-white dark:bg-[#2d2d2d] p-2 rounded border text-xs overflow-auto">
                     {JSON.stringify(toolCall.result, null, 2)}
                   </pre>
                 </div>
@@ -5052,7 +5079,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
               // 折叠状态：显示小灯泡按钮
               <button
                 onClick={() => toggleThinkingCollapse(message.id)}
-                className="flex items-center space-x-1 text-[10px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 transition-colors"
+                className="flex items-center space-x-1 text-[10px] text-gray-400 dark:text-[#808080] hover:text-gray-600 dark:hover:text-gray-400 transition-colors"
                 title="展开思考过程"
               >
                 <Lightbulb className="w-3 h-3" />
@@ -5063,13 +5090,13 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
               <div className="mb-2">
                 <button
                   onClick={() => toggleThinkingCollapse(message.id)}
-                  className="flex items-center space-x-1 text-[10px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 transition-colors mb-1"
+                  className="flex items-center space-x-1 text-[10px] text-gray-400 dark:text-[#808080] hover:text-gray-600 dark:hover:text-gray-400 transition-colors mb-1"
                   title="折叠思考过程"
                 >
                   <Lightbulb className="w-3 h-3" />
                   <span>思考过程</span>
                 </button>
-                <div className="text-[11px] text-gray-400 dark:text-gray-500 font-mono leading-relaxed whitespace-pre-wrap break-words bg-transparent">
+                <div className="text-[11px] text-gray-400 dark:text-[#808080] font-mono leading-relaxed whitespace-pre-wrap break-words bg-transparent">
                   {message.thinking}
                   {isThinkingActive && (
                     <span className="inline-block ml-1 w-1 h-1 bg-gray-400 dark:bg-gray-500 rounded-full animate-pulse"></span>
@@ -5081,7 +5108,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
         )}
         {/* 如果正在思考但还没有思考内容，显示流式思考提示 */}
         {message.isThinking && !hasThinking && (
-          <div className="mb-2 text-[10px] text-gray-400 dark:text-gray-500 flex items-center space-x-1">
+          <div className="mb-2 text-[10px] text-gray-400 dark:text-[#808080] flex items-center space-x-1">
             <Lightbulb className="w-3 h-3 animate-pulse" />
             <span>思考中...</span>
             <span className="inline-block w-1 h-1 bg-gray-400 dark:bg-gray-500 rounded-full animate-pulse"></span>
@@ -5092,7 +5119,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
         
         {/* AI 助手消息使用 Markdown 渲染 */}
         {message.role === 'assistant' ? (
-          <div className="prose prose-sm dark:prose-invert max-w-none text-gray-900 dark:text-gray-100 markdown-content">
+          <div className="prose prose-sm dark:prose-invert max-w-none text-gray-900 dark:text-[#ffffff] markdown-content">
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={{
@@ -5111,11 +5138,11 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                         <div className="relative group my-3">
                           {/* 语言标签 */}
                           {language && (
-                            <div className="absolute top-2 left-2 text-xs text-gray-400 dark:text-gray-500 font-mono bg-gray-800/50 dark:bg-gray-900/50 px-2 py-0.5 rounded z-10">
+                            <div className="absolute top-2 left-2 text-xs text-gray-400 dark:text-[#808080] font-mono bg-gray-800/50 dark:bg-[#363636] px-2 py-0.5 rounded z-10">
                               {language}
                             </div>
                           )}
-                          <pre className="bg-gray-900 dark:bg-gray-950 text-gray-100 rounded-lg p-4 pt-8 overflow-x-auto border border-gray-700 dark:border-gray-600">
+                          <pre className="bg-gray-900 dark:bg-gray-950 text-gray-100 rounded-lg p-4 pt-8 overflow-x-auto border border-gray-700 dark:border-[#404040]">
                             <code className={className} {...props}>
                               {children}
                             </code>
@@ -5153,7 +5180,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   } else {
                     // 行内代码
                     return (
-                      <code className="bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 px-1.5 py-0.5 rounded text-sm font-mono" {...props}>
+                      <code className="bg-gray-100 dark:bg-[#2d2d2d] text-gray-800 dark:text-gray-200 px-1.5 py-0.5 rounded text-sm font-mono" {...props}>
                         {children}
                       </code>
                     );
@@ -5171,7 +5198,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 li: ({ children }: any) => <li className="leading-relaxed">{children}</li>,
                 // 引用样式
                 blockquote: ({ children }: any) => (
-                  <blockquote className="border-l-4 border-blue-500 dark:border-blue-400 pl-4 my-3 italic text-gray-700 dark:text-gray-300">
+                  <blockquote className="border-l-4 border-blue-500 dark:border-blue-400 pl-4 my-3 italic text-gray-700 dark:text-[#ffffff]">
                     {children}
                   </blockquote>
                 ),
@@ -5189,30 +5216,30 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 // 表格样式
                 table: ({ children }: any) => (
                   <div className="overflow-x-auto my-3">
-                    <table className="min-w-full border-collapse border border-gray-300 dark:border-gray-600">
+                    <table className="min-w-full border-collapse border border-gray-300 dark:border-[#404040]">
                       {children}
                     </table>
                   </div>
                 ),
                 thead: ({ children }: any) => (
-                  <thead className="bg-gray-100 dark:bg-gray-800">{children}</thead>
+                  <thead className="bg-gray-100 dark:bg-[#2d2d2d]">{children}</thead>
                 ),
                 tbody: ({ children }: any) => <tbody>{children}</tbody>,
                 tr: ({ children }: any) => (
-                  <tr className="border-b border-gray-200 dark:border-gray-700">{children}</tr>
+                  <tr className="border-b border-gray-200 dark:border-[#404040]">{children}</tr>
                 ),
                 th: ({ children }: any) => (
-                  <th className="border border-gray-300 dark:border-gray-600 px-3 py-2 text-left font-semibold">
+                  <th className="border border-gray-300 dark:border-[#404040] px-3 py-2 text-left font-semibold">
                     {children}
                   </th>
                 ),
                 td: ({ children }: any) => (
-                  <td className="border border-gray-300 dark:border-gray-600 px-3 py-2">
+                  <td className="border border-gray-300 dark:border-[#404040] px-3 py-2">
                     {children}
                   </td>
                 ),
                 // 水平分割线
-                hr: () => <hr className="my-4 border-gray-300 dark:border-gray-700" />,
+                hr: () => <hr className="my-4 border-gray-300 dark:border-[#404040]" />,
                 // 强调样式
                 strong: ({ children }: any) => <strong className="font-semibold">{children}</strong>,
                 em: ({ children }: any) => <em className="italic">{children}</em>,
@@ -5222,7 +5249,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
             </ReactMarkdown>
           </div>
         ) : (
-          <div className="text-[15px] leading-relaxed whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100">
+          <div className="text-[15px] leading-relaxed whitespace-pre-wrap break-words text-gray-900 dark:text-[#ffffff]">
             {message.content}
           </div>
         )}
@@ -5234,10 +5261,10 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   const totalTools = Array.from(mcpTools.values()).flat().length;
 
   return (
-    <div className="h-full flex flex-col bg-gray-50 dark:bg-gray-950">
+    <div className="h-full flex flex-col bg-gray-50 dark:bg-[#1a1a1a]">
 
-      {/* 主要内容区域：聊天界面 - 全屏布局 */}
-      <div className="flex-1 flex min-h-0 p-4">
+      {/* 主要内容区域：聊天界面 - GNOME 风格布局 */}
+      <div className="flex-1 flex min-h-0 p-2 gap-2">
         {/* 左侧配置面板 - 已隐藏，功能移至底部工具栏 */}
         {false && (
           <div className="w-[340px] flex-shrink-0 flex flex-col gap-4 overflow-y-auto pr-2">
@@ -5246,14 +5273,14 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
           {false && (
           <div className="card p-3 flex-shrink-0">
             <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff]">
                 <History className="w-4 h-4 inline mr-1" />
                 会话列表
             </label>
               <div className="flex items-center space-x-1">
                 <button
                   onClick={handleCreateNewSession}
-                  className="flex items-center space-x-1 px-2 py-1 text-xs text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-colors"
+                  className="flex items-center space-x-1 px-2 py-1 text-xs text-primary-600 dark:text-[#a78bfa] hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-colors"
                   title="创建新会话"
                 >
                   <Plus className="w-3.5 h-3.5" />
@@ -5269,20 +5296,20 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 className={`w-full text-left px-2.5 py-2 rounded-lg text-sm transition-colors ${
                   isTemporarySession && currentSessionId === temporarySessionId
                     ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700'
-                    : 'bg-gray-50 dark:bg-gray-800/50 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 border border-gray-200 dark:border-gray-700'
+                    : 'bg-gray-50 dark:bg-[#363636] text-gray-700 dark:text-[#ffffff] hover:bg-gray-100 dark:hover:bg-[#404040] border border-gray-200 dark:border-[#404040]'
                 }`}
                 title="临时会话：不保存历史记录，适合快速询问无关联问题"
               >
                 <div className="flex items-center space-x-2">
                   <MessageCircle className="w-4 h-4 flex-shrink-0" />
                   <span className="font-medium truncate">临时会话</span>
-                  <span className="text-xs text-gray-500 dark:text-gray-400">(不保存)</span>
+                  <span className="text-xs text-gray-500 dark:text-[#b0b0b0]">(不保存)</span>
                 </div>
               </button>
               
               {/* 历史会话列表 */}
               {sessions.length === 0 ? (
-                <div className="text-center py-4 text-xs text-gray-500 dark:text-gray-400">
+                <div className="text-center py-4 text-xs text-gray-500 dark:text-[#b0b0b0]">
                   暂无历史会话
                 </div>
               ) : (
@@ -5362,7 +5389,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                                 className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
                                   canUpgrade
                                     ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/50'
-                                    : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 cursor-not-allowed'
+                                    : 'bg-gray-100 dark:bg-[#2d2d2d] text-gray-500 dark:text-[#b0b0b0] cursor-not-allowed'
                                 }`}
                                 title={canUpgrade ? '升级为智能体' : '需要设置名称、头像和人设才能升级'}
                                 disabled={!canUpgrade}
@@ -5383,13 +5410,13 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
 
           {/* 感知组件列表（MCP + 工作流） */}
           <div className="card p-3 flex-1 flex flex-col min-h-0">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
               <Brain className="w-4 h-4 inline mr-1" />
               感知组件
             </label>
-            <div className="flex-1 overflow-y-auto space-y-2 border border-gray-200 dark:border-gray-700 rounded-lg p-2">
+            <div className="flex-1 overflow-y-auto space-y-2 border border-gray-200 dark:border-[#404040] rounded-lg p-2">
               {mcpServers.length === 0 && workflows.length === 0 ? (
-                <div className="text-xs text-gray-500 dark:text-gray-400 text-center py-2">
+                <div className="text-xs text-gray-500 dark:text-[#b0b0b0] text-center py-2">
                   暂无可用的感知组件，请先在配置页面添加
                 </div>
               ) : (
@@ -5399,10 +5426,10 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                     <div className="space-y-1.5">
                       <div className="flex items-center space-x-1.5 px-1.5 py-1">
                         <Plug className="w-3.5 h-3.5 text-blue-500" />
-                        <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">
+                        <span className="text-xs font-semibold text-gray-700 dark:text-[#ffffff] uppercase tracking-wide">
                           MCP 服务器
                         </span>
-                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                        <span className="text-xs text-gray-500 dark:text-[#b0b0b0]">
                           ({mcpServers.length})
                         </span>
                       </div>
@@ -5416,7 +5443,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   return (
                     <div
                       key={server.id}
-                      className="border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800/50 group"
+                      className="border border-gray-200 dark:border-[#404040] rounded-lg bg-gray-50 dark:bg-[#363636] group"
                       draggable={isConnected}
                       onDragStart={(e) => {
                         if (isConnected) {
@@ -5437,7 +5464,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                           className={`flex-shrink-0 p-1.5 rounded transition-colors ${
                             isConnected
                               ? 'text-green-600 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/20'
-                              : 'text-gray-400 dark:text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700'
+                              : 'text-gray-400 dark:text-[#808080] hover:bg-gray-200 dark:hover:bg-gray-700'
                           } ${isConnecting ? 'opacity-50 cursor-not-allowed' : ''}`}
                           title={isConnected ? '断开连接' : '连接'}
                         >
@@ -5454,7 +5481,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center space-x-2 flex-wrap">
                             <Plug className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
-                            <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                            <span className="text-sm font-medium text-gray-900 dark:text-[#ffffff] truncate">
                               {server.display_name || server.client_name || server.name}
                             </span>
                             {isConnected && (
@@ -5463,7 +5490,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                               </span>
                             )}
                             {isConnected && tools.length > 0 && (
-                              <span className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
+                              <span className="text-xs text-gray-500 dark:text-[#b0b0b0] flex-shrink-0">
                                 ({tools.length} 工具)
                               </span>
                             )}
@@ -5475,7 +5502,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                             )}
                           </div>
                           {server.description && (
-                            <div className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
+                            <div className="text-xs text-gray-500 dark:text-[#b0b0b0] truncate mt-0.5">
                               {server.description}
                             </div>
                           )}
@@ -5488,7 +5515,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                               e.stopPropagation();
                               handleToggleServerExpand(server.id);
                             }}
-                            className="flex-shrink-0 p-1.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
+                            className="flex-shrink-0 p-1.5 text-gray-500 dark:text-[#b0b0b0] hover:text-gray-700 dark:hover:text-[#cccccc] hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
                             title={isExpanded ? '收起工具' : '展开工具'}
                           >
                             {isExpanded ? (
@@ -5506,16 +5533,16 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                               type="checkbox"
                               checked={isSelected}
                               onChange={() => handleToggleMcpServerUsage(server.id)}
-                              className="w-4 h-4 text-primary-500 border-gray-300 rounded focus:ring-primary-500 dark:bg-gray-700 dark:border-gray-600"
+                              className="w-4 h-4 text-primary-500 border-gray-300 rounded focus:ring-primary-500 dark:bg-[#363636] dark:border-[#404040]"
                             />
-                            <span className="text-xs text-gray-600 dark:text-gray-400">使用</span>
+                            <span className="text-xs text-gray-600 dark:text-[#b0b0b0]">使用</span>
                           </label>
                         )}
                         
                         {/* 拖动触点（仅在已连接时显示） */}
                         {isConnected && (
                           <div
-                            className="flex-shrink-0 p-1.5 cursor-grab active:cursor-grabbing text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                            className="flex-shrink-0 p-1.5 cursor-grab active:cursor-grabbing text-gray-400 dark:text-[#808080] hover:text-gray-600 dark:hover:text-[#cccccc] transition-colors"
                             title="拖动到对话框接入"
                             onMouseDown={(e) => e.stopPropagation()}
                           >
@@ -5526,29 +5553,29 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
 
                       {/* 工具列表（展开时显示，在服务器信息下方） */}
                       {isConnected && isExpanded && tools.length > 0 && (
-                        <div className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-2 space-y-1.5">
-                          <div className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                        <div className="border-t border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] p-2 space-y-1.5">
+                          <div className="text-xs font-medium text-gray-700 dark:text-[#ffffff] mb-1.5">
                             可用工具:
                           </div>
                           {tools.map((tool, index) => (
                             <div
                               key={index}
-                              className="bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded p-2 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                              className="bg-gray-50 dark:bg-[#363636] border border-gray-200 dark:border-[#404040] rounded p-2 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                             >
                               <div className="flex items-start space-x-2">
                                 <Wrench className="w-3 h-3 text-blue-500 mt-0.5 flex-shrink-0" />
                                 <div className="flex-1 min-w-0">
-                                  <div className="text-xs font-medium text-gray-900 dark:text-gray-100">
+                                  <div className="text-xs font-medium text-gray-900 dark:text-[#ffffff]">
                                     {tool.name}
                                   </div>
                                   {tool.description && (
-                                    <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                                    <div className="text-xs text-gray-600 dark:text-[#b0b0b0] mt-1">
                                       {tool.description}
                                     </div>
                                   )}
                                   {tool.inputSchema?.properties && (
                                     <div className="mt-1.5">
-                                      <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">参数:</div>
+                                      <div className="text-xs text-gray-500 dark:text-[#b0b0b0] mb-1">参数:</div>
                                       <div className="flex flex-wrap gap-1">
                                         {Object.keys(tool.inputSchema.properties).map((param) => (
                                           <span
@@ -5578,17 +5605,17 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                     <div className="space-y-1.5">
                       <div className="flex items-center space-x-1.5 px-1.5 py-1">
                         <WorkflowIcon className="w-3.5 h-3.5 text-purple-500" />
-                        <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wide">
+                        <span className="text-xs font-semibold text-gray-700 dark:text-[#ffffff] uppercase tracking-wide">
                           工作流
                         </span>
-                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                        <span className="text-xs text-gray-500 dark:text-[#b0b0b0]">
                           ({workflows.length})
                         </span>
                       </div>
                       {workflows.map((workflow) => (
                     <div
                       key={workflow.workflow_id}
-                      className="border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800/50 flex items-center group"
+                      className="border border-gray-200 dark:border-[#404040] rounded-lg bg-gray-50 dark:bg-[#363636] flex items-center group"
                       draggable={true}
                       onDragStart={(e) => {
                         setDraggingComponent({ type: 'workflow', id: workflow.workflow_id, name: workflow.name });
@@ -5601,11 +5628,11 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                       <div className="flex items-center space-x-2 p-1.5 flex-1 min-w-0">
                         <WorkflowIcon className="w-3.5 h-3.5 text-purple-500 flex-shrink-0" />
                         <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                          <div className="text-sm font-medium text-gray-900 dark:text-[#ffffff] truncate">
                             {workflow.name}
                           </div>
                           {workflow.description && (
-                            <div className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
+                            <div className="text-xs text-gray-500 dark:text-[#b0b0b0] truncate mt-0.5">
                               {workflow.description}
                             </div>
                           )}
@@ -5614,7 +5641,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                       
                       {/* 拖动触点 */}
                       <div
-                        className="flex-shrink-0 p-2 cursor-grab active:cursor-grabbing text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                        className="flex-shrink-0 p-2 cursor-grab active:cursor-grabbing text-gray-400 dark:text-[#808080] hover:text-gray-600 dark:hover:text-[#cccccc] transition-colors"
                         title="拖动到对话框接入"
                         onMouseDown={(e) => e.stopPropagation()}
                       >
@@ -5628,7 +5655,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
               )}
             </div>
             {selectedMcpServerIds.size > 0 && (
-              <div className="mt-2 text-xs text-gray-600 dark:text-gray-400 pt-2 border-t border-gray-200 dark:border-gray-700">
+              <div className="mt-2 text-xs text-gray-600 dark:text-[#b0b0b0] pt-2 border-t border-gray-200 dark:border-[#404040]">
                 <span className="font-medium">已选择:</span> {selectedMcpServerIds.size} 个服务器，
                 共 {totalTools} 个工具可用
               </div>
@@ -5637,20 +5664,20 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
         
         {/* 技能包列表 */}
         <div className="card p-3 flex-shrink-0">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
             <Package className="w-4 h-4 inline mr-1" />
             技能包
           </label>
-          <div className="space-y-1.5 border border-gray-200 dark:border-gray-700 rounded-lg p-2 max-h-64 overflow-y-auto">
+          <div className="space-y-1.5 border border-gray-200 dark:border-[#404040] rounded-lg p-2 max-h-64 overflow-y-auto">
             {allSkillPacks.length === 0 ? (
-              <div className="text-xs text-gray-500 dark:text-gray-400 text-center py-2">
+              <div className="text-xs text-gray-500 dark:text-[#b0b0b0] text-center py-2">
                 暂无技能包，请先创建
               </div>
             ) : (
               allSkillPacks.map((skillPack) => (
                 <div
                   key={skillPack.skill_pack_id}
-                  className="border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800/50 p-2 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+                  className="border border-gray-200 dark:border-[#404040] rounded-lg bg-gray-50 dark:bg-[#363636] p-2 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
                   onClick={() => {
                     const component = { type: 'skillpack' as const, id: skillPack.skill_pack_id, name: skillPack.name };
                     handleSelectComponent(component);
@@ -5659,11 +5686,11 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   <div className="flex items-center space-x-2">
                     <Package className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                      <div className="text-sm font-medium text-gray-900 dark:text-[#ffffff] truncate">
                         {skillPack.name}
                       </div>
                       {skillPack.summary && (
-                        <div className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5 line-clamp-2">
+                        <div className="text-xs text-gray-500 dark:text-[#b0b0b0] truncate mt-0.5 line-clamp-2">
                           {skillPack.summary}
                         </div>
                       )}
@@ -5678,9 +5705,9 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
         )}
 
         {/* 聊天界面 - 全屏布局 */}
-        <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 overflow-hidden">
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-[#2d2d2d] rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 overflow-hidden">
         {/* 状态栏 - 优化样式 */}
-          <div className="border-b border-gray-200 dark:border-gray-700 px-3 py-1 bg-gradient-to-r from-gray-50 to-white dark:from-gray-800 dark:to-gray-900 flex-shrink-0">
+          <div className="border-b border-gray-200 dark:border-[#404040] px-3 py-1 bg-gradient-to-r from-gray-50 to-white dark:from-gray-800 dark:to-gray-900 flex-shrink-0">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center space-x-2">
               {/* 头像 - 可点击配置 */}
@@ -5701,7 +5728,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 )}
               </div>
               <div>
-                <span className="text-xs font-semibold text-gray-900 dark:text-gray-100 block leading-tight">
+                <span className="text-xs font-semibold text-gray-900 dark:text-[#ffffff] block leading-tight">
                   {(() => {
                     const currentSession = sessions.find(s => s.session_id === currentSessionId);
                     if (isTemporarySession) return '临时会话';
@@ -5710,15 +5737,30 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                     return 'AI 工作流助手';
                   })()}
                 </span>
-                <span className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">
+                <span className="text-[10px] text-gray-500 dark:text-[#b0b0b0] leading-tight">
                   {currentSessionId && !isTemporarySession ? '点击头像配置' : '智能对话与任务处理'}
                 </span>
               </div>
+              
+              {/* 生效模型显示 - 在头像右侧 */}
+              {selectedLLMConfig ? (
+                <div className="flex items-center space-x-1.5 px-2 py-0.5 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded text-[10px] ml-2">
+                  <CheckCircle className="w-3 h-3 text-green-600 dark:text-green-400" />
+                  <span className="text-green-700 dark:text-green-400 font-medium">
+                    {selectedLLMConfig.name} {selectedLLMConfig.model && `(${selectedLLMConfig.model})`}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center space-x-1.5 px-2 py-0.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded text-[10px] ml-2">
+                  <AlertCircle className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                  <span className="text-amber-700 dark:text-amber-400">未配置</span>
+                </div>
+              )}
             </div>
             <div className="flex items-center space-x-2">
-              {/* LLM模型选择 */}
+              {/* 模型选择和流式开关 - 右对齐 */}
               <div className="flex items-center space-x-2">
-                <label className="text-[10px] font-medium text-gray-700 dark:text-gray-300 flex items-center space-x-1">
+                <label className="text-[10px] font-medium text-gray-700 dark:text-[#ffffff] flex items-center space-x-1">
                   <Brain className="w-3 h-3" />
                   <span>模型:</span>
                 </label>
@@ -5738,14 +5780,14 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   ))}
                 </select>
                 {/* 流式响应开关 */}
-                <label className="flex items-center space-x-1 cursor-pointer group px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+                <label className="flex items-center space-x-1 cursor-pointer group px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-[#404040] transition-colors">
                   <input
                     type="checkbox"
                     checked={streamEnabled}
                     onChange={(e) => setStreamEnabled(e.target.checked)}
                     className="w-3 h-3 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
                   />
-                  <span className="text-[10px] text-gray-600 dark:text-gray-400">流式</span>
+                  <span className="text-[10px] text-gray-600 dark:text-[#b0b0b0]">流式</span>
                 </label>
               </div>
               
@@ -5784,21 +5826,6 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   )}
                   <span>总结</span>
                 </button>
-              )}
-              
-              {/* 模型状态显示 */}
-              {selectedLLMConfig ? (
-                <div className="flex items-center space-x-1.5 px-2 py-1 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded text-xs">
-                  <CheckCircle className="w-3.5 h-3.5 text-green-600 dark:text-green-400" />
-                  <span className="text-green-700 dark:text-green-400 font-medium">
-                    {selectedLLMConfig.name} {selectedLLMConfig.model && `(${selectedLLMConfig.model})`}
-                  </span>
-                </div>
-              ) : (
-                <div className="flex items-center space-x-1.5 px-2 py-1 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded text-xs">
-                  <AlertCircle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                  <span className="text-amber-700 dark:text-amber-400">未配置</span>
-                </div>
               )}
             </div>
           </div>
@@ -5848,16 +5875,16 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
           {/* 加载更多历史消息提示（固定在顶部，历史消息在上方） */}
           {hasMoreMessages && (
             <div className="sticky top-0 z-10 flex justify-center mb-2 pointer-events-none">
-              <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm px-3 py-1.5 rounded-full shadow-sm border border-gray-200 dark:border-gray-700 pointer-events-auto">
+              <div className="bg-white/95 dark:bg-[#2d2d2d]/95 backdrop-blur-sm px-3 py-1.5 rounded-full shadow-sm border border-gray-200 dark:border-[#404040] pointer-events-auto">
                 {isLoadingMessages ? (
-                  <div className="flex items-center space-x-2 text-xs text-gray-600 dark:text-gray-400">
+                  <div className="flex items-center space-x-2 text-xs text-gray-600 dark:text-[#b0b0b0]">
                     <Loader className="w-3 h-3 animate-spin" />
                     <span>加载历史消息...</span>
                   </div>
                 ) : (
                   <button
                     onClick={() => loadSessionMessages(currentSessionId!, messagePage + 1)}
-                    className="flex items-center space-x-2 text-xs text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
+                    className="flex items-center space-x-2 text-xs text-gray-600 dark:text-[#b0b0b0] hover:text-gray-900 dark:hover:text-[#cccccc] transition-colors"
                   >
                     <ChevronUp className="w-3 h-3" />
                     <span>加载更多</span>
@@ -5910,7 +5937,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
             if (isSummaryNotification) {
               return (
                 <div key={message.id} data-message-id={message.id} className="flex justify-center my-2">
-                  <div className="text-xs text-gray-500 dark:text-gray-400 px-3 py-1.5 bg-gray-100 dark:bg-gray-800 rounded-full">
+                  <div className="text-xs text-gray-500 dark:text-[#b0b0b0] px-3 py-1.5 bg-gray-100 dark:bg-[#2d2d2d] rounded-full">
                     {message.content}
                   </div>
                 </div>
@@ -5928,11 +5955,11 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 message.role === 'user' ? 'flex-row-reverse space-x-reverse' : ''
               } ${
                 skillPackSelectionMode 
-                  ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg p-2 -m-2 transition-all duration-200' 
+                  ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-[#404040] rounded-lg p-2 -m-2 transition-all duration-200' 
                   : ''
               } ${
                 isSelected && skillPackSelectionMode
-                  ? 'bg-primary-50 dark:bg-primary-900/20 ring-2 ring-primary-300 dark:ring-primary-700 rounded-lg p-2 -m-2' 
+                  ? 'bg-primary-50 dark:bg-[#7c3aed]/30 ring-2 ring-primary-300 dark:ring-primary-700 rounded-lg p-2 -m-2' 
                   : ''
               }`}
             >
@@ -6033,12 +6060,12 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                           <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" style={{ animationDelay: '150ms' }}></div>
                           <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" style={{ animationDelay: '300ms' }}></div>
                         </div>
-                        <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">回答中</span>
+                        <span className="text-xs text-gray-500 dark:text-[#b0b0b0] font-medium">回答中</span>
                       </div>
                     ) : null}
                     {/* 当前执行步骤（灰色小字） */}
                     {message.currentStep && message.currentStep.trim() && (
-                      <span className="text-xs text-gray-400 dark:text-gray-500 font-normal ml-2">
+                      <span className="text-xs text-gray-400 dark:text-[#808080] font-normal ml-2">
                         {message.currentStep}
                       </span>
                     )}
@@ -6049,16 +6076,16 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 <div
                   className={`rounded-lg p-2.5 transition-all duration-300 ${
                     message.role === 'user'
-                      ? 'bg-primary-50 dark:bg-primary-900/20 text-gray-900 dark:text-gray-100 shadow-sm hover:shadow-md'
+                      ? 'bg-primary-50 dark:bg-[#7c3aed]/30 text-gray-900 dark:text-[#ffffff] shadow-sm hover:shadow-md'
                       : message.role === 'assistant'
-                      ? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700 shadow-lg hover:shadow-xl' // 更立体的阴影
+                      ? 'bg-white dark:bg-[#2d2d2d] text-gray-900 dark:text-[#ffffff] border border-gray-200 dark:border-[#404040] shadow-lg hover:shadow-xl' // 更立体的阴影
                       : message.role === 'tool'
                       ? message.toolType === 'workflow'
-                        ? 'bg-purple-50 dark:bg-purple-900/20 text-gray-900 dark:text-gray-100 border border-purple-200 dark:border-purple-700 shadow-sm hover:shadow-md'
+                        ? 'bg-purple-50 dark:bg-purple-900/20 text-gray-900 dark:text-[#ffffff] border border-purple-200 dark:border-purple-700 shadow-sm hover:shadow-md'
                         : message.toolType === 'mcp'
-                        ? 'bg-green-50 dark:bg-green-900/20 text-gray-900 dark:text-gray-100 border border-green-200 dark:border-green-700 shadow-sm hover:shadow-md'
-                        : 'bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm hover:shadow-md'
-                      : 'bg-yellow-50 dark:bg-yellow-900/20 text-gray-700 dark:text-gray-300 shadow-sm hover:shadow-md'
+                        ? 'bg-green-50 dark:bg-green-900/20 text-gray-900 dark:text-[#ffffff] border border-green-200 dark:border-green-700 shadow-sm hover:shadow-md'
+                        : 'bg-gray-50 dark:bg-[#2d2d2d] text-gray-900 dark:text-[#ffffff] shadow-sm hover:shadow-md'
+                      : 'bg-yellow-50 dark:bg-yellow-900/20 text-gray-700 dark:text-[#ffffff] shadow-sm hover:shadow-md'
                   }`}
                   style={{
                     fontSize: message.role === 'assistant' ? '13px' : '12px', // 减小字体
@@ -6120,10 +6147,10 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
           
           {/* 技能包选择确认栏 */}
           {skillPackSelectionMode && (
-            <div className="sticky bottom-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 p-3 flex items-center justify-between shadow-lg">
+            <div className="sticky bottom-0 bg-white dark:bg-[#2d2d2d] border-t border-gray-200 dark:border-[#404040] p-3 flex items-center justify-between shadow-lg">
               <div className="flex items-center space-x-2">
                 <Package className="w-5 h-5 text-primary-500" />
-                <span className="text-sm text-gray-700 dark:text-gray-300">
+                <span className="text-sm text-gray-700 dark:text-[#ffffff]">
                   已选择 {selectedMessageIds.size} 条消息
                 </span>
               </div>
@@ -6133,7 +6160,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                     setSkillPackSelectionMode(false);
                     setSelectedMessageIds(new Set());
                   }}
-                  className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100"
+                  className="px-4 py-2 text-sm text-gray-600 dark:text-[#b0b0b0] hover:text-gray-900 dark:hover:text-[#cccccc]"
                 >
                   取消
                 </button>
@@ -6161,7 +6188,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
 
         {/* 输入框 - 优化布局 */}
           <div 
-            className={`border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-3 flex-shrink-0 relative transition-colors ${
+            className={`border-t border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] px-4 py-3 flex-shrink-0 relative transition-colors ${
               isDraggingOver ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-700' : ''
             }`}
             onDragOver={handleDragOver}
@@ -6190,7 +6217,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
               {selectedComponents.map((component, index) => (
                 <div
                   key={`${component.type}-${component.id}-${index}`}
-                  className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-md text-sm border border-gray-200 dark:border-gray-600"
+                  className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 bg-gray-100 dark:bg-[#363636] text-gray-700 dark:text-[#ffffff] rounded-md text-sm border border-gray-200 dark:border-[#404040]"
                 >
                   {component.type === 'workflow' ? (
                     <WorkflowIcon className="w-3.5 h-3.5 text-purple-500 flex-shrink-0" />
@@ -6205,7 +6232,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                       e.stopPropagation();
                       handleRemoveComponent(index);
                     }}
-                    className="ml-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors flex-shrink-0"
+                    className="ml-1 text-gray-400 dark:text-[#808080] hover:text-gray-600 dark:hover:text-[#cccccc] transition-colors flex-shrink-0"
                     title="删除"
                   >
                     <X className="w-3.5 h-3.5" />
@@ -6232,7 +6259,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                     </div>
                   )}
                   {pendingBatchItem.item.content && (
-                    <div className="text-xs text-gray-600 dark:text-gray-400 line-clamp-2 mt-1">
+                    <div className="text-xs text-gray-600 dark:text-[#b0b0b0] line-clamp-2 mt-1">
                       {pendingBatchItem.item.content.length > 150 
                         ? pendingBatchItem.item.content.substring(0, 150) + '...' 
                         : pendingBatchItem.item.content}
@@ -6283,7 +6310,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                     </div>
                   )}
                   {selectedBatchItem.item.content && (
-                    <div className="text-xs text-gray-600 dark:text-gray-400 line-clamp-2 mt-1">
+                    <div className="text-xs text-gray-600 dark:text-[#b0b0b0] line-clamp-2 mt-1">
                       {selectedBatchItem.item.content.length > 150 
                         ? selectedBatchItem.item.content.substring(0, 150) + '...' 
                         : selectedBatchItem.item.content}
@@ -6333,17 +6360,17 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
             const quotedMsg = messages.find(m => m.id === quotedMessageId);
             if (!quotedMsg) return null;
             return (
-              <div className="mb-2 p-2 bg-gray-50 dark:bg-gray-800 border-l-4 border-primary-500 rounded-r-lg">
+              <div className="mb-2 p-2 bg-gray-50 dark:bg-[#2d2d2d] border-l-4 border-primary-500 dark:border-[#7c3aed] rounded-r-lg">
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">引用消息</div>
-                    <div className="text-sm text-gray-700 dark:text-gray-300 line-clamp-2">
+                    <div className="text-xs text-gray-500 dark:text-[#b0b0b0] mb-1">引用消息</div>
+                    <div className="text-sm text-gray-700 dark:text-[#ffffff] line-clamp-2">
                       {quotedMsg.content.substring(0, 100)}{quotedMsg.content.length > 100 ? '...' : ''}
                     </div>
                   </div>
                   <button
                     onClick={() => setQuotedMessageId(null)}
-                    className="ml-2 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                    className="ml-2 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -6362,12 +6389,12 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                       <img
                         src={media.preview || `data:${media.mimeType};base64,${media.data}`}
                         alt={`附件 ${index + 1}`}
-                        className="w-20 h-20 object-cover rounded border border-gray-300 dark:border-gray-600"
+                        className="w-20 h-20 object-cover rounded border border-gray-300 dark:border-[#404040]"
                       />
                     ) : (
                       <video
                         src={media.preview || `data:${media.mimeType};base64,${media.data}`}
-                        className="w-20 h-20 object-cover rounded border border-gray-300 dark:border-gray-600"
+                        className="w-20 h-20 object-cover rounded border border-gray-300 dark:border-[#404040]"
                         controls={false}
                       />
                     )}
@@ -6390,10 +6417,10 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
               {isInputFocused && (
                 <button
                   onClick={() => setIsInputExpanded(!isInputExpanded)}
-                  className="absolute -top-8 left-1/2 transform -translate-x-1/2 z-10 p-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-all"
+                  className="absolute -top-8 left-1/2 transform -translate-x-1/2 z-10 p-1.5 bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] rounded-lg shadow-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-all"
                   title={isInputExpanded ? "缩小输入框" : "扩大输入框"}
                 >
-                  <ChevronUp className={`w-4 h-4 text-gray-600 dark:text-gray-400 transition-transform ${isInputExpanded ? 'rotate-180' : ''}`} />
+                  <ChevronUp className={`w-4 h-4 text-gray-600 dark:text-[#b0b0b0] transition-transform ${isInputExpanded ? 'rotate-180' : ''}`} />
                 </button>
               )}
             <textarea
@@ -6599,7 +6626,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 <span className="text-xs text-yellow-600 dark:text-yellow-400 font-medium">编辑模式</span>
                 <button
                   onClick={handleCancelEdit}
-                  className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                  className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc] transition-colors"
                   title="取消编辑"
                 >
                   <X className="w-3.5 h-3.5" />
@@ -6645,7 +6672,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
           {showAtSelector && (
             <div
               ref={selectorRef}
-              className="fixed z-[100] bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg overflow-y-auto at-selector-container"
+              className="fixed z-[100] bg-white dark:bg-[#2d2d2d] border border-gray-300 dark:border-[#404040] rounded-lg shadow-lg overflow-y-auto at-selector-container"
                   style={{
                     top: `${atSelectorPosition.top}px`,
                     left: `${atSelectorPosition.left}px`,
@@ -6667,8 +6694,8 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                     e.stopPropagation(); // 阻止事件冒泡
                   }}
                 >
-                  <div className="p-2 border-b border-gray-200 dark:border-gray-700">
-                    <div className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+                  <div className="p-2 border-b border-gray-200 dark:border-[#404040]">
+                    <div className="text-xs font-semibold text-gray-700 dark:text-[#ffffff]">
                       选择感知组件
                     </div>
                   </div>
@@ -6679,7 +6706,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                     s.name.toLowerCase().includes(atSelectorQuery)
                   ).length > 0 && (
                     <div className="py-1">
-                      <div className="text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-1.5">
+                      <div className="text-xs font-medium text-gray-500 dark:text-[#b0b0b0] px-3 py-1.5">
                         MCP 服务器
                       </div>
                       {mcpServers
@@ -6701,7 +6728,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                               }`}
                             >
                               <Plug className="w-4 h-4 text-blue-500 flex-shrink-0" />
-                              <span className="text-sm text-gray-900 dark:text-gray-100">{server.display_name || server.client_name || server.name}</span>
+                              <span className="text-sm text-gray-900 dark:text-[#ffffff]">{server.display_name || server.client_name || server.name}</span>
                             </div>
                           );
                         })}
@@ -6713,7 +6740,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                     w.name.toLowerCase().includes(atSelectorQuery)
                   ).length > 0 && (
                     <div className="py-1">
-                      <div className="text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-1.5">
+                      <div className="text-xs font-medium text-gray-500 dark:text-[#b0b0b0] px-3 py-1.5">
                         工作流
                       </div>
                       {workflows
@@ -6732,7 +6759,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                               }`}
                             >
                               <WorkflowIcon className="w-4 h-4 text-purple-500 flex-shrink-0" />
-                              <span className="text-sm text-gray-900 dark:text-gray-100">{workflow.name}</span>
+                              <span className="text-sm text-gray-900 dark:text-[#ffffff]">{workflow.name}</span>
                             </div>
                           );
                         })}
@@ -6744,7 +6771,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                     sp.name.toLowerCase().includes(atSelectorQuery)
                   ).length > 0 && (
                     <div className="py-1">
-                      <div className="text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-1.5">
+                      <div className="text-xs font-medium text-gray-500 dark:text-[#b0b0b0] px-3 py-1.5">
                         技能包
                       </div>
                       {allSkillPacks
@@ -6763,7 +6790,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                               }`}
                             >
                               <Package className="w-4 h-4 text-amber-500 flex-shrink-0" />
-                              <span className="text-sm text-gray-900 dark:text-gray-100">{skillPack.name}</span>
+                              <span className="text-sm text-gray-900 dark:text-[#ffffff]">{skillPack.name}</span>
                             </div>
                           );
                         })}
@@ -6781,14 +6808,14 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   allSkillPacks.filter(sp => 
                     sp.name.toLowerCase().includes(atSelectorQuery)
                   ).length === 0 && (
-                    <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 text-center">
+                    <div className="px-3 py-2 text-xs text-gray-500 dark:text-[#b0b0b0] text-center">
                       未找到匹配的感知组件
                     </div>
                   )}
                 </div>
               )}
             </div>
-            <div className="flex items-center justify-between pt-3 border-t border-gray-200 dark:border-gray-700">
+            <div className="flex items-center justify-between pt-3 border-t border-gray-200 dark:border-[#404040]">
               {/* 右侧：发送按钮 */}
               <button
                 onClick={handleSend}
@@ -6808,7 +6835,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
           </div>
           
           {/* 底部工具栏：人设 + Thinking 开关 + Token 计数 - 优化布局 */}
-          <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+          <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-200 dark:border-[#404040]">
             {/* 左侧：帮助图标 + MCP/Workflow缩略图标 + 人设 + Thinking 模式开关 */}
             <div className="flex items-center space-x-2">
               {/* 帮助问号图标 */}
@@ -6829,8 +6856,8 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                       className="fixed inset-0 z-10" 
                       onClick={() => setShowHelpTooltip(false)}
                     />
-                    <div className="absolute bottom-full left-0 mb-2 w-80 p-3 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-20">
-                      <div className="text-xs text-gray-700 dark:text-gray-300 space-y-1">
+                    <div className="absolute bottom-full left-0 mb-2 w-80 p-3 bg-white dark:bg-[#2d2d2d] rounded-lg shadow-lg border border-gray-200 dark:border-[#404040] z-20">
+                      <div className="text-xs text-gray-700 dark:text-[#ffffff] space-y-1">
                         {!selectedLLMConfig ? (
                           <p>请先选择 LLM 模型</p>
                         ) : selectedComponents.length > 0 ? (
@@ -6843,7 +6870,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                       </div>
                       <button
                         onClick={() => setShowHelpTooltip(false)}
-                        className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                        className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
                       >
                         <X className="w-3 h-3" />
                       </button>
@@ -6880,7 +6907,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   className={`flex items-center space-x-1 px-1.5 py-0.5 rounded text-[11px] transition-all ${
                     currentSystemPrompt 
                       ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 font-medium' 
-                      : 'text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400'
+                      : 'text-gray-400 dark:text-[#808080] hover:text-gray-500 dark:hover:text-gray-400'
                   }`}
                   title={currentSystemPrompt ? `人设: ${currentSystemPrompt.length > 50 ? currentSystemPrompt.slice(0, 50) + '...' : currentSystemPrompt}` : '点击设置人设'}
                 >
@@ -6900,7 +6927,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                     className={`flex items-center space-x-1 px-1.5 py-0.5 rounded text-[11px] transition-all ${
                       enableThinking 
                         ? 'bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 font-medium' 
-                        : 'text-gray-400 dark:text-gray-500'
+                        : 'text-gray-400 dark:text-[#808080]'
                     }`}
                     title={enableThinking ? '深度思考模式（在模型配置中启用）' : '普通模式（在模型配置中禁用）'}
                   >
@@ -6931,7 +6958,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
               const currentTokens = estimate_messages_tokens(conversationMessages, model);
               const maxTokens = selectedLLMConfig?.max_tokens || get_model_max_tokens(model);
               return (
-                <span className="text-[11px] text-gray-400 dark:text-gray-500">
+                <span className="text-[11px] text-gray-400 dark:text-[#808080]">
                   {currentTokens.toLocaleString()} / {maxTokens.toLocaleString()} tokens
                 </span>
               );
@@ -6942,34 +6969,34 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
           {isEditingSystemPrompt && (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setIsEditingSystemPrompt(false)}>
               <div 
-                className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden"
+                className="bg-white dark:bg-[#2d2d2d] rounded-xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden"
                 onClick={(e) => e.stopPropagation()}
               >
-                <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                <div className="px-5 py-4 border-b border-gray-200 dark:border-[#404040] flex items-center justify-between">
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center space-x-2">
                     <FileText className="w-5 h-5 text-indigo-500" />
                     <span>设置人设</span>
                   </h3>
                   <button 
                     onClick={() => setIsEditingSystemPrompt(false)}
-                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                    className="text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
                   >
                     <X className="w-5 h-5" />
                   </button>
                 </div>
                 <div className="p-5">
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
+                  <p className="text-sm text-gray-500 dark:text-[#b0b0b0] mb-3">
                     人设是 AI 的角色设定，会影响所有对话的回复风格和内容。
                   </p>
                   <textarea
                     value={systemPromptDraft}
                     onChange={(e) => setSystemPromptDraft(e.target.value)}
                     placeholder="例如：你是一个专业的产品经理，擅长分析用户需求和产品设计..."
-                    className="w-full h-40 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                    className="w-full h-40 px-3 py-2 text-sm border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
                     autoFocus
                   />
                 </div>
-                <div className="px-5 py-4 bg-gray-50 dark:bg-gray-900/50 flex items-center justify-between">
+                <div className="px-5 py-4 bg-gray-50 dark:bg-[#363636] flex items-center justify-between">
                   <button
                     onClick={async () => {
                       if (currentSessionId) {
@@ -6993,7 +7020,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   <div className="flex space-x-3">
                     <button
                       onClick={() => setIsEditingSystemPrompt(false)}
-                      className="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+                      className="px-4 py-2 text-sm text-gray-600 dark:text-[#ffffff] hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
                     >
                       取消
                     </button>
@@ -7027,14 +7054,14 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
           {showSessionTypeDialog && (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowSessionTypeDialog(false)}>
               <div 
-                className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden"
+                className="bg-white dark:bg-[#2d2d2d] rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden"
                 onClick={(e) => e.stopPropagation()}
               >
-                <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                <div className="px-5 py-4 border-b border-gray-200 dark:border-[#404040] flex items-center justify-between">
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-white">选择会话类型</h3>
                   <button 
                     onClick={() => setShowSessionTypeDialog(false)}
-                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                    className="text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -7043,13 +7070,13 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   {/* 临时会话选项 */}
                   <button
                     onClick={handleSwitchToTemporarySession}
-                    className="w-full text-left p-4 border-2 border-gray-200 dark:border-gray-700 rounded-lg hover:border-amber-400 dark:hover:border-amber-600 transition-colors"
+                    className="w-full text-left p-4 border-2 border-gray-200 dark:border-[#404040] rounded-lg hover:border-amber-400 dark:hover:border-amber-600 transition-colors"
                   >
                     <div className="flex items-start space-x-3">
                       <MessageCircle className="w-6 h-6 text-amber-500 flex-shrink-0 mt-0.5" />
                       <div className="flex-1">
                         <h4 className="font-semibold text-gray-900 dark:text-white mb-1">临时会话</h4>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">
+                        <p className="text-sm text-gray-600 dark:text-[#b0b0b0]">
                           不保存历史记录，不发送历史消息，不进行总结。适合快速询问各种无关联的问题。
                         </p>
                       </div>
@@ -7059,13 +7086,13 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   {/* 记忆体选项 */}
                   <button
                     onClick={handleCreateMemorySession}
-                    className="w-full text-left p-4 border-2 border-gray-200 dark:border-gray-700 rounded-lg hover:border-primary-400 dark:hover:border-primary-600 transition-colors"
+                    className="w-full text-left p-4 border-2 border-gray-200 dark:border-[#404040] rounded-lg hover:border-primary-400 dark:hover:border-primary-600 transition-colors"
                   >
                     <div className="flex items-start space-x-3">
                       <Database className="w-6 h-6 text-primary-500 flex-shrink-0 mt-0.5" />
                       <div className="flex-1">
                         <h4 className="font-semibold text-gray-900 dark:text-white mb-1">记忆体</h4>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">
+                        <p className="text-sm text-gray-600 dark:text-[#b0b0b0]">
                           保存所有消息记录，支持历史消息和总结功能。可以升级为智能体。
                         </p>
                       </div>
@@ -7148,29 +7175,29 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
             return (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowUpgradeToAgentDialog(false)}>
                 <div 
-                  className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden"
+                  className="bg-white dark:bg-[#2d2d2d] rounded-xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                  <div className="px-5 py-4 border-b border-gray-200 dark:border-[#404040] flex items-center justify-between">
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center space-x-2">
                       <Sparkles className="w-5 h-5 text-purple-500" />
                       <span>升级为智能体</span>
                     </h3>
                     <button 
                       onClick={() => setShowUpgradeToAgentDialog(false)}
-                      className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                      className="text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
                     >
                       <X className="w-5 h-5" />
                     </button>
                   </div>
                   <div className="p-5 space-y-4">
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                    <p className="text-sm text-gray-600 dark:text-[#b0b0b0]">
                       智能体必须设置头像、名字和人设。升级后，该会话将拥有固定的身份和角色。
                     </p>
 
                     {/* 智能体名称 */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-1">
                         智能体名称 <span className="text-red-500">*</span>
                       </label>
                       <input
@@ -7184,11 +7211,11 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
 
                     {/* 智能体头像 */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-1">
                         智能体头像 <span className="text-red-500">*</span>
                       </label>
                       <div className="flex items-center space-x-3">
-                        <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-gray-200 dark:border-gray-700 flex items-center justify-center bg-gray-100 dark:bg-gray-700">
+                        <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-gray-200 dark:border-[#404040] flex items-center justify-center bg-gray-100 dark:bg-[#363636]">
                           {agentAvatar ? (
                             <img src={agentAvatar} alt="Avatar" className="w-full h-full object-cover" />
                           ) : (
@@ -7213,7 +7240,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
 
                     {/* 智能体人设 */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-1">
                         智能体人设 <span className="text-red-500">*</span>
                       </label>
                       <textarea
@@ -7227,7 +7254,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
 
                     {/* 关联LLM模型 */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-1">
                         关联LLM模型 <span className="text-red-500">*</span>
                       </label>
                       <select
@@ -7244,15 +7271,15 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                             </option>
                           ))}
                       </select>
-                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      <p className="mt-1 text-xs text-gray-500 dark:text-[#b0b0b0]">
                         智能体将固定使用此模型，升级后不可更改
                       </p>
                     </div>
                   </div>
-                  <div className="px-5 py-4 bg-gray-50 dark:bg-gray-900/50 flex items-center justify-between">
+                  <div className="px-5 py-4 bg-gray-50 dark:bg-[#363636] flex items-center justify-between">
                     <button
                       onClick={() => setShowUpgradeToAgentDialog(false)}
-                      className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100"
+                      className="text-sm text-gray-600 dark:text-[#b0b0b0] hover:text-gray-900 dark:hover:text-[#cccccc]"
                     >
                       取消
                     </button>
@@ -7272,14 +7299,14 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
           {/* 头像配置对话框 */}
           {showAvatarConfigDialog && currentSessionId && !isTemporarySession && (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowAvatarConfigDialog(false)}>
-              <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-sm w-full mx-4" onClick={(e) => e.stopPropagation()}>
-                <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+              <div className="bg-white dark:bg-[#2d2d2d] rounded-lg shadow-xl max-w-sm w-full mx-4" onClick={(e) => e.stopPropagation()}>
+                <div className="px-5 py-4 border-b border-gray-200 dark:border-[#404040] flex items-center justify-between">
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
                     配置会话头像
                   </h3>
                   <button
                     onClick={() => setShowAvatarConfigDialog(false)}
-                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                    className="text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -7287,7 +7314,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 <div className="p-5 space-y-4">
                   {/* 头像预览和上传 */}
                   <div className="flex flex-col items-center space-y-4">
-                    <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-gray-200 dark:border-gray-700 flex items-center justify-center bg-gray-100 dark:bg-gray-700">
+                    <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-gray-200 dark:border-[#404040] flex items-center justify-center bg-gray-100 dark:bg-[#363636]">
                       {avatarConfigDraft ? (
                         <img src={avatarConfigDraft} alt="Avatar" className="w-full h-full object-cover" />
                       ) : (
@@ -7334,14 +7361,14 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                       }}
                     />
                   </div>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
+                  <p className="text-xs text-gray-500 dark:text-[#b0b0b0] text-center">
                     支持 JPG、PNG 等格式，建议大小不超过 2MB
                   </p>
                 </div>
-                <div className="px-5 py-4 bg-gray-50 dark:bg-gray-900/50 flex items-center justify-end space-x-3">
+                <div className="px-5 py-4 bg-gray-50 dark:bg-[#363636] flex items-center justify-end space-x-3">
                   <button
                     onClick={() => setShowAvatarConfigDialog(false)}
-                    className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100"
+                    className="text-sm text-gray-600 dark:text-[#b0b0b0] hover:text-gray-900 dark:hover:text-[#cccccc]"
                   >
                     取消
                   </button>
@@ -7374,8 +7401,8 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
           {/* 技能包制作过程对话框 */}
           {showSkillPackDialog && skillPackResult && skillPackProcessInfo && (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-              <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] flex flex-col">
-                <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+              <div className="bg-white dark:bg-[#2d2d2d] rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] flex flex-col">
+                <div className="px-6 py-4 border-b border-gray-200 dark:border-[#404040] flex items-center justify-between">
                   <div className="flex items-center space-x-2">
                     <Package className="w-6 h-6 text-primary-500" />
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
@@ -7391,7 +7418,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                       setOptimizationPrompt('');
                       setSelectedMCPForOptimization([]);
                     }}
-                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                    className="text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -7400,41 +7427,41 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 <div className="px-6 py-4 flex-1 overflow-y-auto">
                   {/* 制作过程信息 */}
                   <div className="mb-6">
-                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+                    <h4 className="text-sm font-semibold text-gray-700 dark:text-[#ffffff] mb-3">
                       制作过程
                     </h4>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3">
-                        <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">消息数量</div>
+                        <div className="text-xs text-gray-600 dark:text-[#b0b0b0] mb-1">消息数量</div>
                         <div className="text-lg font-semibold text-blue-600 dark:text-blue-400">
                           {skillPackProcessInfo.messages_count}
                         </div>
                       </div>
                       <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3">
-                        <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">思考过程</div>
+                        <div className="text-xs text-gray-600 dark:text-[#b0b0b0] mb-1">思考过程</div>
                         <div className="text-lg font-semibold text-purple-600 dark:text-purple-400">
                           {skillPackProcessInfo.thinking_count}
                         </div>
                       </div>
                       <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-3">
-                        <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">工具调用</div>
+                        <div className="text-xs text-gray-600 dark:text-[#b0b0b0] mb-1">工具调用</div>
                         <div className="text-lg font-semibold text-green-600 dark:text-green-400">
                           {skillPackProcessInfo.tool_calls_count}
                         </div>
                       </div>
                       <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3">
-                        <div className="text-xs text-gray-600 dark:text-gray-400 mb-1">媒体资源</div>
+                        <div className="text-xs text-gray-600 dark:text-[#b0b0b0] mb-1">媒体资源</div>
                         <div className="text-lg font-semibold text-amber-600 dark:text-amber-400">
                           {skillPackProcessInfo.media_count}
                         </div>
                         {skillPackProcessInfo.media_types.length > 0 && (
-                          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                          <div className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-1">
                             {skillPackProcessInfo.media_types.join(', ')}
                           </div>
                         )}
                       </div>
                     </div>
-                    <div className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                    <div className="mt-3 text-xs text-gray-500 dark:text-[#b0b0b0]">
                       对话记录长度: {skillPackProcessInfo.conversation_length.toLocaleString()} 字符 | 
                       提示词长度: {skillPackProcessInfo.prompt_length.toLocaleString()} 字符
                     </div>
@@ -7442,44 +7469,44 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
 
                   {/* 技能包名称 */}
                   <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
                       技能包名称
                     </label>
                     <input
                       type="text"
                       value={skillPackResult.name}
                       onChange={(e) => setSkillPackResult({ ...skillPackResult, name: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500"
                     />
                   </div>
                   
                   {/* 技能包总结 */}
                   <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
                       技能包总结
                     </label>
                     <textarea
                       value={skillPackResult.summary}
                       onChange={(e) => setSkillPackResult({ ...skillPackResult, summary: e.target.value })}
                       rows={12}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500 font-mono text-sm"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 font-mono text-sm"
                     />
                   </div>
 
                   {/* 优化总结区域 */}
-                  <div className="mb-4 border-t border-gray-200 dark:border-gray-700 pt-4">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  <div className="mb-4 border-t border-gray-200 dark:border-[#404040] pt-4">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
                       优化总结（可选）
                     </label>
                     
                     {/* MCP服务器选择 */}
                     <div className="mb-3">
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
+                      <label className="block text-xs font-medium text-gray-600 dark:text-[#b0b0b0] mb-2">
                         连接感知模组（可选）- 用于验证工具名称和参数
                       </label>
-                      <div className="space-y-2 max-h-32 overflow-y-auto border border-gray-200 dark:border-gray-600 rounded-lg p-2">
+                      <div className="space-y-2 max-h-32 overflow-y-auto border border-gray-200 dark:border-[#404040] rounded-lg p-2">
                         {mcpServers.filter(s => s.enabled).length === 0 ? (
-                          <div className="text-xs text-gray-500 dark:text-gray-400 text-center py-2">
+                          <div className="text-xs text-gray-500 dark:text-[#b0b0b0] text-center py-2">
                             暂无启用的MCP服务器
                           </div>
                         ) : (
@@ -7503,12 +7530,12 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                                   className="w-4 h-4 text-primary-500 border-gray-300 rounded focus:ring-primary-500"
                                 />
                                 <Plug className="w-4 h-4 text-gray-400" />
-                                <span className="text-sm text-gray-700 dark:text-gray-300">{server.name}</span>
+                                <span className="text-sm text-gray-700 dark:text-[#ffffff]">{server.name}</span>
                               </label>
                             ))
                         )}
                       </div>
-                      <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      <div className="mt-1 text-xs text-gray-500 dark:text-[#b0b0b0]">
                         选择MCP服务器后，优化时将连接这些服务器来验证工具名称和参数，生成更准确的技能包描述
                       </div>
                     </div>
@@ -7518,7 +7545,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                       onChange={(e) => setOptimizationPrompt(e.target.value)}
                       placeholder="例如：更详细地描述工具调用的参数，或者强调某个关键步骤..."
                       rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm"
                     />
                     <button
                       onClick={handleOptimizeSkillPack}
@@ -7540,7 +7567,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   </div>
                 </div>
                 
-                <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-end space-x-3">
+                <div className="px-6 py-4 border-t border-gray-200 dark:border-[#404040] flex items-center justify-end space-x-3">
                   <button
                     onClick={() => {
                       setShowSkillPackDialog(false);
@@ -7550,7 +7577,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                       setOptimizationPrompt('');
                       setSelectedMCPForOptimization([]);
                     }}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                    className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-[#ffffff] bg-gray-100 dark:bg-[#363636] hover:bg-gray-200 dark:hover:bg-[#4a4a4a] rounded-lg transition-colors"
                   >
                     取消
                   </button>
@@ -7568,8 +7595,8 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
           {/* 技能包使用确认弹窗 */}
           {pendingSkillPackUse && (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-              <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col">
-                <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+              <div className="bg-white dark:bg-[#2d2d2d] rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col">
+                <div className="px-6 py-4 border-b border-gray-200 dark:border-[#404040] flex items-center justify-between">
                   <div className="flex items-center space-x-2">
                     <Package className="w-6 h-6 text-primary-500" />
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
@@ -7578,7 +7605,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   </div>
                   <button
                     onClick={() => setPendingSkillPackUse(null)}
-                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                    className="text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -7586,7 +7613,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 
                 <div className="px-6 py-4 flex-1 overflow-y-auto">
                   <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-1">
                       技能包名称
                     </label>
                     <div className="text-lg font-semibold text-gray-900 dark:text-white">
@@ -7595,10 +7622,10 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   </div>
                   
                   <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-1">
                       技能包内容
                     </label>
-                    <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-96 overflow-y-auto">
+                    <div className="bg-gray-50 dark:bg-[#2d2d2d] rounded-lg p-4 text-sm text-gray-700 dark:text-[#ffffff] whitespace-pre-wrap max-h-96 overflow-y-auto">
                       {pendingSkillPackUse.skillPack.summary}
                     </div>
                   </div>
@@ -7608,10 +7635,10 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   </div>
                 </div>
                 
-                <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-end space-x-2">
+                <div className="px-6 py-4 border-t border-gray-200 dark:border-[#404040] flex items-center justify-end space-x-2">
                   <button
                     onClick={() => setPendingSkillPackUse(null)}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                    className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-[#ffffff] bg-gray-100 dark:bg-[#363636] hover:bg-gray-200 dark:hover:bg-[#4a4a4a] rounded-lg transition-colors"
                   >
                     取消
                   </button>

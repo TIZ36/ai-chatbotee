@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { Globe, Package, Database, Plus, Trash2, Edit2, RefreshCw, X, ChevronRight, ChevronDown, Loader, AlertCircle, Copy } from 'lucide-react';
 import CrawlerTestPage from './CrawlerTestPage';
+import PageLayout, { Card, EmptyState, Badge } from './ui/PageLayout';
 import { 
   getModules, 
   getBatches, 
@@ -173,47 +174,45 @@ const CrawlerConfigPage: React.FC = () => {
     );
   }
 
-  return (
-    <div className="h-full flex flex-col bg-gray-50 dark:bg-gray-950">
-      {/* 标题栏 */}
-      <div className="flex items-center justify-between mb-6 px-6 pt-6 flex-shrink-0">
-        <div className="flex items-center space-x-3">
-          <Globe className="w-7 h-7 text-primary-600" />
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">爬虫配置</h1>
-        </div>
-        <button
-          onClick={() => setShowTestPage(true)}
-          className="btn-primary flex items-center space-x-2 px-4 py-2"
-        >
-          <Plus className="w-4 h-4" />
-          <span>新建爬虫模块</span>
-        </button>
-      </div>
+  const headerActions = (
+    <button
+      onClick={() => setShowTestPage(true)}
+      className="gnome-btn gnome-btn-primary"
+    >
+      <Plus className="w-4 h-4" />
+      <span>新建爬虫模块</span>
+    </button>
+  );
 
+  return (
+    <PageLayout
+      title="爬虫配置"
+      description="管理网页爬虫模块和数据批次"
+      icon={Globe}
+      headerActions={headerActions}
+    >
       {/* 内容区域 */}
-      <div className="flex-1 overflow-y-auto px-6 pb-6">
+      <div className="space-y-4">
         {loading ? (
-          <div className="flex items-center justify-center h-64">
-            <Loader className="w-6 h-6 animate-spin text-gray-400" />
-            <span className="ml-2 text-gray-500">加载中...</span>
+          <div className="flex items-center justify-center py-16">
+            <div className="w-6 h-6 border-2 border-gray-300 dark:border-gray-600 border-t-[#7c3aed] rounded-full animate-spin" />
+            <span className="ml-3 text-gray-500 dark:text-gray-400">加载中...</span>
           </div>
         ) : modules.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64 text-center">
-            <Package className="w-16 h-16 text-gray-300 dark:text-gray-600 mb-4" />
-            <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-2">
-              还没有爬虫模块
-            </h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-              点击右上角的"新建爬虫模块"按钮开始创建
-            </p>
-            <button
-              onClick={() => setShowTestPage(true)}
-              className="btn-primary flex items-center space-x-2 px-4 py-2"
-            >
-              <Plus className="w-4 h-4" />
-              <span>创建第一个模块</span>
-            </button>
-          </div>
+          <EmptyState
+            icon={Package}
+            title="还没有爬虫模块"
+            description="点击右上角的「新建爬虫模块」按钮开始创建"
+            action={
+              <button
+                onClick={() => setShowTestPage(true)}
+                className="gnome-btn gnome-btn-primary"
+              >
+                <Plus className="w-4 h-4" />
+                <span>创建第一个模块</span>
+              </button>
+            }
+          />
         ) : (
           <div className="space-y-4">
             {modules.map(module => {
@@ -224,7 +223,7 @@ const CrawlerConfigPage: React.FC = () => {
               return (
                 <div
                   key={module.module_id}
-                  className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden"
+                  className="gnome-card !p-0"
                 >
                   {/* 模块头部 */}
                   <div className="flex items-center justify-between p-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
@@ -294,17 +293,17 @@ const CrawlerConfigPage: React.FC = () => {
                                         <span className="font-medium text-gray-900 dark:text-gray-100">
                                           {batch.batch_name}
                                         </span>
-                                        <span
-                                          className={`text-xs px-2 py-0.5 rounded ${
-                                            batch.status === 'completed'
-                                              ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                                              : batch.status === 'error'
-                                              ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-                                              : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
-                                          }`}
+                                        <Badge 
+                                          variant={
+                                            batch.status === 'completed' 
+                                              ? 'success' 
+                                              : batch.status === 'error' 
+                                                ? 'error' 
+                                                : 'warning'
+                                          }
                                         >
                                           {batch.status === 'completed' ? '已完成' : batch.status === 'error' ? '错误' : '进行中'}
-                                        </span>
+                                        </Badge>
                                       </div>
                                       <div className="flex items-center space-x-4 mt-1 text-xs text-gray-500 dark:text-gray-400">
                                         {batch.crawled_at && (
@@ -386,7 +385,7 @@ const CrawlerConfigPage: React.FC = () => {
           </div>
         )}
       </div>
-    </div>
+    </PageLayout>
   );
 };
 

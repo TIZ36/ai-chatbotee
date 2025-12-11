@@ -3,14 +3,35 @@
  * 用于配置和管理LLM API设置，保存到MySQL数据库
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
-import { Plus, Trash2, CheckCircle, XCircle, Edit2, Brain, Save, X, Loader2, Eye, EyeOff, Type, Image, Video, Music, Download, Upload } from 'lucide-react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { Plus, Trash2, CheckCircle, XCircle, Edit2, Brain, Save, X, Loader2, Eye, EyeOff, Type, Image as ImageIcon, Video, Music, Download, Upload, ChevronDown, ChevronRight, Camera } from 'lucide-react';
 import { 
   getLLMConfigs, createLLMConfig, updateLLMConfig, deleteLLMConfig, getLLMConfigApiKey, 
   LLMConfigFromDB, CreateLLMConfigRequest,
   downloadLLMConfigAsJson, downloadAllLLMConfigsAsJson, importLLMConfigsFromFile, importLLMConfigs
 } from '../services/llmApi';
 import { fetchOllamaModels } from '../services/ollamaService';
+import PageLayout, { Card, EmptyState } from './ui/PageLayout';
+
+// Provider display info
+const PROVIDER_INFO: Record<string, { name: string; color: string; icon: string }> = {
+  openai: { name: 'OpenAI', color: '#10A37F', icon: '🤖' },
+  anthropic: { name: 'Anthropic (Claude)', color: '#D4A574', icon: '🧠' },
+  gemini: { name: 'Google Gemini', color: '#4285F4', icon: '✨' },
+  ollama: { name: 'Ollama', color: '#1D4ED8', icon: '🦙' },
+  local: { name: '本地模型', color: '#6B7280', icon: '💻' },
+  custom: { name: '自定义', color: '#8B5CF6', icon: '⚙️' },
+};
+
+// Helper to convert file to base64
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = error => reject(error);
+  });
+};
 
 const LLMConfigPanel: React.FC = () => {
   const [configs, setConfigs] = useState<LLMConfigFromDB[]>([]);
@@ -32,6 +53,137 @@ const LLMConfigPanel: React.FC = () => {
   const [ollamaError, setOllamaError] = useState<string | null>(null);
   const [showApiKey, setShowApiKey] = useState(false); // 控制API密钥显示/隐藏
   const [loadingApiKey, setLoadingApiKey] = useState(false); // 加载API密钥状态
+  const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set()); // 展开的供应商
+  const logoInputRef = useRef<HTMLInputElement>(null); // Logo 上传输入框引用
+
+  // Handle logo upload
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      alert('请选择图片文件');
+      return;
+    }
+
+    // Validate file size (max 500KB)
+    if (file.size > 500 * 1024) {
+      alert('图片大小不能超过 500KB');
+      return;
+    }
+
+    try {
+      const base64 = await fileToBase64(file);
+      setNewConfig(prev => ({
+        ...prev,
+        metadata: {
+          ...prev.metadata,
+          providerLogo: base64,
+        },
+      }));
+    } catch (error) {
+      console.error('Failed to convert image:', error);
+      alert('图片处理失败');
+    }
+  };
+
+  // Remove logo
+  const handleRemoveLogo = () => {
+    setNewConfig(prev => ({
+      ...prev,
+      metadata: {
+        ...prev.metadata,
+        providerLogo: undefined,
+      },
+    }));
+    if (logoInputRef.current) {
+      logoInputRef.current.value = '';
+    }
+  };
+
+  // Get provider logo (custom or default)
+  const getProviderLogo = (config: LLMConfigFromDB) => {
+    const customLogo = config.metadata?.providerLogo;
+    if (customLogo) {
+      return (
+        <img 
+          src={customLogo} 
+          alt={config.provider} 
+          className="w-full h-full object-cover rounded"
+        />
+      );
+    }
+    const info = PROVIDER_INFO[config.provider.toLowerCase()] || { icon: '📦', color: '#6B7280' };
+    return (
+      <span className="text-sm">{info.icon}</span>
+    );
+  };
+
+  // Get provider logo for group header (uses first config with custom logo, or default)
+  const getProviderGroupLogo = (provider: string, configs: LLMConfigFromDB[]) => {
+    // Find first config with custom logo
+    const configWithLogo = configs.find(c => c.metadata?.providerLogo);
+    if (configWithLogo?.metadata?.providerLogo) {
+      return (
+        <img 
+          src={configWithLogo.metadata.providerLogo} 
+          alt={provider} 
+          className="w-full h-full object-cover rounded-lg"
+        />
+      );
+    }
+    const info = PROVIDER_INFO[provider] || { icon: '📦', color: '#6B7280' };
+    return (
+      <span className="text-lg">{info.icon}</span>
+    );
+  };
+
+  // Group configs by provider
+  const configsByProvider = useMemo(() => {
+    const grouped: Record<string, LLMConfigFromDB[]> = {};
+    configs.forEach(config => {
+      const provider = config.provider.toLowerCase();
+      if (!grouped[provider]) {
+        grouped[provider] = [];
+      }
+      grouped[provider].push(config);
+    });
+    return grouped;
+  }, [configs]);
+
+  // Get sorted provider keys
+  const providerKeys = useMemo(() => {
+    return Object.keys(configsByProvider).sort((a, b) => {
+      // Sort by number of configs (descending), then alphabetically
+      const countDiff = configsByProvider[b].length - configsByProvider[a].length;
+      if (countDiff !== 0) return countDiff;
+      return a.localeCompare(b);
+    });
+  }, [configsByProvider]);
+
+  // Toggle provider expansion
+  const toggleProvider = (provider: string) => {
+    setExpandedProviders(prev => {
+      const next = new Set(prev);
+      if (next.has(provider)) {
+        next.delete(provider);
+      } else {
+        next.add(provider);
+      }
+      return next;
+    });
+  };
+
+  // Expand all providers
+  const expandAllProviders = () => {
+    setExpandedProviders(new Set(providerKeys));
+  };
+
+  // Collapse all providers
+  const collapseAllProviders = () => {
+    setExpandedProviders(new Set());
+  };
 
   useEffect(() => {
     loadConfigs();
@@ -42,6 +194,9 @@ const LLMConfigPanel: React.FC = () => {
       setIsLoading(true);
       const data = await getLLMConfigs();
       setConfigs(data);
+      // Expand all providers by default
+      const providers = new Set(data.map(c => c.provider.toLowerCase()));
+      setExpandedProviders(providers);
     } catch (error) {
       console.error('Failed to load LLM configs:', error);
       alert(`加载配置失败: ${error instanceof Error ? error.message : String(error)}`);
@@ -357,89 +512,95 @@ const LLMConfigPanel: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-6">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
-      </div>
+      <PageLayout
+        title="LLM 模型配置"
+        description="管理您的大语言模型 API 配置"
+        icon={Brain}
+      >
+        <div className="flex items-center justify-center py-12">
+          <div className="w-6 h-6 border-2 border-gray-300 dark:border-gray-600 border-t-[#7c3aed] rounded-full animate-spin" />
+          <span className="ml-3 text-gray-500 dark:text-gray-400">加载中...</span>
+        </div>
+      </PageLayout>
     );
   }
 
+  const headerActions = !isAdding ? (
+    <div className="flex items-center space-x-2">
+      {/* 导入按钮 */}
+      <button
+        onClick={handleImportConfigs}
+        className="gnome-btn gnome-btn-ghost text-sm"
+        title="导入配置"
+      >
+        <Upload className="w-4 h-4" />
+        <span>导入</span>
+      </button>
+      
+      {/* 导出全部按钮 */}
+      <button
+        onClick={handleExportAllConfigs}
+        className="gnome-btn gnome-btn-ghost text-sm"
+        title="导出所有配置"
+      >
+        <Download className="w-4 h-4" />
+        <span>导出全部</span>
+      </button>
+      
+      <div className="w-px h-6 bg-gray-200 dark:bg-[#404040]" />
+      
+      {/* 添加模型按钮 */}
+      <button
+        onClick={() => {
+          setIsAdding(true);
+          setEditingId(null);
+          setNewConfig({
+            name: '',
+            provider: 'openai',
+            api_key: '',
+            api_url: '',
+            model: '',
+            enabled: true,
+            tags: [],
+            description: '',
+            metadata: {},
+          });
+        }}
+        className="gnome-btn gnome-btn-primary"
+      >
+        <Plus className="w-4 h-4" />
+        <span>添加模型</span>
+      </button>
+    </div>
+  ) : null;
+
   return (
-    <div className="space-y-3">
-      {/* 标题栏 */}
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center space-x-2">
-          <Brain className="w-6 h-6 text-gray-600" />
-          <h2 className="text-2xl font-semibold">LLM 模型配置</h2>
-        </div>
-        {!isAdding && (
-          <div className="flex items-center space-x-2">
-            {/* 导入按钮 */}
-            <button
-              onClick={handleImportConfigs}
-              className="flex items-center space-x-1 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-              title="导入配置"
-            >
-              <Upload className="w-4 h-4" />
-              <span>导入</span>
-            </button>
-            
-            {/* 导出全部按钮 */}
-            <button
-              onClick={handleExportAllConfigs}
-              className="flex items-center space-x-1 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-              title="导出所有配置"
-            >
-              <Download className="w-4 h-4" />
-              <span>导出全部</span>
-            </button>
-            
-            <div className="w-px h-6 bg-gray-200" />
-            
-            {/* 添加模型按钮 */}
-            <button
-              onClick={() => {
-                setIsAdding(true);
-                setEditingId(null);
-                setNewConfig({
-                  name: '',
-                  provider: 'openai',
-                  api_key: '',
-                  api_url: '',
-                  model: '',
-                  enabled: true,
-                  tags: [],
-                  description: '',
-                  metadata: {},
-                });
-              }}
-              className="btn-primary flex items-center space-x-2"
-            >
-              <Plus className="w-4 h-4" />
-              <span>添加模型</span>
-            </button>
-          </div>
-        )}
-      </div>
+    <PageLayout
+      title="LLM 模型配置"
+      description="管理您的大语言模型 API 配置"
+      icon={Brain}
+      headerActions={headerActions}
+    >
+      <div className="space-y-4">
 
       {/* 紧凑的添加/编辑表单 */}
       {isAdding && (
-        <div className="card p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-lg font-semibold">
-              {editingId ? '编辑模型配置' : '添加新模型'}
-          </h3>
+        <Card 
+          title={editingId ? '编辑模型配置' : '添加新模型'}
+          headerAction={
             <button
               onClick={handleCancel}
-              className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 transition-colors"
+              className="gnome-btn-icon"
             >
               <X className="w-5 h-5" />
             </button>
-          </div>
+          }
+        >
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {/* 配置名称 */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 配置名称 *
               </label>
               <input
@@ -498,10 +659,69 @@ const LLMConfigPanel: React.FC = () => {
               </div>
             </div>
 
+            {/* 供应商 Logo */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                供应商 Logo <span className="text-xs text-gray-500 font-normal">(可选，≤500KB)</span>
+              </label>
+              <div className="flex items-center space-x-3">
+                {/* Logo 预览 */}
+                <div 
+                  className="w-12 h-12 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600 flex items-center justify-center overflow-hidden bg-gray-50 dark:bg-[#363636]"
+                  style={{ 
+                    backgroundColor: newConfig.metadata?.providerLogo 
+                      ? 'transparent' 
+                      : PROVIDER_INFO[newConfig.provider || 'openai']?.color || '#6B7280'
+                  }}
+                >
+                  {newConfig.metadata?.providerLogo ? (
+                    <img 
+                      src={newConfig.metadata.providerLogo} 
+                      alt="Provider logo" 
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-xl text-white">
+                      {PROVIDER_INFO[newConfig.provider || 'openai']?.icon || '📦'}
+                    </span>
+                  )}
+                </div>
+                
+                {/* 上传/移除按钮 */}
+                <div className="flex flex-col space-y-1">
+                  <input
+                    ref={logoInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleLogoUpload}
+                    className="hidden"
+                    id="logo-upload"
+                  />
+                  <label
+                    htmlFor="logo-upload"
+                    className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-[#404040] hover:bg-gray-200 dark:hover:bg-[#4a4a4a] rounded-lg cursor-pointer transition-colors"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>上传 Logo</span>
+                  </label>
+                  {newConfig.metadata?.providerLogo && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveLogo}
+                      className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>移除</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
             {/* API密钥 */}
             {newConfig.provider !== 'ollama' && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   API密钥 {!editingId && <span className="text-red-500">*</span>} {editingId && <span className="text-xs text-gray-500">(留空则不更新)</span>}
                 </label>
                 <div className="relative">
@@ -536,7 +756,7 @@ const LLMConfigPanel: React.FC = () => {
 
             {/* 模型名称 */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 模型名称 {newConfig.provider === 'ollama' && <span className="text-xs text-gray-500">(从服务器自动获取)</span>}
               </label>
               {newConfig.provider === 'ollama' ? (
@@ -585,7 +805,7 @@ const LLMConfigPanel: React.FC = () => {
             {/* API URL */}
             {(newConfig.provider === 'local' || newConfig.provider === 'custom' || newConfig.provider === 'openai' || newConfig.provider === 'gemini' || newConfig.provider === 'ollama') && (
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   {newConfig.provider === 'ollama' ? 'Ollama 服务器地址' : 'API URL'}
                   <span className="text-gray-500 text-xs font-normal ml-1">
                     {newConfig.provider === 'ollama' ? '*' : '(可选，覆盖默认地址)'}
@@ -625,7 +845,7 @@ const LLMConfigPanel: React.FC = () => {
 
             {/* 描述 */}
             <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 描述（可选）
               </label>
               <textarea
@@ -654,7 +874,7 @@ const LLMConfigPanel: React.FC = () => {
                 }}
                 className="w-4 h-4 text-primary-500 border-gray-300 rounded focus:ring-primary-500"
               />
-              <label htmlFor="enableThinking" className="text-sm font-medium text-gray-700">
+              <label htmlFor="enableThinking" className="text-sm font-medium text-gray-700 dark:text-gray-300">
                 启用 Thinking 模式（深度思考）
               </label>
               <span className="text-xs text-gray-500">
@@ -664,7 +884,7 @@ const LLMConfigPanel: React.FC = () => {
 
             {/* 支持的输入类型 */}
             <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 支持的输入类型
               </label>
               <div className="flex flex-wrap gap-3">
@@ -673,7 +893,7 @@ const LLMConfigPanel: React.FC = () => {
                   const isChecked = supportedInputs.includes(type);
                   const icons = {
                     text: Type,
-                    image: Image,
+                    image: ImageIcon,
                     video: Video,
                     audio: Music,
                   };
@@ -705,8 +925,8 @@ const LLMConfigPanel: React.FC = () => {
                         }}
                         className="w-4 h-4 text-primary-500 border-gray-300 rounded focus:ring-primary-500"
                       />
-                      <Icon className="w-4 h-4 text-gray-600" />
-                      <span className="text-sm text-gray-700">{labels[type]}</span>
+                      <Icon className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                      <span className="text-sm text-gray-700 dark:text-gray-300">{labels[type]}</span>
                     </label>
                   );
                 })}
@@ -715,7 +935,7 @@ const LLMConfigPanel: React.FC = () => {
 
             {/* 支持的输出类型 */}
             <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 支持的输出类型
               </label>
               <div className="flex flex-wrap gap-3">
@@ -724,7 +944,7 @@ const LLMConfigPanel: React.FC = () => {
                   const isChecked = supportedOutputs.includes(type);
                   const icons = {
                     text: Type,
-                    image: Image,
+                    image: ImageIcon,
                     video: Video,
                     audio: Music,
                   };
@@ -756,8 +976,8 @@ const LLMConfigPanel: React.FC = () => {
                         }}
                         className="w-4 h-4 text-primary-500 border-gray-300 rounded focus:ring-primary-500"
                       />
-                      <Icon className="w-4 h-4 text-gray-600" />
-                      <span className="text-sm text-gray-700">{labels[type]}</span>
+                      <Icon className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                      <span className="text-sm text-gray-700 dark:text-gray-300">{labels[type]}</span>
                     </label>
                   );
                 })}
@@ -773,166 +993,228 @@ const LLMConfigPanel: React.FC = () => {
                 onChange={(e) => setNewConfig({ ...newConfig, enabled: e.target.checked })}
                 className="w-4 h-4 text-primary-500 border-gray-300 rounded focus:ring-primary-500"
               />
-              <label htmlFor="enabled" className="text-sm font-medium text-gray-700">
+              <label htmlFor="enabled" className="text-sm font-medium text-gray-700 dark:text-gray-300">
                 启用此配置
               </label>
             </div>
             </div>
 
           {/* 操作按钮 */}
-          <div className="flex space-x-2 mt-3 pt-3 border-t border-gray-200">
+          <div className="flex space-x-2 mt-4 pt-4 border-t border-gray-200 dark:border-[#404040]">
               <button
                 onClick={editingId ? handleUpdateConfig : handleAddConfig}
-                className="btn-primary flex items-center space-x-2"
+                className="gnome-btn gnome-btn-primary"
               >
               <Save className="w-4 h-4" />
               <span>{editingId ? '保存' : '添加'}</span>
               </button>
               <button
               onClick={handleCancel}
-                className="btn-secondary"
+                className="gnome-btn gnome-btn-secondary"
               >
                 取消
               </button>
           </div>
-        </div>
+        </Card>
       )}
 
-      {/* 紧凑的配置列表表格 */}
-      <div className="card">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-gray-200">
-                <th className="text-left py-2 px-3 text-sm font-semibold text-gray-700">名称</th>
-                <th className="text-left py-2 px-3 text-sm font-semibold text-gray-700">提供商</th>
-                <th className="text-left py-2 px-3 text-sm font-semibold text-gray-700">模型</th>
-                <th className="text-left py-2 px-3 text-sm font-semibold text-gray-700">状态</th>
-                <th className="text-left py-2 px-3 text-sm font-semibold text-gray-700">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-        {configs.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="text-center py-4">
-                    <Brain className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                    <p className="text-gray-600">暂无LLM配置</p>
-                    <p className="text-sm text-gray-500 mt-1">点击"添加模型"按钮来添加配置</p>
-                  </td>
-                </tr>
-        ) : (
-          configs.map((config) => {
-            // 获取提供商图标
-            const getProviderIcon = (provider: string) => {
-              switch (provider.toLowerCase()) {
-                case 'openai':
-                  return (
-                    <div className="w-5 h-5 rounded bg-[#10A37F] flex items-center justify-center">
-                      <Brain className="w-3.5 h-3.5 text-white" />
-                    </div>
-                  );
-                case 'anthropic':
-                  return (
-                    <div className="w-5 h-5 rounded bg-[#D4A574] flex items-center justify-center">
-                      <Brain className="w-3.5 h-3.5 text-white" />
-                    </div>
-                  );
-                case 'gemini':
-                  return (
-                    <div className="w-5 h-5 rounded bg-[#4285F4] flex items-center justify-center">
-                      <Brain className="w-3.5 h-3.5 text-white" />
-                    </div>
-                  );
-                case 'ollama':
-                  return (
-                    <div className="w-5 h-5 rounded bg-[#1D4ED8] flex items-center justify-center">
-                      <Brain className="w-3.5 h-3.5 text-white" />
-                    </div>
-                  );
-                case 'custom':
-                  return (
-                    <div className="w-5 h-5 rounded bg-gray-500 flex items-center justify-center">
-                      <Brain className="w-3.5 h-3.5 text-white" />
-                    </div>
-                  );
-                default:
-                  return (
-                    <div className="w-5 h-5 rounded bg-gray-400 flex items-center justify-center">
-                      <Brain className="w-3.5 h-3.5 text-white" />
-                    </div>
-                  );
-              }
-            };
+      {/* 按供应商分组显示 */}
+      {configs.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon={Brain}
+            title="暂无LLM配置"
+            description="点击「添加模型」按钮来添加配置"
+            action={
+              <button
+                onClick={() => setIsAdding(true)}
+                className="gnome-btn gnome-btn-primary"
+              >
+                <Plus className="w-4 h-4" />
+                <span>添加模型</span>
+              </button>
+            }
+          />
+        </Card>
+      ) : (
+        <>
+          {/* 展开/折叠全部按钮 */}
+          <div className="flex items-center justify-end space-x-2 mb-2">
+            <button
+              onClick={expandAllProviders}
+              className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+            >
+              展开全部
+            </button>
+            <span className="text-gray-300 dark:text-gray-600">|</span>
+            <button
+              onClick={collapseAllProviders}
+              className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+            >
+              折叠全部
+            </button>
+          </div>
 
-            return (
-                  <tr key={config.config_id} className="border-b border-gray-100 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
-                    <td className="py-2.5 px-3">
-                      <div className="flex items-center space-x-2.5">
-                        {getProviderIcon(config.provider)}
-                        <div>
-                          <div className="font-medium text-sm text-gray-900 dark:text-gray-100">{config.name}</div>
-                          {config.description && (
-                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{config.description}</div>
-                          )}
+          {/* 按供应商分组 */}
+          <div className="space-y-3">
+            {providerKeys.map(provider => {
+              const providerConfigs = configsByProvider[provider];
+              const isExpanded = expandedProviders.has(provider);
+              const info = PROVIDER_INFO[provider] || { name: provider, color: '#6B7280', icon: '📦' };
+              const enabledCount = providerConfigs.filter(c => c.enabled).length;
+
+              return (
+                <div 
+                  key={provider}
+                  className="rounded-xl border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] overflow-hidden shadow-sm"
+                >
+                  {/* 供应商头部 */}
+                  <button
+                    onClick={() => toggleProvider(provider)}
+                    className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-[#363636] transition-colors"
+                  >
+                    <div className="flex items-center space-x-3">
+                      {/* 展开/折叠图标 */}
+                      <div className="text-gray-400 dark:text-gray-500">
+                        {isExpanded ? (
+                          <ChevronDown className="w-5 h-5" />
+                        ) : (
+                          <ChevronRight className="w-5 h-5" />
+                        )}
+                      </div>
+                      {/* 供应商图标和名称 */}
+                      <div 
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-lg overflow-hidden"
+                        style={{ backgroundColor: providerConfigs.some(c => c.metadata?.providerLogo) ? 'transparent' : info.color }}
+                      >
+                        {getProviderGroupLogo(provider, providerConfigs)}
+                      </div>
+                      <div className="text-left">
+                        <div className="font-medium text-gray-900 dark:text-gray-100">
+                          {info.name}
+                        </div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                          {providerConfigs.length} 个模型 · {enabledCount} 个启用
                         </div>
                       </div>
-                    </td>
-                    <td className="py-2.5 px-3">
-                      <div className="flex items-center space-x-1.5">
-                        {getProviderIcon(config.provider)}
-                        <span className="text-sm text-gray-600 dark:text-gray-400 capitalize">{config.provider}</span>
-                      </div>
-                    </td>
-                    <td className="py-2.5 px-3">
-                      <span className="text-sm text-gray-600 dark:text-gray-400">{config.model || '-'}</span>
-                    </td>
-                    <td className="py-2.5 px-3">
-                      {config.enabled ? (
-                        <span className="inline-flex items-center space-x-1 px-2 py-1 text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400 rounded">
-                          <CheckCircle className="w-3 h-3" />
-                          <span>已启用</span>
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center space-x-1 px-2 py-1 text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded">
-                          <XCircle className="w-3 h-3" />
-                          <span>已禁用</span>
+                    </div>
+                    {/* 状态徽章 */}
+                    <div className="flex items-center space-x-2">
+                      {enabledCount > 0 && (
+                        <span className="ui-badge-success">
+                          {enabledCount} 启用
                         </span>
                       )}
-                    </td>
-                    <td className="py-2.5 px-3">
-                <div className="flex items-center space-x-1.5">
-                    <button
-                          onClick={() => handleEditConfig(config)}
-                          className="p-1.5 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                    title="编辑"
-                  >
-                          <Edit2 className="w-4 h-4" />
+                      {providerConfigs.length - enabledCount > 0 && (
+                        <span className="px-2 py-1 text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-full">
+                          {providerConfigs.length - enabledCount} 禁用
+                        </span>
+                      )}
+                    </div>
                   </button>
-                  <button
-                          onClick={() => handleExportConfig(config)}
-                          className="p-1.5 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                    title="导出"
-                  >
-                          <Download className="w-4 h-4" />
-                  </button>
-                  <button
-                          onClick={() => handleDeleteConfig(config.config_id)}
-                          className="p-1.5 rounded-lg text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                    title="删除"
-                  >
-                          <Trash2 className="w-4 h-4" />
-                  </button>
+
+                  {/* 模型列表 */}
+                  {isExpanded && (
+                    <div className="border-t border-gray-200 dark:border-[#404040]">
+                      <table className="w-full">
+                        <thead>
+                          <tr className="bg-gray-50 dark:bg-[#363636]">
+                            <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-4 py-2">配置名称</th>
+                            <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-4 py-2">模型</th>
+                            <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-4 py-2">状态</th>
+                            <th className="text-right text-xs font-medium text-gray-500 dark:text-gray-400 px-4 py-2">操作</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {providerConfigs.map((config, index) => (
+                            <tr 
+                              key={config.config_id} 
+                              className={`
+                                hover:bg-gray-50 dark:hover:bg-[#363636] transition-colors
+                                ${index !== providerConfigs.length - 1 ? 'border-b border-gray-100 dark:border-[#404040]' : ''}
+                              `}
+                            >
+                              <td className="px-4 py-3">
+                                <div className="flex items-center space-x-2.5">
+                                  {/* 小 Logo 显示 */}
+                                  {config.metadata?.providerLogo && (
+                                    <div className="w-6 h-6 rounded flex-shrink-0 overflow-hidden border border-gray-200 dark:border-[#404040]">
+                                      <img 
+                                        src={config.metadata.providerLogo} 
+                                        alt="" 
+                                        className="w-full h-full object-cover"
+                                      />
+                                    </div>
+                                  )}
+                                  <div>
+                                    <div className="font-medium text-sm text-gray-900 dark:text-gray-100">
+                                      {config.name}
+                                    </div>
+                                    {config.description && (
+                                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-1">
+                                        {config.description}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <code className="text-xs bg-gray-100 dark:bg-[#404040] px-2 py-1 rounded text-gray-700 dark:text-gray-300">
+                                  {config.model || '-'}
+                                </code>
+                              </td>
+                              <td className="px-4 py-3">
+                                {config.enabled ? (
+                                  <span className="ui-model-enabled inline-flex items-center space-x-1">
+                                    <CheckCircle className="w-3 h-3" />
+                                    <span>已启用</span>
+                                  </span>
+                                ) : (
+                                  <span className="ui-model-disabled inline-flex items-center space-x-1">
+                                    <XCircle className="w-3 h-3" />
+                                    <span>已禁用</span>
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="flex items-center justify-end space-x-1">
+                                  <button
+                                    onClick={() => handleEditConfig(config)}
+                                    className="p-1.5 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#404040] transition-colors"
+                                    title="编辑"
+                                  >
+                                    <Edit2 className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleExportConfig(config)}
+                                    className="p-1.5 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#404040] transition-colors"
+                                    title="导出"
+                                  >
+                                    <Download className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteConfig(config.config_id)}
+                                    className="p-1.5 rounded-lg text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                    title="删除"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
-                    </td>
-                  </tr>
-            );
-          })
-        )}
-            </tbody>
-          </table>
-        </div>
+              );
+            })}
+          </div>
+        </>
+      )}
       </div>
-    </div>
+    </PageLayout>
   );
 };
 

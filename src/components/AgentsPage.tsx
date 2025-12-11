@@ -303,16 +303,16 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ selectedRoundTableId }) => {
   };
 
   return (
-    <div className="h-full flex flex-col bg-gray-50 dark:bg-gray-950">
+    <div className="h-full flex flex-col bg-gray-50 dark:bg-[#1a1a1a]">
       {/* 头部 */}
-      <div className="flex-shrink-0 px-6 py-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+      <div className="flex-shrink-0 px-6 py-4 border-b border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d]">
         <div className="flex items-center justify-between">
           <div>
             <div className="flex items-center space-x-3">
               <Sparkles className="w-6 h-6 text-purple-500" />
               <h1 className="text-2xl font-bold text-gray-900 dark:text-white">智能体</h1>
             </div>
-            <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+            <p className="mt-1 text-sm text-gray-600 dark:text-[#858585]">
               管理智能体，开启圆桌会议
             </p>
           </div>
@@ -322,18 +322,18 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ selectedRoundTableId }) => {
             {/* 导入智能体 */}
             <button
               onClick={handleImportAgent}
-              className="flex items-center space-x-1 px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+              className="flex items-center space-x-1 px-3 py-1.5 text-sm text-gray-600 dark:text-[#858585] hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
               title="导入智能体"
             >
               <Upload className="w-4 h-4" />
               <span>导入</span>
             </button>
             
-            <div className="w-px h-6 bg-gray-200 dark:bg-gray-700" />
+            <div className="w-px h-6 bg-gray-200 dark:bg-[#3c3c3c]" />
             
             <button
               onClick={() => setShowRoundTableHistory(!showRoundTableHistory)}
-              className="flex items-center space-x-1 px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+              className="flex items-center space-x-1 px-3 py-1.5 text-sm text-gray-600 dark:text-[#858585] hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
             >
               <History className="w-4 h-4" />
               <span>历史会议</span>
@@ -356,9 +356,9 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ selectedRoundTableId }) => {
         
         {/* 历史会议下拉 */}
         {showRoundTableHistory && (
-          <div className="mt-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+          <div className="mt-3 p-3 bg-gray-50 dark:bg-[#2a2d2e] rounded-lg border border-gray-200 dark:border-[#404040]">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">历史会议</span>
+              <span className="text-sm font-medium text-gray-700 dark:text-[#cccccc]">历史会议</span>
               <button
                 onClick={() => setShowRoundTableHistory(false)}
                 className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
@@ -389,7 +389,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ selectedRoundTableId }) => {
                       <span className={`text-xs px-1.5 py-0.5 rounded ${
                         rt.status === 'active' 
                           ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                          : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+                          : 'bg-gray-100 text-gray-600 dark:bg-[#3c3c3c] dark:text-[#858585]'
                       }`}>
                         {rt.status === 'active' ? '进行中' : '已结束'}
                       </span>
@@ -416,7 +416,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ selectedRoundTableId }) => {
         {isLoadingAgents ? (
           <div className="flex items-center justify-center h-full">
             <Loader className="w-6 h-6 animate-spin text-primary-500" />
-            <span className="ml-2 text-gray-500 dark:text-gray-400">加载中...</span>
+            <span className="ml-2 text-gray-500 dark:text-[#858585]">加载中...</span>
           </div>
         ) : agents.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
@@ -424,7 +424,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ selectedRoundTableId }) => {
             <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
               还没有智能体
             </h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            <p className="text-sm text-gray-500 dark:text-[#858585] mb-4">
               您可以在聊天界面中将记忆体升级为智能体
             </p>
             <button
@@ -444,10 +444,10 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ selectedRoundTableId }) => {
               return (
                 <div
                   key={agent.session_id}
-                  className={`bg-white dark:bg-gray-800 rounded-xl border p-4 hover:shadow-lg transition-all cursor-pointer group ${
+                  className={`bg-white dark:bg-[#2a2d2e] rounded-xl border p-4 hover:shadow-lg transition-all cursor-pointer group ${
                     inRoundTable 
                       ? 'border-primary-300 dark:border-primary-700 ring-2 ring-primary-100 dark:ring-primary-900/30'
-                      : 'border-gray-200 dark:border-gray-700'
+                      : 'border-gray-200 dark:border-[#404040]'
                   }`}
                   onClick={() => handleSelectAgent(agent.session_id)}
                 >
@@ -471,7 +471,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ selectedRoundTableId }) => {
                       <h3 className="font-semibold text-gray-900 dark:text-white truncate">
                         {displayName}
                       </h3>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                      <p className="text-xs text-gray-500 dark:text-[#858585] truncate">
                         {getLLMConfigName(agent.llm_config_id)}
                       </p>
                     </div>
@@ -479,7 +479,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ selectedRoundTableId }) => {
 
                   {/* 人设预览 */}
                   {agent.system_prompt && (
-                    <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2 mb-3">
+                    <p className="text-sm text-gray-600 dark:text-[#858585] line-clamp-2 mb-3">
                       {agent.system_prompt.length > 100 
                         ? agent.system_prompt.substring(0, 100) + '...' 
                         : agent.system_prompt}
@@ -487,8 +487,8 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ selectedRoundTableId }) => {
                   )}
 
                   {/* 操作按钮 */}
-                  <div className="flex items-center justify-between pt-3 border-t border-gray-200 dark:border-gray-700">
-                    <div className="flex items-center space-x-1 text-xs text-gray-500 dark:text-gray-400">
+                  <div className="flex items-center justify-between pt-3 border-t border-gray-200 dark:border-[#404040]">
+                    <div className="flex items-center space-x-1 text-xs text-gray-500 dark:text-[#858585]">
                       <MessageCircle className="w-3 h-3" />
                       <span>{agent.message_count || 0} 条消息</span>
                     </div>
@@ -545,7 +545,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ selectedRoundTableId }) => {
 
       {/* 分隔栏 */}
       <div 
-        className="flex-shrink-0 h-8 bg-gray-100 dark:bg-gray-800 border-y border-gray-200 dark:border-gray-700 flex items-center justify-center cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+        className="flex-shrink-0 h-8 bg-gray-100 dark:bg-[#2a2d2e] border-y border-gray-200 dark:border-[#404040] flex items-center justify-center cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
         onClick={() => setShowRoundTablePanel(!showRoundTablePanel)}
       >
         <div className="flex items-center space-x-2 text-sm text-gray-500">
@@ -574,12 +574,12 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ selectedRoundTableId }) => {
               refreshTrigger={roundTableRefreshTrigger}
             />
           ) : (
-            <div className="h-full flex flex-col items-center justify-center bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
+            <div className="h-full flex flex-col items-center justify-center bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-[#404040]">
               <Users className="w-12 h-12 text-gray-300 dark:text-gray-700 mb-4" />
               <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
                 开始圆桌会议
               </h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4 text-center max-w-md">
+              <p className="text-sm text-gray-500 dark:text-[#858585] mb-4 text-center max-w-md">
                 点击智能体卡片上的 <Plus className="w-4 h-4 inline" /> 按钮将智能体添加到会议中，<br/>
                 或者创建新的圆桌会议
               </p>

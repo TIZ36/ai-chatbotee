@@ -95,6 +95,25 @@ const WorkflowEditor: React.FC = () => {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 3000, height: 3000 });
   
+  // 深色模式检测
+  const [isDarkMode, setIsDarkMode] = useState(() => 
+    document.documentElement.classList.contains('dark')
+  );
+  
+  // 监听深色模式变化
+  useEffect(() => {
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (mutation.attributeName === 'class') {
+          setIsDarkMode(document.documentElement.classList.contains('dark'));
+        }
+      });
+    });
+    
+    observer.observe(document.documentElement, { attributes: true });
+    return () => observer.disconnect();
+  }, []);
+  
   // 画布拖动状态
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
@@ -2220,7 +2239,7 @@ const WorkflowEditor: React.FC = () => {
     
       switch (node.type) {
         case 'llm':
-          bgColor = 'bg-blue-100 border-blue-300';
+          bgColor = 'bg-blue-100 dark:bg-blue-900/40 border-blue-300 dark:border-blue-700';
           const llmConfig = llmConfigs.find(c => c.config_id === node.data.llmConfigId);
           const mcpServer = node.data.mcpServerId ? mcpServers.find(s => s.id === node.data.mcpServerId) : null;
           content = (
@@ -2255,7 +2274,7 @@ const WorkflowEditor: React.FC = () => {
                 </div>
               </div>
               {llmConfig ? (
-                <div className="text-xs text-gray-600 truncate">{llmConfig.name}</div>
+                <div className="text-xs text-gray-600 dark:text-gray-400 truncate">{llmConfig.name}</div>
               ) : (
                 <div className="text-xs text-gray-400">未配置</div>
               )}
@@ -2266,7 +2285,7 @@ const WorkflowEditor: React.FC = () => {
                 </div>
               )}
               {nodeDurations[node.id] !== undefined && (
-                <div className="text-xs text-gray-600 font-medium mt-0.5">
+                <div className="text-xs text-gray-600 dark:text-gray-400 font-medium mt-0.5">
                   ⏱️ {nodeDurations[node.id]}ms
                 </div>
               )}
@@ -2274,7 +2293,7 @@ const WorkflowEditor: React.FC = () => {
           );
           break;
         case 'input':
-          bgColor = 'bg-purple-100 border-purple-300';
+          bgColor = 'bg-purple-100 dark:bg-purple-900/40 border-purple-300 dark:border-purple-700';
           const inputValue = inputNodeValue[node.id] || '';
           // 检查是否有输入连接
           const hasInputConnection = connections.some(conn => conn.target === node.id);
@@ -2316,7 +2335,7 @@ const WorkflowEditor: React.FC = () => {
                 </div>
               )}
               {inputValue ? (
-                <div className="text-xs text-gray-600 truncate max-w-full" title={inputValue}>
+                <div className="text-xs text-gray-600 dark:text-gray-400 truncate max-w-full" title={inputValue}>
                   <span className="text-gray-400">+</span> {inputValue.length > 12 ? inputValue.substring(0, 12) + '...' : inputValue}
                 </div>
               ) : (
@@ -2325,7 +2344,7 @@ const WorkflowEditor: React.FC = () => {
                 </div>
               )}
               {nodeDurations[node.id] !== undefined && (
-                <div className="text-xs text-gray-600 font-medium mt-0.5">
+                <div className="text-xs text-gray-600 dark:text-gray-400 font-medium mt-0.5">
                   ⏱️ {nodeDurations[node.id]}ms
                 </div>
               )}
@@ -2333,7 +2352,7 @@ const WorkflowEditor: React.FC = () => {
           );
           break;
         case 'output':
-          bgColor = 'bg-orange-100 border-orange-300';
+          bgColor = 'bg-orange-100 dark:bg-orange-900/40 border-orange-300 dark:border-orange-700';
           const outputValue = outputNodeResult[node.id] || '';
           // 查找连接到这个输出节点的上游节点
           const outputSourceConnection = connections.find(conn => conn.target === node.id);
@@ -2369,7 +2388,7 @@ const WorkflowEditor: React.FC = () => {
                 <div className="text-xs text-gray-400 italic mt-0.5">未连接</div>
               )}
               {nodeDurations[node.id] !== undefined && (
-                <div className="text-xs text-gray-600 font-medium mt-0.5">
+                <div className="text-xs text-gray-600 dark:text-gray-400 font-medium mt-0.5">
                   ⏱️ {nodeDurations[node.id]}ms
                 </div>
               )}
@@ -2377,7 +2396,7 @@ const WorkflowEditor: React.FC = () => {
           );
           break;
         case 'workflow':
-          bgColor = 'bg-red-100 border-red-300';
+          bgColor = 'bg-red-100 dark:bg-red-900/40 border-red-300 dark:border-red-700';
           const selectedWorkflow = node.data.workflowId
             ? workflows.find(w => (w.id || w.workflow_id) === node.data.workflowId)
             : null;
@@ -2463,12 +2482,12 @@ const WorkflowEditor: React.FC = () => {
             'weblink': '网页链接'
           };
           content = (
-            <div className="p-2 flex flex-col items-center justify-center min-h-[56px] bg-orange-50 rounded">
+            <div className="p-2 flex flex-col items-center justify-center min-h-[56px] bg-orange-50 dark:bg-orange-900/30 rounded">
                <div className="flex items-center space-x-1 mb-1">
-                  <Layout className="w-4 h-4 text-orange-600" />
-                  <span className="text-xs font-semibold text-orange-700">数据格式展示</span>
+                  <Layout className="w-4 h-4 text-orange-600 dark:text-orange-400" />
+                  <span className="text-xs font-semibold text-orange-700 dark:text-orange-300">数据格式展示</span>
                </div>
-               <div className="text-[10px] text-orange-500 truncate w-full text-center">
+               <div className="text-[10px] text-orange-500 dark:text-orange-400 truncate w-full text-center">
                  {vizTypeNames[vizType] || vizType}
                </div>
                {node.data.label && (
@@ -2478,7 +2497,7 @@ const WorkflowEditor: React.FC = () => {
                )}
             </div>
           );
-          bgColor = 'bg-white border-orange-300';
+          bgColor = 'bg-white dark:bg-orange-900/30 border-orange-300 dark:border-orange-700';
           break;
       }
     
@@ -2620,8 +2639,8 @@ const WorkflowEditor: React.FC = () => {
                 </div>
               )}
               {inputNodeValue[node.id] && (
-                <div className="text-xs text-gray-700 break-words whitespace-pre-wrap leading-relaxed">
-                  <span className="font-semibold text-purple-600">+ 附加内容：</span>
+                <div className="text-xs text-gray-700 dark:text-gray-300 break-words whitespace-pre-wrap leading-relaxed">
+                  <span className="font-semibold text-purple-600 dark:text-purple-400">+ 附加内容：</span>
                   <div className="mt-1">{inputNodeValue[node.id]}</div>
                 </div>
               )}
@@ -2638,7 +2657,7 @@ const WorkflowEditor: React.FC = () => {
             return (
               <>
                 <div
-                  className="absolute bg-white border border-gray-300 rounded-lg p-2 shadow-md z-20"
+                  className="absolute bg-white dark:bg-[#2d2d2d] border border-gray-300 dark:border-[#505050] rounded-lg p-2 shadow-md z-20"
                   style={{
                     left: `${node.position.x}px`,
                     top: `${node.position.y + 50}px`,
@@ -2658,7 +2677,7 @@ const WorkflowEditor: React.FC = () => {
                         e.stopPropagation();
                         setExpandedOutputNodeId(isExpanded ? null : node.id);
                       }}
-                      className="ml-auto text-gray-400 hover:text-gray-600 transition-colors"
+                      className="ml-auto text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
                       title={isExpanded ? '缩小' : '放大'}
                     >
                       {isExpanded ? (
@@ -2669,7 +2688,7 @@ const WorkflowEditor: React.FC = () => {
                     </button>
                   </div>
                   {outputNodeResult[node.id] ? (
-                    <div className="text-xs text-gray-700 break-words whitespace-pre-wrap">
+                    <div className="text-xs text-gray-700 dark:text-gray-300 break-words whitespace-pre-wrap">
                       {outputNodeResult[node.id]}
                     </div>
                   ) : (
@@ -2695,7 +2714,7 @@ const WorkflowEditor: React.FC = () => {
                 }}
                 onMouseDown={(e) => e.stopPropagation()}
               >
-                <div className="bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden flex flex-col w-full h-full relative">
+                <div className="bg-white dark:bg-[#2d2d2d] rounded-lg shadow-lg border border-gray-200 dark:border-[#505050] overflow-hidden flex flex-col w-full h-full relative">
                   {/* Content Area */}
                   <div className="flex-1 overflow-auto text-xs">
                     {vizInput ? (
@@ -2709,7 +2728,7 @@ const WorkflowEditor: React.FC = () => {
 
                   {/* Resize Handle */}
                   <div 
-                    className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize flex items-center justify-center z-30 bg-white/80 rounded-tl"
+                    className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize flex items-center justify-center z-30 bg-white/80 dark:bg-[#2d2d2d]/80 rounded-tl"
                     onMouseDown={(e) => {
                       e.stopPropagation();
                       e.preventDefault();
@@ -2778,17 +2797,17 @@ const WorkflowEditor: React.FC = () => {
     };
   
     return (
-      <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
+      <div className="h-screen flex flex-col bg-gray-50 dark:bg-[#1a1a1a] overflow-hidden">
         {/* 顶部工具栏 - 紧凑设计 */}
-        <div className="bg-white border-b border-gray-200 px-3 py-2 flex items-center justify-between flex-shrink-0 overflow-hidden">
+        <div className="bg-white dark:bg-[#2d2d2d] border-b border-gray-200 dark:border-[#404040] px-3 py-2 flex items-center justify-between flex-shrink-0 overflow-hidden">
           <div className="flex items-center space-x-3">
-            <h1 className="text-lg font-bold text-gray-900">工作流编排</h1>
+            <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">工作流编排</h1>
           
             {/* LLM模型选择 */}
             <select
               value={selectedLLMConfigId || ''}
               onChange={(e) => setSelectedLLMConfigId(e.target.value)}
-              className="border border-gray-300 rounded px-2 py-1 text-xs"
+              className="border border-gray-300 dark:border-[#505050] rounded px-2 py-1 text-xs bg-white dark:bg-[#363636] text-gray-900 dark:text-gray-100"
             >
               <option value="">选择LLM</option>
               {llmConfigs.map(config => (
@@ -2808,7 +2827,7 @@ const WorkflowEditor: React.FC = () => {
                   handleNewWorkflow();
                 }
               }}
-              className="border border-gray-300 rounded px-2 py-1 text-xs"
+              className="border border-gray-300 dark:border-[#505050] rounded px-2 py-1 text-xs bg-white dark:bg-[#363636] text-gray-900 dark:text-gray-100"
             >
               <option value="">新建工作流</option>
               {workflows.map(workflow => {
@@ -2827,7 +2846,7 @@ const WorkflowEditor: React.FC = () => {
               value={workflowName}
               onChange={(e) => setWorkflowName(e.target.value)}
               placeholder="工作流名称"
-              className="border border-gray-300 rounded px-2 py-1 text-xs w-32"
+              className="border border-gray-300 dark:border-[#505050] rounded px-2 py-1 text-xs w-32 bg-white dark:bg-[#363636] text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
             />
           </div>
         
@@ -2866,11 +2885,11 @@ const WorkflowEditor: React.FC = () => {
           </div>
         </div>
       
-        <div className="flex-1 flex overflow-hidden min-h-0 bg-gray-50 dark:bg-gray-950">
+        <div className="flex-1 flex overflow-hidden min-h-0 bg-gray-50 dark:bg-[#1a1a1a]">
           {/* 左侧：组件面板和MCP服务器列表 - 优化布局 */}
-          <div className="w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col flex-shrink-0 h-full shadow-sm">
+          <div className="w-64 bg-white dark:bg-[#2d2d2d] border-r border-gray-200 dark:border-[#404040] flex flex-col flex-shrink-0 h-full shadow-sm">
             {/* 组件面板 - 优化样式 */}
-            <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex-shrink-0 bg-gray-50 dark:bg-gray-800/50">
+            <div className="p-4 border-b border-gray-200 dark:border-[#404040] flex-shrink-0 bg-gray-50 dark:bg-[#363636]">
               <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center space-x-2">
                 <WorkflowIcon className="w-4 h-4" />
                 <span>组件库</span>
@@ -2881,13 +2900,13 @@ const WorkflowEditor: React.FC = () => {
             <div
               draggable
               onDragStart={(e) => handlePaletteDragStart(e, 'input')}
-              className="flex items-center space-x-3 p-3 border border-gray-200 dark:border-gray-700 rounded-xl cursor-move hover:border-primary-500 dark:hover:border-primary-500 hover:shadow-md hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-all duration-300 bg-white dark:bg-gray-800 group card-hover-enhanced"
+              className="flex items-center space-x-3 p-3 border border-gray-200 dark:border-[#404040] rounded-xl cursor-move hover:border-primary-500 dark:hover:border-primary-500 hover:shadow-md hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-all duration-300 bg-white dark:bg-[#2d2d2d] group card-hover-enhanced"
             >
-              <div className="w-8 h-8 rounded-md bg-purple-100 flex items-center justify-center text-purple-600 group-hover:bg-purple-200 transition-all duration-300 group-hover:scale-110">
+              <div className="w-8 h-8 rounded-md bg-purple-100 dark:bg-purple-900/50 flex items-center justify-center text-purple-600 dark:text-purple-400 group-hover:bg-purple-200 dark:group-hover:bg-purple-800/50 transition-all duration-300 group-hover:scale-110">
                 <FileText className="w-4 h-4" />
               </div>
               <div>
-                <div className="font-medium text-sm text-gray-900">输入节点</div>
+                <div className="font-medium text-sm text-gray-900 dark:text-gray-100">输入节点</div>
                 <div className="text-xs text-gray-500">起始输入内容</div>
               </div>
             </div>
@@ -2895,13 +2914,13 @@ const WorkflowEditor: React.FC = () => {
             <div
               draggable
               onDragStart={(e) => handlePaletteDragStart(e, 'llm')}
-              className="flex items-center space-x-2 p-2 border border-gray-200 rounded-lg cursor-move hover:border-blue-500 hover:shadow-md hover:bg-blue-50 transition-all duration-300 bg-white group card-hover-enhanced"
+              className="flex items-center space-x-2 p-2 border border-gray-200 dark:border-[#404040] rounded-lg cursor-move hover:border-blue-500 dark:hover:border-blue-400 hover:shadow-md hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-all duration-300 bg-white dark:bg-[#2d2d2d] group card-hover-enhanced"
             >
-              <div className="w-8 h-8 rounded-md bg-blue-100 flex items-center justify-center text-blue-600 group-hover:bg-blue-200 transition-all duration-300 group-hover:scale-110">
+              <div className="w-8 h-8 rounded-md bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center text-blue-600 dark:text-blue-400 group-hover:bg-blue-200 dark:group-hover:bg-blue-800/50 transition-all duration-300 group-hover:scale-110">
                 <Brain className="w-4 h-4" />
               </div>
               <div>
-                <div className="font-medium text-sm text-gray-900">LLM节点</div>
+                <div className="font-medium text-sm text-gray-900 dark:text-gray-100">LLM节点</div>
                 <div className="text-xs text-gray-500">大语言模型处理</div>
               </div>
             </div>
@@ -2909,13 +2928,13 @@ const WorkflowEditor: React.FC = () => {
             <div
               draggable
               onDragStart={(e) => handlePaletteDragStart(e, 'workflow')}
-              className="flex items-center space-x-2 p-2 border border-gray-200 rounded-lg cursor-move hover:border-red-500 hover:shadow-md hover:bg-red-50 transition-all duration-300 bg-white group card-hover-enhanced"
+              className="flex items-center space-x-2 p-2 border border-gray-200 dark:border-[#404040] rounded-lg cursor-move hover:border-red-500 dark:hover:border-red-400 hover:shadow-md hover:bg-red-50 dark:hover:bg-red-900/30 transition-all duration-300 bg-white dark:bg-[#2d2d2d] group card-hover-enhanced"
             >
-              <div className="w-8 h-8 rounded-md bg-red-100 flex items-center justify-center text-red-600 group-hover:bg-red-200 transition-all duration-300 group-hover:scale-110">
+              <div className="w-8 h-8 rounded-md bg-red-100 dark:bg-red-900/50 flex items-center justify-center text-red-600 dark:text-red-400 group-hover:bg-red-200 dark:group-hover:bg-red-800/50 transition-all duration-300 group-hover:scale-110">
                 <GitBranch className="w-4 h-4" />
               </div>
               <div>
-                <div className="font-medium text-sm text-gray-900">子工作流</div>
+                <div className="font-medium text-sm text-gray-900 dark:text-gray-100">子工作流</div>
                 <div className="text-xs text-gray-500">嵌套其他工作流</div>
               </div>
             </div>
@@ -2923,13 +2942,13 @@ const WorkflowEditor: React.FC = () => {
             <div
               draggable
               onDragStart={(e) => handlePaletteDragStart(e, 'output')}
-              className="flex items-center space-x-2 p-2 border border-gray-200 rounded-lg cursor-move hover:border-green-500 hover:shadow-md hover:bg-green-50 transition-all duration-300 bg-white group card-hover-enhanced"
+              className="flex items-center space-x-2 p-2 border border-gray-200 dark:border-[#404040] rounded-lg cursor-move hover:border-green-500 dark:hover:border-green-400 hover:shadow-md hover:bg-green-50 dark:hover:bg-green-900/30 transition-all duration-300 bg-white dark:bg-[#2d2d2d] group card-hover-enhanced"
             >
-              <div className="w-8 h-8 rounded-md bg-green-100 flex items-center justify-center text-green-600 group-hover:bg-green-200 transition-all duration-300 group-hover:scale-110">
+              <div className="w-8 h-8 rounded-md bg-green-100 dark:bg-green-900/50 flex items-center justify-center text-green-600 dark:text-green-400 group-hover:bg-green-200 dark:group-hover:bg-green-800/50 transition-all duration-300 group-hover:scale-110">
                 <FileText className="w-4 h-4" />
               </div>
               <div>
-                <div className="font-medium text-sm text-gray-900">输出节点</div>
+                <div className="font-medium text-sm text-gray-900 dark:text-gray-100">输出节点</div>
                 <div className="text-xs text-gray-500">显示/传递结果</div>
               </div>
             </div>
@@ -2942,13 +2961,13 @@ const WorkflowEditor: React.FC = () => {
             <div
               draggable
               onDragStart={(e) => handlePaletteDragStart(e, 'visualization')}
-              className="flex items-center space-x-2 p-2 border border-gray-200 rounded-lg cursor-move hover:border-orange-500 hover:shadow-md hover:bg-orange-50 transition-all duration-300 bg-white group card-hover-enhanced"
+              className="flex items-center space-x-2 p-2 border border-gray-200 dark:border-[#404040] rounded-lg cursor-move hover:border-orange-500 dark:hover:border-orange-400 hover:shadow-md hover:bg-orange-50 dark:hover:bg-orange-900/30 transition-all duration-300 bg-white dark:bg-[#2d2d2d] group card-hover-enhanced"
             >
-              <div className="w-8 h-8 rounded-md bg-orange-100 flex items-center justify-center text-orange-600 group-hover:bg-orange-200 transition-all duration-300 group-hover:scale-110">
+              <div className="w-8 h-8 rounded-md bg-orange-100 dark:bg-orange-900/50 flex items-center justify-center text-orange-600 dark:text-orange-400 group-hover:bg-orange-200 dark:group-hover:bg-orange-800/50 transition-all duration-300 group-hover:scale-110">
                 <Layout className="w-4 h-4" />
               </div>
               <div>
-                <div className="font-medium text-sm text-gray-900">数据格式展示</div>
+                <div className="font-medium text-sm text-gray-900 dark:text-gray-100">数据格式展示</div>
                 <div className="text-xs text-gray-500">结构化数据可视化</div>
               </div>
             </div>
@@ -2956,13 +2975,13 @@ const WorkflowEditor: React.FC = () => {
             <div
               draggable
               onDragStart={(e) => handlePaletteDragStart(e, 'terminal')}
-              className="flex items-center space-x-2 p-2 border border-gray-200 rounded-lg cursor-move hover:border-gray-500 hover:shadow-md hover:bg-gray-50 transition-all duration-300 bg-white group card-hover-enhanced"
+              className="flex items-center space-x-2 p-2 border border-gray-200 dark:border-[#404040] rounded-lg cursor-move hover:border-gray-500 dark:hover:border-gray-400 hover:shadow-md hover:bg-gray-50 dark:hover:bg-[#363636] transition-all duration-300 bg-white dark:bg-[#2d2d2d] group card-hover-enhanced"
             >
-              <div className="w-8 h-8 rounded-md bg-gray-100 flex items-center justify-center text-gray-600 group-hover:bg-gray-200 transition-all duration-300 group-hover:scale-110">
+              <div className="w-8 h-8 rounded-md bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-gray-600 dark:text-gray-400 group-hover:bg-gray-200 dark:group-hover:bg-gray-700 transition-all duration-300 group-hover:scale-110">
                 <Terminal className="w-4 h-4" />
               </div>
               <div>
-                <div className="font-medium text-sm text-gray-900">命令行</div>
+                <div className="font-medium text-sm text-gray-900 dark:text-gray-100">命令行</div>
                 <div className="text-xs text-gray-500">执行系统命令</div>
               </div>
             </div>
@@ -2972,7 +2991,7 @@ const WorkflowEditor: React.FC = () => {
           
             {/* MCP服务器列表 */}
             <div className="flex-1 overflow-y-auto p-2" style={{ minHeight: 0, maxHeight: 'calc(100vh - 380px)' }}>
-              <h2 className="text-xs font-semibold text-gray-700 mb-1.5">MCP服务器</h2>
+              <h2 className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">MCP服务器</h2>
               <div className="space-y-1">
                 {mcpServers.length === 0 ? (
                   <div className="text-xs text-gray-400 italic">暂无服务器</div>
@@ -2980,7 +2999,7 @@ const WorkflowEditor: React.FC = () => {
                   mcpServers.map(server => (
                     <div
                       key={server.id}
-                      className="p-1.5 border border-gray-300 rounded text-xs hover:bg-gray-50"
+                      className="p-1.5 border border-gray-300 dark:border-[#505050] rounded text-xs hover:bg-gray-50 dark:hover:bg-[#404040] text-gray-700 dark:text-gray-300"
                     >
                       {server.name}
                     </div>
@@ -2996,7 +3015,7 @@ const WorkflowEditor: React.FC = () => {
             {/* 画布区域 - 无限画布 */}
             <div
               ref={canvasRef}
-              className="flex-1 relative bg-gray-50 overflow-auto hide-scrollbar"
+              className="flex-1 relative bg-gray-50 dark:bg-[#252525] overflow-auto hide-scrollbar"
               style={{
                 cursor: isPanning ? 'grabbing' : 'default',
               }}
@@ -3052,10 +3071,11 @@ const WorkflowEditor: React.FC = () => {
                   top: 0,
                   width: `${canvasSize.width}px`,
                   height: `${canvasSize.height}px`,
-                  backgroundImage: `
-                  linear-gradient(to right, #d1d5db 1px, transparent 1px),
-                  linear-gradient(to bottom, #d1d5db 1px, transparent 1px)
-                `,
+                  backgroundImage: isDarkMode
+                    ? `linear-gradient(to right, #404040 1px, transparent 1px),
+                       linear-gradient(to bottom, #404040 1px, transparent 1px)`
+                    : `linear-gradient(to right, #d1d5db 1px, transparent 1px),
+                       linear-gradient(to bottom, #d1d5db 1px, transparent 1px)`,
                   backgroundSize: '20px 20px',
                   pointerEvents: 'none',
                 }}
@@ -3245,7 +3265,7 @@ const WorkflowEditor: React.FC = () => {
             {/* 执行日志面板 - 可拖拽，左下角 */}
             {executionLogs.length > 0 && (
               <div
-                className="absolute bg-white border border-gray-200 shadow-xl rounded-lg z-30 w-[600px] h-[400px] overflow-hidden flex flex-col"
+                className="absolute bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#505050] shadow-xl rounded-lg z-30 w-[600px] h-[400px] overflow-hidden flex flex-col"
                 style={{
                   left: `${logPanelPosition.x}px`,
                   top: `${logPanelPosition.y}px`,
@@ -3254,10 +3274,10 @@ const WorkflowEditor: React.FC = () => {
                 onMouseDown={handleLogPanelMouseDown}
               >
                 {/* 标题栏 - 可拖拽 */}
-                <div className="log-panel-header flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-gray-50 cursor-move">
+                <div className="log-panel-header flex items-center justify-between px-4 py-2 border-b border-gray-200 dark:border-[#404040] bg-gray-50 dark:bg-[#363636] cursor-move">
                   <div className="flex items-center space-x-2">
                     <div className={`w-2 h-2 rounded-full ${isExecuting ? 'bg-blue-500 animate-pulse' : 'bg-green-500'}`}></div>
-                    <span className="text-sm font-medium text-gray-700">
+                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
                       {isExecuting ? '执行中...' : '执行完成'}
                     </span>
                   </div>
@@ -3267,7 +3287,7 @@ const WorkflowEditor: React.FC = () => {
                       setSelectedLogNodeId(null);
                       setExpandedNodes(new Set());
                     }}
-                    className="text-gray-400 hover:text-gray-600"
+                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
                     title="关闭"
                   >
                     <X className="w-4 h-4" />
@@ -3278,8 +3298,8 @@ const WorkflowEditor: React.FC = () => {
                 <div className="flex-1 flex overflow-hidden">
                   {/* 左侧：节点列表 */}
                   <div className="w-48 border-r border-gray-200 flex flex-col overflow-hidden">
-                    <div className="px-3 py-2 bg-gray-50 border-b border-gray-200">
-                      <div className="text-xs font-semibold text-gray-700">节点列表</div>
+                    <div className="px-3 py-2 bg-gray-50 dark:bg-[#363636] border-b border-gray-200 dark:border-[#404040]">
+                      <div className="text-xs font-semibold text-gray-700 dark:text-gray-300">节点列表</div>
                     </div>
                     <div className="flex-1 overflow-y-auto">
                       {(() => {
@@ -3336,8 +3356,8 @@ const WorkflowEditor: React.FC = () => {
                                   key={log.nodeId}
                                   onClick={() => setSelectedLogNodeId(log.nodeId)}
                                   className={`px-3 py-2 rounded cursor-pointer text-xs transition-colors ${selectedLogNodeId === log.nodeId
-                                      ? 'bg-blue-100 border border-blue-300 text-blue-700'
-                                      : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
+                                      ? 'bg-blue-100 dark:bg-blue-900/40 border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300'
+                                      : 'bg-gray-50 dark:bg-[#363636] hover:bg-gray-100 dark:hover:bg-[#404040] text-gray-700 dark:text-gray-300'
                                     }`}
                                 >
                                   <div className="flex items-center space-x-2">
@@ -3379,8 +3399,8 @@ const WorkflowEditor: React.FC = () => {
             
                   {/* 右侧：按节点分组的日志 */}
                   <div className="flex-1 flex flex-col overflow-hidden">
-                    <div className="px-3 py-2 bg-gray-50 border-b border-gray-200">
-                      <div className="text-xs font-semibold text-gray-700">执行日志</div>
+                    <div className="px-3 py-2 bg-gray-50 dark:bg-[#363636] border-b border-gray-200 dark:border-[#404040]">
+                      <div className="text-xs font-semibold text-gray-700 dark:text-gray-300">执行日志</div>
                     </div>
                     <div className="flex-1 overflow-y-auto">
                       {(() => {
@@ -3414,7 +3434,7 @@ const WorkflowEditor: React.FC = () => {
                                       'bg-gray-50 border-gray-200'
                                   }`}>
                                   <div className="flex items-center space-x-2">
-                                    <span className="text-xs font-medium text-gray-700">
+                                    <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
                                       {startLog.message}
                                     </span>
                                   </div>
@@ -3474,15 +3494,15 @@ const WorkflowEditor: React.FC = () => {
                                 <div
                                   key={log.nodeId}
                                   className={`border rounded-lg overflow-hidden transition-all ${isNodeExecuting
-                                      ? 'border-blue-300 bg-blue-50 shadow-md'
+                                      ? 'border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/30 shadow-md'
                                       : isCompleted
-                                        ? 'border-green-200 bg-white'
-                                        : 'border-gray-200 bg-white'
+                                        ? 'border-green-200 dark:border-green-800 bg-white dark:bg-[#2d2d2d]'
+                                        : 'border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d]'
                                     }`}
                                 >
                                   {/* 节点标题栏 - 可点击展开/折叠 */}
                                   <div
-                                    className="px-3 py-2 cursor-pointer hover:bg-gray-50 transition-colors flex items-center justify-between"
+                                    className="px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-[#363636] transition-colors flex items-center justify-between"
                                     onClick={() => {
                                       setExpandedNodes(prev => {
                                         const newSet = new Set(prev);
@@ -3539,13 +3559,13 @@ const WorkflowEditor: React.FC = () => {
                                 
                                   {/* 节点日志内容 - 可折叠 */}
                                   {isExpanded && (
-                                    <div className="border-t border-gray-200 bg-gray-50">
+                                    <div className="border-t border-gray-200 dark:border-[#404040] bg-gray-50 dark:bg-[#2d2d2d]">
                                       <div className="p-3 space-y-2 max-h-96 overflow-y-auto">
                                         {/* 执行日志 - 合并显示所有日志，让日志内容本身反映状态 */}
                                         {(nodeCodeLogs.length > 0 || nodeStatusLogsForDisplay.length > 0) && (
                                           <div>
-                                            <div className="text-xs font-semibold text-gray-600 mb-1">执行日志</div>
-                                            <div className="space-y-0.5 bg-white rounded border border-gray-200 p-2 max-h-80 overflow-y-auto">
+                                            <div className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">执行日志</div>
+                                            <div className="space-y-0.5 bg-white dark:bg-[#363636] rounded border border-gray-200 dark:border-[#404040] p-2 max-h-80 overflow-y-auto">
                                               {/* 先显示状态日志 */}
                                               {nodeStatusLogsForDisplay.map((statusLog, index) => (
                                                 <div
@@ -3566,7 +3586,7 @@ const WorkflowEditor: React.FC = () => {
                                               {nodeCodeLogs.map((codeLog, index) => (
                                                 <div
                                                   key={`code-${index}`}
-                                                  className="text-xs text-gray-600 font-mono py-0.5 leading-relaxed whitespace-pre-wrap break-words"
+                                                  className="text-xs text-gray-600 dark:text-gray-400 font-mono py-0.5 leading-relaxed whitespace-pre-wrap break-words"
                                                 >
                                                   {codeLog.message}
                                                 </div>
@@ -3595,12 +3615,12 @@ const WorkflowEditor: React.FC = () => {
         {/* 节点配置弹窗 */}
         {configuringNode && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-4 w-96 max-h-96 overflow-y-auto">
+            <div className="bg-white dark:bg-[#2d2d2d] rounded-lg p-4 w-96 max-h-96 overflow-y-auto">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold">配置节点</h3>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">配置节点</h3>
                 <button
                   onClick={() => setConfiguringNode(null)}
-                  className="text-gray-400 hover:text-gray-600"
+                  className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -3609,7 +3629,7 @@ const WorkflowEditor: React.FC = () => {
               {configuringNode.type === 'llm' && (
                 <div className="space-y-3">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                       LLM模型
                     </label>
                     <select
@@ -3627,7 +3647,7 @@ const WorkflowEditor: React.FC = () => {
                   </div>
                 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                       MCP服务器（可选）
                     </label>
                     <select
@@ -3649,7 +3669,7 @@ const WorkflowEditor: React.FC = () => {
               {configuringNode.type === 'workflow' && (
                 <div className="space-y-3">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                       选择子工作流
                     </label>
                     <select
@@ -3670,9 +3690,9 @@ const WorkflowEditor: React.FC = () => {
                         ))}
                     </select>
                   </div>
-                  <div className="text-xs text-gray-500 bg-red-50 p-2 rounded border border-red-200">
-                    <div className="font-semibold text-red-700 mb-1">💡 工作流节点说明</div>
-                    <div className="text-gray-600">
+                  <div className="text-xs text-gray-500 bg-red-50 dark:bg-red-900/30 p-2 rounded border border-red-200 dark:border-red-800">
+                    <div className="font-semibold text-red-700 dark:text-red-400 mb-1">💡 工作流节点说明</div>
+                    <div className="text-gray-600 dark:text-gray-400">
                       工作流节点将作为黑盒执行：输入字符串 → 输出字符串。子工作流将接收当前节点的输入，执行后返回输出结果。
                     </div>
                   </div>
@@ -3682,7 +3702,7 @@ const WorkflowEditor: React.FC = () => {
               {configuringNode.type === 'terminal' && (
                 <div className="space-y-3">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                       Terminal类型
                     </label>
                     <select
@@ -3699,9 +3719,9 @@ const WorkflowEditor: React.FC = () => {
                       <option value="node">Node.js</option>
                     </select>
                   </div>
-                  <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded border border-gray-200">
-                    <div className="font-semibold text-gray-700 mb-1">💡 Terminal节点说明</div>
-                    <div className="text-gray-600">
+                  <div className="text-xs text-gray-500 bg-gray-50 dark:bg-[#363636] p-2 rounded border border-gray-200 dark:border-[#404040]">
+                    <div className="font-semibold text-gray-700 dark:text-gray-300 mb-1">💡 Terminal节点说明</div>
+                    <div className="text-gray-600 dark:text-gray-400">
                       <div className="mb-1">• <strong>cursor-agent</strong>: 将输入作为任务发送到cursor-agent处理</div>
                       <div className="mb-1">• <strong>bash/zsh</strong>: 执行bash/zsh命令</div>
                       <div className="mb-1">• <strong>PowerShell/CMD</strong>: 执行Windows命令</div>
@@ -3714,7 +3734,7 @@ const WorkflowEditor: React.FC = () => {
               {configuringNode.type === 'visualization' && (
                 <div className="space-y-3">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                       展示类型
                     </label>
                     <select
@@ -3728,7 +3748,7 @@ const WorkflowEditor: React.FC = () => {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                       自定义标签
                     </label>
                     <input
@@ -3769,11 +3789,11 @@ const WorkflowEditor: React.FC = () => {
         
           return (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-lg p-5 w-[500px]">
+              <div className="bg-white dark:bg-[#2d2d2d] rounded-lg p-5 w-[500px]">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center space-x-2">
-                    <FileText className="w-5 h-5 text-purple-600" />
-                    <h3 className="text-lg font-semibold text-gray-900">
+                    <FileText className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                       {(() => {
                         const hasUpstream = connections.some(c => c.target === editingInputNode);
                         return hasUpstream ? '附加提示词/说明' : '编辑输入内容';
@@ -3782,7 +3802,7 @@ const WorkflowEditor: React.FC = () => {
                   </div>
                   <button
                     onClick={() => setEditingInputNode(null)}
-                    className="text-gray-400 hover:text-gray-600"
+                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
                   >
                     <X className="w-5 h-5" />
                   </button>

@@ -4,7 +4,8 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Edit2, Save, X, Server, AlertCircle, CheckCircle, Wrench, ExternalLink } from 'lucide-react';
+import { Plus, Trash2, Edit2, Save, X, Server, AlertCircle, CheckCircle, Wrench, ExternalLink, Plug } from 'lucide-react';
+import PageLayout, { Card, Section, Alert, EmptyState } from './ui/PageLayout';
 import { MCPTool, MCPClient } from '../services/mcpClient';
 import { 
   getMCPServers, 
@@ -713,26 +714,24 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
   };
 
   return (
-    <div className="container-responsive py-4">
-      <div className="mb-3">
-        <h1 className="text-2xl font-bold text-gray-900 mb-1">连接 MCP 服务器</h1>
-        <p className="text-gray-600 text-sm">选择公开的 MCP 服务器或添加自定义服务器</p>
-      </div>
-
+    <PageLayout
+      title="MCP 服务器配置"
+      description="选择公开的 MCP 服务器或添加自定义服务器"
+      icon={Plug}
+    >
       {/* 公开 MCP 服务器 */}
-      <div className="mb-6">
-        <h2 className="text-xl font-semibold text-gray-900 mb-3">MCP Server</h2>
+      <Section title="公开 MCP 服务器" description="一键连接热门 MCP 服务"  className="mb-6">
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
           {/* Notion */}
-          <div className="flex flex-col items-center justify-center p-4 bg-white border-2 border-gray-200 rounded-lg hover:border-gray-400 hover:shadow-md transition-all duration-200 group">
+          <div className="flex flex-col items-center justify-center p-4 bg-white dark:bg-[#363636] border-2 border-gray-200 dark:border-[#505050] rounded-lg hover:border-gray-400 dark:hover:border-[#606060] hover:shadow-md transition-all duration-200 group">
             <svg className="w-16 h-16 mb-3 transition-transform group-hover:scale-110" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M6.017 4.313l55.333 -4.087c6.797 -0.583 8.543 -0.19 12.817 2.917l17.663 12.443c2.913 2.14 3.883 2.723 3.883 5.053v68.243c0 4.277 -1.553 6.807 -6.99 7.193L24.467 99.967c-4.08 0.193 -6.023 -0.39 -8.16 -3.113L3.3 79.94c-2.333 -3.113 -3.3 -5.443 -3.3 -8.167V11.113c0 -3.497 1.553 -6.413 6.017 -6.8z" fill="#fff"/>
-              <path fillRule="evenodd" clipRule="evenodd" d="M61.35 0.227l-55.333 4.087C1.553 4.7 0 7.617 0 11.113v60.66c0 2.724 0.967 5.053 3.3 8.167l13.007 16.913c2.137 2.723 4.08 3.307 8.16 3.113l64.257 -3.89c5.433 -0.387 6.99 -2.917 6.99 -7.193V20.64c0 -2.21 -0.873 -2.847 -3.443 -4.733L74.167 3.143c-4.273 -3.107 -6.02 -3.5 -12.817 -2.917zM25.92 19.523c-5.247 0.353 -6.437 0.433 -9.417 -1.99L8.927 11.507c-0.77 -0.78 -0.383 -1.753 1.557 -1.947l53.193 -3.887c4.467 -0.39 6.793 1.167 8.54 2.527l9.123 6.61c0.39 0.197 1.36 1.36 0.193 1.36l-54.933 3.307 -0.68 0.047zM19.803 88.3V30.367c0 -2.53 0.777 -3.697 3.103 -3.893L86 22.78c2.14 -0.193 3.107 1.167 3.107 3.693v57.547c0 2.53 -0.39 4.67 -3.883 4.863l-60.377 3.5c-3.493 0.193 -5.043 -0.97 -5.043 -4.083zm59.6 -54.827c0.387 1.75 0 3.5 -1.75 3.7l-2.91 0.577v42.773c-2.527 1.36 -4.853 2.137 -6.797 2.137 -3.107 0 -3.883 -0.973 -6.21 -3.887l-19.03 -29.94v28.967l6.02 1.363s0 3.5 -4.857 3.5l-13.39 0.777c-0.39 -0.78 0 -2.723 1.357 -3.11l3.497 -0.97v-38.3L30.48 40.667c-0.39 -1.75 0.58 -4.277 3.3 -4.473l14.367 -0.967 19.8 30.327v-26.83l-5.047 -0.58c-0.39 -2.143 1.163 -3.7 3.103 -3.89l13.4 -0.78z" fill="#000"/>
+              <path d="M6.017 4.313l55.333 -4.087c6.797 -0.583 8.543 -0.19 12.817 2.917l17.663 12.443c2.913 2.14 3.883 2.723 3.883 5.053v68.243c0 4.277 -1.553 6.807 -6.99 7.193L24.467 99.967c-4.08 0.193 -6.023 -0.39 -8.16 -3.113L3.3 79.94c-2.333 -3.113 -3.3 -5.443 -3.3 -8.167V11.113c0 -3.497 1.553 -6.413 6.017 -6.8z" className="fill-white dark:fill-[#363636]"/>
+              <path fillRule="evenodd" clipRule="evenodd" d="M61.35 0.227l-55.333 4.087C1.553 4.7 0 7.617 0 11.113v60.66c0 2.724 0.967 5.053 3.3 8.167l13.007 16.913c2.137 2.723 4.08 3.307 8.16 3.113l64.257 -3.89c5.433 -0.387 6.99 -2.917 6.99 -7.193V20.64c0 -2.21 -0.873 -2.847 -3.443 -4.733L74.167 3.143c-4.273 -3.107 -6.02 -3.5 -12.817 -2.917zM25.92 19.523c-5.247 0.353 -6.437 0.433 -9.417 -1.99L8.927 11.507c-0.77 -0.78 -0.383 -1.753 1.557 -1.947l53.193 -3.887c4.467 -0.39 6.793 1.167 8.54 2.527l9.123 6.61c0.39 0.197 1.36 1.36 0.193 1.36l-54.933 3.307 -0.68 0.047zM19.803 88.3V30.367c0 -2.53 0.777 -3.697 3.103 -3.893L86 22.78c2.14 -0.193 3.107 1.167 3.107 3.693v57.547c0 2.53 -0.39 4.67 -3.883 4.863l-60.377 3.5c-3.493 0.193 -5.043 -0.97 -5.043 -4.083zm59.6 -54.827c0.387 1.75 0 3.5 -1.75 3.7l-2.91 0.577v42.773c-2.527 1.36 -4.853 2.137 -6.797 2.137 -3.107 0 -3.883 -0.973 -6.21 -3.887l-19.03 -29.94v28.967l6.02 1.363s0 3.5 -4.857 3.5l-13.39 0.777c-0.39 -0.78 0 -2.723 1.357 -3.11l3.497 -0.97v-38.3L30.48 40.667c-0.39 -1.75 0.58 -4.277 3.3 -4.473l14.367 -0.967 19.8 30.327v-26.83l-5.047 -0.58c-0.39 -2.143 1.163 -3.7 3.103 -3.89l13.4 -0.78z" className="fill-black dark:fill-gray-100"/>
             </svg>
-            <span className="text-sm font-medium text-gray-900 mb-2">Notion</span>
+            <span className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">Notion</span>
             
             {notionAuthState === 'authenticating' ? (
-              <div className="flex items-center space-x-2 text-xs text-gray-600">
+              <div className="flex items-center space-x-2 text-xs text-gray-600 dark:text-gray-400">
                 <div className="w-3 h-3 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
                 <span>授权中...</span>
               </div>
@@ -751,26 +750,26 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
           <button
             onClick={() => alert('GitHub MCP 服务器即将推出')}
             disabled={isAdding || editingId !== null || isAddingNotion}
-            className="flex flex-col items-center justify-center p-6 bg-white border-2 border-gray-200 rounded-lg hover:border-gray-400 hover:shadow-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed group"
+            className="flex flex-col items-center justify-center p-6 bg-white dark:bg-[#363636] border-2 border-gray-200 dark:border-[#505050] rounded-lg hover:border-gray-400 dark:hover:border-[#606060] hover:shadow-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed group"
           >
             <svg className="w-16 h-16 mb-3 transition-transform group-hover:scale-110" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path fillRule="evenodd" clipRule="evenodd" d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" fill="#181717"/>
+              <path fillRule="evenodd" clipRule="evenodd" d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" className="fill-[#181717] dark:fill-gray-100"/>
             </svg>
-            <span className="text-sm font-medium text-gray-900">GitHub</span>
+            <span className="text-sm font-medium text-gray-900 dark:text-gray-100">GitHub</span>
           </button>
 
           {/* 更多服务器占位符 */}
-          <div className="flex flex-col items-center justify-center p-4 bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg">
-            <Server className="w-16 h-16 text-gray-400 mb-3" />
-            <span className="text-sm font-medium text-gray-500">更多服务器</span>
-            <span className="text-xs text-gray-400 mt-1">即将推出</span>
+          <div className="flex flex-col items-center justify-center p-4 bg-gray-50 dark:bg-[#363636] border-2 border-dashed border-gray-300 dark:border-[#505050] rounded-lg">
+            <Server className="w-16 h-16 text-gray-400 dark:text-gray-500 mb-3" />
+            <span className="text-sm font-medium text-gray-500 dark:text-gray-400">更多服务器</span>
+            <span className="text-xs text-gray-400 dark:text-gray-500 mt-1">即将推出</span>
           </div>
         </div>
-      </div>
+      </Section>
 
       {/* Notion 专用添加表单 */}
       {isAddingNotion && (
-        <div className="card mb-6 p-4">
+        <Card className="mb-6">
           <h2 className="text-lg font-semibold mb-3 flex items-center space-x-2">
             {/* Notion Logo */}
             <svg className="w-6 h-6" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -784,7 +783,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
             {/* 左侧：输入表单 */}
             <div className="lg:col-span-2 space-y-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Internal Integration Secret *
                 </label>
                 <input
@@ -845,28 +844,28 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                     <span className="flex-shrink-0 w-5 h-5 bg-blue-500 text-white rounded-full flex items-center justify-center font-medium">2</span>
                     <div>
                       <p className="font-medium">创建新的 Integration</p>
-                      <p className="text-gray-600 mt-1">点击 "New integration" 按钮</p>
+                      <p className="text-gray-600 dark:text-gray-400 mt-1">点击 "New integration" 按钮</p>
                     </div>
                   </li>
                   <li className="flex items-start space-x-2">
                     <span className="flex-shrink-0 w-5 h-5 bg-blue-500 text-white rounded-full flex items-center justify-center font-medium">3</span>
                     <div>
                       <p className="font-medium">配置 Integration</p>
-                      <p className="text-gray-600 mt-1">填写名称，选择工作区</p>
+                      <p className="text-gray-600 dark:text-gray-400 mt-1">填写名称，选择工作区</p>
                     </div>
                   </li>
                   <li className="flex items-start space-x-2">
                     <span className="flex-shrink-0 w-5 h-5 bg-blue-500 text-white rounded-full flex items-center justify-center font-medium">4</span>
                     <div>
                       <p className="font-medium">获取 Secret</p>
-                      <p className="text-gray-600 mt-1">在 "Secrets" 标签页中复制 "Internal Integration Secret"</p>
+                      <p className="text-gray-600 dark:text-gray-400 mt-1">在 "Secrets" 标签页中复制 "Internal Integration Secret"</p>
                     </div>
                   </li>
                   <li className="flex items-start space-x-2">
                     <span className="flex-shrink-0 w-5 h-5 bg-blue-500 text-white rounded-full flex items-center justify-center font-medium">5</span>
                     <div>
                       <p className="font-medium">授权页面访问</p>
-                      <p className="text-gray-600 mt-1">在需要访问的 Notion 页面中，点击 "..." → "Add connections" → 选择你的 Integration</p>
+                      <p className="text-gray-600 dark:text-gray-400 mt-1">在需要访问的 Notion 页面中，点击 "..." → "Add connections" → 选择你的 Integration</p>
                     </div>
                   </li>
                 </ol>
@@ -879,19 +878,19 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
               </div>
             </div>
           </div>
-        </div>
+        </Card>
       )}
 
       {/* 添加/编辑表单 */}
       {(isAdding || editingId) && (
-        <div className="card mb-6 p-4">
+        <Card className="mb-6">
           <h2 className="text-lg font-semibold mb-3">
             {isAdding ? '添加 MCP 服务器' : '编辑 MCP 服务器'}
           </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 服务器名称 *
               </label>
               <input
@@ -904,7 +903,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 服务器 URL *
               </label>
               <input
@@ -917,7 +916,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 服务器类型
               </label>
               <select
@@ -932,7 +931,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 状态
               </label>
               <select
@@ -947,7 +946,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
           </div>
 
           <div className="mt-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               描述
             </label>
             <textarea
@@ -962,79 +961,85 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
           <div className="flex justify-end space-x-3 mt-6">
             <button
               onClick={cancelEdit}
-              className="btn-secondary flex items-center space-x-2"
+              className="gnome-btn gnome-btn-secondary"
             >
               <X className="w-4 h-4" />
               <span>取消</span>
             </button>
             <button
               onClick={isAdding ? handleAddServer : handleUpdateServer}
-              className="btn-primary flex items-center space-x-2"
+              className="gnome-btn gnome-btn-primary"
             >
               <Save className="w-4 h-4" />
               <span>{isAdding ? '添加' : '保存'}</span>
             </button>
           </div>
-        </div>
+        </Card>
       )}
 
       {/* 自定义 MCP 服务器 */}
-      <div className="mb-12">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-medium text-gray-700">添加自定义 MCP Server</h2>
+      <Section 
+        title="自定义 MCP 服务器" 
+        description="添加和管理您自己的 MCP 服务器"
+        className="mb-6"
+        headerAction={
           <button
             onClick={() => setIsAdding(true)}
-            className="btn-secondary text-sm flex items-center space-x-1"
+            className="gnome-btn gnome-btn-secondary text-sm"
             disabled={isAdding || editingId !== null || isAddingNotion}
           >
-            <Plus className="w-3 h-3" />
+            <Plus className="w-3.5 h-3.5" />
             <span>添加自定义服务器</span>
           </button>
-        </div>
+        }
+      >
 
       {/* 服务器列表 */}
         <div className="space-y-3">
         {loading ? (
-            <div className="text-center py-6">
-              <div className="w-6 h-6 border-4 border-gray-300 border-t-gray-600 rounded-full animate-spin mx-auto mb-2" />
-              <p className="text-sm text-gray-600">加载中...</p>
+            <div className="text-center py-8">
+              <div className="w-6 h-6 border-2 border-gray-300 dark:border-gray-600 border-t-[#7c3aed] rounded-full animate-spin mx-auto mb-3" />
+              <p className="text-sm text-gray-500 dark:text-gray-400">加载中...</p>
           </div>
         ) : servers.length === 0 ? (
-            <div className="text-center py-6 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
-              <Server className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-              <h3 className="text-sm font-medium text-gray-700 mb-1">还没有自定义 MCP 服务器</h3>
-              <p className="text-xs text-gray-500 mb-3">例如：xiaohongshu-mcp、custom-api 等</p>
-            <button
-              onClick={() => setIsAdding(true)}
-                className="btn-secondary text-sm"
-            >
-                添加第一个自定义服务器
-            </button>
-          </div>
+          <EmptyState
+            icon={Server}
+            title="还没有自定义 MCP 服务器"
+            description="例如：xiaohongshu-mcp、custom-api 等"
+            action={
+              <button
+                onClick={() => setIsAdding(true)}
+                className="gnome-btn gnome-btn-primary"
+              >
+                <Plus className="w-4 h-4" />
+                <span>添加第一个自定义服务器</span>
+              </button>
+            }
+          />
         ) : (
           servers.map((server) => (
-            <div key={server.id} className="bg-white border border-gray-200 rounded-lg p-3 hover:border-gray-300 hover:shadow-sm transition-all">
+            <div key={server.id} className="bg-white dark:bg-[#363636] border border-gray-200 dark:border-[#505050] rounded-lg p-3 hover:border-gray-300 dark:hover:border-[#606060] hover:shadow-sm transition-all">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-3 flex-1 min-w-0">
                   <div className={`w-2 h-2 rounded-full flex-shrink-0 ${server.enabled ? 'bg-green-500' : 'bg-gray-400'}`} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center space-x-2">
-                      <h3 className="text-sm font-medium text-gray-900 truncate">
+                      <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
                         {(server as any).display_name || (server as any).client_name || server.name}
                       </h3>
                       {server.ext?.server_type && (
-                        <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
+                        <span className="text-xs bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 rounded">
                           {server.ext.server_type}
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-gray-500 truncate mt-0.5">{server.url}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">{server.url}</p>
                     {server.description && (
                       <p className="text-xs text-gray-400 mt-1 line-clamp-1">{server.description}</p>
                     )}
                     {/* 如果是 Notion 服务器，显示 client_name 作为额外标识 */}
                     {server.ext?.server_type === 'notion' && server.ext?.client_name && (
-                      <p className="text-xs text-blue-600 mt-0.5">
+                      <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">
                         工作空间: {server.ext.client_name}
                       </p>
                     )}
@@ -1051,7 +1056,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                   <button
                     onClick={() => handleTestConnection(server)}
                     disabled={testingServers.has(server.id)}
-                    className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded transition-colors flex items-center space-x-1"
+                    className="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded transition-colors flex items-center space-x-1"
                   >
                     {testingServers.has(server.id) ? (
                       <>
@@ -1070,7 +1075,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                   <button
                     onClick={() => handleEditServer(server.id)}
                     disabled={isAdding || editingId !== null}
-                    className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors"
+                    className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
                     title="编辑"
                   >
                     <Edit2 className="w-3 h-3" />
@@ -1079,7 +1084,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                   {/* 删除 */}
                   <button
                     onClick={() => handleDeleteServer(server.id)}
-                    className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                    className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
                     title="删除"
                   >
                     <Trash2 className="w-3 h-3" />
@@ -1091,19 +1096,25 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
               {testResults.has(server.id) && (
                 <div className="mt-4 space-y-3">
                   {/* 连接测试结果 */}
-                  <div className={`p-3 rounded-lg flex items-center space-x-2 ${
+                  <div className={`p-3 rounded-lg flex items-center space-x-2 border ${
                     testResults.get(server.id)?.success
-                      ? 'bg-green-50 border border-green-200'
-                      : 'bg-red-50 border border-red-200'
-                  }`}>
+                      ? 'ui-status-success'
+                      : 'ui-status-error'
+                  }`} style={{
+                    backgroundColor: testResults.get(server.id)?.success 
+                      ? 'var(--color-success-bg)' 
+                      : 'var(--color-error-bg)'
+                  }}>
                     {testResults.get(server.id)?.success ? (
-                      <CheckCircle className="w-5 h-5 text-green-600" />
+                      <CheckCircle className="w-5 h-5" style={{ color: 'var(--color-success)' }} />
                     ) : (
-                      <AlertCircle className="w-5 h-5 text-red-600" />
+                      <AlertCircle className="w-5 h-5" style={{ color: 'var(--color-error)' }} />
                     )}
-                    <span className={`text-sm ${
-                      testResults.get(server.id)?.success ? 'text-green-800' : 'text-red-800'
-                    }`}>
+                    <span className="text-sm" style={{
+                      color: testResults.get(server.id)?.success 
+                        ? 'var(--color-success)' 
+                        : 'var(--color-error)'
+                    }}>
                       {testResults.get(server.id)?.message}
                     </span>
                   </div>
@@ -1133,24 +1144,24 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
 
                   {/* 工具列表 */}
                   {testResults.get(server.id)?.success && testResults.get(server.id)?.tools && testResults.get(server.id)!.tools!.length > 0 && (
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                      <h4 className="text-sm font-semibold text-blue-900 mb-2 flex items-center">
+                    <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+                      <h4 className="text-sm font-semibold text-blue-900 dark:text-blue-300 mb-2 flex items-center">
                         <Wrench className="w-4 h-4 mr-1" />
                         可用工具 ({testResults.get(server.id)?.tools?.length})
                       </h4>
                       <div className="space-y-2 max-h-40 overflow-y-auto">
                         {testResults.get(server.id)?.tools?.map((tool, index) => (
-                          <div key={index} className="bg-white rounded border p-2">
+                          <div key={index} className="bg-white dark:bg-[#2d2d2d] rounded border border-gray-200 dark:border-[#404040] p-2">
                             <div className="flex items-start justify-between">
                               <div className="flex-1">
-                                <h5 className="text-sm font-medium text-gray-900">{tool.name}</h5>
-                                <p className="text-xs text-gray-600 mt-1">{tool.description}</p>
+                                <h5 className="text-sm font-medium text-gray-900 dark:text-gray-100">{tool.name}</h5>
+                                <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">{tool.description}</p>
                                 {tool.inputSchema?.properties && (
                                   <div className="mt-2">
-                                    <p className="text-xs text-gray-500">参数:</p>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">参数:</p>
                                     <div className="flex flex-wrap gap-1 mt-1">
                                       {Object.keys(tool.inputSchema.properties).map((param) => (
-                                        <span key={param} className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded">
+                                        <span key={param} className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 px-2 py-1 rounded">
                                           {param}
                                         </span>
                                       ))}
@@ -1170,31 +1181,29 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
           ))
         )}
         </div>
-      </div>
+      </Section>
 
       {/* 使用说明 */}
-      <div className="mt-12 space-y-4">
-        <div className="card bg-blue-50 border-blue-200">
-          <h3 className="text-lg font-semibold text-blue-900 mb-3">使用说明</h3>
-          <div className="text-blue-800 space-y-2 text-sm">
-            <p>• MCP (Model Context Protocol) 允许 LLM 模型调用外部工具和服务</p>
-            <p>• 配置通过后端统一管理，支持 Electron 动态添加 MCP 服务器</p>
-            <p>• 在 Electron 环境中自动使用后端代理，解决 CORS 跨域问题</p>
-            <p>• 在浏览器环境中直接连接到 MCP 服务器（需要服务器支持 CORS）</p>
-            <p>• 配置的服务器将在工作流页面中可用</p>
-            <p>• 确保 MCP 服务器正在运行并可从此应用访问</p>
-            <p>• 可以使用"测试连接"功能验证服务器是否正常工作</p>
-          </div>
-        </div>
+      <div className="mt-8 space-y-4">
+        <Alert variant="info" title="使用说明">
+          <ul className="space-y-1.5 text-sm">
+            <li>• MCP (Model Context Protocol) 允许 LLM 模型调用外部工具和服务</li>
+            <li>• 配置通过后端统一管理，支持 Electron 动态添加 MCP 服务器</li>
+            <li>• 在 Electron 环境中自动使用后端代理，解决 CORS 跨域问题</li>
+            <li>• 在浏览器环境中直接连接到 MCP 服务器（需要服务器支持 CORS）</li>
+            <li>• 配置的服务器将在工作流页面中可用</li>
+            <li>• 确保 MCP 服务器正在运行并可从此应用访问</li>
+            <li>• 可以使用"测试连接"功能验证服务器是否正常工作</li>
+          </ul>
+        </Alert>
 
-        <div className="card bg-green-50 border-green-200">
-          <h3 className="text-lg font-semibold text-green-900 mb-3">协议版本更新</h3>
-          <div className="text-green-800 space-y-2 text-sm">
-            <p>• 已升级到最新的 MCP 协议版本 2025-06-18（兼容 2025-03-26）</p>
-            <p>• 修复了之前的协议版本错误（HTTP 400: Invalid MCP-Protocol-Version）</p>
-            <p>• 所有 MCP 请求现在使用最新的协议标准</p>
-          </div>
-        </div>
+        <Alert variant="success" title="协议版本更新">
+          <ul className="space-y-1.5 text-sm">
+            <li>• 已升级到最新的 MCP 协议版本 2025-06-18（兼容 2025-03-26）</li>
+            <li>• 修复了之前的协议版本错误（HTTP 400: Invalid MCP-Protocol-Version）</li>
+            <li>• 所有 MCP 请求现在使用最新的协议标准</li>
+          </ul>
+        </Alert>
       </div>
 
       {/* Notion 工作空间选择对话框 */}
@@ -1238,9 +1247,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                             {registration.client_name}
                           </div>
                           {existingServer && (
-                            <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">
-                              已连接
-                            </span>
+                            <span className="ui-session-active">已连接</span>
                           )}
                         </div>
                         <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
@@ -1360,7 +1367,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
           </div>
         </div>
       )}
-    </div>
+    </PageLayout>
   );
 };
 

@@ -179,11 +179,11 @@ const ToolCallCard: React.FC<ToolCallCardProps> = ({
   };
 
   return (
-    <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+    <div className="bg-gray-50 dark:bg-[#2d2d2d] rounded-lg p-4 border border-gray-200 dark:border-[#404040]">
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1">
-          <h4 className="font-semibold text-gray-900 mb-1">{tool.name}</h4>
-          <p className="text-sm text-gray-600">{tool.description}</p>
+          <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-1">{tool.name}</h4>
+          <p className="text-sm text-gray-600 dark:text-gray-400">{tool.description}</p>
         </div>
         <button
           onClick={handleCall}
@@ -206,7 +206,7 @@ const ToolCallCard: React.FC<ToolCallCardProps> = ({
             const isRequired = tool.inputSchema.required?.includes(key);
             return (
               <div key={key}>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   {key}
                   {isRequired && <span className="text-red-500 ml-1">*</span>}
                 </label>
@@ -225,14 +225,14 @@ const ToolCallCard: React.FC<ToolCallCardProps> = ({
 
       {/* 结果显示 */}
       {result !== undefined && (
-        <div className="mt-4 pt-4 border-t border-gray-200">
+        <div className="mt-4 pt-4 border-t border-gray-200 dark:border-[#404040]">
           <div className="flex items-center space-x-2 mb-2">
             {result.error ? (
               <XCircle className="w-4 h-4 text-red-500" />
             ) : (
               <CheckCircle className="w-4 h-4 text-green-500" />
             )}
-            <span className="text-sm font-medium text-gray-700">调用结果</span>
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">调用结果</span>
           </div>
           <pre className="bg-gray-900 text-green-400 p-3 rounded text-xs overflow-auto max-h-64">
             {JSON.stringify(result, null, 2)}

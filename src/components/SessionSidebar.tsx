@@ -23,8 +23,6 @@ interface SessionSidebarProps {
   onConfigSession?: (sessionId: string) => void; // 配置会话的回调（打开配置对话框）
 }
 
-type TabType = 'sessions' | 'agents';
-
 const SessionSidebar: React.FC<SessionSidebarProps> = ({
   selectedSessionId,
   onSelectSession,
@@ -33,67 +31,96 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
   onAddToRoundTable,
   onConfigSession,
 }) => {
-  const [activeTab, setActiveTab] = useState<TabType>('sessions');
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [agents, setAgents] = useState<Session[]>([]);
+  const [allSessions, setAllSessions] = useState<Session[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [showCreateMenu, setShowCreateMenu] = useState(false);
+  const createMenuRef = React.useRef<HTMLDivElement>(null);
 
-  // 加载会话列表
-  const loadSessions = useCallback(async () => {
+  // 加载所有会话（包括记忆体和智能体）
+  const loadAllSessions = useCallback(async () => {
     try {
       setIsLoading(true);
-      const data = await getSessions();
-      setSessions(data.sessions || []);
+      const [sessionsData, agentsData] = await Promise.all([
+        getSessions(),
+        getAgents()
+      ]);
+      
+      // 合并所有会话：记忆体和智能体
+      const all = [
+        ...(sessionsData.sessions || []).filter(s => s.session_type === 'memory' || !s.session_type),
+        ...(agentsData || []).filter(s => s.session_type === 'agent')
+      ];
+      
+      setAllSessions(all);
     } catch (error) {
       console.error('Failed to load sessions:', error);
-      setSessions([]);
+      setAllSessions([]);
     } finally {
       setIsLoading(false);
     }
   }, []);
 
-  // 加载智能体列表
-  const loadAgents = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      const agentsData = await getAgents();
-      setAgents(agentsData || []);
-    } catch (error) {
-      console.error('Failed to load agents:', error);
-      setAgents([]);
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  // 根据标签页加载数据
+  // 加载数据
   useEffect(() => {
-    if (activeTab === 'sessions') {
-      loadSessions();
-    } else if (activeTab === 'agents') {
-      loadAgents();
-    }
-  }, [activeTab, loadSessions, loadAgents]);
+    loadAllSessions();
+  }, [loadAllSessions]);
 
-  // 圆桌模式下自动切换到agents标签
+  // 默认选中临时会话（如果当前没有选中任何会话）
   useEffect(() => {
-    if (isRoundTableMode) {
-      setActiveTab('agents');
+    if (!selectedSessionId && !isLoading) {
+      onSelectSession('temporary-session');
     }
-  }, [isRoundTableMode]);
+  }, [selectedSessionId, isLoading, onSelectSession]);
 
-  // 创建新会话
-  const handleCreateSession = async () => {
+  // 创建新会话（记忆体）
+  const handleCreateMemory = async () => {
     try {
+      setShowCreateMenu(false);
       const newSession = await createSession(undefined, undefined, 'memory');
-      await loadSessions();
+      await loadAllSessions();
       onSelectSession(newSession.session_id);
       onNewSession();
     } catch (error) {
-      console.error('Failed to create session:', error);
+      console.error('Failed to create memory:', error);
     }
   };
+
+  // 创建新智能体（默认，不包含头像人设等配置）
+  const handleCreateAgent = async () => {
+    try {
+      setShowCreateMenu(false);
+      const newSession = await createSession(undefined, undefined, 'agent');
+      await loadAllSessions();
+      onSelectSession(newSession.session_id);
+      onNewSession();
+    } catch (error) {
+      console.error('Failed to create agent:', error);
+    }
+  };
+
+  // 创建临时会话
+  const handleCreateTemporary = () => {
+    setShowCreateMenu(false);
+    onSelectSession(temporarySessionId);
+    onNewSession();
+  };
+
+  // 点击外部关闭菜单
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (createMenuRef.current && !createMenuRef.current.contains(event.target as Node)) {
+        setShowCreateMenu(false);
+      }
+    };
+
+    if (showCreateMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+      };
+    }
+  }, [showCreateMenu]);
 
   // 删除会话
   const handleDeleteSession = async (e: React.MouseEvent, sessionId: string) => {
@@ -101,11 +128,7 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
     if (confirm('确定要删除此会话吗？')) {
       try {
         await deleteSession(sessionId);
-        if (activeTab === 'sessions') {
-          await loadSessions();
-        } else if (activeTab === 'agents') {
-          await loadAgents();
-        }
+        await loadAllSessions();
         if (selectedSessionId === sessionId) {
           onSelectSession('');
         }
@@ -148,8 +171,7 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
         system_prompt: session.system_prompt || '',
         llm_config_id: session.llm_config_id || null,
       });
-      await loadSessions();
-      await loadAgents();
+      await loadAllSessions();
       alert('升级成功！');
     } catch (error) {
       console.error('Failed to upgrade to agent:', error);
@@ -162,20 +184,18 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
     return session.name || session.title || session.preview_text || '新会话';
   };
 
-  // 获取显示列表
-  const getDisplayList = (): Session[] => {
-    let list: Session[] = [];
-    if (activeTab === 'sessions') {
-      list = sessions;
-    } else if (activeTab === 'agents') {
-      list = agents;
-    }
+  // 获取显示列表（包含临时会话、记忆体、智能体）
+  const getDisplayList = (): (Session | { session_id: string; isTemporary: true })[] => {
+    let list: (Session | { session_id: string; isTemporary: true })[] = [...allSessions];
 
     // 搜索过滤
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
-      list = list.filter(session => {
-        const name = getDisplayName(session).toLowerCase();
+      list = list.filter(item => {
+        if ('isTemporary' in item) {
+          return '临时会话'.toLowerCase().includes(query);
+        }
+        const name = getDisplayName(item).toLowerCase();
         return name.includes(query);
       });
     }
@@ -188,84 +208,54 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const isTemporarySelected = selectedSessionId === temporarySessionId;
 
   return (
-    <div className="w-[280px] bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col h-full">
-      {/* 标签页切换 - 可滑动 */}
-      <div className="flex border-b border-gray-200 dark:border-gray-800 overflow-x-auto scrollbar-hide">
-        <button
-          onClick={() => setActiveTab('sessions')}
-          className={`
-            flex-shrink-0 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap
-            ${activeTab === 'sessions'
-              ? 'text-primary-600 dark:text-primary-400 border-b-2 border-primary-600 dark:border-primary-400 bg-gray-50 dark:bg-gray-800'
-              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800'
-            }
-          `}
-        >
-          <div className="flex items-center justify-center gap-2">
-            <MessageCircle className="w-4 h-4" />
-            <span>会话</span>
-          </div>
-        </button>
-        <button
-          onClick={() => setActiveTab('agents')}
-          className={`
-            flex-shrink-0 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap
-            ${activeTab === 'agents'
-              ? 'text-primary-600 dark:text-primary-400 border-b-2 border-primary-600 dark:border-primary-400 bg-gray-50 dark:bg-gray-800'
-              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800'
-            }
-          `}
-        >
-          <div className="flex items-center justify-center gap-2">
-            <Sparkles className="w-4 h-4" />
-            <span>Agent</span>
-          </div>
-        </button>
-      </div>
-
+    <div className="w-[200px] flex flex-col h-full">
       {/* 搜索框和新建按钮 */}
-      <div className="p-3 border-b border-gray-200 dark:border-gray-800">
-        <div className="flex gap-2">
+      <div className="p-2.5 border-b border-gray-200 dark:border-[#404040] bg-gray-50/50 dark:bg-[#363636]/30">
+        <div className="flex gap-1.5">
           <div className="flex-1 relative">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 dark:text-[#808080]" />
             <input
               type="text"
               placeholder="搜索..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-8 pr-3 py-2 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-400"
+              className="w-full pl-7 pr-2 py-1.5 text-sm bg-[var(--surface-primary)] border border-[var(--border-default)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]/50 focus:border-[var(--color-accent)] text-[var(--text-primary)] placeholder-[var(--text-muted)] transition-all"
             />
           </div>
-          {activeTab === 'sessions' && (
+          <div className="relative" ref={createMenuRef}>
             <button
-              onClick={handleCreateSession}
-              className="px-3 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-colors flex items-center gap-1"
-              title="新建会话"
+              onClick={handleCreateAgent}
+              className="p-1.5 bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-white rounded-lg transition-colors flex items-center"
+              title="新建智能体"
             >
               <Plus className="w-4 h-4" />
             </button>
-          )}
-          {activeTab === 'agents' && (
-            <>
-              {isRoundTableMode ? (
+            {showCreateMenu && (
+              <div className="absolute right-0 top-full mt-1 w-36 bg-white dark:bg-[#363636] border border-gray-200 dark:border-[#404040] rounded-lg shadow-lg dark:shadow-[0_4px_16px_rgba(0,0,0,0.3)] z-50 overflow-hidden">
                 <button
-                  onClick={handleCreateSession}
-                  className="px-3 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-colors flex items-center gap-1"
-                  title="新建智能体"
+                  onClick={handleCreateTemporary}
+                  className="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-[#e0e0e0] hover:bg-gray-100 dark:hover:bg-[#404040] flex items-center gap-2 transition-colors"
                 >
-                  <Plus className="w-4 h-4" />
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  <span>临时会话</span>
                 </button>
-              ) : (
                 <button
-                  onClick={handleCreateSession}
-                  className="px-3 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-colors flex items-center gap-1"
-                  title="新建智能体"
+                  onClick={handleCreateMemory}
+                  className="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-[#e0e0e0] hover:bg-gray-100 dark:hover:bg-[#404040] flex items-center gap-2 transition-colors border-t border-gray-100 dark:border-[#404040]"
                 >
-                  <Plus className="w-4 h-4" />
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>记忆体</span>
                 </button>
-              )}
-            </>
-          )}
+                <button
+                  onClick={handleCreateAgent}
+                  className="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-[#e0e0e0] hover:bg-gray-100 dark:hover:bg-[#404040] flex items-center gap-2 transition-colors border-t border-gray-100 dark:border-[#404040]"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>智能体</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -273,45 +263,49 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
       <div className="flex-1 overflow-y-auto">
         {isLoading ? (
           <div className="flex items-center justify-center h-32">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[var(--color-accent)]"></div>
           </div>
         ) : (
-          <div className="p-2">
-            {/* 临时会话选项（仅在sessions标签页显示） */}
-            {activeTab === 'sessions' && (
-              <div
-                onClick={() => onSelectSession(temporarySessionId)}
-                className={`
-                  group relative p-3 mb-1 rounded-lg cursor-pointer transition-colors
-                  ${isTemporarySelected
-                    ? 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800'
-                    : 'hover:bg-gray-50 dark:hover:bg-gray-800'
-                  }
-                `}
-              >
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-900 flex items-center justify-center flex-shrink-0">
-                    <MessageCircle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+          <div className="p-1.5 space-y-0.5">
+            {/* 临时会话选项 - 始终显示在顶部 */}
+            <div
+              onClick={() => onSelectSession(temporarySessionId)}
+              className={`
+                group relative px-2.5 py-2 rounded-lg cursor-pointer transition-all duration-150
+                ${isTemporarySelected
+                  ? 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/50'
+                  : 'hover:bg-gray-100 dark:hover:bg-[#363636]'
+                }
+              `}
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-lg bg-amber-100 dark:bg-amber-900/50 flex items-center justify-center flex-shrink-0">
+                  <MessageCircle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-sm text-gray-900 dark:text-white truncate">
+                    临时会话
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-sm text-gray-900 dark:text-gray-100">
-                      临时会话
-                    </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                      (不保存历史)
-                    </div>
+                  <div className="text-[10px] text-gray-500 dark:text-[#808080]">
+                    (不保存历史)
                   </div>
                 </div>
               </div>
-            )}
+            </div>
 
             {displayList.length === 0 ? (
-              <div className="p-4 text-center text-gray-500 dark:text-gray-400">
-                <MessageCircle className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">暂无{activeTab === 'sessions' ? '会话' : '智能体'}</p>
+              <div className="p-4 text-center text-gray-500 dark:text-[#808080]">
+                <MessageCircle className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                <p className="text-xs">暂无会话</p>
               </div>
             ) : (
-              displayList.map((session) => {
+              displayList.map((item) => {
+                // 处理临时会话类型
+                if ('isTemporary' in item) {
+                  return null; // 临时会话已经在上面单独显示了
+                }
+                
+                const session = item as Session;
               const isSelected = selectedSessionId === session.session_id;
               const displayName = getDisplayName(session);
               
@@ -320,72 +314,73 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
                   key={session.session_id}
                   onClick={() => onSelectSession(session.session_id)}
                   className={`
-                    group relative p-3 mb-1 rounded-lg cursor-pointer transition-colors
+                    group relative px-2.5 py-2 rounded-lg cursor-pointer transition-all duration-150
                     ${isSelected
-                      ? 'bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800'
-                      : 'hover:bg-gray-50 dark:hover:bg-gray-800'
+                      ? 'bg-[var(--color-selected-bg)] border border-[var(--color-selected-border)]'
+                      : 'hover:bg-[var(--color-hover-bg)]'
                     }
                   `}
                 >
-                  <div className="flex items-start gap-3">
+                  <div className="flex items-center gap-2.5">
                     {/* 头像 - 可点击打开配置 */}
                     {session.avatar ? (
                       <img
                         src={session.avatar}
                         alt={displayName}
                         onClick={(e) => handleAvatarClick(e, session)}
-                        className="w-8 h-8 rounded-lg flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-primary-400 transition-all"
+                        className="w-7 h-7 rounded-lg flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-[var(--color-accent)]/50 transition-all"
                         title="点击配置"
                       />
                     ) : (
                       <div 
                         onClick={(e) => handleAvatarClick(e, session)}
-                        className="w-8 h-8 rounded-lg bg-primary-100 dark:bg-primary-900 flex items-center justify-center flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-primary-400 transition-all"
+                        className="w-7 h-7 rounded-lg bg-[var(--color-accent-bg)] flex items-center justify-center flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-[var(--color-accent)]/50 transition-all"
                         title="点击配置"
                       >
-                        <MessageCircle className="w-4 h-4 text-primary-600 dark:text-primary-400" />
+                        <MessageCircle className="w-3.5 h-3.5 text-[var(--color-accent)]" />
                       </div>
                     )}
                     
                     {/* 内容 */}
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm text-gray-900 dark:text-gray-100 truncate">
-                        {displayName}
-                      </div>
-                      {session.preview_text && !session.name && (
-                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 truncate">
-                          {session.preview_text}
+                      <div className="flex items-center gap-1">
+                        <div className="font-medium text-sm text-gray-900 dark:text-white truncate">
+                          {displayName}
                         </div>
-                      )}
+                        {/* 智能体图标标记 */}
+                        {session.session_type === 'agent' && (
+                          <Sparkles className="w-3 h-3 text-[var(--color-accent)] flex-shrink-0" title="智能体" />
+                        )}
+                      </div>
                     </div>
 
                     {/* 操作按钮 */}
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {isRoundTableMode && activeTab === 'agents' && (
+                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {isRoundTableMode && session.session_type === 'agent' && (
                         <button
                           onClick={(e) => handleAddToRoundTable(e, session.session_id)}
-                          className="p-1 hover:bg-primary-100 dark:hover:bg-primary-900/20 rounded transition-colors"
+                          className="p-1 hover:bg-[var(--color-accent-bg)] rounded transition-colors"
                           title="添加到圆桌会议"
                         >
-                          <Plus className="w-4 h-4 text-primary-600 dark:text-primary-400" />
+                          <Plus className="w-3.5 h-3.5 text-[var(--color-accent)]" />
                         </button>
                       )}
                       {/* 升级为智能体按钮（仅记忆体显示） */}
-                      {activeTab === 'sessions' && session.session_type === 'memory' && (
+                      {session.session_type === 'memory' && (
                         <button
                           onClick={(e) => handleUpgradeToAgent(e, session)}
-                          className="p-1 hover:bg-purple-100 dark:hover:bg-purple-900/20 rounded transition-colors"
+                          className="p-1 hover:bg-[var(--color-accent-bg)] rounded transition-colors"
                           title="升级为智能体"
                         >
-                          <ArrowUp className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                          <ArrowUp className="w-3.5 h-3.5 text-[var(--color-accent)]" />
                         </button>
                       )}
                       <button
                         onClick={(e) => handleDeleteSession(e, session.session_id)}
-                        className="p-1 hover:bg-red-100 dark:hover:bg-red-900/20 rounded transition-colors"
+                        className="p-1 hover:bg-red-500/10 rounded transition-colors"
                         title="删除"
                       >
-                        <Trash2 className="w-4 h-4 text-red-600 dark:text-red-400" />
+                        <Trash2 className="w-3.5 h-3.5 text-red-500" />
                       </button>
                     </div>
                   </div>

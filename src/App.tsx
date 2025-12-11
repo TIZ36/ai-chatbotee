@@ -29,31 +29,27 @@ const NavItem: React.FC<NavItemProps> = ({ to, icon, title, isActive }) => {
       <Link
         to={to}
         className={`
-          w-11 h-11 flex items-center justify-center rounded-xl 
-          transition-all duration-300 ease-out relative
+          w-9 h-9 flex items-center justify-center rounded-xl 
+          transition-all duration-200 ease-out relative
           flex-shrink-0
           ${isActive 
-            ? 'bg-primary-600 text-white shadow-lg shadow-primary-600/30 scale-105' 
-            : 'text-gray-400 dark:text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-800/60 hover:text-gray-900 dark:hover:text-gray-200 hover:scale-105'
+            ? 'bg-[#7c3aed] text-white' 
+            : 'text-[#b0b0b0] hover:bg-[#363636] hover:text-white'
           }
         `}
         onMouseEnter={() => setShowTooltip(true)}
         onMouseLeave={() => setShowTooltip(false)}
         title=""
       >
-        <div className={`transition-transform duration-300 ${isActive ? 'scale-110' : 'group-hover:scale-110'}`}>
+        <div className={`transition-transform duration-200 ${isActive ? '' : 'group-hover:scale-105'}`}>
           {icon}
         </div>
-        {/* 激活指示器 */}
-        {isActive && (
-          <div className="absolute inset-0 rounded-xl bg-primary-600/20 animate-pulse-soft" />
-        )}
       </Link>
       {/* Tooltip */}
-      {showTooltip && !isActive && (
-        <div className="absolute left-full ml-3 top-1/2 -translate-y-1/2 px-2.5 py-1.5 bg-gray-900 dark:bg-gray-800 text-white text-xs rounded-lg shadow-lg z-50 whitespace-nowrap slide-in-left pointer-events-none">
+      {showTooltip && (
+        <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 px-2 py-1 bg-[#363636] text-white text-xs rounded-lg shadow-lg z-50 whitespace-nowrap pointer-events-none border border-[#404040]">
           {title}
-          <div className="absolute right-full top-1/2 -translate-y-1/2 w-0 h-0 border-t-4 border-b-4 border-r-4 border-transparent border-r-gray-900 dark:border-r-gray-800" />
+          <div className="absolute right-full top-1/2 -translate-y-1/2 w-0 h-0 border-t-4 border-b-4 border-r-4 border-transparent border-r-[#363636]" />
         </div>
       )}
     </div>
@@ -73,7 +69,7 @@ const App: React.FC = () => {
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
   const [, setTerminalState] = useState({ isMinimized: false, isMaximized: false });
   const terminalExecuteCommandRef = React.useRef<((command: string) => void) | null>(null);
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>('temporary-session');
   const [selectedRoundTableId, setSelectedRoundTableId] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(() => {
     const saved = localStorage.getItem('settings');
@@ -195,29 +191,33 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="h-screen bg-gray-50 dark:bg-gray-950 flex transition-colors duration-300 overflow-hidden">
-      {/* 中间导航栏 */}
-      <nav className="w-[72px] bg-white dark:bg-gray-900 shadow-sm border-r border-gray-200 dark:border-gray-800 flex flex-col items-center flex-shrink-0 z-50">
+    <div className="h-screen bg-gray-50 dark:bg-[#1a1a1a] flex flex-col transition-colors duration-200 overflow-hidden">
+      {/* 顶部很薄的占位区域 - 用于窗口拖动 */}
+      <div className="w-full h-[4px] flex-shrink-0 app-drag bg-transparent" />
+      
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+      {/* 中间导航栏 - GNOME 风格 */}
+      <nav className="w-[52px] bg-white dark:bg-[#2d2d2d] border-r border-gray-200 dark:border-[#404040] flex flex-col items-center flex-shrink-0 z-50 pt-3">
 
         {/* 上方导航：聊天、MCP、Workflow */}
-        <div className="flex flex-col items-center space-y-2 w-full px-2 app-no-drag">
+        <div className="flex flex-col items-center space-y-1.5 w-full px-1.5 app-no-drag">
           <NavItem
             to="/"
-            icon={<Bot className="w-[22px] h-[22px]" strokeWidth={2} />}
+            icon={<Bot className="w-[18px] h-[18px]" strokeWidth={1.5} />}
             title="聊天"
             isActive={location.pathname === '/'}
           />
 
           <NavItem
             to="/mcp-config"
-            icon={<Plug className="w-[22px] h-[22px]" strokeWidth={2} />}
+            icon={<Plug className="w-[18px] h-[18px]" strokeWidth={1.5} />}
             title="MCP配置"
             isActive={location.pathname === '/mcp-config'}
           />
 
           <NavItem
             to="/workflow-editor"
-            icon={<WorkflowIcon className="w-[22px] h-[22px]" strokeWidth={2} />}
+            icon={<WorkflowIcon className="w-[18px] h-[18px]" strokeWidth={1.5} />}
             title="工作流编辑器"
             isActive={location.pathname === '/workflow-editor'}
           />
@@ -226,27 +226,27 @@ const App: React.FC = () => {
         <div className="flex-1 app-drag" />
         
         {/* 分隔线 */}
-        <div className="w-8 h-px bg-gray-200 dark:bg-gray-700 my-2 app-no-drag" />
+        <div className="w-6 h-px bg-gray-200 dark:bg-[#404040] my-1.5 app-no-drag" />
         
         {/* 下方导航：设置、模型录入及其他功能 */}
-        <div className="flex flex-col items-center space-y-2 w-full px-2 app-no-drag flex-shrink-0 mb-2">
+        <div className="flex flex-col items-center space-y-1.5 w-full px-1.5 app-no-drag flex-shrink-0 mb-2">
           <NavItem
             to="/settings"
-            icon={<Settings className="w-[22px] h-[22px]" strokeWidth={2} />}
+            icon={<Settings className="w-[18px] h-[18px]" strokeWidth={1.5} />}
             title="设置"
             isActive={location.pathname === '/settings'}
           />
 
           <NavItem
             to="/llm-config"
-            icon={<Brain className="w-[22px] h-[22px]" strokeWidth={2} />}
+            icon={<Brain className="w-[18px] h-[18px]" strokeWidth={1.5} />}
             title="LLM配置"
             isActive={location.pathname === '/llm-config'}
           />
 
           <NavItem
             to="/crawler-config"
-            icon={<Globe className="w-[22px] h-[22px]" strokeWidth={2} />}
+            icon={<Globe className="w-[18px] h-[18px]" strokeWidth={1.5} />}
             title="爬虫配置"
             isActive={location.pathname === '/crawler-config'}
           />
@@ -256,25 +256,22 @@ const App: React.FC = () => {
             <Link
               to="/terminal"
               className={`
-                w-11 h-11 flex items-center justify-center rounded-xl 
-                transition-all duration-300 ease-out relative
+                w-9 h-9 flex items-center justify-center rounded-xl 
+                transition-all duration-200 ease-out relative
                 ${isTerminalPage
-                  ? 'bg-primary-600 text-white shadow-lg shadow-primary-600/30 scale-105' 
-                  : 'text-gray-400 dark:text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-800/60 hover:text-gray-900 dark:hover:text-gray-200 hover:scale-105'
+                  ? 'bg-[#7c3aed] text-white' 
+                  : 'text-[#b0b0b0] hover:bg-[#363636] hover:text-white'
                 }
               `}
               title="终端"
             >
-              <div className={`transition-transform duration-300 ${isTerminalPage ? 'scale-110' : 'group-hover:scale-110'}`}>
-                <Terminal className="w-[22px] h-[22px]" strokeWidth={2} />
+              <div className={`transition-transform duration-200 ${isTerminalPage ? '' : 'group-hover:scale-105'}`}>
+                <Terminal className="w-[18px] h-[18px]" strokeWidth={1.5} />
               </div>
-              {isTerminalPage && (
-                <div className="absolute inset-0 rounded-xl bg-primary-600/20 animate-pulse-soft" />
-              )}
             </Link>
           </div>
 
-          {/* DevTools 按钮 - 增强版 */}
+          {/* DevTools 按钮 */}
           <div className="relative group">
             <button
               onClick={async () => {
@@ -288,11 +285,11 @@ const App: React.FC = () => {
                   alert('在浏览器环境中，请使用以下快捷键打开开发者工具：\n\nWindows/Linux: F12 或 Ctrl+Shift+I\nMac: Cmd+Option+I');
                 }
               }}
-              className="w-11 h-11 flex items-center justify-center rounded-xl transition-all duration-300 ease-out text-gray-400 dark:text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-800/60 hover:text-gray-900 dark:hover:text-gray-200 hover:scale-105"
+              className="w-9 h-9 flex items-center justify-center rounded-xl transition-all duration-200 ease-out text-[#b0b0b0] hover:bg-[#363636] hover:text-white"
               title="开发者工具 (F12)"
             >
-              <div className="transition-transform duration-300 group-hover:scale-110">
-                <Code className="w-[22px] h-[22px]" strokeWidth={2} />
+              <div className="transition-transform duration-200 group-hover:scale-105">
+                <Code className="w-[18px] h-[18px]" strokeWidth={1.5} />
               </div>
             </button>
           </div>
@@ -300,45 +297,50 @@ const App: React.FC = () => {
       </nav>
 
       {/* 主要内容区域 - 全屏显示 */}
-      <main className="flex flex-col flex-1 min-h-0 transition-all duration-300 relative overflow-hidden bg-gray-50 dark:bg-gray-950">
+      <main className="flex flex-col flex-1 min-h-0 transition-all duration-200 relative overflow-hidden bg-gray-100 dark:bg-[#1a1a1a]">
         
         {isTerminalPage ? (
           /* Terminal 独占页面 */
-          <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
-            <TerminalPanel
-              isOpen={true}
-              onClose={() => navigate('/')}
-              onStateChange={(isMinimized, isMaximized) => {
-                setTerminalState({ isMinimized, isMaximized });
-              }}
-              onExecuteCommandReady={(executeCommand) => {
-                terminalExecuteCommandRef.current = executeCommand;
-                setTerminalExecutor(executeCommand);
-              }}
-            />
+          <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden m-2">
+            <div className="flex-1 rounded-xl bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] shadow-lg dark:shadow-[0_4px_24px_rgba(0,0,0,0.4)] overflow-hidden">
+              <TerminalPanel
+                isOpen={true}
+                onClose={() => navigate('/')}
+                onStateChange={(isMinimized, isMaximized) => {
+                  setTerminalState({ isMinimized, isMaximized });
+                }}
+                onExecuteCommandReady={(executeCommand) => {
+                  terminalExecuteCommandRef.current = executeCommand;
+                  setTerminalExecutor(executeCommand);
+                }}
+              />
+            </div>
           </div>
         ) : isChatPage ? (
-          /* 聊天页面 - 左右布局 */
-          <div className="flex flex-1 min-h-0 min-w-0">
-            {/* 左侧会话列表 */}
-            <SessionSidebar
-              selectedSessionId={selectedSessionId}
-              onSelectSession={handleSelectSession}
-              onNewSession={handleNewSession}
-              isRoundTableMode={isRoundTableMode}
-              onAddToRoundTable={handleAddToRoundTable}
-              onConfigSession={handleConfigSession}
-            />
+          /* 聊天页面 - 左右布局 - GNOME 风格 */
+          <div className="flex flex-1 min-h-0 min-w-0 p-2 gap-2">
+            {/* 左侧会话列表面板 */}
+            <div className="rounded-xl bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] shadow-lg dark:shadow-[0_4px_24px_rgba(0,0,0,0.4)] overflow-hidden">
+              <SessionSidebar
+                selectedSessionId={selectedSessionId}
+                onSelectSession={handleSelectSession}
+                onNewSession={handleNewSession}
+                isRoundTableMode={isRoundTableMode}
+                onAddToRoundTable={handleAddToRoundTable}
+                onConfigSession={handleConfigSession}
+              />
+            </div>
             
             {/* 中间会议按钮 */}
-            <div className="w-1 flex items-center justify-center bg-gray-100 dark:bg-gray-800 relative group">
+            <div className="w-0 flex items-center justify-center relative group">
               <button
                 onClick={handleToggleRoundTable}
                 className={`
-                  absolute left-1/2 -translate-x-1/2 w-8 h-16 rounded-r-lg transition-all
+                  absolute left-1/2 -translate-x-1/2 w-7 h-14 rounded-lg transition-all z-10
+                  shadow-md dark:shadow-[0_2px_8px_rgba(0,0,0,0.3)]
                   ${isRoundTableMode
-                    ? 'bg-primary-600 text-white shadow-lg'
-                    : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-primary-100 dark:hover:bg-primary-900/20'
+                    ? 'bg-[#7c3aed] text-white'
+                    : 'bg-white dark:bg-[#363636] text-gray-500 dark:text-[#b0b0b0] hover:bg-[#7c3aed]/10 dark:hover:bg-[#7c3aed]/20 hover:text-[#7c3aed]'
                   }
                 `}
                 title={isRoundTableMode ? '退出圆桌会议' : '进入圆桌会议'}
@@ -347,8 +349,8 @@ const App: React.FC = () => {
               </button>
             </div>
             
-            {/* 右侧聊天区域 */}
-            <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
+            {/* 右侧聊天区域面板 */}
+            <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden rounded-xl bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] shadow-lg dark:shadow-[0_4px_24px_rgba(0,0,0,0.4)]">
               {isRoundTableMode ? (
                 /* 圆桌聊天 */
                 <RoundTableChat
@@ -362,11 +364,11 @@ const App: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="flex flex-1 min-h-0 min-w-0">
-            {/* 主内容区域 - 全屏 */}
-            <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
+          <div className="flex flex-1 min-h-0 min-w-0 p-2 gap-2">
+            {/* 主内容区域面板 - GNOME 风格 */}
+            <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden rounded-xl bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] shadow-lg dark:shadow-[0_4px_24px_rgba(0,0,0,0.4)]">
               <div className="flex-1 overflow-hidden min-w-0 flex flex-col relative">
-                <div className={`h-full flex flex-col page-transition-enter`}>
+                <div className={`h-full flex flex-col`}>
                   <Routes>
                     {/* 工作流聊天界面 - 全屏显示 */}
                     <Route path="/" element={<Workflow sessionId={selectedSessionId} />} />
@@ -401,9 +403,9 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* 右侧终端区域 - 带动画 - 优化布局（仅在非terminal页面且isTerminalOpen时显示） */}
+            {/* 右侧终端区域 - GNOME 风格 */}
             {isTerminalOpen && !isTerminalPage && (
-              <div className="w-[45%] min-w-[400px] flex flex-col min-h-0 min-w-0 border-l border-gray-200 dark:border-gray-800 bg-gray-900 flex-shrink-0 slide-in-right shadow-lg">
+              <div className="w-[45%] min-w-[400px] flex flex-col min-h-0 min-w-0 flex-shrink-0 rounded-xl bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] shadow-lg dark:shadow-[0_4px_24px_rgba(0,0,0,0.4)] overflow-hidden slide-in-right">
                 <TerminalPanel
                   isOpen={true}
                   onClose={() => setIsTerminalOpen(false)}
@@ -420,6 +422,7 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
+      </div>
     </div>
   );
 };

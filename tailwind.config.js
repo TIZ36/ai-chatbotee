@@ -8,6 +8,37 @@ export default {
   theme: {
     extend: {
       colors: {
+        // 深色主题色板 - 参考 GNOME/Ubuntu 风格
+        gray: {
+          50: '#fafafa',
+          100: '#f4f4f5',
+          200: '#e4e4e7',
+          300: '#d4d4d8',
+          400: '#a1a1aa',
+          500: '#71717a',
+          600: '#52525b',
+          700: '#3f3f46',
+          800: '#303030',
+          900: '#242424',
+          950: '#1a1a1a',
+        },
+        // 深色主题配色 - GNOME 风格
+        cursor: {
+          bg: '#1a1a1a',           // 主背景（更深）
+          surface: '#2d2d2d',       // 表面/面板背景
+          elevated: '#363636',      // 卡片/弹窗背景
+          hover: '#404040',         // 悬停背景
+          border: '#404040',        // 边框（低对比度）
+          input: '#363636',         // 输入框背景
+          text: '#ffffff',          // 主文本（白色）
+          'text-secondary': '#b0b0b0', // 次要文本
+          'text-muted': '#808080',  // 弱化文本
+          selected: '#7c3aed',      // 选中背景（紫色）
+          'selected-text': '#ffffff', // 选中文本
+          accent: '#7c3aed',        // 强调色（紫色）
+          'accent-hover': '#6d28d9', // 强调色悬停
+          switch: '#7c3aed',        // 开关颜色
+        },
         primary: {
           50: '#eff6ff',
           100: '#dbeafe',

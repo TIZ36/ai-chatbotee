@@ -4,11 +4,12 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Users, Plus, ChevronRight, X } from 'lucide-react';
+import { Users, Plus, ChevronRight, X, Trash2 } from 'lucide-react';
 import { 
   getRoundTables, 
   createRoundTable, 
   getRoundTable,
+  deleteRoundTable,
   RoundTable,
   RoundTableDetail
 } from '../services/roundTableApi';
@@ -89,6 +90,31 @@ const RoundTableChat: React.FC<RoundTableChatProps> = ({
     }
   };
 
+  // 删除圆桌会议
+  const handleDeleteRoundTable = async (tableId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    if (!confirm('确定要删除这个圆桌会议吗？此操作不可恢复。')) {
+      return;
+    }
+    
+    try {
+      await deleteRoundTable(tableId);
+      
+      // 如果删除的是当前激活的会议，清空激活状态
+      if (activeRoundTable?.round_table_id === tableId) {
+        setActiveRoundTable(null);
+        onRoundTableChange(null);
+      }
+      
+      // 重新加载会议列表
+      await loadRoundTables();
+    } catch (error) {
+      console.error('Failed to delete round table:', error);
+      alert('删除圆桌会议失败，请重试');
+    }
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* 顶部历史会议列表 */}
@@ -103,23 +129,35 @@ const RoundTableChat: React.FC<RoundTableChatProps> = ({
               roundTables.map((table) => {
                 const isActive = activeRoundTable?.round_table_id === table.round_table_id;
                 return (
-                  <button
+                  <div
                     key={table.round_table_id}
-                    onClick={() => handleSelectRoundTable(table.round_table_id)}
-                    className={`
-                      flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-colors whitespace-nowrap
-                      ${isActive
-                        ? 'bg-primary-100 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
-                        : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
-                      }
-                    `}
+                    className="relative group flex items-center"
                   >
-                    <Users className="w-4 h-4" />
-                    <span>{table.name || `圆桌会议 ${table.round_table_id.substring(0, 8)}`}</span>
-                    {table.status === 'active' && (
-                      <span className="w-2 h-2 rounded-full bg-green-500"></span>
-                    )}
-                  </button>
+                    <button
+                      onClick={() => handleSelectRoundTable(table.round_table_id)}
+                      className={`
+                        flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-colors whitespace-nowrap
+                        ${isActive
+                          ? 'bg-primary-100 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
+                          : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+                        }
+                      `}
+                    >
+                      <Users className="w-4 h-4" />
+                      <span>{table.name || `圆桌会议 ${table.round_table_id.substring(0, 8)}`}</span>
+                      {table.status === 'active' && (
+                        <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                      )}
+                    </button>
+                    {/* 删除按钮 */}
+                    <button
+                      onClick={(e) => handleDeleteRoundTable(table.round_table_id, e)}
+                      className="ml-1 p-1 opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded"
+                      title="删除圆桌会议"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 );
               })
             )}
