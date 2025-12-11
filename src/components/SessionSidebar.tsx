@@ -11,7 +11,8 @@ import {
   deleteSession, 
   Session,
   getAgents,
-  upgradeToAgent
+  upgradeToAgent,
+  getSessionMessages
 } from '../services/sessionApi';
 
 interface SessionSidebarProps {
@@ -36,6 +37,42 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [showCreateMenu, setShowCreateMenu] = useState(false);
   const createMenuRef = React.useRef<HTMLDivElement>(null);
+  const missingNameLoggedRef = React.useRef<Set<string>>(new Set());
+  const normalizeText = (text?: string | null) => (text || '').trim();
+  const isPlaceholderTitle = (title?: string | null) => {
+    const t = normalizeText(title);
+    return !t || t === '新会话';
+  };
+  const truncatePreview = (text: string, maxLen: number = 30) => {
+    const cleaned = text.replace(/\s+/g, ' ').trim();
+    if (cleaned.length <= maxLen) return cleaned;
+    return `${cleaned.slice(0, maxLen)}...`;
+  };
+
+  const fetchPreviewForSession = async (sessionId: string) => {
+    const pageSize = 50;
+    // 先拉取一条获取总数
+    const firstRes = await getSessionMessages(sessionId, 1, 1);
+    const total = firstRes.total || firstRes.messages?.length || 0;
+    let candidates = firstRes.messages || [];
+
+    // 拉取最早一页（因为接口按时间倒序，需要取最后一页才能拿到第一条消息）
+    if (total > 1) {
+      const lastPage = Math.max(1, Math.ceil(total / pageSize));
+      const lastRes = await getSessionMessages(sessionId, lastPage, pageSize);
+      candidates = [...(lastRes.messages || []), ...candidates];
+    }
+
+    // 将消息按时间正序，优先找第一条用户消息，其次任意非空消息
+    const ordered = [...candidates].reverse();
+    const firstUser = ordered.find(m => m?.role === 'user' && m?.content?.trim());
+    const firstAny = ordered.find(m => m?.content?.trim());
+    const msg = firstUser?.content || firstAny?.content || '';
+    if (!msg) {
+      console.warn('[SessionSidebar] 未找到可用内容生成预览', sessionId, 'total:', total, '候选数:', candidates.length);
+    }
+    return msg ? truncatePreview(msg) : undefined;
+  };
 
   // 加载所有会话（包括记忆体和智能体）
   const loadAllSessions = useCallback(async () => {
@@ -46,13 +83,70 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
         getAgents()
       ]);
       
-      // 合并所有会话：记忆体和智能体
-      const all = [
-        ...(sessionsData.sessions || []).filter(s => s.session_type === 'memory' || !s.session_type),
-        ...(agentsData || []).filter(s => s.session_type === 'agent')
-      ];
+      // 兼容后端返回结构：有的接口返回 { sessions: [] }，有的直接返回数组
+      const sessionsList = Array.isArray(sessionsData) ? sessionsData : ((sessionsData as any).sessions || []);
+      const agentsList = Array.isArray(agentsData) ? agentsData : ((agentsData as any).sessions || (agentsData as any).agents || []);
       
-      setAllSessions(all);
+      // 合并所有会话：记忆体和智能体
+      const hasMessages = (s: Session) => (s.message_count || 0) > 0 || Boolean(s.last_message_at);
+      const all = [
+        // 仅展示有内容的记忆体/普通会话，避免空会话占位
+        ...sessionsList.filter(s => (s.session_type === 'memory' || !s.session_type) && hasMessages(s)),
+        // 智能体始终展示
+        ...agentsList.filter(s => s.session_type === 'agent')
+      ];
+
+      // 为缺少名称和预览的会话补充一段文本，方便识别
+      const needPreview = all.filter(
+        s => {
+          const titlePlaceholder = isPlaceholderTitle(s.title);
+          const hasUsefulTitle = !titlePlaceholder;
+          const hasName = Boolean(normalizeText(s.name));
+          const hasPreview = Boolean(normalizeText(s.preview_text));
+          return !(hasName || hasUsefulTitle || hasPreview) && (s.message_count || 0) > 0;
+        }
+      );
+      const previewMap: Record<string, string> = {};
+      const previewCandidates = needPreview.slice(0, 30); // 适当扩大补充范围
+      if (previewCandidates.length > 0) {
+        const results = await Promise.allSettled(
+          previewCandidates.map(async (session) => {
+            const preview = await fetchPreviewForSession(session.session_id);
+            if (preview) {
+              previewMap[session.session_id] = preview;
+            }
+          })
+        );
+        results.forEach((r, idx) => {
+          if (r.status === 'rejected') {
+            console.warn('[SessionSidebar] Failed to load preview', previewCandidates[idx]?.session_id, r.reason);
+          }
+        });
+      }
+
+      const sessionsWithPreview = all.map(session => {
+        const filledPreview = normalizeText(session.preview_text) || previewMap[session.session_id];
+        const titleNormalized = normalizeText(session.title);
+        return {
+          ...session,
+          title: isPlaceholderTitle(session.title) ? '' : titleNormalized,
+          preview_text: filledPreview || undefined,
+        };
+      });
+      
+      // 打印仍缺少标题的会话，便于排查
+      const stillMissing = sessionsWithPreview.filter(
+        s => !(s.name || s.title || s.preview_text)
+      );
+      if (stillMissing.length > 0) {
+        console.warn('[SessionSidebar] 仍有未补全标题的会话', stillMissing.map(s => ({
+          id: s.session_id,
+          message_count: s.message_count,
+          last_message_at: s.last_message_at,
+        })));
+      }
+
+      setAllSessions(sessionsWithPreview);
     } catch (error) {
       console.error('Failed to load sessions:', error);
       setAllSessions([]);
@@ -181,7 +275,32 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   // 获取显示名称
   const getDisplayName = (session: Session): string => {
-    return session.name || session.title || session.preview_text || '新会话';
+    const name =
+      normalizeText(session.name) ||
+      (isPlaceholderTitle(session.title) ? '' : normalizeText(session.title)) ||
+      normalizeText(session.preview_text) ||
+      session.system_prompt ||
+      `会话-${session.session_id?.slice(0, 8) || '新会话'}`;
+
+    return logIfMissingDisplay(session, name);
+  };
+  const logIfMissingDisplay = (session: Session, displayName: string) => {
+    if (displayName.startsWith('会话-') || displayName === '新会话') {
+      const id = session.session_id;
+      if (!missingNameLoggedRef.current.has(id)) {
+        missingNameLoggedRef.current.add(id);
+        console.warn('[SessionSidebar] 显示名回退为默认', {
+          session_id: id,
+          message_count: session.message_count,
+          last_message_at: session.last_message_at,
+          hasName: Boolean(session.name),
+          hasTitle: Boolean(session.title),
+          hasPreview: Boolean(session.preview_text),
+          hasSystemPrompt: Boolean(session.system_prompt),
+        });
+      }
+    }
+    return displayName;
   };
 
   // 获取显示列表（包含临时会话、记忆体、智能体）
@@ -395,4 +514,3 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
 };
 
 export default SessionSidebar;
-
