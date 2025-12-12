@@ -20,8 +20,10 @@ interface ComponentThumbnailsProps {
   selectedWorkflowIds: Set<string>;
   selectedSkillPackIds: Set<string>;
   connectedMcpServerIds: Set<string>;
+  connectingMcpServerIds?: Set<string>; // 正在连接中的服务器
   onSelectMCP: (serverId: string) => void;
   onDeselectMCP: (serverId: string) => void;
+  onConnectMCP?: (serverId: string) => Promise<void>; // 连接MCP服务器
   onSelectWorkflow: (workflowId: string) => void;
   onDeselectWorkflow: (workflowId: string) => void;
   onSelectSkillPack: (skillPackId: string) => void;
@@ -37,8 +39,10 @@ const ComponentThumbnails: React.FC<ComponentThumbnailsProps> = ({
   selectedWorkflowIds,
   selectedSkillPackIds,
   connectedMcpServerIds,
+  connectingMcpServerIds = new Set(),
   onSelectMCP,
   onDeselectMCP,
+  onConnectMCP,
   onSelectWorkflow,
   onDeselectWorkflow,
   onSelectSkillPack,
@@ -143,12 +147,21 @@ const ComponentThumbnails: React.FC<ComponentThumbnailsProps> = ({
                 ) : (
                   availableMcpServers.map((server) => {
                     const isConnected = connectedMcpServerIds.has(server.id);
+                    const isConnecting = connectingMcpServerIds.has(server.id);
                     const isSelected = selectedMcpServerIds.has(server.id);
                     return (
                       <div
                         key={server.id}
-                        onClick={() => {
-                          if (!isConnected) return; // 未连接的服务器不能选择
+                        onClick={async () => {
+                          if (isConnecting) return; // 正在连接中不能操作
+                          if (!isConnected) {
+                            // 未连接的服务器，尝试连接
+                            if (onConnectMCP) {
+                              await onConnectMCP(server.id);
+                            }
+                            return;
+                          }
+                          // 已连接的服务器，切换选择状态
                           if (isSelected) {
                             onDeselectMCP(server.id);
                           } else {
@@ -156,28 +169,39 @@ const ComponentThumbnails: React.FC<ComponentThumbnailsProps> = ({
                           }
                         }}
                         className={`
-                          flex items-center justify-between p-2 rounded-lg transition-colors
-                          ${!isConnected 
-                            ? 'opacity-50 cursor-not-allowed'
-                            : isSelected
-                              ? 'bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 cursor-pointer'
-                              : 'hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer'
+                          flex items-center justify-between p-2 rounded-lg transition-colors cursor-pointer
+                          ${isConnecting
+                            ? 'opacity-70 cursor-wait'
+                            : !isConnected 
+                              ? 'hover:bg-yellow-50 dark:hover:bg-yellow-900/20 border border-dashed border-gray-300 dark:border-gray-600'
+                              : isSelected
+                                ? 'bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800'
+                                : 'hover:bg-gray-50 dark:hover:bg-gray-700'
                           }
                         `}
-                        title={!isConnected ? '未连接 - 请先在 MCP 配置页面连接此服务器' : undefined}
+                        title={isConnecting ? '正在连接...' : !isConnected ? '点击连接此服务器' : isSelected ? '点击取消选择' : '点击选择此服务器'}
                       >
                         <div className="flex items-center gap-2 flex-1 min-w-0">
                           <div className="relative">
-                            <Plug className={`w-4 h-4 flex-shrink-0 ${isSelected ? 'text-primary-600 dark:text-primary-400' : isConnected ? 'text-gray-400' : 'text-gray-300'}`} />
-                            {isConnected && (
-                              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-full border border-white dark:border-gray-800"></span>
+                            {isConnecting ? (
+                              <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                            ) : (
+                              <>
+                                <Plug className={`w-4 h-4 flex-shrink-0 ${isSelected ? 'text-primary-600 dark:text-primary-400' : isConnected ? 'text-green-500' : 'text-gray-400'}`} />
+                                {isConnected && (
+                                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-full border border-white dark:border-gray-800"></span>
+                                )}
+                              </>
                             )}
                           </div>
-                          <span className={`text-sm truncate ${isConnected ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'}`}>
+                          <span className={`text-sm truncate ${isConnected ? 'text-gray-900 dark:text-gray-100' : 'text-gray-600 dark:text-gray-400'}`}>
                             {server.display_name || server.client_name || server.name}
                           </span>
-                          {!isConnected && (
-                            <span className="text-[10px] text-gray-400 dark:text-gray-500">(未连接)</span>
+                          {isConnecting && (
+                            <span className="text-[10px] text-blue-500">连接中...</span>
+                          )}
+                          {!isConnected && !isConnecting && (
+                            <span className="text-[10px] text-yellow-600 dark:text-yellow-400 font-medium">点击连接</span>
                           )}
                         </div>
                         {isSelected && (

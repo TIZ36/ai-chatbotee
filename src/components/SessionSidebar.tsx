@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { MessageCircle, Sparkles, Plus, Trash2, Search, ArrowUp } from 'lucide-react';
+import { MessageCircle, Sparkles, Plus, Trash2, Search, ArrowUp, Upload } from 'lucide-react';
 import { 
   getSessions, 
   createSession, 
@@ -12,6 +12,8 @@ import {
   Session,
   getAgents,
   upgradeToAgent,
+  importAgentFromFile,
+  importAgent,
   getSessionMessages
 } from '../services/sessionApi';
 
@@ -36,6 +38,7 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [showCreateMenu, setShowCreateMenu] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
   const createMenuRef = React.useRef<HTMLDivElement>(null);
   const missingNameLoggedRef = React.useRef<Set<string>>(new Set());
   const normalizeText = (text?: string | null) => (text || '').trim();
@@ -303,6 +306,31 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
     return displayName;
   };
 
+  // 导入智能体配置
+  const handleImportAgent = async () => {
+    try {
+      setIsImporting(true);
+      // 从文件选择器获取配置数据
+      const data = await importAgentFromFile();
+      
+      // 导入智能体
+      const result = await importAgent(data, 'use_existing');
+      
+      // 刷新列表并选中新导入的智能体
+      await loadAllSessions();
+      onSelectSession(result.session_id);
+      
+      alert(`智能体 "${result.name}" 导入成功！`);
+    } catch (error) {
+      console.error('Failed to import agent:', error);
+      if (error instanceof Error && error.message !== 'No file selected') {
+        alert('导入失败：' + error.message);
+      }
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   // 获取显示列表（包含临时会话、记忆体、智能体）
   const getDisplayList = (): (Session | { session_id: string; isTemporary: true })[] => {
     let list: (Session | { session_id: string; isTemporary: true })[] = [...allSessions];
@@ -341,6 +369,18 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
               className="w-full pl-7 pr-2 py-1.5 text-sm bg-[var(--surface-primary)] border border-[var(--border-default)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]/50 focus:border-[var(--color-accent)] text-[var(--text-primary)] placeholder-[var(--text-muted)] transition-all"
             />
           </div>
+          <button
+            onClick={handleImportAgent}
+            disabled={isImporting}
+            className="p-1.5 bg-[var(--surface-secondary)] hover:bg-[var(--surface-tertiary)] text-[var(--text-secondary)] border border-[var(--border-default)] rounded-lg transition-colors flex items-center disabled:opacity-50"
+            title="导入智能体配置"
+          >
+            {isImporting ? (
+              <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <Upload className="w-4 h-4" />
+            )}
+          </button>
           <div className="relative" ref={createMenuRef}>
             <button
               onClick={handleCreateAgent}

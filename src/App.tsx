@@ -144,25 +144,18 @@ const App: React.FC = () => {
   // 圆桌模式状态
   const [isRoundTableMode, setIsRoundTableMode] = useState(false);
   const [currentRoundTableId, setCurrentRoundTableId] = useState<string | null>(null);
+  const [participantRefreshKey, setParticipantRefreshKey] = useState(0);
 
   const handleToggleRoundTable = async () => {
     if (!isRoundTableMode) {
-      // 切换到圆桌模式
+      // 切换到圆桌模式，但不自动创建新圆桌
+      // 用户可以在圆桌界面选择已有圆桌或手动创建新圆桌
       setIsRoundTableMode(true);
-      // 如果没有当前圆桌会议，创建一个新的
-      if (!currentRoundTableId) {
-        try {
-          const { createRoundTable } = await import('./services/roundTableApi');
-          const newTable = await createRoundTable();
-          setCurrentRoundTableId(newTable.round_table_id);
-        } catch (error) {
-          console.error('Failed to create round table:', error);
-        }
-      }
     } else {
       // 退出圆桌模式
       setIsRoundTableMode(false);
-      setCurrentRoundTableId(null);
+      // 保留当前圆桌ID，下次进入时可以继续
+      // setCurrentRoundTableId(null);
     }
   };
 
@@ -176,6 +169,8 @@ const App: React.FC = () => {
         setCurrentRoundTableId(newTable.round_table_id);
         // 添加参与者
         await addParticipant(newTable.round_table_id, sessionId);
+        // 触发参与者列表刷新
+        setParticipantRefreshKey(prev => prev + 1);
       } catch (error) {
         console.error('Failed to add to round table:', error);
       }
@@ -184,6 +179,8 @@ const App: React.FC = () => {
       try {
         const { addParticipant } = await import('./services/roundTableApi');
         await addParticipant(currentRoundTableId, sessionId);
+        // 触发参与者列表刷新
+        setParticipantRefreshKey(prev => prev + 1);
       } catch (error) {
         console.error('Failed to add participant:', error);
       }
@@ -297,12 +294,16 @@ const App: React.FC = () => {
       </nav>
 
       {/* 主要内容区域 - 全屏显示 */}
-      <main className="flex flex-col flex-1 min-h-0 transition-all duration-200 relative overflow-hidden bg-gray-100 dark:bg-[#1a1a1a]">
+      <main
+        className={`flex flex-col flex-1 min-h-0 transition-all duration-200 relative ${
+          isTerminalPage ? 'overflow-visible' : 'overflow-hidden'
+        } bg-gray-100 dark:bg-[#1a1a1a]`}
+      >
         
         {isTerminalPage ? (
           /* Terminal 独占页面 */
-          <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden m-2">
-            <div className="flex-1 rounded-xl bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] shadow-lg dark:shadow-[0_4px_24px_rgba(0,0,0,0.4)] overflow-hidden">
+          <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-visible m-2">
+            <div className="flex-1 rounded-xl bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] shadow-lg dark:shadow-[0_4px_24px_rgba(0,0,0,0.4)] overflow-visible">
               <TerminalPanel
                 isOpen={true}
                 onClose={() => navigate('/')}
@@ -356,6 +357,7 @@ const App: React.FC = () => {
                 <RoundTableChat
                   roundTableId={currentRoundTableId}
                   onRoundTableChange={setCurrentRoundTableId}
+                  refreshKey={participantRefreshKey}
                 />
               ) : (
                 /* 普通聊天 */
@@ -405,7 +407,7 @@ const App: React.FC = () => {
 
             {/* 右侧终端区域 - GNOME 风格 */}
             {isTerminalOpen && !isTerminalPage && (
-              <div className="w-[45%] min-w-[400px] flex flex-col min-h-0 min-w-0 flex-shrink-0 rounded-xl bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] shadow-lg dark:shadow-[0_4px_24px_rgba(0,0,0,0.4)] overflow-hidden slide-in-right">
+              <div className="w-[45%] min-w-[400px] flex flex-col min-h-0 min-w-0 flex-shrink-0 rounded-xl bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] shadow-lg dark:shadow-[0_4px_24px_rgba(0,0,0,0.4)] overflow-visible slide-in-right">
                 <TerminalPanel
                   isOpen={true}
                   onClose={() => setIsTerminalOpen(false)}

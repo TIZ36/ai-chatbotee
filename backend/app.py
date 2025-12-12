@@ -5931,6 +5931,53 @@ def update_session_media_output_path(session_id):
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/sessions/<session_id>/llm-config', methods=['PUT', 'OPTIONS'])
+def update_session_llm_config(session_id):
+    """更新会话/智能体的默认 LLM 配置"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        data = request.json
+        llm_config_id = data.get('llm_config_id')  # LLM 配置ID
+        
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            
+            # 检查会话是否存在
+            cursor.execute("SELECT session_id FROM sessions WHERE session_id = %s", (session_id,))
+            if not cursor.fetchone():
+                return jsonify({'error': 'Session not found'}), 404
+            
+            # 更新 LLM 配置
+            cursor.execute("""
+                UPDATE sessions 
+                SET llm_config_id = %s 
+                WHERE session_id = %s
+            """, (llm_config_id, session_id))
+            conn.commit()
+            
+            print(f"[Session API] Updated llm_config_id for session {session_id}: {llm_config_id}")
+            return jsonify({'success': True, 'llm_config_id': llm_config_id})
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Session API] Error updating LLM config: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/sessions/<session_id>/upgrade-to-agent', methods=['PUT', 'OPTIONS'])
 def upgrade_to_agent(session_id):
     """升级记忆体为智能体"""

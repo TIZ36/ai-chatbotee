@@ -12,6 +12,14 @@ export default defineConfig({
   server: {
     port: 5174,
     strictPort: false,
+    watch: {
+      // 忽略不需要监视的目录，减少文件监视器数量
+      ignored: [
+        '**/backend/venv/**',
+        '**/node_modules/**',
+        '**/.git/**',
+      ],
+    },
   },
   build: {
     outDir: 'dist',

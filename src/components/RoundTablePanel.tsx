@@ -103,6 +103,9 @@ const RoundTablePanel = forwardRef<RoundTablePanelRef, RoundTablePanelProps>(({
   const [replyingTo, setReplyingTo] = useState<RoundTableMessage | null>(null);
   const [summarizingAgents, setSummarizingAgents] = useState<Set<string>>(new Set()); // 正在总结的agent
   
+  // 输入框状态
+  const [isInputFocused, setIsInputFocused] = useState(false);
+  
   // 多模态内容（图片）
   const [attachedMedia, setAttachedMedia] = useState<Array<{
     type: 'image';
@@ -1675,92 +1678,251 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
             <div ref={messagesEndRef} />
           </div>
           
-          {/* 输入区 */}
-          <div className="p-3 border-t border-gray-200 dark:border-[#404040]">
-            {/* 发言模式和能力配置 */}
-            <div className="flex flex-wrap items-center gap-3 mb-2 text-xs">
-              {/* 目标模式 */}
-              <label className="flex items-center space-x-1.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={isTargetMode}
-                  onChange={(e) => setIsTargetMode(e.target.checked)}
-                  className="w-3.5 h-3.5 text-primary-500 border-gray-300 rounded focus:ring-primary-500"
-                />
-                <span className="text-gray-600 dark:text-gray-400">
-                  🎯 目标式
-                </span>
-              </label>
-              
-              {/* MCP 工具开关 */}
-              <label className="flex items-center space-x-1.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={enableMCP}
-                  onChange={(e) => setEnableMCP(e.target.checked)}
-                  className="w-3.5 h-3.5 text-green-500 border-gray-300 rounded focus:ring-green-500"
-                />
-                <span className="text-gray-600 dark:text-gray-400">
-                  🔧 MCP ({mcpServers.filter(s => s.enabled).length}服务)
-                </span>
-              </label>
-              
-              {/* 工作流开关 */}
-              <label className="flex items-center space-x-1.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={enableWorkflow}
-                  onChange={(e) => setEnableWorkflow(e.target.checked)}
-                  className="w-3.5 h-3.5 text-blue-500 border-gray-300 rounded focus:ring-blue-500"
-                />
-                <span className="text-gray-600 dark:text-gray-400">
-                  ⚡ 流程 ({workflows.length})
-                </span>
-              </label>
-              
-              {/* Token 计数和总结状态 */}
-              <div className="flex items-center space-x-2 ml-auto">
-                <span className="text-[10px] text-gray-400">
-                  {isTargetMode ? '🎯目标' : '💬普通'}
-                </span>
-                {currentTokenCount > 0 && (
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-                    currentTokenCount > 3000 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-700'
-                  }`}>
-                    ~{currentTokenCount} tokens
-                  </span>
-                )}
-                {roundTableSummary && (
-                  <span 
-                    className="text-[10px] text-green-600 dark:text-green-400 cursor-help" 
-                    title={roundTableSummary}
-                  >
-                    ✓已总结
-                  </span>
-                )}
-              </div>
-            </div>
-            
-            {/* 总结预览（如果有） */}
-            {roundTableSummary && (
-              <div className="mb-2 p-2 bg-blue-50 dark:bg-blue-900/20 rounded text-[10px] text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-medium">🧠 会议总结</span>
-                  <button
-                    onClick={() => setRoundTableSummary(null)}
-                    className="text-blue-500 hover:text-blue-700"
-                    title="清除总结（下次上下文满时会重新总结）"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
+          {/* 输入区 - 统一设计 */}
+          <div className="border-t border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] px-4 py-3">
+            {/* 引用消息预览 */}
+            {replyingTo && (
+              <div className="mb-3 flex items-start gap-2 p-2 bg-gray-100 dark:bg-[#363636] rounded-lg border-l-2 border-[var(--color-accent)]">
+                <CornerDownRight className="w-4 h-4 text-[var(--color-accent)] flex-shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1 text-xs text-gray-500 mb-0.5">
+                    <span>回复</span>
+                    <span className="font-medium text-gray-700 dark:text-gray-300">
+                      {replyingTo.sender_type === 'user' ? '用户' : replyingTo.agent_name || '智能体'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 truncate">
+                    {replyingTo.content?.substring(0, 100) || '[媒体消息]'}
+                  </p>
                 </div>
-                <div className="line-clamp-2">{roundTableSummary}</div>
+                <button
+                  onClick={() => setReplyingTo(null)}
+                  className="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"
+                  title="取消引用"
+                >
+                  <X className="w-3.5 h-3.5 text-gray-400" />
+                </button>
               </div>
             )}
             
+            {/* 图片预览区域 */}
+            {attachedMedia.length > 0 && (
+              <div className="mb-3 flex flex-wrap gap-2">
+                {attachedMedia.map((media, index) => (
+                  <div key={index} className="relative group">
+                    <img
+                      src={media.preview}
+                      alt={`附件 ${index + 1}`}
+                      className="h-16 w-auto rounded-lg border border-gray-200 dark:border-[#404040] object-cover"
+                    />
+                    <button
+                      onClick={() => setAttachedMedia(prev => prev.filter((_, i) => i !== index))}
+                      className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            
+            {/* 统一输入框容器 */}
+            <div className={`border rounded-xl bg-white dark:bg-[#2d2d2d] transition-all ${
+              isInputFocused 
+                ? 'border-[var(--color-accent)] ring-2 ring-[var(--color-accent)]/20' 
+                : 'border-gray-200 dark:border-[#404040]'
+            }`}>
+              <textarea
+                ref={inputRef}
+                value={inputValue}
+                onChange={handleInputChange}
+                onKeyDown={handleKeyDown}
+                onFocus={() => setIsInputFocused(true)}
+                onBlur={() => setIsInputFocused(false)}
+                onPaste={(e) => {
+                  // 检查粘贴板中是否有图片
+                  const items = e.clipboardData?.items;
+                  if (!items) return;
+                  
+                  const imageItems: DataTransferItem[] = [];
+                  for (let i = 0; i < items.length; i++) {
+                    const item = items[i];
+                    if (item.type.startsWith('image/')) {
+                      imageItems.push(item);
+                    }
+                  }
+                  
+                  // 如果有图片，处理图片粘贴
+                  if (imageItems.length > 0) {
+                    e.preventDefault(); // 阻止默认的文本粘贴行为
+                    
+                    imageItems.forEach(item => {
+                      const file = item.getAsFile();
+                      if (!file) return;
+                      
+                      const reader = new FileReader();
+                      reader.onload = (event) => {
+                        const result = event.target?.result as string;
+                        // 移除 data URL 前缀，只保留 base64 数据
+                        const base64Data = result.includes(',') ? result.split(',')[1] : result;
+                        const mimeType = file.type || 'image/png';
+                        
+                        setAttachedMedia(prev => [...prev, {
+                          type: 'image',
+                          mimeType,
+                          data: base64Data,
+                          preview: result, // 用于预览
+                        }]);
+                        
+                        console.log('[RoundTable] 已粘贴图片:', mimeType, '大小:', Math.round(base64Data.length / 1024), 'KB');
+                      };
+                      reader.readAsDataURL(file);
+                    });
+                  }
+                }}
+                placeholder={isTargetMode ? "🎯 目标式发言：描述你的目标，AI会协作完成..." : "输入消息，使用 @ 提及特定智能体，粘贴图片..."}
+                className="w-full px-3 py-3 bg-transparent border-none focus:outline-none focus:ring-0 dark:text-white resize-none text-sm"
+                style={{ minHeight: '60px', maxHeight: '150px' }}
+                disabled={isSending}
+              />
+              
+              {/* @ 提及下拉菜单 */}
+              {showMentionDropdown && roundTable.participants.length > 0 && (
+                <div className="absolute bottom-full left-0 mb-1 w-56 bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] rounded-lg shadow-lg max-h-48 overflow-y-auto z-20">
+                  {getFilteredParticipants().length === 0 ? (
+                    <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">无匹配的智能体</div>
+                  ) : (
+                    getFilteredParticipants().map((participant, index) => (
+                      <button
+                        key={participant.session_id}
+                        onClick={() => handleSelectMention(participant)}
+                        className={`w-full px-3 py-2 text-left flex items-center space-x-2 transition-colors ${
+                          index === mentionSelectedIndex 
+                            ? 'bg-[var(--color-accent)]/10 text-[var(--color-accent)]' 
+                            : 'hover:bg-gray-100 dark:hover:bg-[#363636]'
+                        }`}
+                      >
+                        <div className="w-6 h-6 rounded-full overflow-hidden border border-gray-200 dark:border-[#404040] flex items-center justify-center bg-purple-100 dark:bg-purple-900/30 flex-shrink-0">
+                          {participant.avatar ? (
+                            <img 
+                              src={participant.avatar} 
+                              alt={participant.name} 
+                              className="w-full h-full object-cover" 
+                            />
+                          ) : (
+                            <Bot className="w-3 h-3 text-purple-500" />
+                          )}
+                        </div>
+                        <span className="text-sm text-gray-900 dark:text-white truncate">
+                          {participant.name}
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+              
+              {/* 底部工具栏 */}
+              <div className="flex items-center justify-between px-3 py-2 border-t border-gray-100 dark:border-[#404040]/50">
+                {/* 左侧：功能开关 */}
+                <div className="flex items-center space-x-3 text-xs">
+                  {/* 目标模式开关 */}
+                  <button
+                    onClick={() => setIsTargetMode(!isTargetMode)}
+                    className={`flex items-center space-x-1 px-2 py-1 rounded-lg transition-all ${
+                      isTargetMode 
+                        ? 'bg-[var(--color-accent)]/10 text-[var(--color-accent)]' 
+                        : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#363636]'
+                    }`}
+                    title={isTargetMode ? '目标式发言（点击切换）' : '普通发言（点击切换为目标式）'}
+                  >
+                    <span>🎯</span>
+                    <span className="hidden sm:inline">{isTargetMode ? '目标式' : '普通'}</span>
+                  </button>
+                  
+                  {/* MCP 开关 */}
+                  <button
+                    onClick={() => setEnableMCP(!enableMCP)}
+                    className={`flex items-center space-x-1 px-2 py-1 rounded-lg transition-all ${
+                      enableMCP 
+                        ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' 
+                        : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#363636]'
+                    }`}
+                    title={enableMCP ? '已启用 MCP 工具' : '点击启用 MCP 工具'}
+                  >
+                    <Plug className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">MCP</span>
+                    {enableMCP && <span className="text-[10px]">({mcpServers.filter(s => s.enabled).length})</span>}
+                  </button>
+                  
+                  {/* 工作流开关 */}
+                  <button
+                    onClick={() => setEnableWorkflow(!enableWorkflow)}
+                    className={`flex items-center space-x-1 px-2 py-1 rounded-lg transition-all ${
+                      enableWorkflow 
+                        ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' 
+                        : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#363636]'
+                    }`}
+                    title={enableWorkflow ? '已启用工作流' : '点击启用工作流'}
+                  >
+                    <Workflow className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">流程</span>
+                    {enableWorkflow && <span className="text-[10px]">({workflows.length})</span>}
+                  </button>
+                  
+                  {/* Token 计数 */}
+                  {currentTokenCount > 0 && (
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] ${
+                      currentTokenCount > 3000 
+                        ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' 
+                        : 'text-gray-400 dark:text-gray-500'
+                    }`}>
+                      ~{currentTokenCount} tokens
+                    </span>
+                  )}
+                  
+                  {/* 总结状态 */}
+                  {roundTableSummary && (
+                    <span 
+                      className="text-[10px] text-green-600 dark:text-green-400 cursor-help px-1.5 py-0.5 bg-green-50 dark:bg-green-900/20 rounded" 
+                      title={roundTableSummary}
+                    >
+                      ✓ 已总结
+                    </span>
+                  )}
+                  
+                  {/* 图片计数 */}
+                  {attachedMedia.length > 0 && (
+                    <span className="flex items-center space-x-1 text-[10px] text-gray-400">
+                      <ImageIcon className="w-3 h-3" />
+                      <span>{attachedMedia.length}</span>
+                    </span>
+                  )}
+                </div>
+                
+                {/* 右侧：发送按钮 */}
+                <button
+                  onClick={handleSendMessage}
+                  disabled={(!inputValue.trim() && attachedMedia.length === 0) || isSending}
+                  className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                    (!inputValue.trim() && attachedMedia.length === 0) || isSending
+                      ? 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
+                      : 'bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-white shadow-sm hover:shadow'
+                  }`}
+                >
+                  {isSending ? (
+                    <Loader className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Send className="w-4 h-4" />
+                  )}
+                  <span className="hidden sm:inline">发送</span>
+                </button>
+              </div>
+            </div>
+            
             {/* 发言计数 */}
             {agentResponseCounts.size > 0 && (
-              <div className="flex items-center flex-wrap gap-1 mb-2 text-[10px] text-gray-400">
+              <div className="flex items-center flex-wrap gap-1 mt-2 text-[10px] text-gray-400">
                 <span>发言:</span>
                 {Array.from(agentResponseCounts.entries()).map(([agentId, count]) => {
                   const agent = roundTable.participants.find(p => p.session_id === agentId);
@@ -1769,7 +1931,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
                   return (
                     <span 
                       key={agentId} 
-                      className={`px-1 py-0.5 rounded ${isAtLimit ? 'bg-red-100 text-red-600' : 'bg-gray-100 dark:bg-gray-700'}`}
+                      className={`px-1.5 py-0.5 rounded ${isAtLimit ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' : 'bg-gray-100 dark:bg-gray-700'}`}
                     >
                       {agent?.name?.substring(0, 4) || '?'}: {count}/{maxCount}
                     </span>
@@ -1777,163 +1939,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
                 })}
               </div>
             )}
-          
-          {/* 引用消息预览 */}
-          {replyingTo && (
-            <div className="mb-2 flex items-start gap-2 p-2 bg-gray-100 dark:bg-[#2d2d2d] rounded-lg border-l-2 border-primary-500">
-              <CornerDownRight className="w-4 h-4 text-primary-500 flex-shrink-0 mt-0.5" />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1 text-xs text-gray-500 mb-0.5">
-                  <span>回复</span>
-                  <span className="font-medium text-gray-700 dark:text-gray-300">
-                    {replyingTo.sender_type === 'user' ? '用户' : replyingTo.agent_name || '智能体'}
-                  </span>
-                </div>
-                <p className="text-xs text-gray-600 dark:text-gray-400 truncate">
-                  {replyingTo.content?.substring(0, 100) || '[媒体消息]'}
-                </p>
-              </div>
-              <button
-                onClick={() => setReplyingTo(null)}
-                className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
-                title="取消引用"
-              >
-                <X className="w-3.5 h-3.5 text-gray-400" />
-              </button>
-            </div>
-          )}
-          
-          {/* 图片预览区域 */}
-          {attachedMedia.length > 0 && (
-            <div className="mb-2 flex flex-wrap gap-2">
-              {attachedMedia.map((media, index) => (
-                <div key={index} className="relative group">
-                  <img
-                    src={media.preview}
-                    alt={`附件 ${index + 1}`}
-                    className="h-16 w-auto rounded border border-gray-300 dark:border-gray-600 object-cover"
-                  />
-                  <button
-                    onClick={() => setAttachedMedia(prev => prev.filter((_, i) => i !== index))}
-                    className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-          
-          <div className="relative">
-            <textarea
-              ref={inputRef}
-              value={inputValue}
-              onChange={handleInputChange}
-              onKeyDown={handleKeyDown}
-              onPaste={(e) => {
-                // 检查粘贴板中是否有图片
-                const items = e.clipboardData?.items;
-                if (!items) return;
-                
-                const imageItems: DataTransferItem[] = [];
-                for (let i = 0; i < items.length; i++) {
-                  const item = items[i];
-                  if (item.type.startsWith('image/')) {
-                    imageItems.push(item);
-                  }
-                }
-                
-                // 如果有图片，处理图片粘贴
-                if (imageItems.length > 0) {
-                  e.preventDefault(); // 阻止默认的文本粘贴行为
-                  
-                  imageItems.forEach(item => {
-                    const file = item.getAsFile();
-                    if (!file) return;
-                    
-                    const reader = new FileReader();
-                    reader.onload = (event) => {
-                      const result = event.target?.result as string;
-                      // 移除 data URL 前缀，只保留 base64 数据
-                      const base64Data = result.includes(',') ? result.split(',')[1] : result;
-                      const mimeType = file.type || 'image/png';
-                      
-                      setAttachedMedia(prev => [...prev, {
-                        type: 'image',
-                        mimeType,
-                        data: base64Data,
-                        preview: result, // 用于预览
-                      }]);
-                      
-                      console.log('[RoundTable] 已粘贴图片:', mimeType, '大小:', Math.round(base64Data.length / 1024), 'KB');
-                    };
-                    reader.readAsDataURL(file);
-                  });
-                }
-              }}
-              placeholder={isTargetMode ? "🎯 目标式发言：描述你的目标，AI会协作完成..." : "输入消息，使用 @ 提及特定智能体，粘贴图片..."}
-              className="w-full px-3 py-2 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-[#2d2d2d] dark:text-white resize-none"
-              rows={2}
-              disabled={isSending}
-            />
-            
-            {/* 图片指示器 */}
-            {attachedMedia.length > 0 && (
-              <div className="absolute left-2 bottom-2 flex items-center space-x-1 text-xs text-gray-400">
-                <ImageIcon className="w-3 h-3" />
-                <span>{attachedMedia.length}</span>
-              </div>
-            )}
-            
-            <button
-              onClick={handleSendMessage}
-              disabled={(!inputValue.trim() && attachedMedia.length === 0) || isSending}
-              className="absolute right-2 bottom-2 p-1.5 bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isSending ? (
-                <Loader className="w-4 h-4 animate-spin" />
-              ) : (
-                <Send className="w-4 h-4" />
-              )}
-            </button>
-            
-            {/* @ 提及下拉菜单 */}
-            {showMentionDropdown && roundTable.participants.length > 0 && (
-              <div className="absolute bottom-full left-0 mb-1 w-48 bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] rounded-lg shadow-lg max-h-40 overflow-y-auto z-10">
-                {getFilteredParticipants().length === 0 ? (
-                  <div className="px-3 py-2 text-sm text-gray-500">无匹配的智能体</div>
-                ) : (
-                  getFilteredParticipants().map((participant, index) => (
-                    <button
-                      key={participant.session_id}
-                      onClick={() => handleSelectMention(participant)}
-                      className={`w-full px-3 py-2 text-left flex items-center space-x-2 ${
-                        index === mentionSelectedIndex 
-                          ? 'bg-primary-100 dark:bg-primary-900/30' 
-                          : 'hover:bg-gray-100 dark:hover:bg-gray-700'
-                      }`}
-                    >
-                      <div className="w-6 h-6 rounded-full overflow-hidden border border-gray-200 dark:border-[#404040] flex items-center justify-center bg-purple-100 dark:bg-purple-900/30 flex-shrink-0">
-                        {participant.avatar ? (
-                          <img 
-                            src={participant.avatar} 
-                            alt={participant.name} 
-                            className="w-full h-full object-cover" 
-                          />
-                        ) : (
-                          <Bot className="w-3 h-3 text-purple-500" />
-                        )}
-                      </div>
-                      <span className="text-sm text-gray-900 dark:text-white truncate">
-                        {participant.name}
-                      </span>
-                    </button>
-                  ))
-                )}
-              </div>
-            )}
           </div>
-        </div>
       </div>
       
       {/* 右侧工具边栏 */}

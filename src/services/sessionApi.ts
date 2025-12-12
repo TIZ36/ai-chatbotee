@@ -425,6 +425,22 @@ export async function updateSessionMediaOutputPath(session_id: string, media_out
 }
 
 /**
+ * 更新会话/智能体的默认 LLM 配置
+ */
+export async function updateSessionLLMConfig(session_id: string, llm_config_id: string | null): Promise<void> {
+  const response = await fetch(`${API_BASE}/sessions/${session_id}/llm-config`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ llm_config_id }),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to update LLM config: ${response.statusText}`);
+  }
+}
+
+/**
  * 升级记忆体为智能体
  */
 export async function upgradeToAgent(session_id: string, name: string, avatar: string, system_prompt: string, llm_config_id: string): Promise<Session> {
