@@ -11,6 +11,11 @@ export interface Session {
   system_prompt?: string; // 系统提示词（人设）
   media_output_path?: string; // 媒体输出本地路径（图片/视频/音频）
   session_type?: 'temporary' | 'memory' | 'agent' | 'research'; // 会话类型：临时会话/记忆体/智能体/研究
+  // 角色应用（会话绑定角色版本，用于可复盘）
+  role_id?: string | null;
+  role_version_id?: string | null;
+  // 仅对角色（agent）返回：当前激活的角色版本
+  current_role_version_id?: string | null;
   created_at?: string;
   updated_at?: string;
   last_message_at?: string;
@@ -574,4 +579,3 @@ export function importAgentFromFile(): Promise<AgentExportData> {
     input.click();
   });
 }
-

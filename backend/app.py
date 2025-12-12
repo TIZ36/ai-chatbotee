@@ -215,6 +215,122 @@ def handle_cors_preflight():
     response.headers['Access-Control-Max-Age'] = '3600'
     return response
 
+# ==================== Role Versions（角色版本） ====================
+
+def _role_version_id_now() -> str:
+    return f"rv-{int(time.time() * 1000)}"
+
+
+def _get_session_row(cursor, session_id: str) -> Optional[dict]:
+    cursor.execute(
+        """
+        SELECT session_id, session_type, title, name, llm_config_id, avatar, system_prompt, updated_at
+        FROM sessions
+        WHERE session_id = %s
+        """,
+        (session_id,),
+    )
+    return cursor.fetchone()
+
+
+def _ensure_role_current_version(conn, role_id: str) -> str:
+    """
+    确保 role_versions 中存在该角色的 current 版本；如果不存在则按当前角色快照创建一个。
+    返回 current 的 version_id。
+    """
+    cursor = conn.cursor(pymysql.cursors.DictCursor)
+    try:
+        role = _get_session_row(cursor, role_id)
+        if not role or role.get('session_type') != 'agent':
+            raise ValueError('role_id is not a valid agent session')
+
+        cursor.execute(
+            """
+            SELECT version_id
+            FROM role_versions
+            WHERE role_id = %s AND is_current = 1
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (role_id,),
+        )
+        row = cursor.fetchone()
+        if row and row.get('version_id'):
+            return row['version_id']
+
+        version_id = _role_version_id_now()
+        cursor.execute("UPDATE role_versions SET is_current = 0 WHERE role_id = %s", (role_id,))
+        cursor.execute(
+            """
+            INSERT INTO role_versions
+              (role_id, version_id, name, avatar, system_prompt, llm_config_id, is_current, metadata)
+            VALUES
+              (%s, %s, %s, %s, %s, %s, 1, %s)
+            """,
+            (
+                role_id,
+                version_id,
+                role.get('name'),
+                role.get('avatar'),
+                role.get('system_prompt'),
+                role.get('llm_config_id'),
+                json.dumps({'reason': 'bootstrap'}, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+        return version_id
+    finally:
+        cursor.close()
+
+
+def _create_role_version(conn, role_id: str, metadata: Optional[dict] = None) -> str:
+    """从当前角色会话快照创建一个新版本，并设置为 current。"""
+    cursor = conn.cursor(pymysql.cursors.DictCursor)
+    try:
+        role = _get_session_row(cursor, role_id)
+        if not role or role.get('session_type') != 'agent':
+            raise ValueError('role_id is not a valid agent session')
+
+        version_id = _role_version_id_now()
+        cursor.execute("UPDATE role_versions SET is_current = 0 WHERE role_id = %s", (role_id,))
+        cursor.execute(
+            """
+            INSERT INTO role_versions
+              (role_id, version_id, name, avatar, system_prompt, llm_config_id, is_current, metadata)
+            VALUES
+              (%s, %s, %s, %s, %s, %s, 1, %s)
+            """,
+            (
+                role_id,
+                version_id,
+                role.get('name'),
+                role.get('avatar'),
+                role.get('system_prompt'),
+                role.get('llm_config_id'),
+                json.dumps(metadata or {'reason': 'update'}, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+        return version_id
+    finally:
+        cursor.close()
+
+
+def _get_role_version(conn, role_id: str, version_id: str) -> Optional[dict]:
+    cursor = conn.cursor(pymysql.cursors.DictCursor)
+    try:
+        cursor.execute(
+            """
+            SELECT role_id, version_id, name, avatar, system_prompt, llm_config_id, metadata, is_current, created_at
+            FROM role_versions
+            WHERE role_id = %s AND version_id = %s
+            """,
+            (role_id, version_id),
+        )
+        return cursor.fetchone()
+    finally:
+        cursor.close()
+
 # CORS配置 - 使用统一的CORS配置常量
 cors_origins = config.get('server', {}).get('cors_origins', ['*'])
 CORS(app, 
@@ -4760,6 +4876,8 @@ def list_sessions():
                     s.system_prompt,
                     s.media_output_path,
                     s.session_type,
+                    s.role_id,
+                    s.role_version_id,
                     s.created_at,
                     s.updated_at,
                     s.last_message_at,
@@ -4773,8 +4891,8 @@ def list_sessions():
                 LEFT JOIN messages m ON s.session_id = m.session_id
                 WHERE s.session_type != 'temporary' OR s.session_type IS NULL
                 GROUP BY s.session_id
-                ORDER BY s.last_message_at DESC, s.created_at DESC
-                LIMIT 100
+                ORDER BY COALESCE(s.last_message_at, s.updated_at, s.created_at) DESC, s.created_at DESC
+                LIMIT 300
             """)
             
             sessions = []
@@ -4797,6 +4915,8 @@ def list_sessions():
                     'system_prompt': row.get('system_prompt'),  # 人设
                     'media_output_path': row.get('media_output_path'),  # 多媒体保存地址
                     'session_type': row.get('session_type', 'memory'),  # 会话类型
+                    'role_id': row.get('role_id'),
+                    'role_version_id': row.get('role_version_id'),
                     'created_at': row['created_at'].isoformat() if row['created_at'] else None,
                     'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
                     'last_message_at': row['last_message_at'].isoformat() if row['last_message_at'] else None,
@@ -4834,21 +4954,94 @@ def create_session():
         data = request.json
         session_id = data.get('session_id') or f'session-{int(time.time() * 1000)}'
         title = data.get('title')
+        name = data.get('name')
+        avatar = data.get('avatar')
+        media_output_path = data.get('media_output_path')
         llm_config_id = data.get('llm_config_id')
         session_type = data.get('session_type', 'memory')  # 默认为记忆体
+
+        # 从角色创建会话（版本锁定）
+        source_role_id = data.get('source_role_id')
+        source_role_version_id = data.get('source_role_version_id')
+        system_prompt = data.get('system_prompt')
+        role_id = None
+        role_version_id = None
+        role_snapshot = None
+        role_applied_at = None
         
         cursor = None
         try:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("""
-                INSERT INTO sessions (session_id, title, llm_config_id, session_type)
-                VALUES (%s, %s, %s, %s)
-            """, (session_id, title, llm_config_id, session_type))
+
+            if source_role_id:
+                role_id = source_role_id
+                if not source_role_version_id:
+                    role_version_id = _ensure_role_current_version(conn, role_id)
+                else:
+                    role_version_id = source_role_version_id
+
+                role_version = _get_role_version(conn, role_id, role_version_id)
+                if not role_version:
+                    # 兼容：版本缺失时回退到当前角色快照
+                    role_version_id = _ensure_role_current_version(conn, role_id)
+                    role_version = _get_role_version(conn, role_id, role_version_id)
+
+                if role_version:
+                    system_prompt = role_version.get('system_prompt')
+                    # 如果未指定头像，则默认继承角色头像（让“从角色开始”更有感知）
+                    if not avatar:
+                        avatar = role_version.get('avatar')
+                    # 如果未指定 llm_config_id，则默认继承角色
+                    if not llm_config_id:
+                        llm_config_id = role_version.get('llm_config_id')
+                    role_snapshot = {
+                        'role_id': role_id,
+                        'role_version_id': role_version_id,
+                        'name': role_version.get('name'),
+                        'avatar': role_version.get('avatar'),
+                        'llm_config_id': role_version.get('llm_config_id'),
+                        'system_prompt': role_version.get('system_prompt'),
+                        'created_at': role_version.get('created_at').isoformat() if role_version.get('created_at') else None,
+                    }
+                    role_applied_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            cursor.execute(
+                """
+                INSERT INTO sessions
+                  (session_id, title, name, avatar, system_prompt, media_output_path, llm_config_id, session_type,
+                   role_id, role_version_id, role_snapshot, role_applied_at)
+                VALUES
+                  (%s, %s, %s, %s, %s, %s, %s, %s,
+                   %s, %s, %s, %s)
+                """,
+                (
+                    session_id,
+                    title,
+                    name,
+                    avatar,
+                    system_prompt,
+                    media_output_path,
+                    llm_config_id,
+                    session_type,
+                    role_id,
+                    role_version_id,
+                    json.dumps(role_snapshot, ensure_ascii=False) if role_snapshot else None,
+                    role_applied_at,
+                ),
+            )
             conn.commit()
+
+            # 如果创建的是角色（agent），确保存在 current 版本
+            current_role_version_id = None
+            if session_type == 'agent':
+                try:
+                    current_role_version_id = _ensure_role_current_version(conn, session_id)
+                except Exception as e:
+                    print(f"[RoleVersion] Failed to bootstrap role version for new agent {session_id}: {e}")
             
             # 获取创建的会话信息
             cursor.execute("""
-                SELECT session_id, title, name, llm_config_id, avatar, system_prompt, session_type, created_at, updated_at
+                SELECT session_id, title, name, llm_config_id, avatar, system_prompt, media_output_path, session_type, role_id, role_version_id, created_at, updated_at
                 FROM sessions
                 WHERE session_id = %s
             """, (session_id,))
@@ -4861,7 +5054,11 @@ def create_session():
                 'llm_config_id': session.get('llm_config_id'),
                 'avatar': session.get('avatar'),
                 'system_prompt': session.get('system_prompt'),
+                'media_output_path': session.get('media_output_path'),
                 'session_type': session.get('session_type', 'memory'),
+                'role_id': session.get('role_id'),
+                'role_version_id': session.get('role_version_id'),
+                'current_role_version_id': current_role_version_id,
                 'created_at': session.get('created_at').isoformat() if session.get('created_at') else None,
                 'updated_at': session.get('updated_at').isoformat() if session.get('updated_at') else None,
                 'message': 'Session created successfully'
@@ -4944,6 +5141,8 @@ def get_session(session_id):
                     s.avatar,
                     s.system_prompt,
                     s.session_type,
+                    s.role_id,
+                    s.role_version_id,
                     s.created_at,
                     s.updated_at,
                     s.last_message_at,
@@ -4966,6 +5165,8 @@ def get_session(session_id):
                 'avatar': row['avatar'],
                 'system_prompt': row['system_prompt'],
                 'session_type': row.get('session_type', 'memory'),  # 会话类型
+                'role_id': row.get('role_id'),
+                'role_version_id': row.get('role_version_id'),
                 'created_at': row['created_at'].isoformat() if row['created_at'] else None,
                 'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
                 'last_message_at': row['last_message_at'].isoformat() if row['last_message_at'] else None,
@@ -6283,7 +6484,16 @@ def update_session_name(session_id):
         
         cursor = None
         try:
-            cursor = conn.cursor()
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+            cursor.execute(
+                "SELECT session_type FROM sessions WHERE session_id = %s",
+                (session_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return jsonify({'error': 'Session not found'}), 404
+            session_type = row.get('session_type') or 'memory'
             
             # 更新会话名称（允许设置为空字符串）
             cursor.execute("""
@@ -6292,10 +6502,13 @@ def update_session_name(session_id):
                 WHERE session_id = %s
             """, (name if name else None, session_id))
             
-            if cursor.rowcount == 0:
-                return jsonify({'error': 'Session not found'}), 404
-            
             conn.commit()
+            # 如果是角色（agent），则沉淀一个新版本
+            if session_type == 'agent':
+                try:
+                    _create_role_version(conn, session_id, {'reason': 'name_update'})
+                except Exception as e:
+                    print(f"[RoleVersion] Failed to create version on name update: {e}")
             return jsonify({'success': True, 'name': name or None})
             
         finally:
@@ -6327,20 +6540,32 @@ def update_session_avatar(session_id):
         
         cursor = None
         try:
-            cursor = conn.cursor()
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
             
             # 检查会话是否存在
-            cursor.execute("SELECT session_id FROM sessions WHERE session_id = %s", (session_id,))
-            if not cursor.fetchone():
+            cursor.execute(
+                "SELECT session_id, session_type FROM sessions WHERE session_id = %s",
+                (session_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
                 return jsonify({'error': 'Session not found'}), 404
+            session_type = row.get('session_type') or 'memory'
             
             # 更新头像
             cursor.execute("""
                 UPDATE sessions 
-                SET avatar = %s 
+                SET avatar = %s, updated_at = NOW()
                 WHERE session_id = %s
             """, (avatar, session_id))
             conn.commit()
+
+            # 如果是角色（agent），则沉淀一个新版本
+            if session_type == 'agent':
+                try:
+                    _create_role_version(conn, session_id, {'reason': 'avatar_update'})
+                except Exception as e:
+                    print(f"[RoleVersion] Failed to create version on avatar update: {e}")
             
             return jsonify({
                 'session_id': session_id,
@@ -6376,20 +6601,32 @@ def update_session_system_prompt(session_id):
         
         cursor = None
         try:
-            cursor = conn.cursor()
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
             
             # 检查会话是否存在
-            cursor.execute("SELECT session_id FROM sessions WHERE session_id = %s", (session_id,))
-            if not cursor.fetchone():
+            cursor.execute(
+                "SELECT session_id, session_type FROM sessions WHERE session_id = %s",
+                (session_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
                 return jsonify({'error': 'Session not found'}), 404
+            session_type = row.get('session_type') or 'memory'
             
             # 更新系统提示词
             cursor.execute("""
                 UPDATE sessions 
-                SET system_prompt = %s 
+                SET system_prompt = %s, updated_at = NOW()
                 WHERE session_id = %s
             """, (system_prompt, session_id))
             conn.commit()
+
+            # 如果是角色（agent），则沉淀一个新版本
+            if session_type == 'agent':
+                try:
+                    _create_role_version(conn, session_id, {'reason': 'system_prompt_update'})
+                except Exception as e:
+                    print(f"[RoleVersion] Failed to create version on system prompt update: {e}")
             
             return jsonify({
                 'session_id': session_id,
@@ -6473,20 +6710,32 @@ def update_session_llm_config(session_id):
         
         cursor = None
         try:
-            cursor = conn.cursor()
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
             
             # 检查会话是否存在
-            cursor.execute("SELECT session_id FROM sessions WHERE session_id = %s", (session_id,))
-            if not cursor.fetchone():
+            cursor.execute(
+                "SELECT session_id, session_type FROM sessions WHERE session_id = %s",
+                (session_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
                 return jsonify({'error': 'Session not found'}), 404
+            session_type = row.get('session_type') or 'memory'
             
             # 更新 LLM 配置
             cursor.execute("""
                 UPDATE sessions 
-                SET llm_config_id = %s 
+                SET llm_config_id = %s, updated_at = NOW()
                 WHERE session_id = %s
             """, (llm_config_id, session_id))
             conn.commit()
+
+            # 如果是角色（agent），则沉淀一个新版本
+            if session_type == 'agent':
+                try:
+                    _create_role_version(conn, session_id, {'reason': 'llm_config_update'})
+                except Exception as e:
+                    print(f"[RoleVersion] Failed to create version on llm config update: {e}")
             
             print(f"[Session API] Updated llm_config_id for session {session_id}: {llm_config_id}")
             return jsonify({'success': True, 'llm_config_id': llm_config_id})
@@ -6499,6 +6748,102 @@ def update_session_llm_config(session_id):
                 
     except Exception as e:
         print(f"[Session API] Error updating LLM config: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/sessions/<session_id>/apply-role', methods=['PUT', 'OPTIONS'])
+def apply_role_to_session(session_id):
+    """将某个角色版本应用到会话（会话绑定角色版本，便于回放/复盘）"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+
+        data = request.json or {}
+        role_id = (data.get('role_id') or '').strip()
+        role_version_id = (data.get('role_version_id') or '').strip() or None
+        keep_session_llm_config = bool(data.get('keep_session_llm_config', False))
+
+        if not role_id:
+            return jsonify({'error': 'role_id is required'}), 400
+
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute(
+                "SELECT session_id, session_type, llm_config_id FROM sessions WHERE session_id = %s",
+                (session_id,),
+            )
+            session = cursor.fetchone()
+            if not session:
+                return jsonify({'error': 'Session not found'}), 404
+            if (session.get('session_type') or 'memory') == 'agent':
+                return jsonify({'error': 'Cannot apply role to an agent session'}), 400
+
+            if not role_version_id:
+                role_version_id = _ensure_role_current_version(conn, role_id)
+
+            role_version = _get_role_version(conn, role_id, role_version_id)
+            if not role_version:
+                return jsonify({'error': 'Role version not found'}), 404
+
+            new_llm_config_id = session.get('llm_config_id') if keep_session_llm_config else role_version.get('llm_config_id')
+            snapshot = {
+                'role_id': role_id,
+                'role_version_id': role_version_id,
+                'name': role_version.get('name'),
+                'avatar': role_version.get('avatar'),
+                'llm_config_id': role_version.get('llm_config_id'),
+                'system_prompt': role_version.get('system_prompt'),
+                'created_at': role_version.get('created_at').isoformat() if role_version.get('created_at') else None,
+            }
+
+            cursor.execute(
+                """
+                UPDATE sessions
+                SET avatar = %s,
+                    system_prompt = %s,
+                    llm_config_id = %s,
+                    role_id = %s,
+                    role_version_id = %s,
+                    role_snapshot = %s,
+                    role_applied_at = NOW(),
+                    updated_at = NOW()
+                WHERE session_id = %s
+                """,
+                (
+                    role_version.get('avatar'),
+                    role_version.get('system_prompt'),
+                    new_llm_config_id,
+                    role_id,
+                    role_version_id,
+                    json.dumps(snapshot, ensure_ascii=False),
+                    session_id,
+                ),
+            )
+            conn.commit()
+
+            return jsonify({
+                'success': True,
+                'session_id': session_id,
+                'role_id': role_id,
+                'role_version_id': role_version_id,
+                'llm_config_id': new_llm_config_id,
+            })
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    except Exception as e:
+        print(f"[Session API] Error applying role: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
@@ -6561,6 +6906,13 @@ def upgrade_to_agent(session_id):
                 WHERE session_id = %s
             """, (name, avatar, system_prompt, llm_config_id, session_id))
             conn.commit()
+
+            # 为该角色创建初始版本（如果不存在）
+            try:
+                current_version_id = _ensure_role_current_version(conn, session_id)
+            except Exception as e:
+                current_version_id = None
+                print(f"[RoleVersion] Failed to bootstrap role version for agent {session_id}: {e}")
             
             # 获取更新后的会话信息
             cursor.execute("""
@@ -6578,6 +6930,7 @@ def upgrade_to_agent(session_id):
                 'avatar': updated_session.get('avatar'),
                 'system_prompt': updated_session.get('system_prompt'),
                 'session_type': updated_session.get('session_type', 'agent'),
+                'current_role_version_id': current_version_id,
                 'created_at': updated_session.get('created_at').isoformat() if updated_session.get('created_at') else None,
                 'updated_at': updated_session.get('updated_at').isoformat() if updated_session.get('updated_at') else None,
                 'message': 'Upgraded to agent successfully'
@@ -6612,25 +6965,51 @@ def list_agents():
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             
             # 获取所有智能体类型的会话
-            cursor.execute("""
-                SELECT 
-                    s.session_id,
-                    s.title,
-                    s.name,
-                    s.llm_config_id,
-                    s.avatar,
-                    s.system_prompt,
-                    s.session_type,
-                    s.created_at,
-                    s.updated_at,
-                    s.last_message_at,
-                    COUNT(m.id) as message_count
-                FROM sessions s
-                LEFT JOIN messages m ON s.session_id = m.session_id
-                WHERE s.session_type = 'agent'
-                GROUP BY s.session_id
-                ORDER BY s.updated_at DESC, s.created_at DESC
-            """)
+            try:
+                cursor.execute("""
+                    SELECT 
+                        s.session_id,
+                        s.title,
+                        s.name,
+                        s.llm_config_id,
+                        s.avatar,
+                        s.system_prompt,
+                        s.session_type,
+                        rv.version_id as current_role_version_id,
+                        s.created_at,
+                        s.updated_at,
+                        s.last_message_at,
+                        COUNT(m.id) as message_count
+                    FROM sessions s
+                    LEFT JOIN messages m ON s.session_id = m.session_id
+                    LEFT JOIN role_versions rv ON rv.role_id = s.session_id AND rv.is_current = 1
+                    WHERE s.session_type = 'agent'
+                    GROUP BY s.session_id
+                    ORDER BY s.updated_at DESC, s.created_at DESC
+                """)
+            except Exception as join_error:
+                # 兼容：老库可能还没建 role_versions 表，避免角色库直接“空白”
+                print(f"[Agent API] Warning: role_versions join failed, fallback without versions: {join_error}")
+                cursor.execute("""
+                    SELECT 
+                        s.session_id,
+                        s.title,
+                        s.name,
+                        s.llm_config_id,
+                        s.avatar,
+                        s.system_prompt,
+                        s.session_type,
+                        NULL as current_role_version_id,
+                        s.created_at,
+                        s.updated_at,
+                        s.last_message_at,
+                        COUNT(m.id) as message_count
+                    FROM sessions s
+                    LEFT JOIN messages m ON s.session_id = m.session_id
+                    WHERE s.session_type = 'agent'
+                    GROUP BY s.session_id
+                    ORDER BY s.updated_at DESC, s.created_at DESC
+                """)
             
             agents = []
             for row in cursor.fetchall():
@@ -6642,6 +7021,7 @@ def list_agents():
                     'avatar': row['avatar'],
                     'system_prompt': row.get('system_prompt'),
                     'session_type': row.get('session_type', 'agent'),
+                    'current_role_version_id': row.get('current_role_version_id'),
                     'created_at': row['created_at'].isoformat() if row['created_at'] else None,
                     'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
                     'last_message_at': row['last_message_at'].isoformat() if row['last_message_at'] else None,
@@ -6662,6 +7042,239 @@ def list_agents():
         import traceback
         traceback.print_exc()
         return jsonify({'agents': [], 'total': 0, 'error': str(e)}), 500
+
+
+@app.route('/api/agents/<role_id>/profile', methods=['PUT', 'OPTIONS'])
+def update_agent_profile(role_id):
+    """批量更新角色档案（避免多次更新导致版本噪音）"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+
+    try:
+        from database import get_mysql_connection
+
+        data = request.get_json() or {}
+
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+            role = _get_session_row(cursor, role_id)
+            if not role:
+                return jsonify({'error': 'Agent not found'}), 404
+            if role.get('session_type') != 'agent':
+                return jsonify({'error': 'Session is not an agent'}), 400
+
+            update_fields = []
+            update_values = []
+            updated_keys = []
+
+            def add_field(field_name, value, key_name):
+                update_fields.append(f"{field_name} = %s")
+                update_values.append(value)
+                updated_keys.append(key_name)
+
+            if 'name' in data:
+                name = (data.get('name') or '').strip()
+                next_value = name if name else None
+                if next_value != role.get('name'):
+                    add_field('name', next_value, 'name')
+            if 'title' in data:
+                title = (data.get('title') or '').strip()
+                next_value = title if title else None
+                if next_value != role.get('title'):
+                    add_field('title', next_value, 'title')
+            if 'avatar' in data:
+                avatar = data.get('avatar')
+                if avatar != role.get('avatar'):
+                    add_field('avatar', avatar, 'avatar')
+            if 'system_prompt' in data:
+                system_prompt = data.get('system_prompt')
+                if system_prompt != role.get('system_prompt'):
+                    add_field('system_prompt', system_prompt, 'system_prompt')
+            if 'llm_config_id' in data:
+                llm_config_id = data.get('llm_config_id')
+                if llm_config_id != role.get('llm_config_id'):
+                    add_field('llm_config_id', llm_config_id, 'llm_config_id')
+            if 'media_output_path' in data:
+                media_output_path = data.get('media_output_path')
+                if media_output_path != role.get('media_output_path'):
+                    add_field('media_output_path', media_output_path, 'media_output_path')
+
+            if not update_fields:
+                try:
+                    current_id = _ensure_role_current_version(conn, role_id)
+                except Exception:
+                    current_id = None
+                return jsonify({'success': True, 'role_id': role_id, 'current_role_version_id': current_id, 'message': 'No fields updated'}), 200
+
+            update_fields.append('updated_at = NOW()')
+            update_values.append(role_id)
+
+            sql = f"""
+                UPDATE sessions
+                SET {', '.join(update_fields)}
+                WHERE session_id = %s
+            """
+            cursor.execute(sql, tuple(update_values))
+
+            version_id = None
+            try:
+                reason = (data.get('reason') or 'profile_update').strip()
+                metadata = {'reason': reason, 'fields': updated_keys}
+                version_id = _create_role_version(conn, role_id, metadata)
+            except Exception as e:
+                # 兼容：版本表不可用时，仍允许更新角色档案
+                print(f"[RoleVersion] Failed to create version on profile update: {e}")
+
+            return jsonify({'success': True, 'role_id': role_id, 'current_role_version_id': version_id})
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+    except Exception as e:
+        print(f"[Agent API] Error updating agent profile: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/agents/<role_id>/versions', methods=['GET', 'OPTIONS'])
+def list_role_versions(role_id):
+    """获取角色版本列表（按时间倒序）"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'versions': [], 'error': 'MySQL not available'}), 503
+
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+            # 角色必须存在且为 agent
+            role = _get_session_row(cursor, role_id)
+            if not role:
+                return jsonify({'error': 'Agent not found'}), 404
+            if role.get('session_type') != 'agent':
+                return jsonify({'error': 'Session is not an agent'}), 400
+
+            # 确保存在 current 版本（兼容历史数据）
+            try:
+                _ensure_role_current_version(conn, role_id)
+            except Exception as e:
+                print(f"[RoleVersion] Failed to ensure current version: {e}")
+
+            cursor.execute(
+                """
+                SELECT version_id, is_current, created_at, updated_at, metadata
+                FROM role_versions
+                WHERE role_id = %s
+                ORDER BY created_at DESC
+                LIMIT 200
+                """,
+                (role_id,),
+            )
+            versions = []
+            for row in cursor.fetchall():
+                meta = row.get('metadata')
+                if isinstance(meta, str):
+                    try:
+                        meta = json.loads(meta)
+                    except Exception:
+                        meta = None
+                versions.append({
+                    'version_id': row.get('version_id'),
+                    'is_current': bool(row.get('is_current')),
+                    'created_at': row.get('created_at').isoformat() if row.get('created_at') else None,
+                    'updated_at': row.get('updated_at').isoformat() if row.get('updated_at') else None,
+                    'metadata': meta,
+                })
+            return jsonify({'versions': versions})
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+    except Exception as e:
+        print(f"[RoleVersion API] Error listing role versions: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'versions': [], 'error': str(e)}), 500
+
+
+@app.route('/api/agents/<role_id>/versions/<version_id>/activate', methods=['PUT', 'OPTIONS'])
+def activate_role_version(role_id, version_id):
+    """激活某个角色版本（将角色档案回滚/切换到该版本）"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            role = _get_session_row(cursor, role_id)
+            if not role:
+                return jsonify({'error': 'Agent not found'}), 404
+            if role.get('session_type') != 'agent':
+                return jsonify({'error': 'Session is not an agent'}), 400
+
+            role_version = _get_role_version(conn, role_id, version_id)
+            if not role_version:
+                return jsonify({'error': 'Role version not found'}), 404
+
+            # 切换 current 标记
+            cursor.execute("UPDATE role_versions SET is_current = 0 WHERE role_id = %s", (role_id,))
+            cursor.execute(
+                "UPDATE role_versions SET is_current = 1 WHERE role_id = %s AND version_id = %s",
+                (role_id, version_id),
+            )
+
+            # 将角色会话字段回滚到该版本快照
+            cursor.execute(
+                """
+                UPDATE sessions
+                SET name = %s,
+                    avatar = %s,
+                    system_prompt = %s,
+                    llm_config_id = %s,
+                    updated_at = NOW()
+                WHERE session_id = %s
+                """,
+                (
+                    role_version.get('name'),
+                    role_version.get('avatar'),
+                    role_version.get('system_prompt'),
+                    role_version.get('llm_config_id'),
+                    role_id,
+                ),
+            )
+            conn.commit()
+
+            return jsonify({'success': True, 'role_id': role_id, 'current_role_version_id': version_id})
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+    except Exception as e:
+        print(f"[RoleVersion API] Error activating role version: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/agents/<session_id>/export', methods=['GET', 'OPTIONS'])
 def export_agent(session_id):
@@ -11068,4 +11681,3 @@ if __name__ == '__main__':
     print()
     
     app.run(host='0.0.0.0', port=port, debug=debug)
-

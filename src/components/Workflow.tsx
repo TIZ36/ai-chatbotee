@@ -13,7 +13,8 @@ import { LLMClient, LLMMessage } from '../services/llmClient';
 import { getLLMConfigs, getLLMConfig, getLLMConfigApiKey, LLMConfigFromDB } from '../services/llmApi';
 import { mcpManager, MCPServer, MCPTool } from '../services/mcpClient';
 import { getMCPServers, MCPServerConfig } from '../services/mcpApi';
-import { getSessions, createSession, getSessionMessages, saveMessage, summarizeSession, getSessionSummaries, deleteSession, clearSummarizeCache, deleteMessage, executeMessageComponent, updateSessionAvatar, updateSessionName, updateSessionSystemPrompt, updateSessionMediaOutputPath, updateSessionLLMConfig, upgradeToAgent, Session, Summary } from '../services/sessionApi';
+import { getSessions, getSession, createSession, getSessionMessages, saveMessage, summarizeSession, getSessionSummaries, deleteSession, clearSummarizeCache, deleteMessage, executeMessageComponent, updateSessionAvatar, updateSessionName, updateSessionSystemPrompt, updateSessionMediaOutputPath, updateSessionLLMConfig, upgradeToAgent, Session, Summary } from '../services/sessionApi';
+import { applyRoleToSession, createRole, updateRoleProfile } from '../services/roleApi';
 import { createSkillPack, saveSkillPack, optimizeSkillPackSummary, getSkillPacks, getSessionSkillPacks, assignSkillPack, unassignSkillPack, SkillPack, SessionSkillPack, SkillPackCreationResult, SkillPackProcessInfo } from '../services/skillPackApi';
 import { estimate_messages_tokens, get_model_max_tokens, estimate_tokens } from '../services/tokenCounter';
 import { getWorkflows, getWorkflow, Workflow as WorkflowType, WorkflowNode, WorkflowConnection } from '../services/workflowApi';
@@ -32,6 +33,7 @@ import {
   DialogFooter,
 } from './ui/Dialog';
 import { toast } from './ui/use-toast';
+import { emitSessionsChanged, SESSIONS_CHANGED_EVENT } from '../utils/sessionEvents';
 
 interface Message {
   id: string;
@@ -106,6 +108,7 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
   const configFileInputRef = useRef<HTMLInputElement>(null); // 配置对话框的文件输入
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingConfig, setIsSavingConfig] = useState(false); // 配置保存状态
+  const [isSavingAsRole, setIsSavingAsRole] = useState(false);
   const [activeConfigTab, setActiveConfigTab] = useState<'basic' | 'skillpack' | 'media'>('basic'); // 配置对话框的标签页
   
   // 技能包管理状态
@@ -151,6 +154,54 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
     setActiveConfigTab('basic');
     loadSkillPacks();
     setShowConfigDialog(true);
+  };
+
+  const handleSaveAsRole = async () => {
+    const name = editName.trim() || displayName;
+    const avatar = (editAvatar || '').trim();
+    const systemPrompt = editSystemPrompt.trim();
+    const llmConfigId = editLlmConfigId;
+    const mediaOutputPath = editMediaOutputPath.trim();
+
+    if (!avatar || !systemPrompt || !llmConfigId) {
+      toast({
+        title: '还差一步',
+        description: '保存为角色需要：头像、人设、默认LLM。',
+        variant: 'destructive',
+      });
+      setActiveConfigTab('basic');
+      return;
+    }
+
+    setIsSavingAsRole(true);
+    try {
+      const role = await createRole({
+        name,
+        avatar,
+        system_prompt: systemPrompt,
+        llm_config_id: llmConfigId,
+        media_output_path: mediaOutputPath || undefined,
+      });
+      if (onConfigSaved) {
+        await onConfigSaved();
+      }
+      emitSessionsChanged();
+      setShowConfigDialog(false);
+      toast({
+        title: '已保存为角色',
+        description: `角色「${role.name || role.title || role.session_id}」已加入角色库`,
+        variant: 'success',
+      });
+    } catch (error) {
+      console.error('Failed to save as role:', error);
+      toast({
+        title: '保存为角色失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSavingAsRole(false);
+    }
   };
 
   // 当 session prop 变化时，同步更新编辑状态（如果对话框已打开）
@@ -787,6 +838,23 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
 
             {/* 底部按钮 */}
             <div className="px-5 py-4 bg-gray-50 dark:bg-[#1a1a1a] flex items-center justify-end space-x-3 flex-shrink-0">
+              {session.session_type !== 'agent' && (
+                <button
+                  onClick={handleSaveAsRole}
+                  disabled={isSavingConfig || isSavingAsRole}
+                  className="px-4 py-2 text-sm font-medium text-primary-700 dark:text-primary-300 bg-primary-100 dark:bg-primary-900/30 hover:bg-primary-200 dark:hover:bg-primary-900/50 rounded-lg transition-colors disabled:opacity-50 flex items-center space-x-2"
+                  title="复制当前配置为一个可复用角色（不影响当前会话）"
+                >
+                  {isSavingAsRole ? (
+                    <>
+                      <Loader className="w-4 h-4 animate-spin" />
+                      <span>保存为角色中...</span>
+                    </>
+                  ) : (
+                    <span>保存为角色</span>
+                  )}
+                </button>
+              )}
               <button
                 onClick={() => setShowConfigDialog(false)}
                 className="text-sm text-gray-600 dark:text-[#b0b0b0] hover:text-gray-900 dark:hover:text-[#cccccc]"
@@ -826,18 +894,19 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                     
                     await Promise.all(promises);
                     // 保存成功后，刷新会话列表以获取最新数据
-                    if (onConfigSaved) {
-                      await onConfigSaved();
-                    }
-                    setShowConfigDialog(false);
-                  } catch (error) {
-                    console.error('Failed to save config:', error);
-                    alert('保存配置失败，请重试');
-                  } finally {
+                  if (onConfigSaved) {
+                    await onConfigSaved();
+                  }
+                  emitSessionsChanged();
+                  setShowConfigDialog(false);
+                } catch (error) {
+                  console.error('Failed to save config:', error);
+                  alert('保存配置失败，请重试');
+                } finally {
                     setIsSavingConfig(false);
                   }
                 }}
-                disabled={isSavingConfig}
+                disabled={isSavingConfig || isSavingAsRole}
                 className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 flex items-center space-x-2"
               >
                 {isSavingConfig ? (
@@ -897,6 +966,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   const [selectedComponents, setSelectedComponents] = useState<Array<{ type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string }>>([]); // 已选定的组件（tag）
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isComposingRef = useRef(false);
+  const editingMessageIdRef = useRef<string | null>(null);
   const selectorRef = useRef<HTMLDivElement>(null);
   const blurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
@@ -921,6 +991,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   const [sessions, setSessions] = useState<Session[]>([]);
   const [temporarySessionId] = useState('temporary-session'); // 临时会话ID（固定）
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(temporarySessionId);
+  const [currentSessionMeta, setCurrentSessionMeta] = useState<Session | null>(null);
   const [currentSessionAvatar, setCurrentSessionAvatar] = useState<string | null>(null); // 当前会话的头像
   const [currentSystemPrompt, setCurrentSystemPrompt] = useState<string | null>(null); // 当前会话的系统提示词（人设）
   const [showAvatarConfigDialog, setShowAvatarConfigDialog] = useState(false); // 是否显示头像配置对话框
@@ -936,6 +1007,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   const [headerConfigEditLlmConfigId, setHeaderConfigEditLlmConfigId] = useState<string | null>(null);
   const [headerConfigActiveTab, setHeaderConfigActiveTab] = useState<'basic' | 'skillpacks'>('basic');
   const headerConfigFileInputRef = useRef<HTMLInputElement>(null);
+  const [isSavingHeaderAsRole, setIsSavingHeaderAsRole] = useState(false);
   const [isEditingSystemPrompt, setIsEditingSystemPrompt] = useState(false); // 是否正在编辑人设
   const [systemPromptDraft, setSystemPromptDraft] = useState(''); // 人设编辑草稿
   const [showHelpTooltip, setShowHelpTooltip] = useState(false); // 是否显示帮助提示
@@ -1115,6 +1187,23 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 外部触发：会话/角色数据变更时刷新（例如侧边栏新建/删除/应用角色）
+  useEffect(() => {
+    const handler = () => {
+      void (async () => {
+        try {
+          const sessionList = await getSessions();
+          setSessions(sessionList);
+        } catch (error) {
+          console.error('[Workflow] Failed to reload sessions (event):', error);
+          setSessions([]);
+        }
+      })();
+    };
+    window.addEventListener(SESSIONS_CHANGED_EVENT, handler);
+    return () => window.removeEventListener(SESSIONS_CHANGED_EVENT, handler);
+  }, []);
+
   // 监听外部传入的sessionId（从左侧会话列表选择）
   useEffect(() => {
     if (externalSessionId && externalSessionId !== currentSessionId) {
@@ -1150,7 +1239,18 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
     if (configSessionId && configSessionId === currentSessionId && currentSessionId) {
       // 延迟打开对话框，确保会话数据已加载
       setTimeout(() => {
-        setShowConfigDialog(true);
+        const currentSession =
+          sessions.find(s => s.session_id === currentSessionId) ||
+          (currentSessionMeta?.session_id === currentSessionId ? currentSessionMeta : null);
+        if (currentSession) {
+          setHeaderConfigEditName(currentSession.name || '');
+          setHeaderConfigEditAvatar(currentSession.avatar || null);
+          setHeaderConfigEditSystemPrompt(currentSession.system_prompt || '');
+          setHeaderConfigEditMediaOutputPath(currentSession.media_output_path || '');
+          setHeaderConfigEditLlmConfigId(currentSession.llm_config_id || null);
+          setHeaderConfigActiveTab('basic');
+          setShowHeaderConfigDialog(true);
+        }
         // 清除URL参数
         const newSearchParams = new URLSearchParams(searchParams);
         newSearchParams.delete('config');
@@ -1173,6 +1273,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
           },
         ]);
         setSummaries([]);
+        setCurrentSessionMeta(null);
         setCurrentSessionAvatar(null);
         setCurrentSystemPrompt(null);
       } else {
@@ -1181,13 +1282,38 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
       loadSessionSummaries(currentSessionId);
       // 加载会话头像和人设
       const session = sessions.find(s => s.session_id === currentSessionId);
-      if (session?.avatar) {
-        setCurrentSessionAvatar(session.avatar);
+      if (session) {
+        setCurrentSessionMeta(session);
+        setCurrentSessionAvatar(session.avatar || null);
+        setCurrentSystemPrompt(session.system_prompt || null);
       } else {
+        setCurrentSessionMeta(null);
         setCurrentSessionAvatar(null);
+        setCurrentSystemPrompt(null);
       }
-      // 加载人设
-      setCurrentSystemPrompt(session?.system_prompt || null);
+      // 如果列表里没有，主动拉取（例如“从角色开始新对话”后立即跳转）
+      if (!session) {
+        let canceled = false;
+        (async () => {
+          try {
+            const fresh = await getSession(currentSessionId);
+            if (canceled) return;
+            setCurrentSessionMeta(fresh);
+            setCurrentSessionAvatar(fresh.avatar || null);
+            setCurrentSystemPrompt(fresh.system_prompt || null);
+            if (fresh.llm_config_id) {
+              const llmId = fresh.llm_config_id;
+              const configExists = llmConfigs.some(c => c.config_id === llmId);
+              if (configExists) setSelectedLLMConfigId(llmId);
+            }
+          } catch (error) {
+            console.warn('[Workflow] Failed to fetch session detail in effect:', currentSessionId, error);
+          }
+        })();
+        return () => {
+          canceled = true;
+        };
+      }
       // 加载技能包
       getSessionSkillPacks(currentSessionId).then(packs => {
         setCurrentSessionSkillPacks(packs);
@@ -1203,6 +1329,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
         content: '你好！我是你的 AI 工作流助手。请先选择 LLM 模型，然后开始对话。如果需要使用工具，可以选择 MCP 服务器。',
       }]);
       setSummaries([]);
+      setCurrentSessionMeta(null);
       setCurrentSessionAvatar(null);
       setCurrentSystemPrompt(null);
       // 清空系统提示词状态
@@ -1661,6 +1788,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
       // 切换到临时会话
       setIsTemporarySession(true);
       setCurrentSessionId(temporarySessionId);
+      setCurrentSessionMeta(null);
       setMessages([
         {
           id: '1',
@@ -1678,30 +1806,42 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
     setCurrentSessionId(session_id);
     setMessagePage(1);
       // 加载会话信息
-      const session = sessions.find(s => s.session_id === session_id);
+      let session = sessions.find(s => s.session_id === session_id);
+      if (!session) {
+        try {
+          session = await getSession(session_id);
+          await loadSessions();
+        } catch (error) {
+          console.warn('[Workflow] Failed to fetch session detail:', session_id, error);
+        }
+      }
       if (session) {
+        setCurrentSessionMeta(session);
         setCurrentSessionAvatar(session.avatar || null);
         setCurrentSystemPrompt(session.system_prompt || null);
-        // 如果是智能体，自动选择关联的LLM模型
-        if (session.session_type === 'agent' && session.llm_config_id) {
+        // 会话绑定了 llm_config_id（角色开始/应用角色/手动设置）时，切换到该配置
+        if (session.llm_config_id) {
+          const llmId = session.llm_config_id;
           // 确保LLM配置已加载后再设置
           if (llmConfigs.length > 0) {
-            const configExists = llmConfigs.some(c => c.config_id === session.llm_config_id);
+            const configExists = llmConfigs.some(c => c.config_id === llmId);
             if (configExists) {
-              setSelectedLLMConfigId(session.llm_config_id);
+              setSelectedLLMConfigId(llmId);
             } else {
-              console.warn('[Workflow] Agent LLM config not found:', session.llm_config_id);
+              console.warn('[Workflow] Session LLM config not found:', llmId);
             }
           } else {
             // 如果配置还没加载，延迟设置
             setTimeout(() => {
-              const configExists = llmConfigs.some(c => c.config_id === session.llm_config_id);
+              const configExists = llmConfigs.some(c => c.config_id === llmId);
               if (configExists) {
-                setSelectedLLMConfigId(session.llm_config_id);
+                setSelectedLLMConfigId(llmId);
               }
             }, 100);
           }
         }
+      } else {
+        setCurrentSessionMeta(null);
       }
     }
   };
@@ -2143,8 +2283,8 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
     }
 
     // 如果是编辑模式，先处理重新发送
-    if (editingMessageId) {
-      await handleResendMessage(editingMessageId, input.trim());
+    if (editingMessageIdRef.current) {
+      await handleResendMessage(editingMessageIdRef.current, input.trim());
       return;
     }
 
@@ -3358,6 +3498,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   const handleStartEdit = (messageId: string) => {
     const message = messages.find(m => m.id === messageId);
     if (message && message.role === 'user') {
+      editingMessageIdRef.current = messageId;
       setEditingMessageId(messageId);
       setInput(message.content);
       inputRef.current?.focus();
@@ -3366,6 +3507,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
 
   // 取消编辑
   const handleCancelEdit = () => {
+    editingMessageIdRef.current = null;
     setEditingMessageId(null);
     setInput('');
   };
@@ -3396,14 +3538,28 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
             try {
               await deleteMessage(currentSessionId, msg.id);
             } catch (error) {
-              console.error(`[Workflow] Failed to delete message ${msg.id}:`, error);
+              // 404 is fine (already deleted / cache mismatch)
+              const messageText = error instanceof Error ? error.message : String(error);
+              if (messageText.includes('NOT FOUND') || messageText.includes('404')) {
+                console.warn(`[Workflow] Message already deleted: ${msg.id}`);
+              } else {
+                console.error(`[Workflow] Failed to delete message ${msg.id}:`, error);
+              }
             }
           }
         }
         
         // 清除总结缓存（因为删除了消息）
-        await clearSummarizeCache(currentSessionId);
-        await loadSessionSummaries(currentSessionId);
+        try {
+          await clearSummarizeCache(currentSessionId);
+        } catch (error) {
+          console.warn('[Workflow] Failed to clear summarize cache (non-fatal):', error);
+        }
+        try {
+          await loadSessionSummaries(currentSessionId);
+        } catch (error) {
+          console.warn('[Workflow] Failed to reload summaries (non-fatal):', error);
+        }
       } catch (error) {
         console.error('[Workflow] Failed to delete messages:', error);
       }
@@ -3412,7 +3568,8 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
     // 从消息列表中删除这些消息（保留到该消息之前的所有消息）
     setMessages(prev => prev.slice(0, messageIndex));
     
-    // 取消编辑状态
+    // 取消编辑状态（useRef first to avoid re-entering resend via handleSend)
+    editingMessageIdRef.current = null;
     setEditingMessageId(null);
     
     // 使用新内容发送消息
@@ -5441,6 +5598,8 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                             {sessionTypeLabel}
                           </span>
                           {session.session_type === 'memory' && (() => {
+                            const hasSourceRole = Boolean(session.role_id);
+                            const canPromote = Boolean(session.system_prompt) && Boolean(session.llm_config_id) && hasSourceRole;
                             // 检查是否满足升级条件
                             const hasName = !!session.name;
                             const hasAvatar = !!session.avatar;
@@ -5451,6 +5610,44 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  if (hasSourceRole) {
+                                    if (!canPromote) {
+                                      toast({
+                                        title: '需要完善信息',
+                                        description: '沉淀到角色需要：人设与默认LLM（可在配置里设置）。',
+                                        variant: 'destructive',
+                                      });
+                                      return;
+                                    }
+                                    void (async () => {
+                                      try {
+                                        const roleId = session.role_id as string;
+                                        const updated = await updateRoleProfile(roleId, {
+                                          system_prompt: session.system_prompt || '',
+                                          llm_config_id: session.llm_config_id || '',
+                                          avatar: session.avatar || null,
+                                          reason: 'promote_from_chat',
+                                        });
+                                        await applyRoleToSession({
+                                          session_id: session.session_id,
+                                          role_id: roleId,
+                                          role_version_id: updated.current_role_version_id || undefined,
+                                          keep_session_llm_config: false,
+                                        });
+                                        emitSessionsChanged();
+                                        await loadSessions();
+                                        toast({ title: '已沉淀到角色版本', variant: 'success' });
+                                      } catch (error) {
+                                        console.error('[Workflow] Failed to promote to role:', error);
+                                        toast({
+                                          title: '沉淀失败',
+                                          description: error instanceof Error ? error.message : String(error),
+                                          variant: 'destructive',
+                                        });
+                                      }
+                                    })();
+                                    return;
+                                  }
                                   // 初始化升级对话框的数据
                                   setAgentName(session.name || '');
                                   setAgentAvatar(session.avatar || null);
@@ -5462,14 +5659,22 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                                   setShowUpgradeToAgentDialog(true);
                                 }}
                                 className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
-                                  canUpgrade
+                                  hasSourceRole
+                                    ? (canPromote
+                                      ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent)] hover:bg-[var(--color-accent-bg)]/70'
+                                      : 'bg-gray-100 dark:bg-[#2d2d2d] text-gray-500 dark:text-[#b0b0b0] cursor-not-allowed')
+                                    : canUpgrade
                                     ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 hover:bg-primary-200 dark:hover:bg-primary-900/50'
                                     : 'bg-gray-100 dark:bg-[#2d2d2d] text-gray-500 dark:text-[#b0b0b0] cursor-not-allowed'
                                 }`}
-                                title={canUpgrade ? '升级为智能体' : '需要设置名称、头像和人设才能升级'}
-                                disabled={!canUpgrade}
+                                title={
+                                  hasSourceRole
+                                    ? (canPromote ? '沉淀为来源角色的新版本' : '需要设置人设与默认LLM才能沉淀')
+                                    : (canUpgrade ? '升级为智能体' : '需要设置名称、头像和人设才能升级')
+                                }
+                                disabled={hasSourceRole ? !canPromote : !canUpgrade}
                               >
-                                {canUpgrade ? '升级' : '需完善'}
+                                {hasSourceRole ? (canPromote ? '沉淀' : '需完善') : (canUpgrade ? '升级' : '需完善')}
                               </button>
                             );
                           })()}
@@ -5788,10 +5993,20 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
               {/* 头像 - 可点击配置 */}
               <div 
                 className="w-7 h-7 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary-400 hover:ring-offset-1 transition-all overflow-hidden"
-                onClick={() => {
+                onClick={async () => {
                   if (currentSessionId && !isTemporarySession) {
                     // 从当前会话获取数据
-                    const currentSession = sessions.find(s => s.session_id === currentSessionId);
+                    let currentSession =
+                      sessions.find(s => s.session_id === currentSessionId) ||
+                      (currentSessionMeta?.session_id === currentSessionId ? currentSessionMeta : null);
+                    if (!currentSession) {
+                      try {
+                        currentSession = await getSession(currentSessionId);
+                        setCurrentSessionMeta(currentSession);
+                      } catch (error) {
+                        console.warn('[Workflow] Failed to load session for header config:', currentSessionId, error);
+                      }
+                    }
                     if (currentSession) {
                       setHeaderConfigEditName(currentSession.name || '');
                       setHeaderConfigEditAvatar(currentSession.avatar || null);
@@ -5814,7 +6029,9 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
               <div>
                 <span className="text-xs font-semibold text-gray-900 dark:text-[#ffffff] block leading-tight">
                   {(() => {
-                    const currentSession = sessions.find(s => s.session_id === currentSessionId);
+                    const currentSession =
+                      sessions.find(s => s.session_id === currentSessionId) ||
+                      (currentSessionMeta?.session_id === currentSessionId ? currentSessionMeta : null);
                     if (isTemporarySession) return '临时会话';
                     if (currentSession?.name) return currentSession.name;
                     if (currentSession?.session_type === 'agent') return '智能体';
@@ -5822,10 +6039,20 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   })()}
                 </span>
                 <span className="text-[10px] text-gray-500 dark:text-[#b0b0b0] leading-tight cursor-pointer hover:text-[var(--color-accent)]"
-                  onClick={() => {
+                  onClick={async () => {
                     if (currentSessionId && !isTemporarySession) {
                       // 从当前会话获取数据
-                      const currentSession = sessions.find(s => s.session_id === currentSessionId);
+                      let currentSession =
+                        sessions.find(s => s.session_id === currentSessionId) ||
+                        (currentSessionMeta?.session_id === currentSessionId ? currentSessionMeta : null);
+                      if (!currentSession) {
+                        try {
+                          currentSession = await getSession(currentSessionId);
+                          setCurrentSessionMeta(currentSession);
+                        } catch (error) {
+                          console.warn('[Workflow] Failed to load session for header config:', currentSessionId, error);
+                        }
+                      }
                       if (currentSession) {
                         setHeaderConfigEditName(currentSession.name || '');
                         setHeaderConfigEditAvatar(currentSession.avatar || null);
@@ -7943,6 +8170,70 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
           
           {/* 底部按钮 */}
           <div className="px-5 py-4 bg-gray-50 dark:bg-[#1a1a1a] flex items-center justify-end space-x-3 flex-shrink-0">
+            {(() => {
+              const currentSession = sessions.find(s => s.session_id === currentSessionId);
+              const isAgent = currentSession?.session_type === 'agent';
+              if (!currentSessionId || !currentSession || isTemporarySession || isAgent) return null;
+              return (
+                <button
+                  onClick={async () => {
+                    const name = headerConfigEditName.trim() || currentSession.name || currentSession.title || `角色 ${currentSession.session_id.slice(0, 8)}`;
+                    const avatar = (headerConfigEditAvatar || '').trim();
+                    const systemPrompt = headerConfigEditSystemPrompt.trim();
+                    const llmConfigId = headerConfigEditLlmConfigId;
+                    const mediaOutputPath = headerConfigEditMediaOutputPath.trim();
+
+                    if (!avatar || !systemPrompt || !llmConfigId) {
+                      toast({
+                        title: '还差一步',
+                        description: '保存为角色需要：头像、人设、默认LLM。',
+                        variant: 'destructive',
+                      });
+                      setHeaderConfigActiveTab('basic');
+                      return;
+                    }
+
+                    try {
+                      setIsSavingHeaderAsRole(true);
+                      const role = await createRole({
+                        name,
+                        avatar,
+                        system_prompt: systemPrompt,
+                        llm_config_id: llmConfigId,
+                        media_output_path: mediaOutputPath || undefined,
+                      });
+                      emitSessionsChanged();
+                      toast({
+                        title: '已保存为角色',
+                        description: `角色「${role.name || role.title || role.session_id}」已加入角色库`,
+                        variant: 'success',
+                      });
+                    } catch (error) {
+                      console.error('Failed to save as role (header config):', error);
+                      toast({
+                        title: '保存为角色失败',
+                        description: error instanceof Error ? error.message : String(error),
+                        variant: 'destructive',
+                      });
+                    } finally {
+                      setIsSavingHeaderAsRole(false);
+                    }
+                  }}
+                  disabled={isSavingHeaderAsRole}
+                  className="px-4 py-2 text-sm font-medium text-primary-700 dark:text-primary-300 bg-primary-100 dark:bg-primary-900/30 hover:bg-primary-200 dark:hover:bg-primary-900/50 rounded-lg transition-colors disabled:opacity-50 flex items-center space-x-2"
+                  title="复制当前配置为一个可复用角色（不影响当前会话）"
+                >
+                  {isSavingHeaderAsRole ? (
+                    <>
+                      <Loader className="w-4 h-4 animate-spin" />
+                      <span>保存为角色中...</span>
+                    </>
+                  ) : (
+                    <span>保存为角色</span>
+                  )}
+                </button>
+              );
+            })()}
             <button
               onClick={() => setShowHeaderConfigDialog(false)}
               className="text-sm text-gray-600 dark:text-[#b0b0b0] hover:text-gray-900 dark:hover:text-[#cccccc]"
@@ -7992,6 +8283,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   // 刷新会话列表
                   const allSessions = await getSessions();
                   setSessions(allSessions);
+                  emitSessionsChanged();
                   
                   setShowHeaderConfigDialog(false);
                 } catch (error) {

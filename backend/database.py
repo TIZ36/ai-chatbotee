@@ -448,7 +448,141 @@ def create_tables():
                 print("  ✓ Column 'media_output_path' already exists in 'sessions'")
         except Exception as e:
             print(f"  ⚠️ Warning: Failed to add 'media_output_path' column to sessions: {e}")
-        
+
+        # ==================== 角色（智能体）应用信息（会话绑定角色版本） ====================
+        # 说明：
+        # - role_id: 应用的角色（对应 sessions.session_id，session_type='agent'）
+        # - role_version_id: 会话锁定的角色版本ID（用于可复盘/可回放）
+        # - role_snapshot: 应用时的角色快照（审计/回放辅助）
+        # - role_applied_at: 应用时间
+        def _ensure_column(table: str, column: str, ddl: str, log_name: str):
+            try:
+                cursor.execute(f"""
+                    SELECT COUNT(*)
+                    FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = %s
+                      AND COLUMN_NAME = %s
+                """, (table, column))
+                exists = cursor.fetchone()[0] > 0
+                if exists:
+                    print(f"  ✓ Column '{log_name}' already exists in '{table}'")
+                    return
+                print(f"  → Adding '{log_name}' column to '{table}' table...")
+                cursor.execute(ddl)
+                conn.commit()
+                print(f"  ✓ Column '{log_name}' added to '{table}' table")
+            except Exception as e:
+                print(f"  ⚠️ Warning: Failed to add '{log_name}' column to {table}: {e}")
+
+        _ensure_column(
+            'sessions',
+            'role_id',
+            """
+                ALTER TABLE `sessions`
+                ADD COLUMN `role_id` VARCHAR(100) DEFAULT NULL COMMENT '应用的角色ID（对应 sessions.session_id，session_type=agent）'
+                AFTER `session_type`
+            """,
+            'role_id',
+        )
+        _ensure_column(
+            'sessions',
+            'role_version_id',
+            """
+                ALTER TABLE `sessions`
+                ADD COLUMN `role_version_id` VARCHAR(100) DEFAULT NULL COMMENT '锁定的角色版本ID（用于可复盘/回放）'
+                AFTER `role_id`
+            """,
+            'role_version_id',
+        )
+        _ensure_column(
+            'sessions',
+            'role_snapshot',
+            """
+                ALTER TABLE `sessions`
+                ADD COLUMN `role_snapshot` JSON DEFAULT NULL COMMENT '应用角色时的快照（用于审计/回放）'
+                AFTER `role_version_id`
+            """,
+            'role_snapshot',
+        )
+        _ensure_column(
+            'sessions',
+            'role_applied_at',
+            """
+                ALTER TABLE `sessions`
+                ADD COLUMN `role_applied_at` DATETIME DEFAULT NULL COMMENT '应用角色时间'
+                AFTER `role_snapshot`
+            """,
+            'role_applied_at',
+        )
+        try:
+            cursor.execute("""
+                SELECT COUNT(*)
+                FROM information_schema.STATISTICS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'sessions'
+                  AND INDEX_NAME = 'idx_role_id'
+            """)
+            role_idx_exists = cursor.fetchone()[0] > 0
+            if not role_idx_exists:
+                print("  → Adding index 'idx_role_id' to 'sessions' table...")
+                cursor.execute("CREATE INDEX `idx_role_id` ON `sessions` (`role_id`)")
+                conn.commit()
+                print("  ✓ Index 'idx_role_id' added to 'sessions' table")
+        except Exception as e:
+            print(f"  ⚠️ Warning: Failed to add 'idx_role_id' index: {e}")
+
+        # ==================== 角色版本（Role Versions） ====================
+        # 用于让角色（session_type='agent'）可成长：每次角色配置变更沉淀为一个版本。
+        try:
+            create_role_versions_table = """
+            CREATE TABLE IF NOT EXISTS `role_versions` (
+                `id` INT AUTO_INCREMENT PRIMARY KEY,
+                `role_id` VARCHAR(100) NOT NULL COMMENT '角色ID（对应 sessions.session_id，session_type=agent）',
+                `version_id` VARCHAR(100) NOT NULL COMMENT '版本ID',
+                `name` VARCHAR(255) DEFAULT NULL COMMENT '角色名称（快照）',
+                `avatar` MEDIUMTEXT DEFAULT NULL COMMENT '角色头像（快照，base64）',
+                `system_prompt` TEXT DEFAULT NULL COMMENT '系统提示词（快照）',
+                `llm_config_id` VARCHAR(100) DEFAULT NULL COMMENT '默认LLM配置ID（快照）',
+                `metadata` JSON DEFAULT NULL COMMENT '扩展信息（变更原因等）',
+                `is_current` TINYINT(1) DEFAULT 0 COMMENT '是否为当前版本',
+                `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                UNIQUE KEY `uniq_role_version` (`role_id`, `version_id`),
+                INDEX `idx_role_current` (`role_id`, `is_current`),
+                INDEX `idx_role_created_at` (`role_id`, `created_at`),
+                FOREIGN KEY (`role_id`) REFERENCES `sessions`(`session_id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='角色版本表';
+            """
+            cursor.execute(create_role_versions_table)
+            print("✓ Table 'role_versions' created/verified successfully")
+        except Exception as e:
+            print(f"  ⚠️ Warning: Failed to create 'role_versions' table: {e}")
+            # 兼容旧库：如果 sessions 不是 InnoDB/无法加外键，回退创建无外键版本
+            try:
+                create_role_versions_table_no_fk = """
+                CREATE TABLE IF NOT EXISTS `role_versions` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `role_id` VARCHAR(100) NOT NULL COMMENT '角色ID（对应 sessions.session_id，session_type=agent）',
+                    `version_id` VARCHAR(100) NOT NULL COMMENT '版本ID',
+                    `name` VARCHAR(255) DEFAULT NULL COMMENT '角色名称（快照）',
+                    `avatar` MEDIUMTEXT DEFAULT NULL COMMENT '角色头像（快照，base64）',
+                    `system_prompt` TEXT DEFAULT NULL COMMENT '系统提示词（快照）',
+                    `llm_config_id` VARCHAR(100) DEFAULT NULL COMMENT '默认LLM配置ID（快照）',
+                    `metadata` JSON DEFAULT NULL COMMENT '扩展信息（变更原因等）',
+                    `is_current` TINYINT(1) DEFAULT 0 COMMENT '是否为当前版本',
+                    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                    UNIQUE KEY `uniq_role_version` (`role_id`, `version_id`),
+                    INDEX `idx_role_current` (`role_id`, `is_current`),
+                    INDEX `idx_role_created_at` (`role_id`, `created_at`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='角色版本表';
+                """
+                cursor.execute(create_role_versions_table_no_fk)
+                print("  ✓ Table 'role_versions' created without FK")
+            except Exception as e2:
+                print(f"  ⚠️ Warning: Failed to create 'role_versions' table without FK: {e2}")
+
         # 消息表
         create_messages_table = """
         CREATE TABLE IF NOT EXISTS `messages` (
@@ -1358,4 +1492,3 @@ def refresh_oauth_token(mcp_url: str, token_info: dict, oauth_config: dict) -> O
         import traceback
         traceback.print_exc()
         return None
-
