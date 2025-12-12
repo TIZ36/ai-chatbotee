@@ -277,6 +277,7 @@ function createWindow() {
   const x = Math.floor((screenWidth - windowWidth) / 2);
   const y = Math.floor((screenHeight - windowHeight) / 2);
   
+  const isDarwin = process.platform === 'darwin';
   mainWindow = new BrowserWindow({
     width: windowWidth,
     height: windowHeight,
@@ -290,9 +291,15 @@ function createWindow() {
       contextIsolation: true,
       webSecurity: true,
     },
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
-    trafficLightPosition: { x: 20, y: 18 }, // macOS 红绿灯按钮位置
-    frame: true,
+    titleBarStyle: isDarwin ? 'hidden' : 'default',
+    titleBarOverlay: isDarwin
+      ? {
+          color: '#18181b',
+          symbolColor: '#b0b0b0',
+          height: 28,
+        }
+      : undefined,
+    frame: !isDarwin,
     show: true, // 立即显示窗口
   });
 
@@ -700,6 +707,18 @@ ipcMain.handle('open-devtools', async () => {
   return { success: false };
 });
 
+// IPC处理程序 - 窗口控制（用于自定义拖拽区双击最大化）
+ipcMain.handle('window-toggle-maximize', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  if (!win) return { maximized: false };
+  if (win.isMaximized()) {
+    win.unmaximize();
+    return { maximized: false };
+  }
+  win.maximize();
+  return { maximized: true };
+});
+
 // IPC处理程序 - 通用 MCP OAuth 授权
 ipcMain.handle('mcp-oauth-authorize', async (_, params: { authorizationUrl: string; windowTitle?: string }) => {
   const { authorizationUrl, windowTitle = 'MCP Authorization' } = params;
@@ -1025,4 +1044,3 @@ app.on('window-all-closed', () => {
     app.quit();
   }
 });
-

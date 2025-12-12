@@ -26,6 +26,16 @@ import {
   sendMessage,
 } from '../services/roundTableApi';
 import RoundTablePanel from './RoundTablePanel';
+import { Button } from './ui/Button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from './ui/Dialog';
+import { toast } from './ui/use-toast';
 
 interface AgentsPageProps {
   selectedRoundTableId?: string | null;
@@ -47,6 +57,8 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ selectedRoundTableId }) => {
   const [showRoundTableHistory, setShowRoundTableHistory] = useState(false);
   const [isCreatingRoundTable, setIsCreatingRoundTable] = useState(false);
   const [roundTableRefreshTrigger, setRoundTableRefreshTrigger] = useState(0);
+  const [deleteAgentTarget, setDeleteAgentTarget] = useState<Session | null>(null);
+  const [deleteRoundTableTarget, setDeleteRoundTableTarget] = useState<RoundTable | null>(null);
 
   // 加载智能体列表
   const loadAgents = useCallback(async () => {
@@ -109,21 +121,26 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ selectedRoundTableId }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRoundTableId, roundTables]);
 
-  // 删除智能体
-  const handleDeleteAgent = async (sessionId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    
-    if (!confirm('确定要删除这个智能体吗？此操作不可恢复。')) {
-      return;
-    }
-    
+  const performDeleteAgent = async (sessionId: string) => {
     try {
       await deleteSession(sessionId);
       await loadAgents();
+      toast({ title: '智能体已删除', variant: 'success' });
     } catch (error) {
       console.error('[AgentsPage] Failed to delete agent:', error);
-      alert('删除智能体失败，请重试');
+      toast({
+        title: '删除智能体失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
     }
+  };
+
+  // 删除智能体（确认）
+  const handleDeleteAgent = (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const agent = agents.find((a) => a.session_id === sessionId) || null;
+    setDeleteAgentTarget(agent);
   };
 
   // 跳转到私聊
@@ -219,26 +236,29 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ selectedRoundTableId }) => {
     }
   };
 
-  // 删除圆桌会议
-  const handleDeleteRoundTable = async (roundTableId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    
-    if (!confirm('确定要删除这个圆桌会议吗？此操作不可恢复。')) {
-      return;
-    }
-    
+  const performDeleteRoundTable = async (roundTableId: string) => {
     try {
       await deleteRoundTable(roundTableId);
-      
       if (activeRoundTable?.round_table_id === roundTableId) {
         setActiveRoundTable(null);
       }
-      
       await loadRoundTables();
+      toast({ title: '圆桌会议已删除', variant: 'success' });
     } catch (error) {
       console.error('[AgentsPage] Failed to delete round table:', error);
-      alert('删除圆桌会议失败，请重试');
+      toast({
+        title: '删除圆桌会议失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
     }
+  };
+
+  // 删除圆桌会议（确认）
+  const handleDeleteRoundTable = (roundTableId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const rt = roundTables.find((r) => r.round_table_id === roundTableId) || null;
+    setDeleteRoundTableTarget(rt);
   };
 
   // 关闭圆桌会议面板
@@ -303,6 +323,7 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ selectedRoundTableId }) => {
   };
 
   return (
+    <>
     <div className="h-full flex flex-col bg-gray-50 dark:bg-[#1a1a1a]">
       {/* 头部 */}
       <div className="flex-shrink-0 px-6 py-4 border-b border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d]">
@@ -600,6 +621,74 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ selectedRoundTableId }) => {
         </div>
       )}
     </div>
+
+    <Dialog
+      open={deleteAgentTarget !== null}
+      onOpenChange={(open) => {
+        if (!open) setDeleteAgentTarget(null);
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>删除智能体</DialogTitle>
+          <DialogDescription>
+            确定要删除「{deleteAgentTarget?.name || deleteAgentTarget?.title}」吗？此操作不可恢复。
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="mt-4">
+          <Button variant="secondary" onClick={() => setDeleteAgentTarget(null)}>
+            取消
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={async () => {
+              if (!deleteAgentTarget) return;
+              const id = deleteAgentTarget.session_id;
+              setDeleteAgentTarget(null);
+              await performDeleteAgent(id);
+            }}
+          >
+            删除
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog
+      open={deleteRoundTableTarget !== null}
+      onOpenChange={(open) => {
+        if (!open) setDeleteRoundTableTarget(null);
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>删除圆桌会议</DialogTitle>
+          <DialogDescription>
+            确定要删除「{deleteRoundTableTarget?.name}」吗？此操作不可恢复。
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="mt-4">
+          <Button
+            variant="secondary"
+            onClick={() => setDeleteRoundTableTarget(null)}
+          >
+            取消
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={async () => {
+              if (!deleteRoundTableTarget) return;
+              const id = deleteRoundTableTarget.round_table_id;
+              setDeleteRoundTableTarget(null);
+              await performDeleteRoundTable(id);
+            }}
+          >
+            删除
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 };
 

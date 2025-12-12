@@ -1,26 +1,49 @@
+/* 统一设计系统 */
+@import './styles/design-system.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-/* 统一设计系统 */
-@import './styles/design-system.css';
 
 /* ========================================
    统一设计系统 - 交互组件颜色变量
    ======================================== */
 :root {
-  /* 主强调色 - 紫罗兰 (Violet) */
-  --color-accent: #7c3aed;
-  --color-accent-hover: #6d28d9;
-  --color-accent-light: #a78bfa;
-  --color-accent-bg: rgba(124, 58, 237, 0.1);
-  --color-accent-bg-hover: rgba(124, 58, 237, 0.15);
+  /* shadcn/ui design tokens (light) */
+  --background: 0 0% 100%;
+  --foreground: 240 10% 3.9%;
+  --card: 0 0% 100%;
+  --card-foreground: 240 10% 3.9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 240 10% 3.9%;
+  /* Primary accent: indigo-600 (cool blue-violet, less neon) */
+  --primary: 234 89% 60%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 240 4.8% 95.9%;
+  --secondary-foreground: 240 5.9% 10%;
+  --muted: 240 4.8% 95.9%;
+  --muted-foreground: 240 3.8% 46.1%;
+  --accent: 240 4.8% 95.9%;
+  --accent-foreground: 240 5.9% 10%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 240 5.9% 90%;
+  --input: 240 5.9% 90%;
+  --ring: 234 89% 60%;
+  --radius: 6px;
+
+  /* 主强调色 - 冷峻蓝紫 (Indigo) */
+  --color-accent: #4f46e5; /* indigo-600 */
+  --color-accent-hover: #4338ca; /* indigo-700 */
+  --color-accent-light: #6366f1; /* indigo-500 */
+  --color-accent-bg: rgba(79, 70, 229, 0.08);
+  --color-accent-bg-hover: rgba(79, 70, 229, 0.12);
   
-  /* 选中/激活状态 - 靛蓝 (Indigo) */
+  /* 选中/激活状态 - 同色系低饱和 */
   --color-selected: #4f46e5;
   --color-selected-hover: #4338ca;
-  --color-selected-bg: rgba(79, 70, 229, 0.1);
-  --color-selected-border: rgba(79, 70, 229, 0.3);
+  --color-selected-bg: rgba(79, 70, 229, 0.06);
+  --color-selected-border: rgba(79, 70, 229, 0.22);
   
   /* 活跃状态 - 翠绿 (Emerald) */
   --color-active: #10b981;
@@ -35,8 +58,8 @@
   --color-warning-bg: rgba(245, 158, 11, 0.1);
   --color-error: #ef4444;
   --color-error-bg: rgba(239, 68, 68, 0.1);
-  --color-info: #3b82f6;
-  --color-info-bg: rgba(59, 130, 246, 0.1);
+  --color-info: #4f46e5;
+  --color-info-bg: rgba(79, 70, 229, 0.08);
   
   /* 会话状态颜色 */
   --color-session-active: #10b981;
@@ -45,7 +68,7 @@
   --color-session-error: #ef4444;
   
   /* 模型/组件状态 */
-  --color-model-selected: #7c3aed;
+  --color-model-selected: #4f46e5;
   --color-model-enabled: #22c55e;
   --color-model-disabled: #9ca3af;
   
@@ -65,18 +88,40 @@
 }
 
 .dark {
-  /* 暗色主题强调色调整 - 更亮更鲜艳 */
-  --color-accent: #a78bfa;
-  --color-accent-hover: #c4b5fd;
-  --color-accent-light: #c4b5fd;
-  --color-accent-bg: rgba(167, 139, 250, 0.15);
-  --color-accent-bg-hover: rgba(167, 139, 250, 0.25);
+  /* shadcn/ui design tokens (dark industrial zinc) */
+  --background: 240 10% 3.9%;   /* #18181b */
+  --foreground: 210 20% 96%;
+  --card: 240 10% 3.9%;         /* same as background */
+  --card-foreground: 210 20% 96%;
+  --popover: 240 10% 3.9%;
+  --popover-foreground: 210 20% 96%;
+  --primary: 234 89% 60%;       /* indigo-600 */
+  --primary-foreground: 0 0% 100%;
+  --secondary: 240 5% 10%;      /* subtle surface */
+  --secondary-foreground: 210 20% 96%;
+  --muted: 240 5% 10%;
+  --muted-foreground: 215 10% 70%;
+  --accent: 262 40% 16%;
+  --accent-foreground: 210 20% 96%;
+  --destructive: 0 72% 52%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 240 3.7% 15.9%;     /* #27272a */
+  --input: 240 3.7% 15.9%;
+  --ring: 234 89% 60%;
+  --radius: 6px;
+
+  /* 暗色主题强调色 - 同色系 */
+  --color-accent: #4f46e5;
+  --color-accent-hover: #4338ca;
+  --color-accent-light: #6366f1;
+  --color-accent-bg: rgba(79, 70, 229, 0.10);
+  --color-accent-bg-hover: rgba(79, 70, 229, 0.16);
   
   /* 选中/激活状态 */
-  --color-selected: #818cf8;
-  --color-selected-hover: #a5b4fc;
-  --color-selected-bg: rgba(129, 140, 248, 0.15);
-  --color-selected-border: rgba(129, 140, 248, 0.4);
+  --color-selected: #4f46e5;
+  --color-selected-hover: #4338ca;
+  --color-selected-bg: rgba(79, 70, 229, 0.08);
+  --color-selected-border: rgba(79, 70, 229, 0.22);
   
   /* 活跃状态 */
   --color-active: #34d399;
@@ -85,14 +130,14 @@
   --color-active-border: rgba(52, 211, 153, 0.4);
   
   /* 状态指示器 - 暗色调整 */
-  --color-success: #4ade80;
-  --color-success-bg: rgba(74, 222, 128, 0.15);
-  --color-warning: #fbbf24;
-  --color-warning-bg: rgba(251, 191, 36, 0.15);
-  --color-error: #f87171;
-  --color-error-bg: rgba(248, 113, 113, 0.15);
-  --color-info: #60a5fa;
-  --color-info-bg: rgba(96, 165, 250, 0.15);
+  --color-success: #22c55e;
+  --color-success-bg: rgba(34, 197, 94, 0.12);
+  --color-warning: #f59e0b;
+  --color-warning-bg: rgba(245, 158, 11, 0.12);
+  --color-error: #ef4444;
+  --color-error-bg: rgba(239, 68, 68, 0.12);
+  --color-info: #4f46e5;
+  --color-info-bg: rgba(79, 70, 229, 0.10);
   
   /* 会话状态颜色 */
   --color-session-active: #34d399;
@@ -101,7 +146,7 @@
   --color-session-error: #f87171;
   
   /* 模型/组件状态 */
-  --color-model-selected: #a78bfa;
+  --color-model-selected: #4f46e5;
   --color-model-enabled: #4ade80;
   --color-model-disabled: #6b7280;
   
@@ -110,20 +155,25 @@
   --color-hover-border: rgba(255, 255, 255, 0.1);
   
   /* 暗色主题特定 */
-  --surface-primary: #2d2d2d;
-  --surface-secondary: #363636;
-  --surface-tertiary: #404040;
+  --surface-primary: #18181b;   /* zinc-950 */
+  --surface-secondary: #202022; /* slight lift */
+  --surface-tertiary: #242427;
   --text-primary: #f9fafb;
   --text-secondary: #d1d5db;
   --text-muted: #9ca3af;
-  --border-default: #404040;
-  --border-subtle: #363636;
+  --border-default: #27272a;    /* zinc-800 */
+  --border-subtle: #202022;
 }
 
 @layer base {
   body {
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
     @apply bg-gray-50 text-gray-900 font-sans antialiased;
-    @apply dark:bg-[#1a1a1a] dark:text-[#ffffff];
+    @apply dark:bg-[#18181b] dark:text-[#f4f4f5];
+  }
+
+  code, pre, kbd, samp, .font-mono {
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   }
   
   * {
@@ -187,7 +237,7 @@
   /* 图标盒子 */
   .gnome-icon-box {
     @apply w-9 h-9 rounded-lg flex items-center justify-center;
-    @apply bg-[#7c3aed]/10 dark:bg-[#7c3aed]/20;
+    @apply bg-primary-50 dark:bg-primary-900/20;
     /* 微妙的立体效果 */
     box-shadow: 
       inset 0 1px 0 rgba(255, 255, 255, 0.1),
@@ -277,12 +327,10 @@
   }
   
   .gnome-list-item-active {
-    @apply bg-[#7c3aed]/10 dark:bg-[#7c3aed]/20;
-    @apply border-[#7c3aed]/20 dark:border-[#7c3aed]/30;
-    @apply text-[#7c3aed];
-    box-shadow: 
-      inset 0 0 0 1px rgba(124, 58, 237, 0.1),
-      0 1px 3px rgba(124, 58, 237, 0.1);
+    @apply bg-primary-50 dark:bg-primary-900/20;
+    @apply border-primary-200 dark:border-primary-800;
+    @apply text-primary-700 dark:text-primary-300;
+    box-shadow: inset 0 0 0 1px hsl(var(--primary) / 0.12);
   }
   
   /* 按钮组件 - 3D 立体效果 */
@@ -294,27 +342,28 @@
   }
   
   .gnome-btn-primary {
-    @apply bg-[#7c3aed] text-white;
+    background-color: var(--color-accent);
+    color: #fff;
     box-shadow: 
       inset 0 1px 0 rgba(255, 255, 255, 0.15),
-      0 1px 2px rgba(124, 58, 237, 0.2),
-      0 2px 4px rgba(124, 58, 237, 0.15);
+      0 1px 2px hsl(var(--primary) / 0.2),
+      0 2px 4px hsl(var(--primary) / 0.15);
   }
   
   .gnome-btn-primary:hover {
-    @apply bg-[#6d28d9];
+    background-color: var(--color-accent-hover);
     box-shadow: 
       inset 0 1px 0 rgba(255, 255, 255, 0.15),
-      0 2px 4px rgba(124, 58, 237, 0.25),
-      0 4px 8px rgba(124, 58, 237, 0.2);
+      0 2px 4px hsl(var(--primary) / 0.25),
+      0 4px 8px hsl(var(--primary) / 0.2);
     transform: translateY(-1px);
   }
   
   .gnome-btn-primary:active {
-    @apply bg-[#5b21b6];
+    background-color: hsl(var(--primary) / 0.85);
     box-shadow: 
       inset 0 1px 3px rgba(0, 0, 0, 0.2),
-      0 1px 2px rgba(124, 58, 237, 0.1);
+      0 1px 2px hsl(var(--primary) / 0.1);
     transform: translateY(0);
   }
   
@@ -489,8 +538,8 @@
   }
   
   .gnome-alert-info {
-    @apply bg-blue-50 border-blue-200 text-blue-800;
-    @apply dark:bg-blue-900/20 dark:border-blue-800/50 dark:text-blue-300;
+    @apply bg-primary-50 border-primary-200 text-primary-800;
+    @apply dark:bg-primary-900/10 dark:border-primary-800/40 dark:text-primary-300;
   }
   
   .gnome-alert-success {
@@ -1091,11 +1140,11 @@
   }
 
   .markdown-content blockquote {
-    @apply border-l-4 border-violet-500 dark:border-[#7c3aed] pl-4 my-3 italic text-gray-700 dark:text-[#e0e0e0];
+    @apply border-l-4 border-primary-500 pl-4 my-3 italic text-gray-700 dark:text-[#e0e0e0];
   }
 
   .markdown-content a {
-    @apply text-violet-600 dark:text-[#a78bfa] hover:underline;
+    @apply text-primary-600 dark:text-primary-400 hover:underline;
   }
 
   .markdown-content table {

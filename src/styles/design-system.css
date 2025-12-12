@@ -47,7 +47,7 @@
   height: 0.5rem;
   border-radius: 9999px;
   background-color: var(--color-active);
-  box-shadow: 0 0 8px var(--color-active);
+  box-shadow: none;
 }
 
 /* --- 状态指示器 --- */
@@ -106,7 +106,7 @@
   border-radius: 9999px;
   margin-right: 0.375rem;
   background-color: var(--color-session-active);
-  box-shadow: 0 0 6px var(--color-session-active);
+  box-shadow: none;
 }
 .ui-session-idle {
   display: inline-flex;
@@ -179,7 +179,7 @@
   height: 0.5rem;
   border-radius: 9999px;
   background-color: var(--color-model-selected);
-  box-shadow: 0 0 6px var(--color-model-selected);
+  box-shadow: none;
 }
 .ui-model-enabled {
   display: inline-flex;
@@ -330,8 +330,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.375rem 0.75rem;
-  border-radius: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
   font-size: 0.875rem;
   font-weight: 500;
   transition: all 0.2s;
@@ -376,8 +376,8 @@
 /* --- 输入框统一样式 --- */
 .ui-input {
   width: 100%;
-  padding: 0.5rem 0.75rem;
-  border-radius: 0.5rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: 0.375rem;
   font-size: 0.875rem;
   background-color: var(--surface-primary);
   border: 1px solid var(--border-default);
@@ -401,8 +401,8 @@
 /* --- 选择框统一样式 --- */
 .ui-select {
   width: 100%;
-  padding: 0.5rem 2.5rem 0.5rem 0.75rem;
-  border-radius: 0.5rem;
+  padding: 0.375rem 2.25rem 0.375rem 0.5rem;
+  border-radius: 0.375rem;
   font-size: 0.875rem;
   appearance: none;
   cursor: pointer;
@@ -426,13 +426,14 @@
   border: 1px solid var(--border-default);
   border-radius: 0.75rem;
   padding: 1rem;
-  transition: box-shadow 0.2s, border-color 0.2s;
+  transition: border-color 0.2s, background-color 0.2s;
 }
 .ui-card:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: none;
+  border-color: var(--border-default);
 }
 .dark .ui-card:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  box-shadow: none;
 }
 .ui-card.selected {
   border-color: var(--color-selected-border);
@@ -512,4 +513,3 @@
     opacity: 0.5;
   }
 }
-

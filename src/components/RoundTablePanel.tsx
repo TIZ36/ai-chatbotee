@@ -31,6 +31,16 @@ import {
   removeRaiseHandMark,
   saveMediaToLocal,
 } from '../services/roundTableApi';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from './ui/Dialog';
+import { Button } from './ui/Button';
+import { toast } from './ui/use-toast';
 
 // 检测是否为沉默响应
 const isSilentResponse = (content: string): boolean => {
@@ -72,6 +82,7 @@ const RoundTablePanel = forwardRef<RoundTablePanelRef, RoundTablePanelProps>(({
   const [messages, setMessages] = useState<RoundTableMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [removeTarget, setRemoveTarget] = useState<RoundTableParticipant | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [llmConfigs, setLlmConfigs] = useState<LLMConfigFromDB[]>([]);
   const [editingParticipant, setEditingParticipant] = useState<RoundTableParticipant | null>(null);
@@ -1353,28 +1364,35 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
     }
   };
   
-  // 移除参与者
-  const handleRemoveParticipant = async (sessionId: string) => {
-    if (!confirm('确定要将该智能体移出圆桌会议吗？')) return;
-    
+  // 移除参与者（执行）
+  const performRemoveParticipant = async (participant: RoundTableParticipant) => {
     try {
-      await removeParticipant(roundTableId, sessionId);
+      await removeParticipant(roundTableId, participant.session_id);
       await loadRoundTable(false);
       onParticipantChange?.();
-      
-      // 发送系统通知
-      const participant = roundTable?.participants.find(p => p.session_id === sessionId);
-      if (participant) {
-        await sendMessage(roundTableId, {
-          content: `${participant.name} 已离开圆桌会议`,
-          sender_type: 'system',
-        });
-        const msgsData = await getRoundTableMessages(roundTableId);
-        setMessages(msgsData.messages);
-      }
+
+      await sendMessage(roundTableId, {
+        content: `${participant.name} 已离开圆桌会议`,
+        sender_type: 'system',
+      });
+      const msgsData = await getRoundTableMessages(roundTableId);
+      setMessages(msgsData.messages);
+      toast({ title: '已移出圆桌会议', variant: 'success' });
     } catch (error) {
       console.error('[RoundTable] Failed to remove participant:', error);
+      toast({
+        title: '移除参与者失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
     }
+  };
+
+  // 移除参与者（确认）
+  const handleRemoveParticipant = (sessionId: string) => {
+    const participant =
+      roundTable?.participants.find(p => p.session_id === sessionId) || null;
+    setRemoveTarget(participant);
   };
   
   // 打开配置弹框
@@ -2148,6 +2166,38 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
           </div>
         </div>
       )}
+
+      <Dialog
+        open={removeTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setRemoveTarget(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>移出圆桌会议</DialogTitle>
+            <DialogDescription>
+              确定要将「{removeTarget?.name || removeTarget?.session_id}」移出当前圆桌会议吗？
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-4">
+            <Button variant="secondary" onClick={() => setRemoveTarget(null)}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (!removeTarget) return;
+                const target = removeTarget;
+                setRemoveTarget(null);
+                await performRemoveParticipant(target);
+              }}
+            >
+              移出
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 });

@@ -8,6 +8,36 @@ export default {
   theme: {
     extend: {
       colors: {
+        // shadcn/ui token colors (driven by CSS variables)
+        background: 'hsl(var(--background))',
+        foreground: 'hsl(var(--foreground))',
+        card: 'hsl(var(--card))',
+        'card-foreground': 'hsl(var(--card-foreground))',
+        popover: 'hsl(var(--popover))',
+        'popover-foreground': 'hsl(var(--popover-foreground))',
+        primaryToken: {
+          DEFAULT: 'hsl(var(--primary))',
+          foreground: 'hsl(var(--primary-foreground))',
+        },
+        secondaryToken: {
+          DEFAULT: 'hsl(var(--secondary))',
+          foreground: 'hsl(var(--secondary-foreground))',
+        },
+        mutedToken: {
+          DEFAULT: 'hsl(var(--muted))',
+          foreground: 'hsl(var(--muted-foreground))',
+        },
+        accentToken: {
+          DEFAULT: 'hsl(var(--accent))',
+          foreground: 'hsl(var(--accent-foreground))',
+        },
+        destructiveToken: {
+          DEFAULT: 'hsl(var(--destructive))',
+          foreground: 'hsl(var(--destructive-foreground))',
+        },
+        borderToken: 'hsl(var(--border))',
+        inputToken: 'hsl(var(--input))',
+        ringToken: 'hsl(var(--ring))',
         // 深色主题色板 - 参考 GNOME/Ubuntu 风格
         gray: {
           50: '#fafafa',
@@ -193,4 +223,3 @@ export default {
   },
   plugins: [],
 }
-

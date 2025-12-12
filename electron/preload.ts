@@ -73,6 +73,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Notion OAuth (保留向后兼容)
   notionOAuthAuthorize: (authorizationUrl: string) => 
     ipcRenderer.invoke('notion-oauth-authorize', authorizationUrl),
+
+  // Window controls (custom titlebar)
+  toggleMaximize: () => ipcRenderer.invoke('window-toggle-maximize'),
 });
 
 // 类型定义（供TypeScript使用）
@@ -99,6 +102,7 @@ export interface ElectronAPI {
   mcpOAuthAuthorize: (params: { authorizationUrl: string; windowTitle?: string }) => Promise<{ code: string; state: string }>;
   mcpOAuthOpenExternal: (params: { authorizationUrl: string }) => Promise<{ success: boolean }>;
   notionOAuthAuthorize: (authorizationUrl: string) => Promise<{ code: string; state: string }>;
+  toggleMaximize: () => Promise<{ maximized: boolean }>;
 }
 
 declare global {
@@ -106,4 +110,3 @@ declare global {
     electronAPI: ElectronAPI;
   }
 }
-

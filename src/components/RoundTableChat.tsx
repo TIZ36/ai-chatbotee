@@ -15,6 +15,16 @@ import {
   RoundTableDetail
 } from '../services/roundTableApi';
 import RoundTablePanel from './RoundTablePanel';
+import { Button } from './ui/Button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from './ui/Dialog';
+import { toast } from './ui/use-toast';
 
 interface RoundTableChatProps {
   roundTableId: string | null;
@@ -37,6 +47,7 @@ const RoundTableChat: React.FC<RoundTableChatProps> = ({
   const [roundTables, setRoundTables] = useState<RoundTable[]>([]);
   const [activeRoundTable, setActiveRoundTable] = useState<RoundTableDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   
   // 右键菜单状态
   const [contextMenu, setContextMenu] = useState<ContextMenuPosition | null>(null);
@@ -132,30 +143,32 @@ const RoundTableChat: React.FC<RoundTableChatProps> = ({
     }
   };
 
-  // 删除圆桌会议
-  const handleDeleteRoundTable = async (tableId: string, e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    setContextMenu(null);
-    
-    if (!confirm('确定要删除这个圆桌会议吗？此操作不可恢复。')) {
-      return;
-    }
-    
+  // 删除圆桌会议（执行）
+  const performDeleteRoundTable = async (tableId: string) => {
     try {
       await deleteRoundTable(tableId);
-      
-      // 如果删除的是当前激活的会议，清空激活状态
       if (activeRoundTable?.round_table_id === tableId) {
         setActiveRoundTable(null);
         onRoundTableChange(null);
       }
-      
-      // 重新加载会议列表
       await loadRoundTables();
+      toast({ title: '圆桌会议已删除', variant: 'success' });
     } catch (error) {
       console.error('Failed to delete round table:', error);
-      alert('删除圆桌会议失败，请重试');
+      toast({
+        title: '删除圆桌会议失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
     }
+  };
+
+  // 删除圆桌会议（确认）
+  const handleDeleteRoundTable = (tableId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setContextMenu(null);
+    const table = roundTables.find(t => t.round_table_id === tableId);
+    setDeleteTarget({ id: tableId, name: table?.name || '未命名圆桌会议' });
   };
   
   // 右键菜单
@@ -353,6 +366,38 @@ const RoundTableChat: React.FC<RoundTableChatProps> = ({
           </button>
         </div>
       )}
+
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除圆桌会议</DialogTitle>
+            <DialogDescription>
+              确定要删除「{deleteTarget?.name}」吗？此操作不可恢复。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-4">
+            <Button variant="secondary" onClick={() => setDeleteTarget(null)}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (!deleteTarget) return;
+                const id = deleteTarget.id;
+                setDeleteTarget(null);
+                await performDeleteRoundTable(id);
+              }}
+            >
+              删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

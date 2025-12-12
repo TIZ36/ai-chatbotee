@@ -93,13 +93,13 @@ const ComponentThumbnails: React.FC<ComponentThumbnailsProps> = ({
             className={`
               flex items-center justify-center px-1.5 py-0.5 rounded text-[11px] transition-all relative
               ${selectedMcpServerIds.size > 0
-                ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-medium ring-1 ring-blue-200 dark:ring-blue-800'
-                : 'text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400'
+                ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 font-medium ring-1 ring-primary-200 dark:ring-primary-800'
+                : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'
               }
             `}
             title={`MCP 服务器 (${connectedCount}/${mcpServers.length}已连接${selectedMcpServerIds.size > 0 ? `, ${selectedMcpServerIds.size}个已选` : ''}) - 点击查看列表`}
           >
-            <Plug className="w-3 h-3 flex-shrink-0" />
+            <Plug className="w-4 h-4 flex-shrink-0" />
             {selectedMcpServerIds.size > 0 && (
               <span className="ml-0.5 text-[10px] font-bold">{selectedMcpServerIds.size}</span>
             )}
@@ -111,13 +111,13 @@ const ComponentThumbnails: React.FC<ComponentThumbnailsProps> = ({
               <div className="p-3 border-b border-gray-200 dark:border-gray-700">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Plug className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                    <Plug className="w-4 h-4 text-primary-600 dark:text-primary-400" />
                     <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">MCP 服务器</h3>
                     <span className="text-xs text-gray-500 dark:text-gray-400">
                       ({connectedCount}/{mcpServers.length}已连接)
                     </span>
                     {selectedMcpServerIds.size > 0 && (
-                      <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">
+                      <span className="text-xs text-primary-600 dark:text-primary-400 font-medium">
                         {selectedMcpServerIds.size}个已选
                       </span>
                     )}
@@ -125,6 +125,7 @@ const ComponentThumbnails: React.FC<ComponentThumbnailsProps> = ({
                   <button
                     onClick={() => setShowMCPList(false)}
                     className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                    title="关闭"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -184,7 +185,7 @@ const ComponentThumbnails: React.FC<ComponentThumbnailsProps> = ({
                         <div className="flex items-center gap-2 flex-1 min-w-0">
                           <div className="relative">
                             {isConnecting ? (
-                              <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                              <div className="w-4 h-4 border-2 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
                             ) : (
                               <>
                                 <Plug className={`w-4 h-4 flex-shrink-0 ${isSelected ? 'text-primary-600 dark:text-primary-400' : isConnected ? 'text-green-500' : 'text-gray-400'}`} />
@@ -198,7 +199,7 @@ const ComponentThumbnails: React.FC<ComponentThumbnailsProps> = ({
                             {server.display_name || server.client_name || server.name}
                           </span>
                           {isConnecting && (
-                            <span className="text-[10px] text-blue-500">连接中...</span>
+                            <span className="text-[10px] text-primary-500">连接中...</span>
                           )}
                           {!isConnected && !isConnecting && (
                             <span className="text-[10px] text-yellow-600 dark:text-yellow-400 font-medium">点击连接</span>
@@ -228,13 +229,13 @@ const ComponentThumbnails: React.FC<ComponentThumbnailsProps> = ({
             className={`
               flex items-center justify-center px-1.5 py-0.5 rounded text-[11px] transition-all relative
               ${selectedWorkflowIds.size > 0
-                ? 'bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 font-medium ring-1 ring-purple-200 dark:ring-purple-800'
-                : 'text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400'
+                ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 font-medium ring-1 ring-primary-200 dark:ring-primary-800'
+                : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'
               }
             `}
             title={`工作流${selectedWorkflowIds.size > 0 ? ` (${selectedWorkflowIds.size}个已选)` : ''} - 点击查看列表`}
           >
-            <WorkflowIcon className="w-3 h-3 flex-shrink-0" />
+            <WorkflowIcon className="w-4 h-4 flex-shrink-0" />
             {selectedWorkflowIds.size > 0 && (
               <span className="ml-0.5 text-[10px] font-bold">{selectedWorkflowIds.size}</span>
             )}
@@ -246,10 +247,10 @@ const ComponentThumbnails: React.FC<ComponentThumbnailsProps> = ({
               <div className="p-3 border-b border-gray-200 dark:border-gray-700">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <WorkflowIcon className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                    <WorkflowIcon className="w-4 h-4 text-primary-600 dark:text-primary-400" />
                     <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">工作流</h3>
                     {selectedWorkflowIds.size > 0 && (
-                      <span className="text-xs text-purple-600 dark:text-purple-400 font-medium">
+                      <span className="text-xs text-primary-600 dark:text-primary-400 font-medium">
                         ({selectedWorkflowIds.size}个已选)
                       </span>
                     )}
@@ -257,6 +258,7 @@ const ComponentThumbnails: React.FC<ComponentThumbnailsProps> = ({
                   <button
                     onClick={() => setShowWorkflowList(false)}
                     className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                    title="关闭"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -328,13 +330,13 @@ const ComponentThumbnails: React.FC<ComponentThumbnailsProps> = ({
             className={`
               flex items-center justify-center px-1.5 py-0.5 rounded text-[11px] transition-all relative
               ${selectedSkillPackIds.size > 0
-                ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 font-medium ring-1 ring-amber-200 dark:ring-amber-800'
-                : 'text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400'
+                ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 font-medium ring-1 ring-primary-200 dark:ring-primary-800'
+                : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'
               }
             `}
             title={`技能包${selectedSkillPackIds.size > 0 ? ` (${selectedSkillPackIds.size}个已选)` : ''} - 点击查看列表`}
           >
-            <Package className="w-3 h-3 flex-shrink-0" />
+            <Package className="w-4 h-4 flex-shrink-0" />
             {selectedSkillPackIds.size > 0 && (
               <span className="ml-0.5 text-[10px] font-bold">{selectedSkillPackIds.size}</span>
             )}
@@ -346,10 +348,10 @@ const ComponentThumbnails: React.FC<ComponentThumbnailsProps> = ({
               <div className="p-3 border-b border-gray-200 dark:border-gray-700">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Package className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                    <Package className="w-4 h-4 text-primary-600 dark:text-primary-400" />
                     <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">技能包</h3>
                     {selectedSkillPackIds.size > 0 && (
-                      <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">
+                      <span className="text-xs text-primary-600 dark:text-primary-400 font-medium">
                         ({selectedSkillPackIds.size}个已选)
                       </span>
                     )}
@@ -357,6 +359,7 @@ const ComponentThumbnails: React.FC<ComponentThumbnailsProps> = ({
                   <button
                     onClick={() => setShowSkillPackList(false)}
                     className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                    title="关闭"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -445,4 +448,3 @@ const ComponentThumbnails: React.FC<ComponentThumbnailsProps> = ({
 };
 
 export default ComponentThumbnails;
-

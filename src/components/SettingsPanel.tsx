@@ -1,7 +1,16 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Settings, Trash2, Save, Code } from 'lucide-react';
 import { Settings as SettingsType } from '../services/storage';
 import PageLayout, { Card } from './ui/PageLayout';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from './ui/Dialog';
+import { Button } from './ui/Button';
 
 interface SettingsPanelProps {
   settings: SettingsType;
@@ -12,11 +21,10 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   settings,
   onUpdateSettings,
 }) => {
+  const [clearDataOpen, setClearDataOpen] = useState(false);
+
   const handleClearData = () => {
-    if (window.confirm('确定要清除所有数据吗？此操作不可撤销。')) {
-      localStorage.clear();
-      window.location.reload();
-    }
+    setClearDataOpen(true);
   }; 
 
   return (
@@ -164,13 +172,15 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <h3 className="text-sm font-medium text-gray-900 dark:text-white">清除所有数据</h3>
                 <p className="text-xs text-gray-600 dark:text-[#a0a0a0]">删除所有收藏的频道、视频和设置</p>
               </div>
-              <button
+              <Button
                 onClick={handleClearData}
-                className="px-3 py-1.5 text-sm font-medium rounded-lg bg-red-500 text-white hover:bg-red-600 active:bg-red-700 transition-all duration-150 flex items-center space-x-1.5"
+                variant="destructive"
+                size="sm"
+                className="px-3 py-1.5 text-sm font-medium flex items-center space-x-1.5"
               >
                 <Trash2 className="w-4 h-4" />
                 <span>清除</span>
-              </button>
+              </Button>
             </div>
 
             <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-[#2d2d2d] rounded-lg border border-gray-200 dark:border-[#404040]">
@@ -244,6 +254,31 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </div>
         </Card>
       </div>
+
+      <Dialog open={clearDataOpen} onOpenChange={setClearDataOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>清除所有数据</DialogTitle>
+            <DialogDescription>
+              这将清除本地所有配置与会话数据，且不可撤销。确定继续吗？
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-4">
+            <Button variant="secondary" onClick={() => setClearDataOpen(false)}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                localStorage.clear();
+                window.location.reload();
+              }}
+            >
+              清除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageLayout>
   );
 };

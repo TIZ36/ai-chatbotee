@@ -13,6 +13,12 @@ import AgentsPage from './components/AgentsPage';
 import SessionSidebar from './components/SessionSidebar';
 import RoundTableChat from './components/RoundTableChat';
 import ResearchPanel from './components/ResearchPanel';
+import {
+  PanelGroup,
+  Panel,
+  PanelResizeHandle,
+  type ImperativePanelHandle,
+} from 'react-resizable-panels';
 
 // 导航项组件 - 带动画和tooltip
 interface NavItemProps {
@@ -34,8 +40,8 @@ const NavItem: React.FC<NavItemProps> = ({ to, icon, title, isActive }) => {
           transition-all duration-200 ease-out relative
           flex-shrink-0
           ${isActive 
-            ? 'bg-[#7c3aed] text-white' 
-            : 'text-[#b0b0b0] hover:bg-[#363636] hover:text-white'
+            ? 'bg-[var(--color-accent)] text-white' 
+            : 'text-[#b0b0b0] hover:bg-[#202022] hover:text-white'
           }
         `}
         onMouseEnter={() => setShowTooltip(true)}
@@ -150,6 +156,24 @@ const App: React.FC = () => {
   // Research 模式状态
   const [isResearchMode, setIsResearchMode] = useState(false);
   const [currentResearchSessionId, setCurrentResearchSessionId] = useState<string | null>(null);
+  const leftPanelRef = React.useRef<ImperativePanelHandle>(null);
+  const autoCollapsedRef = React.useRef(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+
+  useEffect(() => {
+    const shouldCollapse = isResearchMode || isRoundTableMode;
+    if (shouldCollapse && !autoCollapsedRef.current) {
+      leftPanelRef.current?.collapse();
+      autoCollapsedRef.current = true;
+      setIsSidebarCollapsed(true);
+      return;
+    }
+    if (!shouldCollapse && autoCollapsedRef.current) {
+      leftPanelRef.current?.expand();
+      autoCollapsedRef.current = false;
+      setIsSidebarCollapsed(false);
+    }
+  }, [isResearchMode, isRoundTableMode]);
 
   const handleToggleRoundTable = async () => {
     if (!isRoundTableMode) {
@@ -206,8 +230,14 @@ const App: React.FC = () => {
 
   return (
     <div className="h-screen bg-gray-50 dark:bg-[#1a1a1a] flex flex-col transition-colors duration-200 overflow-hidden">
-      {/* 顶部很薄的占位区域 - 用于窗口拖动 */}
-      <div className="w-full h-[4px] flex-shrink-0 app-drag bg-transparent" />
+      {/* 顶部拖拽区域 - 支持三指拖动与双击最大化 */}
+      <div
+        className="w-full h-7 flex-shrink-0 app-drag bg-transparent"
+        title="拖动窗口 / 双击最大化"
+        onDoubleClick={() => {
+          window.electronAPI?.toggleMaximize?.();
+        }}
+      />
       
       <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* 中间导航栏 - GNOME 风格 */}
@@ -273,8 +303,8 @@ const App: React.FC = () => {
                 w-9 h-9 flex items-center justify-center rounded-xl 
                 transition-all duration-200 ease-out relative
                 ${isTerminalPage
-                  ? 'bg-[#7c3aed] text-white' 
-                  : 'text-[#b0b0b0] hover:bg-[#363636] hover:text-white'
+                  ? 'bg-[var(--color-accent)] text-white' 
+                  : 'text-[#b0b0b0] hover:bg-[#202022] hover:text-white'
                 }
               `}
               title="终端"
@@ -314,13 +344,13 @@ const App: React.FC = () => {
       <main
         className={`flex flex-col flex-1 min-h-0 transition-all duration-200 relative ${
           isTerminalPage ? 'overflow-visible' : 'overflow-hidden'
-        } bg-gray-100 dark:bg-[#1a1a1a]`}
+        } bg-gray-100 dark:bg-[#18181b]`}
       >
         
         {isTerminalPage ? (
           /* Terminal 独占页面 */
           <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-visible m-2">
-            <div className="flex-1 rounded-xl bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] shadow-lg dark:shadow-[0_4px_24px_rgba(0,0,0,0.4)] overflow-visible">
+            <div className="flex-1 rounded-xl bg-white dark:bg-[#18181b] border border-gray-200 dark:border-[#27272a] overflow-visible">
               <TerminalPanel
                 isOpen={true}
                 onClose={() => navigate('/')}
@@ -335,94 +365,122 @@ const App: React.FC = () => {
             </div>
           </div>
         ) : isChatPage ? (
-          /* 聊天页面 - 左右布局 - GNOME 风格 */
-          <div className="flex flex-1 min-h-0 min-w-0 p-2 gap-2">
-            {/* 左侧会话列表面板 */}
-            <div
-              className={`rounded-xl bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] shadow-lg dark:shadow-[0_4px_24px_rgba(0,0,0,0.4)] overflow-hidden transition-all duration-300 ${
-                isResearchMode ? 'w-0 opacity-0 pointer-events-none border-transparent shadow-none' : 'opacity-100'
-              }`}
-            >
-              <SessionSidebar
-                selectedSessionId={selectedSessionId}
-                onSelectSession={handleSelectSession}
-                onNewSession={handleNewSession}
-                isRoundTableMode={isRoundTableMode}
-                onAddToRoundTable={handleAddToRoundTable}
-                onConfigSession={handleConfigSession}
-              />
-            </div>
-            
-            {/* 中间会议按钮 */}
-            <div className="w-0 flex items-center justify-center relative">
-              <div className="absolute left-1/2 -translate-x-1/2 flex flex-col gap-2 z-10">
-                <button
-                  onClick={handleToggleRoundTable}
-                  className={`
-                    w-7 h-14 rounded-lg transition-all
-                    shadow-md dark:shadow-[0_2px_8px_rgba(0,0,0,0.3)]
-                    ${isRoundTableMode
-                      ? 'bg-[#7c3aed] text-white'
-                      : 'bg-white dark:bg-[#363636] text-gray-500 dark:text-[#b0b0b0] hover:bg-[#7c3aed]/10 dark:hover:bg-[#7c3aed]/20 hover:text-[#7c3aed]'
-                    }
-                  `}
-                  title={isRoundTableMode ? '退出圆桌会议' : '进入圆桌会议'}
-                >
-                  <Users className="w-4 h-4 mx-auto" />
-                </button>
-                
-                <button
-                  onClick={handleToggleResearch}
-                  className={`
-                    w-7 h-14 rounded-lg transition-all
-                    shadow-md dark:shadow-[0_2px_8px_rgba(0,0,0,0.3)]
-                    ${isResearchMode
-                      ? 'bg-[#7c3aed] text-white'
-                      : 'bg-white dark:bg-[#363636] text-gray-500 dark:text-[#b0b0b0] hover:bg-[#7c3aed]/10 dark:hover:bg-[#7c3aed]/20 hover:text-[#7c3aed]'
-                    }
-                  `}
-                  title={isResearchMode ? '退出 Research' : '进入 Research'}
-                >
-                  <BookOpen className="w-4 h-4 mx-auto" />
-                </button>
-              </div>
-            </div>
-            
-            {/* Research 主面板 */}
-            {isResearchMode && (
-              <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden rounded-xl bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] shadow-lg dark:shadow-[0_4px_24px_rgba(0,0,0,0.4)]">
-                <ResearchPanel
-                  chatSessionId={selectedSessionId}
-                  researchSessionId={currentResearchSessionId}
-                  onResearchSessionChange={setCurrentResearchSessionId}
-                  onExit={() => setIsResearchMode(false)}
+          /* 聊天页面 - 可拖拽分栏布局（IDE 风格） */
+          <div className="relative flex flex-1 min-h-0 min-w-0 p-2">
+            <PanelGroup direction="horizontal" className="flex flex-1 min-h-0 min-w-0">
+              {/* 左侧会话列表（可折叠） */}
+              <Panel
+                ref={leftPanelRef}
+                defaultSize={18}
+                minSize={12}
+                maxSize={28}
+                collapsible
+                collapsedSize={0}
+                onCollapse={() => setIsSidebarCollapsed(true)}
+                onExpand={() => setIsSidebarCollapsed(false)}
+                className={`overflow-hidden border border-gray-200 dark:border-[#27272a] bg-gray-50 dark:bg-[#202022] ${
+                  isSidebarCollapsed
+                    ? 'rounded-xl border-r-0'
+                    : 'rounded-xl rounded-r-none border-r-0'
+                }`}
+              >
+                <SessionSidebar
+                  selectedSessionId={selectedSessionId}
+                  onSelectSession={handleSelectSession}
+                  onNewSession={handleNewSession}
+                  isRoundTableMode={isRoundTableMode}
+                  onAddToRoundTable={handleAddToRoundTable}
+                  onConfigSession={handleConfigSession}
                 />
-              </div>
-            )}
+              </Panel>
 
-            {/* 右侧聊天区域面板 */}
-            <div
-              className={`flex flex-col min-h-0 min-w-0 overflow-hidden rounded-xl bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] shadow-lg dark:shadow-[0_4px_24px_rgba(0,0,0,0.4)] transition-all duration-300 ${
-                isResearchMode ? 'w-0 opacity-0 pointer-events-none border-transparent shadow-none' : 'flex-1 opacity-100'
-              }`}
-            >
-              {isRoundTableMode ? (
-                /* 圆桌聊天 */
-                <RoundTableChat
-                  roundTableId={currentRoundTableId}
-                  onRoundTableChange={setCurrentRoundTableId}
-                  refreshKey={participantRefreshKey}
-                />
-              ) : (
-                /* 普通聊天 */
-                <Workflow sessionId={selectedSessionId} />
+              {!isSidebarCollapsed && (
+                <PanelResizeHandle className="flex w-1 items-center justify-center cursor-col-resize">
+                  <div className="h-full w-px bg-gray-200 dark:bg-[#27272a] hover:bg-[var(--color-accent)] transition-colors" />
+                </PanelResizeHandle>
               )}
-            </div>
+
+              {/* 主面板（Research 或 Chat/RoundTable） */}
+              <Panel
+                minSize={40}
+                className={`relative overflow-hidden border border-gray-200 dark:border-[#27272a] bg-white dark:bg-[#18181b] ${
+                  isSidebarCollapsed
+                    ? 'rounded-xl'
+                    : 'rounded-xl rounded-l-none border-l-0'
+                }`}
+              >
+                {/* 浮动 Dock：模式 + 侧栏折叠 */}
+                <div className="absolute left-2 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-10">
+                  <button
+                    onClick={() => {
+                      autoCollapsedRef.current = false;
+                      if (isSidebarCollapsed) {
+                        leftPanelRef.current?.expand();
+                        setIsSidebarCollapsed(false);
+                      } else {
+                        leftPanelRef.current?.collapse();
+                        setIsSidebarCollapsed(true);
+                      }
+                    }}
+                    className="w-7 h-7 rounded-lg border border-gray-200 dark:border-[#27272a] bg-white dark:bg-[#202022] text-gray-500 dark:text-[#b0b0b0] hover:bg-[var(--color-hover-bg)]"
+                    title={isSidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'}
+                  >
+                    {isSidebarCollapsed ? '›' : '‹'}
+                  </button>
+                  <button
+                    onClick={handleToggleRoundTable}
+                    className={`
+                      w-7 h-14 rounded-lg transition-all
+                      border border-gray-200 dark:border-[#27272a]
+                      ${isRoundTableMode
+                        ? 'bg-[var(--color-accent)] text-white'
+                        : 'bg-white dark:bg-[#202022] text-gray-500 dark:text-[#b0b0b0] hover:bg-[var(--color-accent-bg)] hover:text-[var(--color-accent)]'
+                      }
+                    `}
+                    title={isRoundTableMode ? '退出圆桌会议' : '进入圆桌会议'}
+                  >
+                    <Users className="w-4 h-4 mx-auto" />
+                  </button>
+
+                  <button
+                    onClick={handleToggleResearch}
+                    className={`
+                      w-7 h-14 rounded-lg transition-all
+                      border border-gray-200 dark:border-[#27272a]
+                      ${isResearchMode
+                        ? 'bg-[var(--color-accent)] text-white'
+                        : 'bg-white dark:bg-[#202022] text-gray-500 dark:text-[#b0b0b0] hover:bg-[var(--color-accent-bg)] hover:text-[var(--color-accent)]'
+                      }
+                    `}
+                    title={isResearchMode ? '退出 Research' : '进入 Research'}
+                  >
+                    <BookOpen className="w-4 h-4 mx-auto" />
+                  </button>
+                </div>
+
+                {isResearchMode ? (
+                  <ResearchPanel
+                    chatSessionId={selectedSessionId}
+                    researchSessionId={currentResearchSessionId}
+                    onResearchSessionChange={setCurrentResearchSessionId}
+                    onExit={() => setIsResearchMode(false)}
+                  />
+                ) : isRoundTableMode ? (
+                  <RoundTableChat
+                    roundTableId={currentRoundTableId}
+                    onRoundTableChange={setCurrentRoundTableId}
+                    refreshKey={participantRefreshKey}
+                  />
+                ) : (
+                  <Workflow sessionId={selectedSessionId} />
+                )}
+              </Panel>
+            </PanelGroup>
           </div>
         ) : (
           <div className="flex flex-1 min-h-0 min-w-0 p-2 gap-2">
             {/* 主内容区域面板 - GNOME 风格 */}
-            <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden rounded-xl bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] shadow-lg dark:shadow-[0_4px_24px_rgba(0,0,0,0.4)]">
+            <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden rounded-xl bg-white dark:bg-[#18181b] border border-gray-200 dark:border-[#27272a]">
               <div className="flex-1 overflow-hidden min-w-0 flex flex-col relative">
                 <div className={`h-full flex flex-col`}>
                   <Routes>
@@ -461,7 +519,7 @@ const App: React.FC = () => {
 
             {/* 右侧终端区域 - GNOME 风格 */}
             {isTerminalOpen && !isTerminalPage && (
-              <div className="w-[45%] min-w-[400px] flex flex-col min-h-0 min-w-0 flex-shrink-0 rounded-xl bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] shadow-lg dark:shadow-[0_4px_24px_rgba(0,0,0,0.4)] overflow-visible slide-in-right">
+              <div className="w-[45%] min-w-[400px] flex flex-col min-h-0 min-w-0 flex-shrink-0 rounded-xl bg-white dark:bg-[#18181b] border border-gray-200 dark:border-[#27272a] overflow-visible slide-in-right">
                 <TerminalPanel
                   isOpen={true}
                   onClose={() => setIsTerminalOpen(false)}
@@ -484,4 +542,3 @@ const App: React.FC = () => {
 };
 
 export default App;
-

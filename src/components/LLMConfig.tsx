@@ -12,6 +12,25 @@ import {
 } from '../services/llmApi';
 import { fetchOllamaModels } from '../services/ollamaService';
 import PageLayout, { Card, EmptyState } from './ui/PageLayout';
+import { Button } from './ui/Button';
+import { toast } from './ui/use-toast';
+import { Checkbox } from './ui/Checkbox';
+import { Switch } from './ui/Switch';
+import {
+  Select,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+  SelectValue,
+} from './ui/Select';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from './ui/Dialog';
 
 // Provider display info
 const PROVIDER_INFO: Record<string, { name: string; color: string; icon: string }> = {
@@ -38,6 +57,7 @@ const LLMConfigPanel: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<LLMConfigFromDB | null>(null);
   const [newConfig, setNewConfig] = useState<CreateLLMConfigRequest>({
     name: '',
     provider: 'openai',
@@ -199,7 +219,11 @@ const LLMConfigPanel: React.FC = () => {
       setExpandedProviders(providers);
     } catch (error) {
       console.error('Failed to load LLM configs:', error);
-      alert(`加载配置失败: ${error instanceof Error ? error.message : String(error)}`);
+      toast({
+        title: '加载配置失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
     } finally {
       setIsLoading(false);
     }
@@ -254,7 +278,10 @@ const LLMConfigPanel: React.FC = () => {
     // Ollama 不需要 API key，其他提供商需要
     const requiresApiKey = newConfig.provider !== 'ollama';
     if (!newConfig.name || (requiresApiKey && !newConfig.api_key)) {
-      alert(requiresApiKey ? '请填写配置名称和API密钥' : '请填写配置名称');
+      toast({
+        title: requiresApiKey ? '请填写配置名称和 API 密钥' : '请填写配置名称',
+        variant: 'destructive',
+      });
       return;
     }
 
@@ -277,14 +304,18 @@ const LLMConfigPanel: React.FC = () => {
     setIsAdding(false);
     } catch (error) {
       console.error('Failed to add config:', error);
-      alert(`添加配置失败: ${error instanceof Error ? error.message : String(error)}`);
+      toast({
+        title: '添加配置失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
     }
   };
 
   const handleUpdateConfig = async () => {
     // 编辑时：Ollama 不需要 API key，其他提供商在新建时需要，但编辑时可以不填写（留空则不更新）
     if (!editingId || !newConfig.name) {
-      alert('请填写配置名称');
+      toast({ title: '请填写配置名称', variant: 'destructive' });
       return;
     }
 
@@ -325,21 +356,25 @@ const LLMConfigPanel: React.FC = () => {
     setEditingId(null);
     } catch (error) {
       console.error('Failed to update config:', error);
-      alert(`更新配置失败: ${error instanceof Error ? error.message : String(error)}`);
+      toast({
+        title: '更新配置失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
     }
   };
 
   const handleDeleteConfig = async (configId: string) => {
-    if (!window.confirm('确定要删除此配置吗？')) {
-      return;
-    }
-
     try {
       await deleteLLMConfig(configId);
       await loadConfigs();
     } catch (error) {
       console.error('Failed to delete config:', error);
-      alert(`删除配置失败: ${error instanceof Error ? error.message : String(error)}`);
+      toast({
+        title: '删除配置失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
     }
   };
 
@@ -528,29 +563,33 @@ const LLMConfigPanel: React.FC = () => {
   const headerActions = !isAdding ? (
     <div className="flex items-center space-x-2">
       {/* 导入按钮 */}
-      <button
+      <Button
         onClick={handleImportConfigs}
-        className="gnome-btn gnome-btn-ghost text-sm"
+        variant="ghost"
+        size="sm"
+        className="text-sm"
         title="导入配置"
       >
         <Upload className="w-4 h-4" />
         <span>导入</span>
-      </button>
+      </Button>
       
       {/* 导出全部按钮 */}
-      <button
+      <Button
         onClick={handleExportAllConfigs}
-        className="gnome-btn gnome-btn-ghost text-sm"
+        variant="ghost"
+        size="sm"
+        className="text-sm"
         title="导出所有配置"
       >
         <Download className="w-4 h-4" />
         <span>导出全部</span>
-      </button>
+      </Button>
       
       <div className="w-px h-6 bg-gray-200 dark:bg-[#404040]" />
       
       {/* 添加模型按钮 */}
-      <button
+      <Button
         onClick={() => {
           setIsAdding(true);
           setEditingId(null);
@@ -566,11 +605,11 @@ const LLMConfigPanel: React.FC = () => {
             metadata: {},
           });
         }}
-        className="gnome-btn gnome-btn-primary"
+        variant="primary"
       >
         <Plus className="w-4 h-4" />
         <span>添加模型</span>
-      </button>
+      </Button>
     </div>
   ) : null;
 
@@ -588,12 +627,9 @@ const LLMConfigPanel: React.FC = () => {
         <Card 
           title={editingId ? '编辑模型配置' : '添加新模型'}
           headerAction={
-            <button
-              onClick={handleCancel}
-              className="gnome-btn-icon"
-            >
+            <Button onClick={handleCancel} variant="ghost" size="icon">
               <X className="w-5 h-5" />
-            </button>
+            </Button>
           }
         >
           
@@ -617,46 +653,49 @@ const LLMConfigPanel: React.FC = () => {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 提供商 *
               </label>
-              <div className="relative">
-                <select
-                  value={newConfig.provider || 'openai'}
-                  onChange={(e) => {
-                    const provider = e.target.value as CreateLLMConfigRequest['provider'];
-                    setNewConfig({
-                      ...newConfig,
-                      provider,
-                      api_url: getProviderDefaultUrl(provider),
-                      model: getProviderDefaultModel(provider),
-                      api_key: (provider === 'ollama') ? '' : newConfig.api_key, // Ollama 清空 API key
-                    });
-                  }}
-                  className="input-field appearance-none pr-8"
-                >
-                  <option value="openai">OpenAI</option>
-                  <option value="anthropic">Anthropic (Claude)</option>
-                  <option value="gemini">Google Gemini</option>
-                  <option value="ollama">Ollama</option>
-                  <option value="local">本地模型</option>
-                  <option value="custom">自定义</option>
-                </select>
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                  {(() => {
-                    const provider = (newConfig.provider || 'openai').toLowerCase();
-                    switch (provider) {
-                      case 'openai':
-                        return <Brain className="w-4 h-4 text-[#10A37F]" />;
-                      case 'anthropic':
-                        return <Brain className="w-4 h-4 text-[#D4A574]" />;
-                      case 'gemini':
-                        return <Brain className="w-4 h-4 text-[#4285F4]" />;
-                      case 'ollama':
-                        return <Brain className="w-4 h-4 text-[#1D4ED8]" />;
-                      default:
-                        return <Brain className="w-4 h-4 text-gray-400" />;
-                    }
-                  })()}
-                </div>
-              </div>
+              <Select
+                value={newConfig.provider || 'openai'}
+                onValueChange={(value) => {
+                  const provider =
+                    value as CreateLLMConfigRequest['provider'];
+                  setNewConfig({
+                    ...newConfig,
+                    provider,
+                    api_url: getProviderDefaultUrl(provider),
+                    model: getProviderDefaultModel(provider),
+                    api_key: provider === 'ollama' ? '' : newConfig.api_key,
+                  });
+                }}
+              >
+                <SelectTrigger className="input-field">
+                  <div className="flex items-center gap-2">
+                    {(() => {
+                      const provider = (newConfig.provider || 'openai').toLowerCase();
+                      switch (provider) {
+                        case 'openai':
+                          return <Brain className="w-4 h-4 text-[#10A37F]" />;
+                        case 'anthropic':
+                          return <Brain className="w-4 h-4 text-[#D4A574]" />;
+                        case 'gemini':
+                          return <Brain className="w-4 h-4 text-[#4285F4]" />;
+                        case 'ollama':
+                          return <Brain className="w-4 h-4 text-[#1D4ED8]" />;
+                        default:
+                          return <Brain className="w-4 h-4 text-gray-400" />;
+                      }
+                    })()}
+                    <SelectValue />
+                  </div>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="openai">OpenAI</SelectItem>
+                  <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
+                  <SelectItem value="gemini">Google Gemini</SelectItem>
+                  <SelectItem value="ollama">Ollama</SelectItem>
+                  <SelectItem value="local">本地模型</SelectItem>
+                  <SelectItem value="custom">自定义</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {/* 供应商 Logo */}
@@ -761,19 +800,34 @@ const LLMConfigPanel: React.FC = () => {
               </label>
               {newConfig.provider === 'ollama' ? (
                 <div>
-                  <select
+                  <Select
                     value={newConfig.model || ''}
-                    onChange={(e) => setNewConfig({ ...newConfig, model: e.target.value })}
-                    className="input-field"
-                    disabled={isLoadingOllamaModels || ollamaModels.length === 0}
+                    onValueChange={(value) =>
+                      setNewConfig({ ...newConfig, model: value })
+                    }
                   >
-                    <option value="">{isLoadingOllamaModels ? '正在加载模型列表...' : ollamaModels.length === 0 ? '请先输入服务器地址' : '请选择模型'}</option>
-                    {ollamaModels.map((model) => (
-                      <option key={model} value={model}>
-                        {model}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger
+                      className="input-field"
+                      disabled={isLoadingOllamaModels || ollamaModels.length === 0}
+                    >
+                      <SelectValue
+                        placeholder={
+                          isLoadingOllamaModels
+                            ? '正在加载模型列表...'
+                            : ollamaModels.length === 0
+                            ? '请先输入服务器地址'
+                            : '请选择模型'
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ollamaModels.map((model) => (
+                        <SelectItem key={model} value={model}>
+                          {model}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   {isLoadingOllamaModels && (
                     <div className="flex items-center space-x-2 mt-1 text-xs text-gray-500">
                       <Loader2 className="w-3 h-3 animate-spin" />
@@ -859,22 +913,23 @@ const LLMConfigPanel: React.FC = () => {
 
             {/* Thinking 模式配置 */}
             <div className="md:col-span-2 flex items-center space-x-2">
-              <input
-                type="checkbox"
+              <Switch
                 id="enableThinking"
                 checked={newConfig.metadata?.enableThinking ?? false}
-                onChange={(e) => {
+                onCheckedChange={(checked) => {
                   setNewConfig({
                     ...newConfig,
                     metadata: {
                       ...newConfig.metadata,
-                      enableThinking: e.target.checked,
+                      enableThinking: checked,
                     },
                   });
                 }}
-                className="w-4 h-4 text-primary-500 border-gray-300 rounded focus:ring-primary-500"
               />
-              <label htmlFor="enableThinking" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              <label
+                htmlFor="enableThinking"
+                className="text-sm font-medium text-gray-700 dark:text-gray-300"
+              >
                 启用 Thinking 模式（深度思考）
               </label>
               <span className="text-xs text-gray-500">
@@ -907,12 +962,12 @@ const LLMConfigPanel: React.FC = () => {
                   
                   return (
                     <label key={type} className="flex items-center space-x-1.5 cursor-pointer">
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={isChecked}
-                        onChange={(e) => {
+                        onCheckedChange={(checked) => {
+                          const nextChecked = checked === true;
                           const current = newConfig.metadata?.supportedInputs || [];
-                          const updated = e.target.checked
+                          const updated = nextChecked
                             ? [...current, type]
                             : current.filter((t: string) => t !== type);
                           setNewConfig({
@@ -923,7 +978,6 @@ const LLMConfigPanel: React.FC = () => {
                             },
                           });
                         }}
-                        className="w-4 h-4 text-primary-500 border-gray-300 rounded focus:ring-primary-500"
                       />
                       <Icon className="w-4 h-4 text-gray-600 dark:text-gray-400" />
                       <span className="text-sm text-gray-700 dark:text-gray-300">{labels[type]}</span>
@@ -958,12 +1012,12 @@ const LLMConfigPanel: React.FC = () => {
                   
                   return (
                     <label key={type} className="flex items-center space-x-1.5 cursor-pointer">
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={isChecked}
-                        onChange={(e) => {
+                        onCheckedChange={(checked) => {
+                          const nextChecked = checked === true;
                           const current = newConfig.metadata?.supportedOutputs || [];
-                          const updated = e.target.checked
+                          const updated = nextChecked
                             ? [...current, type]
                             : current.filter((t: string) => t !== type);
                           setNewConfig({
@@ -974,7 +1028,6 @@ const LLMConfigPanel: React.FC = () => {
                             },
                           });
                         }}
-                        className="w-4 h-4 text-primary-500 border-gray-300 rounded focus:ring-primary-500"
                       />
                       <Icon className="w-4 h-4 text-gray-600 dark:text-gray-400" />
                       <span className="text-sm text-gray-700 dark:text-gray-300">{labels[type]}</span>
@@ -986,14 +1039,17 @@ const LLMConfigPanel: React.FC = () => {
 
             {/* 启用状态 */}
             <div className="md:col-span-2 flex items-center space-x-2">
-              <input
-                type="checkbox"
+              <Switch
                 id="enabled"
                 checked={newConfig.enabled ?? true}
-                onChange={(e) => setNewConfig({ ...newConfig, enabled: e.target.checked })}
-                className="w-4 h-4 text-primary-500 border-gray-300 rounded focus:ring-primary-500"
+                onCheckedChange={(checked) =>
+                  setNewConfig({ ...newConfig, enabled: checked })
+                }
               />
-              <label htmlFor="enabled" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              <label
+                htmlFor="enabled"
+                className="text-sm font-medium text-gray-700 dark:text-gray-300"
+              >
                 启用此配置
               </label>
             </div>
@@ -1193,7 +1249,7 @@ const LLMConfigPanel: React.FC = () => {
                                     <Download className="w-4 h-4" />
                                   </button>
                                   <button
-                                    onClick={() => handleDeleteConfig(config.config_id)}
+                                    onClick={() => setDeleteTarget(config)}
                                     className="p-1.5 rounded-lg text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
                                     title="删除"
                                   >
@@ -1214,6 +1270,38 @@ const LLMConfigPanel: React.FC = () => {
         </>
       )}
       </div>
+
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除模型配置</DialogTitle>
+            <DialogDescription>
+              确定要删除「{deleteTarget?.name}」吗？此操作不可撤销。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-4">
+            <Button variant="secondary" onClick={() => setDeleteTarget(null)}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (!deleteTarget) return;
+                const id = deleteTarget.config_id;
+                setDeleteTarget(null);
+                await handleDeleteConfig(id);
+              }}
+            >
+              删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageLayout>
   );
 };

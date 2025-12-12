@@ -25,6 +25,8 @@ interface ElectronAPI {
   // 开发者工具
   toggleDevTools: () => Promise<{ opened: boolean }>;
   openDevTools: () => Promise<{ success: boolean }>;
+  // 窗口控制
+  toggleMaximize: () => Promise<{ maximized: boolean }>;
 }
 
 interface Window {

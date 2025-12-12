@@ -22,6 +22,16 @@ import { getBatch } from '../services/crawlerApi';
 import CrawlerModuleSelector from './CrawlerModuleSelector';
 import CrawlerBatchItemSelector from './CrawlerBatchItemSelector';
 import ComponentThumbnails from './ComponentThumbnails';
+import { Button } from './ui/Button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from './ui/Dialog';
+import { toast } from './ui/use-toast';
 
 interface Message {
   id: string;
@@ -236,7 +246,7 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
 
   // 默认头像 SVG（机器人图标）
   const DefaultAvatar = () => (
-    <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center flex-shrink-0 cursor-pointer hover:bg-blue-600 transition-colors">
+    <div className="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center flex-shrink-0 cursor-pointer hover:bg-primary-700 transition-colors">
       <Bot className="w-5 h-5 text-white" />
     </div>
   );
@@ -246,7 +256,7 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
       <div
         className={`group relative w-full text-left px-2.5 py-2 rounded-lg text-sm transition-colors ${
           isSelected
-            ? 'bg-primary-100 dark:bg-[#7c3aed] text-primary-700 dark:text-[#ffffff] border border-primary-300 dark:border-[#7c3aed]'
+            ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-200 border border-primary-200 dark:border-primary-800'
             : 'bg-gray-50 dark:bg-[#363636] text-gray-700 dark:text-[#ffffff] hover:bg-gray-100 dark:hover:bg-[#404040] border border-gray-200 dark:border-[#404040]'
         }`}
       >
@@ -325,7 +335,7 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                 onClick={() => setShowSkillPackTab(false)}
                 className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                   !showSkillPackTab
-                    ? 'border-primary-500 dark:border-[#7c3aed] text-primary-600 dark:text-[#a78bfa]'
+                    ? 'border-primary-500 dark:border-primary-600 text-primary-600 dark:text-primary-400'
                     : 'border-transparent text-gray-500 dark:text-[#b0b0b0] hover:text-gray-700 dark:hover:text-[#cccccc]'
                 }`}
               >
@@ -338,7 +348,7 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                 }}
                 className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                   showSkillPackTab
-                    ? 'border-primary-500 dark:border-[#7c3aed] text-primary-600 dark:text-[#a78bfa]'
+                    ? 'border-primary-500 dark:border-primary-600 text-primary-600 dark:text-primary-400'
                     : 'border-transparent text-gray-500 dark:text-[#b0b0b0] hover:text-gray-700 dark:hover:text-[#cccccc]'
                 }`}
               >
@@ -373,7 +383,7 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                               key={pack.skill_pack_id}
                               className={`flex items-start space-x-3 p-3 rounded-lg border ${
                                 isAssigned
-                                  ? 'bg-primary-50 dark:bg-[#7c3aed]/30 border-primary-200 dark:border-[#7c3aed]'
+                                  ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-200 dark:border-primary-800'
                                   : 'bg-gray-50 dark:bg-[#363636] border-gray-200 dark:border-[#404040]'
                               }`}
                             >
@@ -416,7 +426,7 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                         className="w-16 h-16 rounded-full object-cover border-2 border-gray-200 dark:border-[#404040]"
                       />
                     ) : (
-                      <div className="w-16 h-16 rounded-full bg-blue-500 flex items-center justify-center border-2 border-gray-200 dark:border-[#404040]">
+                      <div className="w-16 h-16 rounded-full bg-primary-600 flex items-center justify-center border-2 border-gray-200 dark:border-[#404040]">
                         <Bot className="w-8 h-8 text-white" />
                       </div>
                     )}
@@ -466,7 +476,7 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                       handleCancel();
                     }
                   }}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-[#7c3aed]"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600"
                   placeholder="输入会话名称（留空则使用默认名称）"
                 />
               </div>
@@ -511,7 +521,7 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                 <button
                   onClick={handleSave}
                   disabled={isSaving}
-                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 flex items-center space-x-2"
+                  className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 flex items-center space-x-2"
                 >
                   {isSaving ? (
                     <>
@@ -550,7 +560,7 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                 onClick={() => setActiveConfigTab('basic')}
                 className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                   activeConfigTab === 'basic'
-                    ? 'border-primary-500 dark:border-[#7c3aed] text-primary-600 dark:text-[#a78bfa]'
+                    ? 'border-primary-500 dark:border-primary-600 text-primary-600 dark:text-primary-400'
                     : 'border-transparent text-gray-500 dark:text-[#b0b0b0] hover:text-gray-700 dark:hover:text-[#cccccc]'
                 }`}
               >
@@ -563,7 +573,7 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                 }}
                 className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                   activeConfigTab === 'skillpack'
-                    ? 'border-primary-500 dark:border-[#7c3aed] text-primary-600 dark:text-[#a78bfa]'
+                    ? 'border-primary-500 dark:border-primary-600 text-primary-600 dark:text-primary-400'
                     : 'border-transparent text-gray-500 dark:text-[#b0b0b0] hover:text-gray-700 dark:hover:text-[#cccccc]'
                 }`}
               >
@@ -573,7 +583,7 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                 onClick={() => setActiveConfigTab('media')}
                 className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                   activeConfigTab === 'media'
-                    ? 'border-primary-500 dark:border-[#7c3aed] text-primary-600 dark:text-[#a78bfa]'
+                    ? 'border-primary-500 dark:border-primary-600 text-primary-600 dark:text-primary-400'
                     : 'border-transparent text-gray-500 dark:text-[#b0b0b0] hover:text-gray-700 dark:hover:text-[#cccccc]'
                 }`}
               >
@@ -654,7 +664,7 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                       type="text"
                       value={editName}
                       onChange={(e) => setEditName(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-[#7c3aed]"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600"
                       placeholder="输入会话昵称（留空则使用默认名称）"
                     />
                   </div>
@@ -667,7 +677,7 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                     <textarea
                       value={editSystemPrompt}
                       onChange={(e) => setEditSystemPrompt(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-[#7c3aed] resize-none"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600 resize-none"
                       rows={6}
                       placeholder="输入系统提示词（人设），用于定义AI的角色和行为..."
                     />
@@ -684,7 +694,7 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                     <select
                       value={editLlmConfigId || ''}
                       onChange={(e) => setEditLlmConfigId(e.target.value || null)}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-[#7c3aed]"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600"
                     >
                       <option value="">不设置默认模型</option>
                       {llmConfigs.filter(c => c.enabled).map(config => (
@@ -726,7 +736,7 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                                 key={pack.skill_pack_id}
                                 className={`flex items-start space-x-3 p-3 rounded-lg border ${
                                   isAssigned
-                                    ? 'bg-primary-50 dark:bg-[#7c3aed]/30 border-primary-200 dark:border-[#7c3aed]'
+                                    ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-200 dark:border-primary-800'
                                     : 'bg-gray-50 dark:bg-[#363636] border-gray-200 dark:border-[#404040]'
                                 }`}
                               >
@@ -764,7 +774,7 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                       type="text"
                       value={editMediaOutputPath}
                       onChange={(e) => setEditMediaOutputPath(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-[#7c3aed]"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600"
                       placeholder="输入本地路径，例如：/Users/username/Documents/media 或 C:\Users\username\Documents\media"
                     />
                     <p className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-1">
@@ -828,7 +838,7 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                   }
                 }}
                 disabled={isSavingConfig}
-                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 flex items-center space-x-2"
+                className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 flex items-center space-x-2"
               >
                 {isSavingConfig ? (
                   <>
@@ -886,6 +896,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   const [selectedComponentIndex, setSelectedComponentIndex] = useState(0); // 当前选中的组件索引（用于键盘导航）
   const [selectedComponents, setSelectedComponents] = useState<Array<{ type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string }>>([]); // 已选定的组件（tag）
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const isComposingRef = useRef(false);
   const selectorRef = useRef<HTMLDivElement>(null);
   const blurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
@@ -1695,35 +1706,54 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
     }
   };
   
-  // 删除会话
-  const handleDeleteSession = async (sessionId: string, e: React.MouseEvent) => {
-    e.stopPropagation(); // 阻止触发会话选择
-    
-    if (!confirm('确定要删除这个会话吗？此操作不可恢复。')) {
-      return;
-    }
-    
+  const [deleteSessionTarget, setDeleteSessionTarget] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+
+  // 删除会话（执行）
+  const performDeleteSession = async (sessionId: string) => {
     try {
       await deleteSession(sessionId);
-      
-      // 如果删除的是当前会话，切换到新会话
+
       if (currentSessionId === sessionId) {
         setCurrentSessionId(null);
-        setMessages([{
-          id: '1',
-          role: 'system',
-          content: '你好！我是你的 AI 工作流助手。请先选择 LLM 模型，然后开始对话。如果需要使用工具，可以选择 MCP 服务器。',
-        }]);
+        setMessages([
+          {
+            id: '1',
+            role: 'system',
+            content:
+              '你好！我是你的 AI 工作流助手。请先选择 LLM 模型，然后开始对话。如果需要使用工具，可以选择 MCP 服务器。',
+          },
+        ]);
         setSummaries([]);
         setCurrentSessionAvatar(null);
       }
-      
-      // 重新加载会话列表
+
       await loadSessions();
+      toast({ title: '会话已删除', variant: 'success' });
     } catch (error) {
       console.error('[Workflow] Failed to delete session:', error);
-      alert('删除会话失败，请重试');
+      toast({
+        title: '删除会话失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
     }
+  };
+
+  // 删除会话（确认）
+  const handleDeleteSession = (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const targetSession = sessions.find((s) => s.session_id === sessionId);
+    setDeleteSessionTarget({
+      id: sessionId,
+      name:
+        targetSession?.name ||
+        targetSession?.title ||
+        targetSession?.preview_text ||
+        '未命名会话',
+    });
   };
   
   // 处理总结的通用函数
@@ -3312,16 +3342,16 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
-    // shift+Enter: 换行
-    // ctrl+Enter: 发送
-    if (e.key === 'Enter') {
-      if (e.ctrlKey || e.metaKey) {
-        // Ctrl+Enter 或 Cmd+Enter: 发送
-        e.preventDefault();
-        handleSend();
-      }
-      // shift+Enter: 默认行为（换行），不需要处理
-    }
+    if (e.key !== 'Enter') return;
+    // IME composing should not trigger send.
+    if (isComposingRef.current || (e.nativeEvent as any)?.isComposing) return;
+    // If any selector is open, let it handle Enter.
+    if (showBatchItemSelector || showModuleSelector || showAtSelector) return;
+    // shift+Enter: newline
+    if (e.shiftKey) return;
+    // Enter / Ctrl+Enter / Cmd+Enter: send
+    e.preventDefault();
+    handleSend();
   };
 
   // 开始编辑消息
@@ -4793,7 +4823,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                         e.stopPropagation();
                         downloadImage(media, index);
                       }}
-                      className="bg-blue-500/90 hover:bg-blue-600 text-white text-xs px-3 py-1.5 rounded-md flex items-center gap-1 shadow-lg transition-colors"
+                      className="bg-primary-500/90 hover:bg-primary-600 text-white text-xs px-3 py-1.5 rounded-md flex items-center gap-1 shadow-lg transition-colors"
                       title="下载图片"
                     >
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4820,7 +4850,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                         e.stopPropagation();
                         downloadImage(media, index);
                       }}
-                      className="bg-blue-500/90 hover:bg-blue-600 text-white text-xs px-3 py-1.5 rounded-md flex items-center gap-1 shadow-lg transition-colors"
+                      className="bg-primary-500/90 hover:bg-primary-600 text-white text-xs px-3 py-1.5 rounded-md flex items-center gap-1 shadow-lg transition-colors"
                       title="下载视频"
                     >
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4918,7 +4948,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 </div>
                 <div className={`text-xs font-medium px-2 py-1 rounded ${
                   message.workflowStatus === 'pending' ? 'bg-gray-100 dark:bg-[#2d2d2d] text-gray-700 dark:text-[#ffffff]' :
-                  message.workflowStatus === 'running' ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' :
+                  message.workflowStatus === 'running' ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' :
                   message.workflowStatus === 'completed' ? 'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300' :
                   'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300'
                 }`}>
@@ -5086,7 +5116,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
           {Array.isArray(message.toolCalls) && message.toolCalls.map((toolCall: any, idx: number) => (
             <div key={idx} className="mb-3 p-3 bg-gray-50 dark:bg-[#363636] rounded-lg">
               <div className="flex items-center space-x-2 mb-2">
-                <Wrench className="w-4 h-4 text-blue-500" />
+                <Wrench className="w-4 h-4 text-primary-500" />
                 <span className="font-medium text-sm">{toolCall.name}</span>
               </div>
               {toolCall.arguments && (
@@ -5242,7 +5272,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 li: ({ children }: any) => <li className="leading-relaxed">{children}</li>,
                 // 引用样式
                 blockquote: ({ children }: any) => (
-                  <blockquote className="border-l-4 border-blue-500 dark:border-blue-400 pl-4 my-3 italic text-gray-700 dark:text-[#ffffff]">
+                  <blockquote className="border-l-4 border-primary-500 dark:border-primary-400 pl-4 my-3 italic text-gray-700 dark:text-[#ffffff]">
                     {children}
                   </blockquote>
                 ),
@@ -5252,7 +5282,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                     href={href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-blue-600 dark:text-blue-400 hover:underline"
+                    className="text-primary-600 dark:text-primary-400 hover:underline"
                   >
                     {children}
                   </a>
@@ -5407,7 +5437,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                       {/* 会话类型标签和升级按钮 */}
                       {sessionTypeLabel && (
                         <div className="absolute top-1 right-1 flex items-center space-x-1">
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300">
                             {sessionTypeLabel}
                           </span>
                           {session.session_type === 'memory' && (() => {
@@ -5433,7 +5463,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                                 }}
                                 className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
                                   canUpgrade
-                                    ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/50'
+                                    ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 hover:bg-primary-200 dark:hover:bg-primary-900/50'
                                     : 'bg-gray-100 dark:bg-[#2d2d2d] text-gray-500 dark:text-[#b0b0b0] cursor-not-allowed'
                                 }`}
                                 title={canUpgrade ? '升级为智能体' : '需要设置名称、头像和人设才能升级'}
@@ -5470,7 +5500,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   {mcpServers.length > 0 && (
                     <div className="space-y-1.5">
                       <div className="flex items-center space-x-1.5 px-1.5 py-1">
-                        <Plug className="w-3.5 h-3.5 text-blue-500" />
+                        <Plug className="w-3.5 h-3.5 text-primary-500" />
                         <span className="text-xs font-semibold text-gray-700 dark:text-[#ffffff] uppercase tracking-wide">
                           MCP 服务器
                         </span>
@@ -5525,7 +5555,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                         {/* 服务器信息 - 始终显示 */}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center space-x-2 flex-wrap">
-                            <Plug className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+                            <Plug className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" />
                             <span className="text-sm font-medium text-gray-900 dark:text-[#ffffff] truncate">
                               {server.display_name || server.client_name || server.name}
                             </span>
@@ -5541,7 +5571,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                             )}
                             {/* 服务器类型标签 */}
                             {server.ext?.server_type && (
-                              <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-1.5 py-0.5 rounded flex-shrink-0">
+                              <span className="text-xs bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 px-1.5 py-0.5 rounded flex-shrink-0">
                                 {server.ext.server_type}
                               </span>
                             )}
@@ -5608,7 +5638,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                               className="bg-gray-50 dark:bg-[#363636] border border-gray-200 dark:border-[#404040] rounded p-2 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                             >
                               <div className="flex items-start space-x-2">
-                                <Wrench className="w-3 h-3 text-blue-500 mt-0.5 flex-shrink-0" />
+                                <Wrench className="w-3 h-3 text-primary-500 mt-0.5 flex-shrink-0" />
                                 <div className="flex-1 min-w-0">
                                   <div className="text-xs font-medium text-gray-900 dark:text-[#ffffff]">
                                     {tool.name}
@@ -5625,7 +5655,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                                         {Object.keys(tool.inputSchema.properties).map((param) => (
                                           <span
                                             key={param}
-                                            className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-1.5 py-0.5 rounded"
+                                            className="text-xs bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 px-1.5 py-0.5 rounded"
                                           >
                                             {param}
                                           </span>
@@ -5649,7 +5679,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   {workflows.length > 0 && (
                     <div className="space-y-1.5">
                       <div className="flex items-center space-x-1.5 px-1.5 py-1">
-                        <WorkflowIcon className="w-3.5 h-3.5 text-purple-500" />
+                        <WorkflowIcon className="w-3.5 h-3.5 text-primary-500" />
                         <span className="text-xs font-semibold text-gray-700 dark:text-[#ffffff] uppercase tracking-wide">
                           工作流
                         </span>
@@ -5671,7 +5701,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                       }}
                     >
                       <div className="flex items-center space-x-2 p-1.5 flex-1 min-w-0">
-                        <WorkflowIcon className="w-3.5 h-3.5 text-purple-500 flex-shrink-0" />
+                        <WorkflowIcon className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" />
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-medium text-gray-900 dark:text-[#ffffff] truncate">
                             {workflow.name}
@@ -5757,7 +5787,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
             <div className="flex items-center space-x-2">
               {/* 头像 - 可点击配置 */}
               <div 
-                className="w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary-400 hover:ring-offset-1 transition-all overflow-hidden"
+                className="w-7 h-7 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary-400 hover:ring-offset-1 transition-all overflow-hidden"
                 onClick={() => {
                   if (currentSessionId && !isTemporarySession) {
                     // 从当前会话获取数据
@@ -5778,7 +5808,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 {currentSessionAvatar ? (
                   <img src={currentSessionAvatar} alt="Avatar" className="w-full h-full object-cover" />
                 ) : (
-                  <Bot className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                  <Bot className="w-4 h-4 text-primary-600 dark:text-primary-400" />
                 )}
               </div>
               <div>
@@ -6029,7 +6059,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   : ''
               } ${
                 isSelected && skillPackSelectionMode
-                  ? 'bg-primary-50 dark:bg-[#7c3aed]/30 ring-2 ring-primary-300 dark:ring-primary-700 rounded-lg p-2 -m-2' 
+                  ? 'bg-primary-50 dark:bg-primary-900/20 ring-2 ring-primary-300 dark:ring-primary-700 rounded-lg p-2 -m-2' 
                   : ''
               }`}
             >
@@ -6049,10 +6079,10 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   message.role === 'user'
                     ? 'bg-primary-500 text-white'
                     : message.role === 'assistant'
-                    ? 'bg-blue-500 text-white'
+                    ? 'bg-primary-500 text-white'
                     : message.role === 'tool'
                       ? message.toolType === 'workflow'
-                        ? 'bg-purple-500 text-white'
+                        ? 'bg-primary-500 text-white'
                         : message.toolType === 'mcp'
                     ? 'bg-green-500 text-white'
                         : 'bg-gray-500 text-white'
@@ -6092,18 +6122,18 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                       <div className="flex items-center space-x-2">
                         {/* 大脑思考动画 */}
                         <div className="relative">
-                          <Brain className="w-4 h-4 text-purple-500 animate-pulse" />
-                          <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-purple-400 rounded-full animate-ping opacity-75"></div>
+                          <Brain className="w-4 h-4 text-primary-500 animate-pulse" />
+                          <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-primary-400 rounded-full animate-ping opacity-75"></div>
                         </div>
                         <div className="flex items-center space-x-1">
-                          <span className="text-xs text-purple-600 dark:text-purple-400 font-medium">
+                          <span className="text-xs text-primary-600 dark:text-primary-400 font-medium">
                             {selectedLLMConfig?.provider === 'gemini' ? '深度思考中' : '思考中'}
                           </span>
                           {/* 思考进度动画 */}
                           <div className="flex space-x-0.5 ml-1">
-                            <div className="w-1 h-1 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '0ms', animationDuration: '1s' }}></div>
-                            <div className="w-1 h-1 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '200ms', animationDuration: '1s' }}></div>
-                            <div className="w-1 h-1 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '400ms', animationDuration: '1s' }}></div>
+                            <div className="w-1 h-1 bg-primary-500 rounded-full animate-bounce" style={{ animationDelay: '0ms', animationDuration: '1s' }}></div>
+                            <div className="w-1 h-1 bg-primary-500 rounded-full animate-bounce" style={{ animationDelay: '200ms', animationDuration: '1s' }}></div>
+                            <div className="w-1 h-1 bg-primary-500 rounded-full animate-bounce" style={{ animationDelay: '400ms', animationDuration: '1s' }}></div>
                           </div>
                         </div>
                       </div>
@@ -6126,9 +6156,9 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                       // 回答中动画（正在流式输出内容）
                       <div className="flex items-center space-x-1.5">
                         <div className="flex space-x-0.5">
-                          <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" style={{ animationDelay: '0ms' }}></div>
-                          <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" style={{ animationDelay: '150ms' }}></div>
-                          <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" style={{ animationDelay: '300ms' }}></div>
+                          <div className="w-1.5 h-1.5 bg-primary-500 rounded-full animate-pulse" style={{ animationDelay: '0ms' }}></div>
+                          <div className="w-1.5 h-1.5 bg-primary-500 rounded-full animate-pulse" style={{ animationDelay: '150ms' }}></div>
+                          <div className="w-1.5 h-1.5 bg-primary-500 rounded-full animate-pulse" style={{ animationDelay: '300ms' }}></div>
                         </div>
                         <span className="text-xs text-gray-500 dark:text-[#b0b0b0] font-medium">回答中</span>
                       </div>
@@ -6146,12 +6176,12 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 <div
                   className={`rounded-lg p-2.5 transition-all duration-300 ${
                     message.role === 'user'
-                      ? 'bg-primary-50 dark:bg-[#7c3aed]/30 text-gray-900 dark:text-[#ffffff] shadow-sm hover:shadow-md'
+                      ? 'bg-primary-50 dark:bg-primary-900/20 text-gray-900 dark:text-[#ffffff] shadow-sm hover:shadow-md'
                       : message.role === 'assistant'
                       ? 'bg-white dark:bg-[#2d2d2d] text-gray-900 dark:text-[#ffffff] border border-gray-200 dark:border-[#404040] shadow-lg hover:shadow-xl' // 更立体的阴影
                       : message.role === 'tool'
                       ? message.toolType === 'workflow'
-                        ? 'bg-purple-50 dark:bg-purple-900/20 text-gray-900 dark:text-[#ffffff] border border-purple-200 dark:border-purple-700 shadow-sm hover:shadow-md'
+                        ? 'bg-primary-50 dark:bg-primary-900/20 text-gray-900 dark:text-[#ffffff] border border-primary-200 dark:border-primary-700 shadow-sm hover:shadow-md'
                         : message.toolType === 'mcp'
                         ? 'bg-green-50 dark:bg-green-900/20 text-gray-900 dark:text-[#ffffff] border border-green-200 dark:border-green-700 shadow-sm hover:shadow-md'
                         : 'bg-gray-50 dark:bg-[#2d2d2d] text-gray-900 dark:text-[#ffffff] shadow-sm hover:shadow-md'
@@ -6169,14 +6199,14 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   <div className="absolute top-2 right-2 flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={() => setQuotedMessageId(message.id)}
-                      className="p-1.5 text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded transition-all"
+                      className="p-1.5 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-all"
                       title="引用此消息"
                     >
                       <Quote className="w-3.5 h-3.5" />
                     </button>
                     <button
                       onClick={() => handleStartEdit(message.id)}
-                      className="p-1.5 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-all"
+                      className="p-1.5 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-all"
                       title="编辑消息"
                     >
                       <Edit2 className="w-3.5 h-3.5" />
@@ -6201,7 +6231,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                     <button
                       onClick={() => handleRetryMessage(message.id)}
                       disabled={isLoading}
-                      className="px-3 py-1.5 text-sm font-medium text-white bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed rounded-lg transition-all flex items-center space-x-1.5 shadow-sm"
+                      className="px-3 py-1.5 text-sm font-medium text-white bg-primary-500 hover:bg-primary-600 disabled:bg-gray-400 disabled:cursor-not-allowed rounded-lg transition-all flex items-center space-x-1.5 shadow-sm"
                       title="重试发送"
                     >
                       <RotateCw className="w-3.5 h-3.5" />
@@ -6259,7 +6289,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
         {/* 输入框 - 优化布局 */}
           <div 
             className={`border-t border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] px-4 py-3 flex-shrink-0 relative transition-colors ${
-              isDraggingOver ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-700' : ''
+              isDraggingOver ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700' : ''
             }`}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
@@ -6274,8 +6304,8 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
           >
             {/* 拖拽提示 */}
             {isDraggingOver && (
-              <div className="absolute inset-0 flex items-center justify-center bg-blue-100/50 dark:bg-blue-900/30 rounded-lg z-10 pointer-events-none">
-                <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 font-medium">
+              <div className="absolute inset-0 flex items-center justify-center bg-primary-100/50 dark:bg-primary-900/30 rounded-lg z-10 pointer-events-none">
+                <div className="flex items-center gap-2 text-primary-600 dark:text-primary-400 font-medium">
                   <Image className="w-5 h-5" />
                   <span>松开以添加图片</span>
                 </div>
@@ -6290,11 +6320,11 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 bg-gray-100 dark:bg-[#363636] text-gray-700 dark:text-[#ffffff] rounded-md text-sm border border-gray-200 dark:border-[#404040]"
                 >
                   {component.type === 'workflow' ? (
-                    <WorkflowIcon className="w-3.5 h-3.5 text-purple-500 flex-shrink-0" />
+                    <WorkflowIcon className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" />
                   ) : component.type === 'skillpack' ? (
                     <Package className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
                   ) : (
-                    <Plug className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+                    <Plug className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" />
                   )}
                   <span className="font-medium">{component.name}</span>
                   <button
@@ -6347,7 +6377,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
               <div className="flex items-center space-x-2">
                 <button
                   onClick={handleSetAsSystemPrompt}
-                  className="flex-1 px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium rounded-lg transition-colors flex items-center justify-center space-x-2"
+                  className="flex-1 px-3 py-2 bg-primary-500 hover:bg-primary-600 text-white text-sm font-medium rounded-lg transition-colors flex items-center justify-center space-x-2"
                 >
                   <Brain className="w-4 h-4" />
                   <span>🤖 设置为系统提示词</span>
@@ -6365,12 +6395,12 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
           
           {/* 显示选定的批次数据项（系统提示词） */}
           {selectedBatchItem && (
-            <div className="mb-2 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+            <div className="mb-2 p-3 bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 rounded-lg">
               <div className="flex items-start justify-between">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center space-x-2 mb-1">
-                    <Database className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
-                    <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                    <Database className="w-4 h-4 text-primary-600 dark:text-primary-400 flex-shrink-0" />
+                    <span className="text-sm font-medium text-primary-900 dark:text-primary-100">
                       🤖 机器人人设: {selectedBatchItem.batchName}
                     </span>
                   </div>
@@ -6412,13 +6442,13 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                       }
                     }
                   }}
-                  className="ml-2 p-1 text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 transition-colors flex-shrink-0"
+                  className="ml-2 p-1 text-primary-400 hover:text-primary-600 dark:hover:text-primary-300 transition-colors flex-shrink-0"
                   title="取消选择"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
-              <div className="mt-2 text-xs text-blue-600 dark:text-blue-400">
+              <div className="mt-2 text-xs text-primary-600 dark:text-primary-400">
                 💡 此数据已保存为系统提示词，将作为机器人人设持续生效
               </div>
             </div>
@@ -6430,7 +6460,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
             const quotedMsg = messages.find(m => m.id === quotedMessageId);
             if (!quotedMsg) return null;
             return (
-              <div className="mb-2 p-2 bg-gray-50 dark:bg-[#2d2d2d] border-l-4 border-primary-500 dark:border-[#7c3aed] rounded-r-lg">
+              <div className="mb-2 p-2 bg-gray-50 dark:bg-[#2d2d2d] border-l-4 border-primary-500 rounded-r-lg">
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
                     <div className="text-xs text-gray-500 dark:text-[#b0b0b0] mb-1">引用消息</div>
@@ -6486,6 +6516,10 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
               {/* 输入框扩大按钮 - 当输入框聚焦时显示 */}
               {isInputFocused && (
                 <button
+                  onMouseDown={(e) => {
+                    // Prevent textarea blur so click still toggles expand.
+                    e.preventDefault();
+                  }}
                   onClick={() => setIsInputExpanded(!isInputExpanded)}
                   className="absolute -top-8 left-1/2 transform -translate-x-1/2 z-10 p-1.5 bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] rounded-lg shadow-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-all"
                   title={isInputExpanded ? "缩小输入框" : "扩大输入框"}
@@ -6498,7 +6532,13 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 ref={inputRef}
               value={input}
                 onChange={handleInputChange}
-              onKeyPress={handleKeyPress}
+              onCompositionStart={() => {
+                isComposingRef.current = true;
+              }}
+              onCompositionEnd={() => {
+                isComposingRef.current = false;
+              }}
+              
               onFocus={(e) => {
                 setIsInputFocused(true);
                 // 保留原有的focus处理逻辑
@@ -6518,37 +6558,6 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                     }
                   }
                 }
-              }}
-              onBlur={(e) => {
-                setIsInputFocused(false);
-                // 保留原有的blur处理逻辑
-                if (showBatchItemSelector) {
-                  return;
-                }
-                
-                if (showModuleSelector) {
-                  return;
-                }
-                
-                if (!showAtSelector) {
-                  return;
-                }
-                
-                if (blurTimeoutRef.current) {
-                  clearTimeout(blurTimeoutRef.current);
-                  blurTimeoutRef.current = null;
-                }
-                
-                blurTimeoutRef.current = setTimeout(() => {
-                  const activeElement = document.activeElement;
-                  const isFocusInSelector = activeElement?.closest('.at-selector-container');
-                  
-                  if (!isFocusInSelector) {
-                    setShowAtSelector(false);
-                  }
-                  
-                  blurTimeoutRef.current = null;
-                }, 300);
               }}
               onPaste={(e) => {
                 // 检查粘贴板中是否有图片
@@ -6592,6 +6601,9 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 }
               }}
                 onKeyDown={(e) => {
+                  // Send/newline handling (runs before selector navigation).
+                  handleKeyPress(e);
+                  if (e.defaultPrevented) return;
                   // 如果批次数据项选择器显示，不处理键盘事件（由 CrawlerBatchItemSelector 处理）
                   if (showBatchItemSelector) {
                     return;
@@ -6627,6 +6639,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   }
                 }}
                 onBlur={(e) => {
+                  setIsInputFocused(false);
                   // 如果批次数据项选择器显示，不处理blur（由组件自己处理）
                   if (showBatchItemSelector) {
                     return;
@@ -6810,7 +6823,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                                 isConnecting
                                   ? 'opacity-70 cursor-wait'
                                   : isSelected 
-                                    ? 'bg-blue-100 dark:bg-blue-900/30' 
+                                    ? 'bg-primary-100 dark:bg-primary-900/30' 
                                     : !isConnected
                                       ? 'hover:bg-yellow-50 dark:hover:bg-yellow-900/20'
                                       : 'hover:bg-gray-100 dark:hover:bg-gray-700'
@@ -6818,10 +6831,10 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                             >
                               <div className="relative">
                                 {isConnecting ? (
-                                  <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                                  <div className="w-4 h-4 border-2 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
                                 ) : (
                                   <>
-                                    <Plug className={`w-4 h-4 flex-shrink-0 ${isConnected ? 'text-blue-500' : 'text-gray-400'}`} />
+                                    <Plug className={`w-4 h-4 flex-shrink-0 ${isConnected ? 'text-primary-500' : 'text-gray-400'}`} />
                                     {isConnected && (
                                       <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-green-500 rounded-full"></span>
                                     )}
@@ -6832,7 +6845,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                                 {server.display_name || server.client_name || server.name}
                               </span>
                               {isConnecting && (
-                                <span className="text-[10px] text-blue-500 ml-auto">连接中...</span>
+                                <span className="text-[10px] text-primary-500 ml-auto">连接中...</span>
                               )}
                               {!isConnected && !isConnecting && (
                                 <span className="text-[10px] text-yellow-600 dark:text-yellow-400 ml-auto">点击连接</span>
@@ -6863,10 +6876,10 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                               key={workflow.workflow_id}
                               onClick={() => handleSelectComponent(component)}
                               className={`px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer flex items-center space-x-2 ${
-                                isSelected ? 'bg-blue-100 dark:bg-blue-900/30' : ''
+                                isSelected ? 'bg-primary-100 dark:bg-primary-900/30' : ''
                               }`}
                             >
-                              <WorkflowIcon className="w-4 h-4 text-purple-500 flex-shrink-0" />
+                              <WorkflowIcon className="w-4 h-4 text-primary-500 flex-shrink-0" />
                               <span className="text-sm text-gray-900 dark:text-[#ffffff]">{workflow.name}</span>
                             </div>
                           );
@@ -6894,7 +6907,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                               key={skillPack.skill_pack_id}
                               onClick={() => handleSelectComponent(component)}
                               className={`px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer flex items-center space-x-2 ${
-                                isSelected ? 'bg-blue-100 dark:bg-blue-900/30' : ''
+                                isSelected ? 'bg-primary-100 dark:bg-primary-900/30' : ''
                               }`}
                             >
                               <Package className="w-4 h-4 text-amber-500 flex-shrink-0" />
@@ -7016,7 +7029,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                       <div
                         className={`flex items-center space-x-1 px-1.5 py-0.5 rounded text-[11px] transition-all ${
                           enableThinking 
-                            ? 'bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 font-medium' 
+                            ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 font-medium' 
                             : 'text-gray-400 dark:text-[#808080]'
                         }`}
                         title={enableThinking ? '深度思考模式（在模型配置中启用）' : '普通模式（在模型配置中禁用）'}
@@ -7024,7 +7037,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                         <Brain className="w-3 h-3" />
                         <span>{enableThinking ? '深度思考' : '普通'}</span>
                         {enableThinking && (
-                          <span className="w-1 h-1 bg-purple-500 rounded-full animate-pulse"></span>
+                          <span className="w-1 h-1 bg-primary-500 rounded-full animate-pulse"></span>
                         )}
                       </div>
                     );
@@ -7056,22 +7069,22 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   })() : null}
                   
                   {/* 发送按钮 */}
-                  <button
+                  <Button
                     onClick={handleSend}
                     disabled={isLoading || (!input.trim() && attachedMedia.length === 0) || !selectedLLMConfig}
-                    className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                      isLoading || (!input.trim() && attachedMedia.length === 0) || !selectedLLMConfig
-                        ? 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
-                        : 'bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-white shadow-sm hover:shadow'
-                    }`}
+                    variant="primary"
+                    size="default"
+                    className="gap-1.5 px-3 py-1.5"
                   >
                     {isLoading ? (
                       <Loader className="w-4 h-4 animate-spin" />
                     ) : (
                       <Send className="w-4 h-4" />
                     )}
-                    <span className="hidden sm:inline">{editingMessageId ? '重新发送' : '发送'}</span>
-                  </button>
+                    <span className="hidden sm:inline">
+                      {editingMessageId ? '重新发送' : '发送'}
+                    </span>
+                  </Button>
                 </div>
               </div>
             </div>
@@ -7292,7 +7305,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 >
                   <div className="px-5 py-4 border-b border-gray-200 dark:border-[#404040] flex items-center justify-between">
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center space-x-2">
-                      <Sparkles className="w-5 h-5 text-purple-500" />
+                      <Sparkles className="w-5 h-5 text-primary-500" />
                       <span>升级为智能体</span>
                     </h3>
                     <button 
@@ -7543,15 +7556,15 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                       制作过程
                     </h4>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3">
+                      <div className="bg-primary-50 dark:bg-primary-900/20 rounded-lg p-3">
                         <div className="text-xs text-gray-600 dark:text-[#b0b0b0] mb-1">消息数量</div>
-                        <div className="text-lg font-semibold text-blue-600 dark:text-blue-400">
+                        <div className="text-lg font-semibold text-primary-600 dark:text-primary-400">
                           {skillPackProcessInfo.messages_count}
                         </div>
                       </div>
-                      <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3">
+                      <div className="bg-primary-50 dark:bg-primary-900/20 rounded-lg p-3">
                         <div className="text-xs text-gray-600 dark:text-[#b0b0b0] mb-1">思考过程</div>
-                        <div className="text-lg font-semibold text-purple-600 dark:text-purple-400">
+                        <div className="text-lg font-semibold text-primary-600 dark:text-primary-400">
                           {skillPackProcessInfo.thinking_count}
                         </div>
                       </div>
@@ -7662,7 +7675,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                     <button
                       onClick={handleOptimizeSkillPack}
                       disabled={isOptimizing || !selectedLLMConfigId}
-                      className="mt-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center space-x-2"
+                      className="mt-2 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center space-x-2"
                     >
                       {isOptimizing ? (
                         <>
@@ -7742,7 +7755,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                     </div>
                   </div>
                   
-                  <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg p-3 text-sm text-blue-700 dark:text-blue-300">
+                  <div className="bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-700 rounded-lg p-3 text-sm text-primary-700 dark:text-primary-300">
                     <strong>提示：</strong>确认后，技能包内容将被注入到对话上下文中，AI将使用该技能包的能力来完成任务。
                   </div>
                 </div>
@@ -7809,13 +7822,13 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
               {/* 头像 */}
               <div className="flex flex-col items-center space-y-2">
                 <div 
-                  className="w-16 h-16 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary-400 hover:ring-offset-2 transition-all overflow-hidden"
+                  className="w-16 h-16 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary-400 hover:ring-offset-2 transition-all overflow-hidden"
                   onClick={() => headerConfigFileInputRef.current?.click()}
                 >
                   {headerConfigEditAvatar ? (
                     <img src={headerConfigEditAvatar} alt="Avatar" className="w-full h-full object-cover" />
                   ) : (
-                    <Bot className="w-8 h-8 text-blue-600 dark:text-blue-400" />
+                    <Bot className="w-8 h-8 text-primary-600 dark:text-primary-400" />
                   )}
                 </div>
                 <input
@@ -7846,7 +7859,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   type="text"
                   value={headerConfigEditName}
                   onChange={(e) => setHeaderConfigEditName(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-[#7c3aed]"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600"
                   placeholder="输入名称..."
                 />
               </div>
@@ -7860,7 +7873,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
               <select
                 value={headerConfigEditLlmConfigId || ''}
                 onChange={(e) => setHeaderConfigEditLlmConfigId(e.target.value || null)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-[#7c3aed]"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600"
               >
                 <option value="">使用当前选择的模型</option>
                 {llmConfigs.filter(c => c.enabled).map(config => (
@@ -7882,7 +7895,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
               <textarea
                 value={headerConfigEditSystemPrompt}
                 onChange={(e) => setHeaderConfigEditSystemPrompt(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-[#7c3aed] resize-none"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600 resize-none"
                 rows={6}
                 placeholder="输入系统提示词（人设），用于定义AI的角色和行为..."
               />
@@ -7901,7 +7914,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   type="text"
                   value={headerConfigEditMediaOutputPath}
                   onChange={(e) => setHeaderConfigEditMediaOutputPath(e.target.value)}
-                  className="flex-1 px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-[#7c3aed]"
+                  className="flex-1 px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600"
                   placeholder="输入保存路径..."
                 />
                 {window.electron && (
@@ -7995,9 +8008,43 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
       </div>,
       document.body
     )}
+
+    <Dialog
+      open={deleteSessionTarget !== null}
+      onOpenChange={(open) => {
+        if (!open) setDeleteSessionTarget(null);
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>删除会话</DialogTitle>
+          <DialogDescription>
+            确定要删除「{deleteSessionTarget?.name}」吗？此操作不可恢复。
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="mt-4">
+          <Button
+            variant="secondary"
+            onClick={() => setDeleteSessionTarget(null)}
+          >
+            取消
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={async () => {
+              if (!deleteSessionTarget) return;
+              const id = deleteSessionTarget.id;
+              setDeleteSessionTarget(null);
+              await performDeleteSession(id);
+            }}
+          >
+            删除
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     </>
   );
 };
 
 export default Workflow;
-

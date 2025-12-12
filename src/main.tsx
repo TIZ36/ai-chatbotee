@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom'
 import App from './App.tsx'
 import ErrorBoundary from './components/ErrorBoundary.tsx'
 import { TerminalProvider } from './contexts/TerminalContext.tsx'
+import { Toaster } from './components/ui/Toaster.tsx'
 import './index.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
@@ -12,6 +13,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <BrowserRouter>
         <TerminalProvider>
           <App />
+          <Toaster />
         </TerminalProvider>
       </BrowserRouter>
     </ErrorBoundary>

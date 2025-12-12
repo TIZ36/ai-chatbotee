@@ -5,6 +5,18 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { MessageCircle, Sparkles, Plus, Trash2, Search, ArrowUp, Upload } from 'lucide-react';
+import { Button } from './ui/Button';
+import { Input } from './ui/Input';
+import { ScrollArea } from './ui/ScrollArea';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from './ui/Dialog';
+import { toast } from './ui/use-toast';
 import { 
   getSessions, 
   createSession, 
@@ -39,6 +51,8 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [showCreateMenu, setShowCreateMenu] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
+  const [upgradeTarget, setUpgradeTarget] = useState<Session | null>(null);
   const createMenuRef = React.useRef<HTMLDivElement>(null);
   const missingNameLoggedRef = React.useRef<Set<string>>(new Set());
   const normalizeText = (text?: string | null) => (text || '').trim();
@@ -219,20 +233,31 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
     }
   }, [showCreateMenu]);
 
-  // 删除会话
-  const handleDeleteSession = async (e: React.MouseEvent, sessionId: string) => {
-    e.stopPropagation();
-    if (confirm('确定要删除此会话吗？')) {
-      try {
-        await deleteSession(sessionId);
-        await loadAllSessions();
-        if (selectedSessionId === sessionId) {
-          onSelectSession('');
-        }
-      } catch (error) {
-        console.error('Failed to delete session:', error);
+  // 删除会话（执行）
+  const performDeleteSession = async (sessionId: string) => {
+    try {
+      await deleteSession(sessionId);
+      await loadAllSessions();
+      if (selectedSessionId === sessionId) {
+        onSelectSession('');
       }
+      toast({ title: '会话已删除', variant: 'success' });
+    } catch (error) {
+      console.error('Failed to delete session:', error);
+      toast({
+        title: '删除会话失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
     }
+  };
+
+  // 删除会话（确认）
+  const handleDeleteSession = (e: React.MouseEvent, sessionId: string) => {
+    e.stopPropagation();
+    const target =
+      allSessions.find((s) => s.session_id === sessionId) || null;
+    setDeleteTarget(target);
   };
 
   // 添加到圆桌会议
@@ -251,16 +276,8 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
     }
   };
 
-  // 升级为智能体
-  const handleUpgradeToAgent = async (e: React.MouseEvent, session: Session) => {
-    e.stopPropagation();
-    if (session.session_type === 'agent') {
-      alert('该会话已经是智能体');
-      return;
-    }
-    if (!confirm(`确定要将"${getDisplayName(session)}"升级为智能体吗？`)) {
-      return;
-    }
+  // 升级为智能体（执行）
+  const performUpgradeToAgent = async (session: Session) => {
     try {
       await upgradeToAgent(session.session_id, {
         name: session.name || getDisplayName(session),
@@ -269,11 +286,25 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
         llm_config_id: session.llm_config_id || null,
       });
       await loadAllSessions();
-      alert('升级成功！');
+      toast({ title: '升级成功', variant: 'success' });
     } catch (error) {
       console.error('Failed to upgrade to agent:', error);
-      alert('升级失败：' + (error instanceof Error ? error.message : '未知错误'));
+      toast({
+        title: '升级失败',
+        description: error instanceof Error ? error.message : '未知错误',
+        variant: 'destructive',
+      });
     }
+  };
+
+  // 升级为智能体（确认）
+  const handleUpgradeToAgent = (e: React.MouseEvent, session: Session) => {
+    e.stopPropagation();
+    if (session.session_type === 'agent') {
+      toast({ title: '该会话已经是智能体', variant: 'destructive' });
+      return;
+    }
+    setUpgradeTarget(session);
   };
 
   // 获取显示名称
@@ -355,24 +386,25 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const isTemporarySelected = selectedSessionId === temporarySessionId;
 
   return (
-    <div className="w-[200px] flex flex-col h-full">
+    <div className="w-full min-w-0 flex flex-col h-full">
       {/* 搜索框和新建按钮 */}
       <div className="p-2.5 border-b border-gray-200 dark:border-[#404040] bg-gray-50/50 dark:bg-[#363636]/30">
         <div className="flex gap-1.5">
           <div className="flex-1 relative">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 dark:text-[#808080]" />
-            <input
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-[#808080]" />
+            <Input
               type="text"
               placeholder="搜索..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-7 pr-2 py-1.5 text-sm bg-[var(--surface-primary)] border border-[var(--border-default)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]/50 focus:border-[var(--color-accent)] text-[var(--text-primary)] placeholder-[var(--text-muted)] transition-all"
+              className="pl-7 pr-2 py-1.5 text-sm"
             />
           </div>
-          <button
+          <Button
             onClick={handleImportAgent}
             disabled={isImporting}
-            className="p-1.5 bg-[var(--surface-secondary)] hover:bg-[var(--surface-tertiary)] text-[var(--text-secondary)] border border-[var(--border-default)] rounded-lg transition-colors flex items-center disabled:opacity-50"
+            variant="outline"
+            size="icon"
             title="导入智能体配置"
           >
             {isImporting ? (
@@ -380,36 +412,37 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
             ) : (
               <Upload className="w-4 h-4" />
             )}
-          </button>
+          </Button>
           <div className="relative" ref={createMenuRef}>
-            <button
+            <Button
               onClick={handleCreateAgent}
-              className="p-1.5 bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-white rounded-lg transition-colors flex items-center"
+              variant="primary"
+              size="icon"
               title="新建智能体"
             >
               <Plus className="w-4 h-4" />
-            </button>
+            </Button>
             {showCreateMenu && (
               <div className="absolute right-0 top-full mt-1 w-36 bg-white dark:bg-[#363636] border border-gray-200 dark:border-[#404040] rounded-lg shadow-lg dark:shadow-[0_4px_16px_rgba(0,0,0,0.3)] z-50 overflow-hidden">
                 <button
                   onClick={handleCreateTemporary}
                   className="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-[#e0e0e0] hover:bg-gray-100 dark:hover:bg-[#404040] flex items-center gap-2 transition-colors"
                 >
-                  <MessageCircle className="w-3.5 h-3.5" />
+                  <MessageCircle className="w-4 h-4" />
                   <span>临时会话</span>
                 </button>
                 <button
                   onClick={handleCreateMemory}
                   className="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-[#e0e0e0] hover:bg-gray-100 dark:hover:bg-[#404040] flex items-center gap-2 transition-colors border-t border-gray-100 dark:border-[#404040]"
                 >
-                  <Sparkles className="w-3.5 h-3.5" />
+                  <Sparkles className="w-4 h-4" />
                   <span>记忆体</span>
                 </button>
                 <button
                   onClick={handleCreateAgent}
                   className="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-[#e0e0e0] hover:bg-gray-100 dark:hover:bg-[#404040] flex items-center gap-2 transition-colors border-t border-gray-100 dark:border-[#404040]"
                 >
-                  <Sparkles className="w-3.5 h-3.5" />
+                  <Sparkles className="w-4 h-4" />
                   <span>智能体</span>
                 </button>
               </div>
@@ -419,27 +452,27 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
       </div>
 
       {/* 列表内容 */}
-      <div className="flex-1 overflow-y-auto">
+      <ScrollArea className="flex-1">
         {isLoading ? (
           <div className="flex items-center justify-center h-32">
             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[var(--color-accent)]"></div>
           </div>
         ) : (
-          <div className="p-1.5 space-y-0.5">
+          <div className="p-1.5 pr-3 space-y-1.5">
             {/* 临时会话选项 - 始终显示在顶部 */}
             <div
               onClick={() => onSelectSession(temporarySessionId)}
               className={`
                 group relative px-2.5 py-2 rounded-lg cursor-pointer transition-all duration-150
                 ${isTemporarySelected
-                  ? 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/50'
-                  : 'hover:bg-gray-100 dark:hover:bg-[#363636]'
+                  ? "bg-[var(--color-selected-bg)] border border-[var(--color-selected-border)] before:content-[''] before:absolute before:left-0 before:top-1 before:bottom-1 before:w-0.5 before:rounded-r before:bg-[var(--color-accent)]"
+                  : 'hover:bg-[var(--color-hover-bg)]'
                 }
               `}
             >
               <div className="flex items-center gap-2.5">
                 <div className="w-7 h-7 rounded-lg bg-amber-100 dark:bg-amber-900/50 flex items-center justify-center flex-shrink-0">
-                  <MessageCircle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                  <MessageCircle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-sm text-gray-900 dark:text-white truncate">
@@ -480,7 +513,7 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
                     }
                   `}
                 >
-                  <div className="flex items-center gap-2.5">
+                  <div className="grid grid-cols-[auto,1fr,auto] items-center gap-2.5">
                     {/* 头像 - 可点击打开配置 */}
                     {session.avatar ? (
                       <img
@@ -496,7 +529,7 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
                         className="w-7 h-7 rounded-lg bg-[var(--color-accent-bg)] flex items-center justify-center flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-[var(--color-accent)]/50 transition-all"
                         title="点击配置"
                       >
-                        <MessageCircle className="w-3.5 h-3.5 text-[var(--color-accent)]" />
+                        <MessageCircle className="w-4 h-4 text-[var(--color-accent)]" />
                       </div>
                     )}
                     
@@ -514,14 +547,14 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
                     </div>
 
                     {/* 操作按钮 */}
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity justify-self-end pointer-events-none group-hover:pointer-events-auto">
                       {isRoundTableMode && session.session_type === 'agent' && (
                         <button
                           onClick={(e) => handleAddToRoundTable(e, session.session_id)}
                           className="p-1 hover:bg-[var(--color-accent-bg)] rounded transition-colors"
                           title="添加到圆桌会议"
                         >
-                          <Plus className="w-3.5 h-3.5 text-[var(--color-accent)]" />
+                          <Plus className="w-4 h-4 text-[var(--color-accent)]" />
                         </button>
                       )}
                       {/* 升级为智能体按钮（仅记忆体显示） */}
@@ -531,7 +564,7 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
                           className="p-1 hover:bg-[var(--color-accent-bg)] rounded transition-colors"
                           title="升级为智能体"
                         >
-                          <ArrowUp className="w-3.5 h-3.5 text-[var(--color-accent)]" />
+                          <ArrowUp className="w-4 h-4 text-[var(--color-accent)]" />
                         </button>
                       )}
                       <button
@@ -539,7 +572,7 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
                         className="p-1 hover:bg-red-500/10 rounded transition-colors"
                         title="删除"
                       >
-                        <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                        <Trash2 className="w-4 h-4 text-red-500" />
                       </button>
                     </div>
                   </div>
@@ -548,7 +581,71 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
             }))}
           </div>
         )}
-      </div>
+      </ScrollArea>
+
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除会话</DialogTitle>
+            <DialogDescription>
+              确定要删除「{deleteTarget ? getDisplayName(deleteTarget) : ''}」吗？此操作不可撤销。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-4">
+            <Button variant="secondary" onClick={() => setDeleteTarget(null)}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (!deleteTarget) return;
+                const id = deleteTarget.session_id;
+                setDeleteTarget(null);
+                await performDeleteSession(id);
+              }}
+            >
+              删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={upgradeTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setUpgradeTarget(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>升级为智能体</DialogTitle>
+            <DialogDescription>
+              将「{upgradeTarget ? getDisplayName(upgradeTarget) : ''}」升级为智能体后，将作为可复用的 Agent 出现在智能体列表中。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-4">
+            <Button variant="secondary" onClick={() => setUpgradeTarget(null)}>
+              取消
+            </Button>
+            <Button
+              variant="primary"
+              onClick={async () => {
+                if (!upgradeTarget) return;
+                const target = upgradeTarget;
+                setUpgradeTarget(null);
+                await performUpgradeToAgent(target);
+              }}
+            >
+              升级
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

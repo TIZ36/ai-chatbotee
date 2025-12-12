@@ -6,6 +6,23 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, Edit2, Save, X, Server, AlertCircle, CheckCircle, Wrench, ExternalLink, Plug } from 'lucide-react';
 import PageLayout, { Card, Section, Alert, EmptyState } from './ui/PageLayout';
+import { Button } from './ui/Button';
+import { toast } from './ui/use-toast';
+import {
+  Select,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+  SelectValue,
+} from './ui/Select';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from './ui/Dialog';
 import { MCPTool, MCPClient } from '../services/mcpClient';
 import { 
   getMCPServers, 
@@ -34,6 +51,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
 
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<MCPServerConfig | null>(null);
   const [isAddingNotion, setIsAddingNotion] = useState(false);
   const [newServer, setNewServer] = useState<Partial<MCPServerConfig>>({
     name: '',
@@ -95,7 +113,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
 
   const handleAddServer = async () => {
     if (!newServer.name || !newServer.url) {
-      alert('名称和URL都是必需的');
+      toast({ title: '名称和 URL 都是必需的', variant: 'destructive' });
       return;
     }
 
@@ -110,9 +128,14 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
         enabled: true,
         description: '',
       });
+      toast({ title: 'MCP 服务器已添加', variant: 'success' });
     } catch (error) {
       console.error('Failed to create MCP server:', error);
-      alert('创建服务器失败: ' + (error instanceof Error ? error.message : String(error)));
+      toast({
+        title: '创建服务器失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
     }
   };
 
@@ -450,7 +473,10 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
 
   const handleAddNotionServer = async () => {
     if (!notionIntegrationSecret.trim()) {
-      alert('请输入 Notion Internal Integration Secret');
+      toast({
+        title: '请输入 Notion Internal Integration Secret',
+        variant: 'destructive',
+      });
       return;
     }
 
@@ -477,10 +503,14 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
       await loadServers();
       setIsAddingNotion(false);
       setNotionIntegrationSecret('');
-      alert('Notion MCP 服务器添加成功！');
+      toast({ title: 'Notion MCP 服务器添加成功', variant: 'success' });
     } catch (error) {
       console.error('Failed to create Notion MCP server:', error);
-      alert('创建 Notion 服务器失败: ' + (error instanceof Error ? error.message : String(error)));
+      toast({
+        title: '创建 Notion 服务器失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
     }
   };
 
@@ -494,7 +524,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
 
   const handleUpdateServer = async () => {
     if (!editingId || !newServer.name || !newServer.url) {
-      alert('名称和URL都是必需的');
+      toast({ title: '名称和 URL 都是必需的', variant: 'destructive' });
       return;
     }
 
@@ -509,26 +539,34 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
         enabled: true,
         description: '',
       });
+      toast({ title: 'MCP 服务器已保存', variant: 'success' });
     } catch (error) {
       console.error('Failed to update MCP server:', error);
-      alert('更新服务器失败: ' + (error instanceof Error ? error.message : String(error)));
+      toast({
+        title: '更新服务器失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
     }
   };
 
   const handleDeleteServer = async (serverId: string) => {
-    if (confirm('确定要删除这个 MCP 服务器吗？')) {
-      try {
-        await deleteMCPServer(serverId);
-        await loadServers(); // 重新加载列表
-        setTestResults(prev => {
-          const newResults = new Map(prev);
-          newResults.delete(serverId);
-          return newResults;
-        });
-      } catch (error) {
-        console.error('Failed to delete MCP server:', error);
-        alert('删除服务器失败: ' + (error instanceof Error ? error.message : String(error)));
-      }
+    try {
+      await deleteMCPServer(serverId);
+      await loadServers(); // 重新加载列表
+      setTestResults(prev => {
+        const newResults = new Map(prev);
+        newResults.delete(serverId);
+        return newResults;
+      });
+      toast({ title: 'MCP 服务器已删除', variant: 'success' });
+    } catch (error) {
+      console.error('Failed to delete MCP server:', error);
+      toast({
+        title: '删除服务器失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
     }
   };
 
@@ -736,13 +774,15 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                 <span>授权中...</span>
               </div>
             ) : (
-              <button
+              <Button
                 onClick={handleNotionOAuthConnect}
                 disabled={isAdding || editingId !== null}
-                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                variant="primary"
+                size="sm"
+                className="text-xs"
               >
                 Connect
-              </button>
+              </Button>
             )}
           </div>
 
@@ -919,29 +959,47 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 服务器类型
               </label>
-              <select
+              <Select
                 value={newServer.type || 'http-stream'}
-                onChange={(e) => setNewServer(prev => ({ ...prev, type: e.target.value as MCPServerConfig['type'] }))}
-                className="input-field"
+                onValueChange={(value) =>
+                  setNewServer((prev) => ({
+                    ...prev,
+                    type: value as MCPServerConfig['type'],
+                  }))
+                }
               >
-                <option value="http-stream">HTTP Stream</option>
-                <option value="http-post">HTTP POST</option>
-                <option value="stdio">Stdio</option>
-              </select>
+                <SelectTrigger className="input-field">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="http-stream">HTTP Stream</SelectItem>
+                  <SelectItem value="http-post">HTTP POST</SelectItem>
+                  <SelectItem value="stdio">Stdio</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 状态
               </label>
-              <select
+              <Select
                 value={newServer.enabled ? 'enabled' : 'disabled'}
-                onChange={(e) => setNewServer(prev => ({ ...prev, enabled: e.target.value === 'enabled' }))}
-                className="input-field"
+                onValueChange={(value) =>
+                  setNewServer((prev) => ({
+                    ...prev,
+                    enabled: value === 'enabled',
+                  }))
+                }
               >
-                <option value="enabled">启用</option>
-                <option value="disabled">禁用</option>
-              </select>
+                <SelectTrigger className="input-field">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="enabled">启用</SelectItem>
+                  <SelectItem value="disabled">禁用</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
@@ -959,20 +1017,17 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
           </div>
 
           <div className="flex justify-end space-x-3 mt-6">
-            <button
-              onClick={cancelEdit}
-              className="gnome-btn gnome-btn-secondary"
-            >
+            <Button onClick={cancelEdit} variant="secondary">
               <X className="w-4 h-4" />
               <span>取消</span>
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={isAdding ? handleAddServer : handleUpdateServer}
-              className="gnome-btn gnome-btn-primary"
+              variant="primary"
             >
               <Save className="w-4 h-4" />
               <span>{isAdding ? '添加' : '保存'}</span>
-            </button>
+            </Button>
           </div>
         </Card>
       )}
@@ -983,14 +1038,16 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
         description="添加和管理您自己的 MCP 服务器"
         className="mb-6"
         headerAction={
-          <button
+          <Button
             onClick={() => setIsAdding(true)}
-            className="gnome-btn gnome-btn-secondary text-sm"
+            variant="secondary"
+            size="sm"
+            className="text-sm"
             disabled={isAdding || editingId !== null || isAddingNotion}
           >
             <Plus className="w-3.5 h-3.5" />
             <span>添加自定义服务器</span>
-          </button>
+          </Button>
         }
       >
 
@@ -1007,13 +1064,10 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
             title="还没有自定义 MCP 服务器"
             description="例如：xiaohongshu-mcp、custom-api 等"
             action={
-              <button
-                onClick={() => setIsAdding(true)}
-                className="gnome-btn gnome-btn-primary"
-              >
+              <Button onClick={() => setIsAdding(true)} variant="primary">
                 <Plus className="w-4 h-4" />
                 <span>添加第一个自定义服务器</span>
-              </button>
+              </Button>
             }
           />
         ) : (
@@ -1083,7 +1137,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
 
                   {/* 删除 */}
                   <button
-                    onClick={() => handleDeleteServer(server.id)}
+                    onClick={() => setDeleteTarget(server)}
                     className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
                     title="删除"
                   >
@@ -1367,6 +1421,38 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
           </div>
         </div>
       )}
+
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除 MCP 服务器</DialogTitle>
+            <DialogDescription>
+              确定要删除「{deleteTarget?.name}」吗？此操作不可撤销。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-4">
+            <Button variant="secondary" onClick={() => setDeleteTarget(null)}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (!deleteTarget) return;
+                const id = deleteTarget.id;
+                setDeleteTarget(null);
+                await handleDeleteServer(id);
+              }}
+            >
+              删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageLayout>
   );
 };
