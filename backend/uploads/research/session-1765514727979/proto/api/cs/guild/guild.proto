@@ -1,0 +1,573 @@
+syntax = "proto3";
+package guild;
+import "msg/msg.proto";
+import "msg/map_msg.proto";
+import "enumx/enumx.proto";
+import "optx/optx.proto";
+import "enumx/csv_enumx.proto";
+import "cs_common/cs_common.proto";
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb/pb_guild";
+option (gogoproto.goproto_getters_all) = false;
+
+//------------------------------------------------------------------------------------------
+message Up_Union {
+  oneof body {
+    option (validator.oneof)                             = {required: true};
+    option (optx.moduleCheckAll)                         = "Guild";
+    msg.Empty                   openPanel                = 1; // 打开面板
+    Up_Create                   create                   = 2; // 创建联盟
+    int64                       apply                    = 3; // 申请公会
+    int64                       cancelApply              = 4; // 取消申请
+    msg.Empty                   exit                     = 5; // 退出公会
+    msg.Empty                   recommend                = 6; // 刷新推荐公会列表
+    string                      search                   = 7; // 搜索公会
+    GuildKey                    openMemberList           = 8; // 打开成员列表
+    int64                       approve                  = 9; // 批准申请入会
+    msg.Empty                   joinDirect               = 10; // 立即加入
+    Up_KickMember               kickMember               = 11; // 踢出成员
+    Up_CommonSetting            commonSetting            = 12; // 公会设置
+    Up_MemberSetting            memberSetting            = 13; // 成员设置
+    msg.Empty                   queryApplyList           = 14; // 查询申请列表
+    int64                       denyApply                = 15; // 拒绝申请
+    int64                       transferMaster           = 16; // 转让盟主
+    GuildKey                    queryGSummary            = 17; // 查询公会信息
+    Up_NotifyShareGuildCard     shareGuildCard           = 18; // 分享公会名片到聊天频道
+    uint32                      setFirstChatMsgID        = 19; // 设置玩家入盟的第一条聊天id
+    int64                       queryOneMember           = 20; // 查询指定玩家信息
+    uint32                      queryMilestoneReward     = 21; // 领取里程碑奖励
+    Up_TaskInfoShare            taskInfoShare            = 22; // 任务信息分享
+    // Up_GreetingMessage          greetingMessage          = 23; // 发送打招呼消息
+
+
+    // 联盟帮助
+    Up_RequestHelp              requestHelp              = 50; // 请求他人帮助我
+    msg.Empty                   helpAll                  = 51; // 帮助所有可以帮助的玩家
+    HelpTypeAndID               queryOneHelpInfo         = 52; // 查询单个帮助信息
+    msg.Empty                   queryAllHelpList         = 53; // 查询所有可以被帮助的列表
+
+    // 联盟科技
+    msg.GuildRecommendTech      recommendTech            = 60; // 推荐科技
+    msg.Empty                   cancelRecommendTech      = 61; // 取消推荐科技
+    enumx.GuildTechType         queryTechList            = 62; // 查询科技列表
+    msg.Empty                   querySkillList           = 63; // 查询技能列表
+    Up_TechDonate               techDonate               = 64; // 科技捐献
+    Up_TechDonate               skillAddEnergy           = 65; // 技能充能
+    uint32                      useSkill                 = 66; // 使用技能
+    uint32                      researchTech             = 67; // 研究科技
+    uint32                      queryOneTech             = 68; // 查询单个科技
+    uint32                      queryOneSkill            = 69; // 查询单个技能
+
+    // 联盟礼物
+    msg.GuildGiftKey            queryGiftList            = 80; // 查询礼物列表
+    msg.GuildGiftKey            recvOneGift              = 81; // 领取单个礼物
+    enumx.GuildGiftType         recvAllByType            = 82; // 领取当前类型的所有礼物
+    msg.GuildGiftKey            delAllRecvdAndExpired    = 83; // 删除当前类型的所有已经领取的礼物
+    bool                        setPayGiftAnonymous      = 84; // 匿名赠送礼物
+    bool                        setTechAutoResearch      = 85; // 设置科技自动研究
+
+    // 联盟模拟战
+    Up_BossBattleInfo           bossBattleInfo           = 99;  // 联盟BOSS信息
+    Up_BossBattleAppointTime    bossBattleAppointTime    = 100; // 预约模拟战时间
+
+    Up_BossBattleChangeBossPos  bossBattleChangeBossPos  = 101; // 更改堡垒位置
+    Up_BossBattleDonate         bossBattleDonate         = 102; // 模拟战捐献
+    Up_BossBattleSetOfflineJoin bossBattleSetOfflineJoin = 103; // 设置离线参与
+    Up_BossBattleStart          bossBattleStart          = 104; // 正式开始模拟战
+    Up_SetRendezvousPoint       setRendezvousPoint       = 105; // 设置联盟聚集点
+    Up_Invite2RendezvousPoint   invite2RendezvousPoint   = 106; // 邀请集合
+
+    // 联盟日志
+    // Up_QueryGuildLogs           queryGuildLogs           = 120; // 联盟日志
+
+    // // 联盟列车 w3
+    // Up_AppointTrainLeader     appointTrainLeader     = 130; //任命车长
+    // Up_ApplyJoinTrain         applyJoinTrain         = 131; //申请加入列车
+    // Up_SendGiftToTrainLeader  sendGiftToTrainLeader  = 132; //发送礼物给车长
+    // Up_RefreshTrainQuality    refreshTrainQuality    = 133; //刷新列车品质
+    // Up_SetTrainFormation      setTrainFormation      = 134; //设置列车阵容
+    // Up_InviteTrainVip         inviteTrainVip         = 135; //邀请列车VIP
+    // Up_AcceptTrainVip         acceptTrainVip         = 136; //接受列车VIP
+    // Up_RobTrain               robTrain               = 137; //抢车
+    // Up_GetTrainDetail         getTrainDetail         = 138; //获取列车详情
+    // Up_RefreshOtherTrains    refreshOtherTrains      = 139; //刷新其他列车
+    // Up_GetMyTrain           getMyTrain             = 140; //获取我的列车
+    // Up_SetTrainVipGoods     setTrainVipGoods       = 141; //设置列车VIP物品
+    // Up_TrainHeaderGetGuildTrainGift trainHeaderGetGuildTrainGift = 142; //获取列车点赞礼物
+    // // 联盟对决
+    // Up_GuildVsLike            guildVsLike            = 150; // 联盟对决点赞
+    
+  }
+}
+
+message Dn_Union {
+  oneof body {
+    Dn_OpenPanel                openPanel                = 1;
+    Dn_Create                   create                   = 2;
+    Dn_Apply                    apply                    = 3;
+    msg.Empty                   cancelApply              = 4;
+    msg.Empty                   exit                     = 5;
+    Dn_GuildList                recommend                = 6;
+    Dn_GuildList                search                   = 7;
+    Dn_OpenMemberList           openMemberList           = 8;
+    Dn_Approve                  approve                  = 9;
+    Dn_JoinDirect               joinDirect               = 10;
+    msg.Empty                   kickMember               = 11; // 踢出成员
+    Dn_CommonSetting            commonSetting            = 12; // 公会设置
+    msg.Empty                   memberSetting            = 13; // 成员设置
+    Dn_QueryApplyList           queryApplyList           = 14; // 查询申请列表
+    msg.Empty                   denyApply                = 15; // 拒绝申请
+    Dn_TransferMaster           transferMaster           = 16; // 转让盟主
+    msg.GSummary                queryGSummary            = 17; // 查询公会信息
+    msg.Empty                   shareGuildCard           = 18;
+    msg.Empty                   setFirstChatMsgID        = 19;
+    msg.GuildMember             queryOneMember           = 20;
+    Dn_QueryMilestoneReward     queryMilestoneReward     = 21; // 领取里程碑奖励
+    msg.Empty                   taskInfoShare            = 22; // 任务信息分享
+    msg.Empty                   greetingMessage          = 23; // 发送打招呼消息
+    // 联盟帮助，码段50-60
+    Dn_RequestHelp              requestHelp              = 50;
+    Dn_HelpAll                  helpAll                  = 51; // 帮助所有可以帮助的玩家
+    msg.GuildHelpInfo           queryOneHelpInfo         = 52; // 查询单个帮助信息
+    Dn_QueryAllHelpList         queryAllHelpList         = 53; // 查询所有可以被帮助的列表
+
+    // 联盟科技，码段60-80
+    msg.Empty                   recommendTech            = 60; // 推荐科技
+    msg.Empty                   cancelRecommendTech      = 61; // 取消推荐科技
+    Dn_QueryTechList            queryTechList            = 62; // 查询科技列表
+    Dn_QuerySkillList           querySkillList           = 63; // 查询技能列表
+    Dn_Donate                   techDonate               = 64; // 捐献
+    Dn_Donate                   skillAddEnergy           = 65; // 技能充能
+    msg.Empty                   useSkill                 = 66; // 使用技能
+    msg.GuildTechInfo           researchTech             = 67; // 研究科技
+    msg.GuildTechInfo           queryOneTech             = 68; // 查询单个科技
+    msg.GuildSkill              queryOneSkill            = 69; // 查询单个技能
+
+    // 联盟礼物，码段80-90
+    Dn_QueryGiftList            queryGiftList            = 80; // 查询礼物列表
+    Dn_RecvOneGift              recvOneGift              = 81; // 领取单个礼物
+    Dn_RecvAllByType            recvAllByType            = 82; // 领取当前类型的所有礼物
+    msg.Empty                   delAllRecvdAndExpired    = 83; // 删除当前类型的所有礼物
+    msg.Empty                   setPayGiftAnonymous      = 84; // 匿名赠送礼物
+    msg.Empty                   setTechAutoResearch      = 85; // 设置科技自动研究
+
+    // 联盟模拟战
+    Dn_BossBattleInfo           bossBattleInfo           = 99;  // 联盟BOSS信息
+    Dn_BossBattleAppointTime    bossBattleAppointTime    = 100; // 预约模拟战时间
+
+    Dn_BossBattleChangeBossPos  bossBattleChangeBossPos  = 101; // 更改堡垒位置
+    Dn_BossBattleDonate         bossBattleDonate         = 102; // 模拟战捐献
+    Dn_BossBattleSetOfflineJoin bossBattleSetOfflineJoin = 103; // 设置离线参与
+    Dn_BossBattleStart          bossBattleStart          = 104; // 正式开始模拟战
+    Dn_SetRendezvousPoint       setRendezvousPoint       = 105; // 设置聚集点
+    Dn_Invite2RendezvousPoint   invite2RendezvousPoint   = 106; // 邀请集合
+
+    // w3
+    // Dn_QueryGuildLogs           queryGuildLogs           = 120; // 联盟日志
+
+    // // 联盟列车
+    // Dn_AppointTrainLeader     appointTrainLeader     = 130; //任命车长
+    // Dn_ApplyJoinTrain         applyJoinTrain         = 131; //申请加入列车
+    // Dn_SendGiftToTrainLeader  sendGiftToTrainLeader  = 132; //发送礼物给车长
+    // Dn_RefreshTrainQuality    refreshTrainQuality    = 133; //刷新列车品质
+    // Dn_SetTrainFormation      setTrainFormation      = 134; //设置列车阵容
+    // Dn_InviteTrainVip         inviteTrainVip         = 135; //邀请列车VIP
+    // Dn_AcceptTrainVip         acceptTrainVip         = 136; //接受列车VIP
+    // Dn_RobTrain               robTrain               = 137; //抢车
+    // Dn_GetTrainDetail         getTrainDetail         = 138; //获取列车详情
+    // Dn_RefreshOtherTrains    refreshOtherTrains      = 139; //刷新其他列车
+    // Dn_GetMyTrain           getMyTrain             = 140; //获取我的列车
+    // Dn_SetTrainVipGoods     setTrainVipGoods       = 141; //设置列车VIP物品
+    // Dn_TrainHeaderGetGuildTrainGift trainHeaderGetGuildTrainGift = 142; //获取列车点赞礼物
+    // // 联盟对决
+    // msg.Empty                   guildVsLike            = 150; // 联盟对决点赞
+  }
+}
+
+message Up_KickMember {
+  repeated int64 uids = 1;
+}
+
+message Dn_Approve {
+  cs_common.GuildMemberSummary memberSummary = 1; // 新增成员信息
+  msg.GSummary                 gSummary      = 2; // 公会信息
+}
+
+message GuildKey {
+  uint32 gid   = 1;
+  uint32 svrID = 2;
+}
+
+message Dn_QueryGiftList {
+  repeated msg.GuildGiftInfo giftList = 1; // 礼物列表
+  uint32                     lv       = 2; // 礼物等级
+  int64                      totalExp = 3; // 礼物经验
+}
+
+message Dn_RecvOneGift {
+  msg.Reward        reward   = 1; // 奖励
+  msg.GuildGiftInfo gift     = 2; // 礼物信息
+  uint32            lv       = 3; // 礼物等级
+  int64             totalExp = 4; // 礼物经验
+  uint32            addExp   = 5; // 本次领取增加的经验
+}
+
+message Dn_RecvAllByType {
+  msg.Reward                 reward   = 1; // 奖励
+  repeated msg.GuildGiftInfo gifts    = 2; // 礼物列表
+  uint32                     lv       = 3; // 礼物等级
+  int64                      totalExp = 4; // 礼物经验
+  uint32                     addExp   = 5; // 本次领取增加的经验
+}
+
+message Dn_OpenPanel {
+  msg.GSummary           gSummary           = 1;
+  msg.UGuildTech         tech               = 2;
+  msg.GuildMember        memberSelf         = 3;
+  uint32                 researchingTechID  = 4; // 正在研究的科技id
+  msg.GuildRecommendTech recommendTech      = 5; // 推荐
+  bool                   nonAutoResearch    = 6; // 不开启科技自动研究
+  msg.ClientGuildGvGInfo clientGuildGvGInfo = 16; // 公会gvg点信息
+}
+
+message Dn_QueryApplyList {
+  repeated msg.GuildApplying applyingList = 1; // 申请列表
+}
+
+message Dn_TransferMaster {
+  msg.GSummary                          gSummary = 1;
+  repeated cs_common.GuildMemberSummary members  = 2;
+}
+
+message Up_Create {
+  string          fullName     = 1 [(validator.field) = {string_not_empty: true}]; // 联盟全称
+  string          shortName    = 2 [(validator.field) = {string_not_empty: true}]; // 联盟简称
+  repeated uint32 picture      = 3 [(validator.field) = {repeated_count_min: 1}]; // 联盟旗帜
+  enumx.Lang      lang         = 4; // 联盟语言
+  string          announcement = 5 [(validator.field) = {string_not_empty: true}]; // 联盟宣言
+  bool            isPreCheck   = 6; // 是否预先检查 联盟基地密度和dirtyWord
+  bool            isRelocate   = 7; // 是否迁城并创建
+}
+
+message Dn_Create {
+  msg.Cost     cost     = 1;
+  msg.GSummary gSummary = 2;
+}
+
+message Dn_Apply {
+  bool         joinSuccess = 1; // 是否直接成功加入了
+  msg.GSummary gSummary    = 2;
+  bool         isFirstJoin = 3;
+}
+
+message Dn_OpenMemberList {
+  repeated cs_common.GuildMemberSummary members = 6;  // 成员列表
+}
+
+message Dn_GuildList {
+  repeated msg.GSummary summaries = 1; // 公会列表
+}
+
+message Dn_JoinDirect {
+  bool         joinSuccess = 1;
+  msg.GSummary gSummary    = 2;
+  bool         isFirstJoin = 3;
+}
+
+message HelpTypeAndID{
+  enumx.GuildHelpType typ = 1; // 帮助类型
+  uint32              id  = 2; // 帮助id，帮助类型为建筑时，id为建筑id；帮助类型为科技时，id为科技id
+}
+
+message Up_RequestHelp {
+  repeated HelpTypeAndID reqHelpList = 1; // 请求帮助列表
+}
+
+message Dn_RequestHelp {
+  repeated msg.GuildHelpInfo reqHelpList = 1; // 请求帮助列表
+}
+
+message Dn_HelpAll {
+  uint32 dailyGuildCoin = 1; // 每日获得的公会币，跨天清零
+  uint32 guildCoin      = 2; // 累计获得公会币
+}
+
+message Dn_QueryAllHelpList {
+  repeated msg.GuildHelpInfo helpList       = 1; // 帮助列表
+  uint32                     dailyGuildCoin = 2; // 每日获得的公会币，跨天清零
+}
+
+message Up_CommonSetting {
+  enumx.GuildOperation operation     = 1; // 操作类型
+  string               fullName      = 2; // 联盟全称
+  string               shortName     = 3; // 联盟简称
+  bool                 isCheckName   = 4; // 是否检查名称
+  enumx.Lang           lang          = 5; // 联盟语言
+  enumx.GuildJoinType  joinType      = 6; // 联盟加入方式
+  uint64               powerLimit    = 7; // 联盟战力限制   注意：战力和主基地等级两个参数要一起发过来，不能只发一个，这两个参数属于一次设置 ！！！
+  uint32               headquarterLv = 8; // 联盟总部建筑lv限制
+  string               announcement  = 9; // 联盟公告/宣言
+  repeated uint32      picture       = 10; // 联盟旗帜
+}
+
+message Dn_CommonSetting {
+  string illegalFullName  = 1;
+  string illegalShortName = 2;
+  string realAnnouncement = 3;
+}
+
+// 成员设置
+message Up_MemberSetting {
+  enumx.GuildOperation      operation         = 1; // 操作类型
+  int64                     memberUID         = 2; // 成员uid
+  enumx.GuildMemberPos      afterPos          = 3; // 修改后的等级
+  enumx.GuildSeniorOfficial afterOfficialType = 4; // 修改后的官职类型
+}
+
+message Up_TechDonate {
+  enumx.GuildTechType       techType   = 1; // 科技类型
+  uint32                    techID     = 2; // 科技ID
+  enumx.GuildTechDonateType donateType = 3; // 捐献类型
+}
+
+message Dn_QueryTechList {
+  msg.GuildTechGroup     group     = 1; // 科技列表
+  msg.GuildRecommendTech recommend = 2; // 推荐的科技
+}
+
+message Dn_QuerySkillList {
+  repeated msg.GuildSkill skillList = 1; // 技能列表
+}
+
+message DonateReward {
+  uint32 techAddExp   = 1; // 捐献之后，当前科技增加的exp
+  uint32 guildCoin    = 2; // 本次捐献获得的公会币
+  uint32 userAddScore = 3; // 捐献之后玩家增加的积分
+  uint32 hitID        = 4; // 暴击id
+}
+
+message Dn_Donate {
+  DonateReward      reward   = 1; // 捐献奖励
+  msg.UGuildTech    uGTech   = 2;
+  msg.GuildTechInfo techInfo = 3;
+  msg.GuildSkill    skill    = 4; // 技能信息
+}
+
+message Up_NotifyShareGuildCard {
+  repeated NotifyShareGuildCard msgs = 1;
+}
+
+message NotifyShareGuildCard {
+  uint32 channelType = 1;
+  int64  channelID   = 2;
+  int64  senderUID   = 3;
+  int64  contentType = 4;
+}
+
+message Dn_QueryMilestoneReward {
+  repeated uint32 recvdTaskIDs = 1; // 已领取的任务id列表
+  msg.Reward      reward       = 2; // 奖励
+}
+
+message Up_GreetingMessage {
+  string content  = 1;
+  string extra    = 2;
+}
+
+//---------------------------------------
+message Up_BossBattleAppointTime {
+  int64  appointTS = 1; // 预约的时间（秒）
+  uint32 bossLv    = 2; // 难度等级
+}
+message Dn_BossBattleAppointTime {
+  msg.GuildBossBattle bossBattle = 1;
+}
+
+message Up_BossBattleChangeBossPos {
+  msg.IntPos newPos = 1;
+}
+message Dn_BossBattleChangeBossPos {
+  msg.GuildBossBattle bossBattle = 1;
+}
+
+message Up_BossBattleDonate {
+  uint32 tarDonateLv = 1; // 目标捐献等级
+  uint32 donateCnt   = 2; // 捐献数量
+}
+message Dn_BossBattleDonate {
+  msg.GuildBossBattle bossBattle = 1;
+  msg.Reward          reward     = 2;
+}
+
+message Up_BossBattleSetOfflineJoin {
+  bool offlineJoin = 1; // 设置离线参与
+}
+message Dn_BossBattleSetOfflineJoin {
+  msg.GuildBossBattle bossBattle = 1;
+}
+
+message Up_BossBattleStart{}
+message Dn_BossBattleStart {
+  msg.GuildBossBattle bossBattle = 1;
+}
+
+message Up_BossBattleInfo {
+  bool withRank = 1; // 是否携带排行榜数据
+}
+message Dn_BossBattleInfo {
+  msg.GuildBossBattle    bossBattle = 1;
+  repeated msg.RankEntry entries    = 2;
+}
+
+message Up_TaskInfoShare {
+  uint64 objID = 1;
+  uint32 taskType = 2;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+message Up_SetRendezvousPoint {
+    msg.IntPos pos = 1[(gogoproto.nullable) = false]; // 设置公会聚集点
+}
+
+
+message Dn_SetRendezvousPoint {
+    msg.IntPos pos = 1[(gogoproto.nullable) = false]; // 设置公会聚集点
+}
+
+// 邀请集结
+message Up_Invite2RendezvousPoint {
+    msg.Empty empty = 1;
+}
+
+// 邀请集结
+message Dn_Invite2RendezvousPoint {
+    msg.Empty empty = 1;
+}
+
+
+// message Up_QueryGuildLogs{
+//   enumx.GuildLogType             type        = 1;
+//   uint32                         initNum     = 2; // 初始第一屏幕的数量
+//   repeated uint32                logIDs      = 3; // 第二屏使用，按照id请求
+// }
+
+// message Dn_QueryGuildLogs{
+//   repeated uint32                      allIDs    = 1;
+//   repeated cs_common.Dn_GuildLogEntry  entries   = 2;
+// }
+
+// // 联盟列车
+// message Up_AppointTrainLeader {
+//   uint32 leaderUID = 1;
+//   uint64 truckID = 2;
+// }
+// message Dn_AppointTrainLeader {
+//   msg.Empty empty = 1;
+// }
+
+// message Up_ApplyJoinTrain {
+//   uint64 trainID = 1;
+//   uint32 carIndex = 2;
+// }
+// message Dn_ApplyJoinTrain {
+//   msg.Empty empty = 1;
+// }
+
+// message Up_SendGiftToTrainLeader {
+//   uint32 giftCount = 1;
+//   bool   isLike = 2;//是否点赞
+//   uint64 trainID = 3;
+// }
+// message Dn_SendGiftToTrainLeader {
+//   msg.CostReward costReward = 1;
+
+// }
+
+// message Up_RefreshTrainQuality {
+//   uint64 trainID = 1;
+//   msg.Cost cost = 2;
+// }
+// message Dn_RefreshTrainQuality {
+//   msg.TrainData trainData = 1;
+// }
+
+// message Up_SetTrainFormation {
+//   msg.Formation formation = 1;
+// }
+// message Dn_SetTrainFormation {
+//   msg.Empty empty = 1;
+// }
+
+// message Up_InviteTrainVip {
+//   enumx.TrainVipType vipType = 1;
+//   uint32 vipUID = 2;
+//   enumx.TrainInviteWaitTime waitTime = 3;
+//   uint64 trainID = 4;
+// }
+// message Dn_InviteTrainVip {
+//   msg.Empty empty = 1;
+// }
+
+// message Up_AcceptTrainVip {
+//   enumx.TrainVipType vipType = 1;
+//   uint64 trainID = 2;
+// }
+// message Dn_AcceptTrainVip {
+//   msg.Empty empty = 1;
+// }
+
+// message Up_RobTrain {
+//   uint64 GuildID = 1;
+//   uint64 TrainID = 2;
+// }
+// message Dn_RobTrain {
+//   msg.CostReward costReward = 1;
+// }
+
+// message Up_GetTrainDetail {
+//   uint64 GuildID = 1;
+//   uint64 TrainID = 2;
+// }
+
+// message Dn_GetTrainDetail {
+//   msg.TrainData trainData = 1;
+// }
+
+// message Up_RefreshOtherTrains {
+
+// }
+// message Dn_RefreshOtherTrains {
+//   repeated msg.TrainData trains = 1;
+// }
+
+// message Up_GetMyTrain {
+
+// }
+
+// message Dn_GetMyTrain {
+//   repeated msg.TrainData trains = 1;
+// }
+
+// message Up_SetTrainVipGoods{
+//   repeated uint32 goods = 1;
+//   uint64 trainID = 2;
+// }
+// message Dn_SetTrainVipGoods{
+//   msg.Empty empty = 1;
+// }
+
+// // 联盟对决点赞
+// message Up_GuildVsLike {
+//   uint32 targetUID = 1;
+// }
+
+// message Up_TrainHeaderGetGuildTrainGift {
+//   uint64 trainID = 1;
+// }
+
+// message Dn_TrainHeaderGetGuildTrainGift {
+//   repeated msg.TrainLikeGiftData likeGiftData = 1;
+//   msg.CostReward costReward = 2;
+// }

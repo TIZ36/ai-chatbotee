@@ -1,0 +1,92 @@
+syntax = "proto3";
+package bc;
+
+option go_package = "verse/backend/pb/pb_bc";
+
+// 攻击方视角的结果
+enum result {
+  Result_win = 0;
+  Result_lose = 1;
+  Result_draw = 2;
+}
+
+message int_kv {
+  int32 key   = 1;
+  int64 value = 2;
+}
+
+message trait_info {
+  uint32 id = 1;
+  float  a  = 2;
+  float  b  = 3;
+}
+
+message card {
+  uint32              tid             = 1;
+  uint32              level           = 2;
+  uint32              star            = 3;
+  map<int32, float>   additionProps   = 4;
+  repeated int32      skillIds        = 5;
+  repeated int32      passiveSkillIds = 6;
+  uint32              heroId          = 7;
+  uint32              heroLevel       = 8;
+  map<int32, int32>   skillIdMap      = 9;
+  repeated float      subHps          = 10;
+  repeated int32      skillEffects    = 11;
+  repeated trait_info traits          = 12;
+  int32               logicPos        = 13; //兵卡站位
+}
+
+message monster {
+  uint32 cfg           = 1;
+  string formationPath = 2;
+}
+
+message skill_input {
+  uint32 tick     = 1;
+  uint32 camp     = 2; // TODO 可以不需要？
+  uint32 battleId = 3;
+  uint32 skillId  = 4;
+}
+
+message switch_input {
+  uint32 tick   = 1;
+  uint32 camp   = 2;
+  bool   isAuto = 3;
+}
+
+message bt_formation {
+  repeated card       cards   = 1; //兵卡阵容
+  bool                is_card = 2; //是否是兵卡阵容
+  monster             monster = 3; //怪物阵容
+  repeated trait_info traits  = 4; //阵容特性
+}
+
+// 对应Battle/BattleFormationPool.csv配置信息
+message bt_formation_cfg {
+  float  duration   = 1;
+  int32  atk_god_id = 2;
+  int32  dfd_god_id = 3;
+  string mapPath    = 4;
+  int32  atk_win_id = 5;  //攻击方胜利条件
+  int32  dfd_win_id = 6;  //防守方胜利条件
+}
+
+message bt_check_req {
+  bt_formation          atk           = 1;
+  bt_formation          dfd           = 2;
+  int32                 seq           = 3;
+  repeated skill_input  skill_inputs  = 4; //技能输入
+  repeated switch_input switch_inputs = 5; //切换输入
+  int32                 seed          = 6; //随机种子
+  bt_formation_cfg      cfg           = 7;
+}
+
+message bt_check_reply {
+  //bt_formation atk = 1;
+  //bt_formation dfd = 2;
+  int32  result    = 3;
+  int32  reply_seq = 4;
+  string errMsg    = 5;
+  int32  retCode   = 6;
+}

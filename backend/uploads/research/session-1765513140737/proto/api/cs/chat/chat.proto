@@ -1,0 +1,48 @@
+syntax = "proto3";
+package chat;
+import "msg/msg.proto";
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb/pb_chat";
+option (gogoproto.goproto_getters_all) = false;
+
+//------------------------------------------------------------------------------------------
+message Up_Union {
+  oneof body {
+    option (validator.oneof) = {required: true};
+    Up_GetChatEnv  getChatEnv  = 1;
+    Up_QueryUser   queryUser   = 2; // 根据名字模糊搜索
+    Up_GetUserInfo getUserInfo = 3; // by uid
+  }
+}
+
+message Dn_Union {
+  oneof body {
+    Dn_GetChatEnv getChatEnv  = 1;
+    Dn_QueryUser  queryUser   = 2; // 根据名字模糊搜索
+    Dn_QueryUser  getUserInfo = 3; // by uid
+  }
+}
+
+// 获取聊天环境
+message Up_GetChatEnv {
+}
+message Dn_GetChatEnv {
+  string          chatEnv = 1; // 聊天环境 tsh_dev_im_xxx
+  string          token   = 2;   // 透传给IM的token， 后续验证玩家请求
+  repeated string wsUrls  = 3; // websocket主备地址[1-3]
+}
+
+// 查询用户信息
+message Up_QueryUser {
+  string name = 1; // 玩家名称
+}
+
+message Dn_QueryUser {
+  repeated msg.IMUserInfo userInfo = 1; // 玩家信息
+}
+
+message Up_GetUserInfo {
+  repeated int64 uids = 1;
+}

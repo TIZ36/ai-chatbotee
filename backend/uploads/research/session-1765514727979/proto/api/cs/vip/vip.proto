@@ -1,0 +1,42 @@
+syntax = "proto3";
+package vip;
+import "msg/msg.proto";
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb/pb_vip";
+option (gogoproto.goproto_getters_all) = false;
+
+//------------------------------------------------------------------------------------------
+message Up_Union {
+  oneof body {
+    option (validator.oneof)  = {required: true};
+    Up_GetVipDailyLevelRewards getVipDailyLevelRewards = 1;
+    Up_GetVipDailyFreeRewards  getVipDailyFreeRewards  = 2;
+  }
+}
+
+message Dn_Union {
+  oneof body {
+    Dn_GetVipDailyLevelRewards getVipDailyLevelRewards = 1;
+    Dn_GetVipDailyFreeRewards  getVipDailyFreeRewards  = 2;
+  }
+}
+
+message Up_GetVipDailyLevelRewards {
+}
+
+message Dn_GetVipDailyLevelRewards {
+  msg.CostReward costReward    = 1;
+  int64          getRewardTime = 2;
+}
+
+message Up_GetVipDailyFreeRewards {
+}
+
+message Dn_GetVipDailyFreeRewards {
+  uint32         vipLevel      = 1;
+  int64          vipExp        = 2;
+  int64          getRewardTime = 3;
+  msg.CostReward costReward    = 4;
+}

@@ -1,0 +1,77 @@
+syntax = "proto3";
+package view;
+import "msg/msg.proto";
+import "msg/map_msg.proto";
+import "enumx/enumx.proto";
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb/pb_view";
+option (gogoproto.goproto_getters_all) = false;
+
+// 地图视图协议
+message Up_Union {
+  oneof body {
+    option (validator.oneof) = {required: true};
+    Up_SetMapView  setMapView  = 1; // 客户端订阅地图视图, 登录时目前直接使用getMapView获取全量数据
+    Up_GetMapView  getMapView  = 2; // 客户端主动拉取视野格子信息
+    Up_ExitMapView exitMapView = 3; // 客户端主动取消订阅地图视图
+  }
+}
+
+message Dn_Union {
+  oneof body {
+    msg.Empty setMapView  = 1; // 异步通过push消息的Dn_ClientMapView推送
+    msg.Empty getMapView  = 2; // 服务器返回走异步消息
+    msg.Empty exitMapView = 3; // 客户端主动取消订阅地图视图
+  }
+}
+
+
+//------------------------------------------------------------------------------------------
+// 订阅地图视图
+message Up_SetMapView {
+  uint32             mapID      = 1;
+  enumx.MapViewLayer layer      = 2;      // client视野层级
+  msg.IntPos         viewCenter = 3;      // 视野中心
+  bool               isViewUser = 4;      // 是否在观察别的地图
+}
+
+// 客户端主动取消订阅地图视图
+message Up_ExitMapView {
+  uint32 mapID = 1;      // 地图ID
+}
+
+// 客户端主动拉取视野格子信息并订阅
+message Up_GetMapView {
+  uint32             mapID      = 1;
+  enumx.MapViewLayer layer      = 2;  // client视野层级
+  msg.IntPos         viewCenter = 3;  // 视野中心
+  bool               isViewUser = 4;  // 是否在观察别的地图
+  bool               isObserve  = 5;  // 是否订阅地图
+}
+
+//------------------------------------------------------------------------------------------
+
+// 服务器异步推送客户端地图视图
+message Dn_ClientMapView {
+  msg.ClientMapView mapView = 1;
+}
+
+//------------------------------------------------------------------------------------------
+// Army 操作更新 单独立即推送给 owner
+message Dn_MapObjectAdd {
+  uint32                    mapID        = 1; // 地图ID
+  msg.UBIGuildInfo          ubiGuildInfo = 2; // 玩家|公会信息
+  repeated msg.ClientMapObj mapObjs      = 3; // 地图对象
+}
+
+// 地图单位数据变化的全量更新, 目前主要是Army, 异步推送owner
+message Dn_MapObjectChange {
+  repeated msg.ClientMapObj mapObjs = 1; // 地图对象
+}
+
+message Dn_MapObjectRemove {
+  uint32          mapID  = 1; // 地图ID
+  repeated uint64 objIDs = 2; // 删除的对象ID
+}

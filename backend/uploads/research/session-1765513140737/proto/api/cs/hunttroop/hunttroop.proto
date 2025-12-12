@@ -1,0 +1,195 @@
+syntax = "proto3";
+package hunttroop;
+import "msg/msg.proto";
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb/pb_hunttroop";
+option (gogoproto.goproto_getters_all) = false;
+//------------------------------------------------------------------------------------------
+message Up_Union {
+  oneof body {
+    option (validator.oneof) = {required: true};
+    Up_SendTroop                sendTroop                = 1;
+    Up_CommonRefreshTask        commonRefreshTask        = 2;
+    Up_SuperRefreshTask         superRefreshTask         = 3;
+    Up_GetMyTasks               getMyTasks               = 4;
+    Up_SupperSendTroop          supperSendTroop          = 5;
+    Up_RobHuntTroop             robHuntTroop             = 6;
+    Up_ChasePlayer              chasePlayer              = 7;
+    Up_GetCanHelpListInGuild    getCanHelpListInGuild    = 8;
+    //获取通缉列表中可帮助的任务
+    Up_GetTaskListByWanted      getTaskListByWanted      = 9;
+    Up_HelpGuildMemberHuntTroop helpGuildMemberHuntTroop = 10;
+    Up_MarkEmojiForRob          markEmojiForRob          = 11;
+    Up_GetRecords               getRecords               = 12;
+    Up_GetHuntTroopReward       getHuntTroopReward       = 13;
+    Up_MarkEmojiForHelp         markEmojiForHelp         = 14;
+    Up_CreateHuntTroopInMap     createHuntTroopInMap     = 15;
+    Up_GetRandCanStealTask      getRandCanStealTask      = 16;
+  }
+}
+
+message Dn_Union {
+  oneof body {
+    Dn_SendTroop                sendTroop                = 1;
+    Dn_CommonRefreshTask        commonRefreshTask        = 2;
+    Dn_SuperRefreshTask         superRefreshTask         = 3;
+    Dn_GetMyTasks               getMyTasks               = 4;
+    Dn_SupperSendTroop          supperSendTroop          = 5;
+    Dn_RobHuntTroop             robHuntTroop             = 6;
+    Dn_ChasePlayer              chasePlayer              = 7;
+    Dn_GetCanHelpListInGuild    getCanHelpListInGuild    = 8;
+    //获取通缉列表中可帮助的任务
+    Dn_GetTaskListByWanted      getTaskListByWanted      = 9;
+    Dn_HelpGuildMemberHuntTroop helpGuildMemberHuntTroop = 10;
+    Dn_MarkEmojiForRob          markEmojiForRob          = 11;
+    Dn_GetRecords               getRecords               = 12;
+    Dn_GetHuntTroopReward       getHuntTroopReward       = 13;
+    Dn_MarkEmojiForHelp         markEmojiForHelp         = 14;
+    Dn_CreateHuntTroopInMap     createHuntTroopInMap     = 15;
+    Dn_GetRandCanStealTask      getRandCanStealTask      = 16;
+  }
+}
+
+message Up_CommonRefreshTask {
+}
+
+message Dn_CommonRefreshTask {
+  msg.CostReward             costReward   = 1; // 消耗
+  repeated msg.HuntTroopTask currentTasks = 2; // 刷新后的任务
+}
+
+message Up_SuperRefreshTask {
+}
+
+message Dn_SuperRefreshTask {
+  msg.CostReward             costReward   = 1; // 消耗
+  repeated msg.HuntTroopTask currentTasks = 2; // 刷新后的任务
+}
+
+message Up_GetMyTasks {
+}
+
+message Dn_GetMyTasks {
+  repeated msg.HuntTroopTask currentTaskList   = 1;
+  repeated msg.HuntTroopTask guildTaskList  = 2;
+  repeated msg.HuntTroopTask wantedTaskList = 3;
+  repeated msg.HuntTroopTask historyTaskList = 4;
+}
+
+message Up_SendTroop {
+  uint64          taskID    = 1;
+  repeated uint32 heroIDs = 2;
+}
+
+message Dn_SendTroop {
+  msg.HuntTroopTask task = 1;
+}
+
+message TroopForSend {
+  uint32          slot    = 1;
+  repeated uint32 heroIDs = 2;
+}
+
+message Up_SupperSendTroop {
+  repeated TroopForSend troops = 1;
+}
+
+message Dn_SupperSendTroop {
+  repeated msg.HuntTroopTask tasks = 1;
+}
+
+message Up_RobHuntTroop {
+  uint64 huntTroopId = 1;
+  uint32 ownerUid    = 2;
+  uint32 mapID       = 3;
+}
+
+message Dn_RobHuntTroop {
+  msg.CostReward    costReward = 1; // 奖励
+  msg.HuntTroopTask task       = 2;
+}
+
+message Up_ChasePlayer {
+  uint32 playerID = 1;
+}
+
+message Dn_ChasePlayer {
+}
+
+message Up_GetCanHelpListInGuild {
+}
+
+message Dn_GetCanHelpListInGuild {
+  repeated msg.HuntTroopTask taskList = 1;
+}
+
+message Up_GetTaskListByWanted {
+}
+
+message Dn_GetTaskListByWanted {
+  repeated msg.HuntTroopTask taskList = 1;
+}
+
+message Up_HelpGuildMemberHuntTroop {
+  uint64 taskID   = 1;
+  uint32 ownerUID = 2;
+  uint32 mapID    = 3;
+}
+
+message Dn_HelpGuildMemberHuntTroop {
+  msg.CostReward    costReward = 1; // 消耗
+  msg.HuntTroopTask task       = 2;
+}
+
+message Up_MarkEmojiForRob {
+  uint64 taskID   = 1;
+  uint32 ownerUID = 2;
+  string emoji    = 3;
+  uint32 mapID    = 4;
+}
+
+message Dn_MarkEmojiForRob {
+}
+
+message Up_GetRecords {
+}
+
+message Dn_GetRecords {
+  repeated msg.HuntTroopRecord records = 1;
+}
+
+message Up_GetHuntTroopReward {
+  //uint64 taskID = 1;
+  repeated uint64 taskIDs = 2;
+}
+
+message Dn_GetHuntTroopReward {
+  msg.CostReward costReward = 1; // 消耗
+}
+
+message Up_MarkEmojiForHelp {
+  uint64 taskID   = 1;
+  uint32 ownerUID = 2;
+  string emoji    = 3;
+  uint32 mapID    = 4;
+}
+
+message Dn_MarkEmojiForHelp {
+}
+
+message Up_CreateHuntTroopInMap {
+  uint64 taskID = 1;
+}
+
+message Dn_CreateHuntTroopInMap {
+  msg.HuntTroopTask task = 1;
+}
+
+message Up_GetRandCanStealTask {
+}
+
+message Dn_GetRandCanStealTask {
+  msg.HuntTroopTask task = 1;
+}

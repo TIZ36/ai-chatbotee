@@ -1,0 +1,84 @@
+syntax = "proto3";
+package reserve;
+import "msg/msg.proto";
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb/pb_reserve";
+option (gogoproto.goproto_getters_all) = false;
+
+// reserve
+//------------------------------------------------------------------------------------------
+message Up_Union {
+  oneof body {
+    option (validator.oneof) = {required: true};
+    Up_Recruit    recruit       = 1; // 招募预备役
+    Up_Upgrade    upgrade       = 2; // 晋升预备役
+    msg.Empty     finishQueue   = 3; // 完成预备役队列
+    Up_SpeedUp    speedUp       = 4; // 加速预备役
+    Up_UpgradeNow upgradeNow    = 5; // 立即完成预备役晋升
+    bool          defendToDeath = 6; // 死守模式
+  }
+}
+
+message Dn_Union {
+  oneof body {
+    Dn_Recruit     recruit       = 1; // 招募预备役结果
+    Dn_Upgrade     upgrade       = 2; // 晋升预备役结果
+    Dn_FinishQueue finishQueue   = 3; // 完成预备役队列结果
+    Dn_SpeedUp     speedUp       = 4; // 加速预备役结果
+    Dn_UpgradeNow  upgradeNow    = 5; // 立即完成预备役晋升结果
+    msg.Empty      defendToDeath = 6; // 死守模式结果
+  }
+}
+
+message Up_Recruit {
+  uint32 id           = 1; // 预备役id
+  uint32 num          = 2; // 招募数量
+  bool   isNow        = 3; // 是否立即完成
+  uint32 timeCostGold = 4; // 时间消耗的黄金
+}
+
+message Dn_Recruit {
+  msg.ReserveQueue reserveQueue = 1; // 招募队列
+  msg.CostReward   costReward   = 2; // 消耗奖励
+  msg.ReserveUnit  reserveUnit  = 3; // 变化的预备役
+}
+
+message Up_Upgrade {
+  uint32 id           = 1; // 预备役id
+  uint32 targetId     = 2; // 目标预备役id
+  uint32 num          = 3; // 升级数量
+  bool   isNow        = 4; // 是否立即完成
+  uint32 timeCostGold = 5; // 时间消耗的黄金
+}
+
+message Dn_Upgrade {
+  msg.ReserveQueue reserveQueue = 1; // 晋升队列
+  msg.CostReward   costReward   = 2; // 消耗奖励
+}
+
+message Dn_FinishQueue {
+  msg.ReserveQueue reserveQueue = 1; // 完成的队列
+  msg.ReserveUnit  reserveUnit  = 2; // 完成的预备役
+}
+
+message Up_SpeedUp {
+  uint32              id                = 1;
+  repeated msg.UintKV items             = 2[(gogoproto.nullable) = false]; // 加速道具列表
+  uint64              clientSpeedUpTime = 3; // 客户端加速时间
+}
+
+message Dn_SpeedUp {
+  msg.ReserveQueue reserveQueue = 1; // 加速后的预备役队列
+  msg.CostReward   costReward   = 2; // 消耗奖励
+}
+
+message Up_UpgradeNow {
+  uint32 timeCostGold = 1; // 时间消耗的黄金
+}
+
+message Dn_UpgradeNow {
+  msg.ReserveQueue reserveQueue = 1; // 预备役队列
+  msg.CostReward   costReward   = 2; // 消耗奖励
+}

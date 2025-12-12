@@ -1,0 +1,432 @@
+syntax = "proto3";
+package gm;
+import "msg/msg.proto";
+import "msg/map_msg.proto";
+import "msg/battle_msg.proto";
+import "enumx/enumx.proto";
+import "enumx/csv_enumx.proto";
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb/pb_gm";
+option (gogoproto.goproto_getters_all) = false;
+
+//------------------------------------------------------------------------------------------
+message Up_Union {
+  oneof body {
+    option (validator.oneof)                 = {required: true};
+    Up_UnlockBuilding     unlockBuilding     = 3;
+    Up_LockBuilding       lockBuilding       = 4;
+    Up_Common             common             = 5;
+    Up_AddAsset           addAsset           = 6;
+    Up_AddBuff            addBuff            = 7;
+    Up_UnlockHomeProgress unlockHomeProgress = 8;
+    Up_FinishTask         finishTask         = 9;
+    Up_Charge             charge             = 10;
+    Up_AddActivity        addActivity        = 11;
+    Up_UpgradeHomeToLv upgradeHomeToLv = 12;
+    Up_ChangeGameTime changeGameTime = 13;
+    // from w3
+    Up_SendMail           sendMail           = 14;
+    Up_SetActivity        setActivity        = 15;
+    Up_FinishActivityTask finishActivityTask = 16;
+    Up_OpAssets           opAssets           = 17; // 资源操作
+    Up_LeaveBattle        leaveBattle        = 18; // 离开战斗
+    Up_PassFpsStage       passFpsStage       = 19; // FPS战斗通过
+    Up_Teleport           teleport           = 20; // 主基地瞬移
+    Up_AddTime            setTime            = 21; // 加减时间类型
+    Up_Refund             refund             = 22; // 退款
+    Up_BuyBack            buyBack            = 23; // 回购
+    Up_SetActivityPoint   setActivityPoint   = 24; // 设置活动积分
+    Up_CutStrength        cutStrength        = 25; // 扣减体力
+    Up_SendQueueCitizen   sendQueueCitizen   = 26; // gm发居民到队列
+
+    Up_OccupyVillage      occupyVillage      = 30; // 立即占领村庄
+    Up_GiveupVillage      giveupVillage      = 31; // 放弃村庄 倒计时15s
+    Up_DeclareWar         declareWar         = 32; // gm宣战/预宣战 绕过检查
+    Up_OpenVillage        openVillage        = 33; // 从未开放到开放村庄 倒计时15s
+    Up_SetVillageHP       setVillageHP       = 34; // 设置村庄血量
+    Up_AddGuildGvgPoint   addGuildGvgPoint   = 40; // 增加公会GvG积分
+    Up_GvGToNextStage     gvgToNextStage     = 41; // GvG村庄到下一阶段 倒计时15s, 目前只有保护期->争夺期->保护期
+    Up_GenGvGReward       genGvGReward       = 42; // 生成GvG氛围奖励
+
+    msg.Empty             btMsgCheck         = 50; // 战斗校验
+
+    Up_QueryInfo          queryInfo          = 60; // 查询信息
+  }
+}
+
+message Dn_Union {
+  oneof body {
+    Dn_UnlockBuilding     unlockBuilding     = 3;
+    Dn_LockBuilding       lockBuilding       = 4;
+    Dn_Common             common             = 5;
+    Dn_AddAsset           addAsset           = 6;
+    Dn_AddBuff            addBuff            = 7;
+    Dn_UnlockHomeProgress unlockHomeProgress = 8;
+    Dn_FinishTask         finishTask         = 9;
+    Dn_Charge             charge             = 10;
+    Dn_AddActivity        addActivity        = 11;
+    Dn_UpgradeHomeToLv upgradeHomeToLv = 12;
+    Dn_ChangeGameTime changeGameTime = 13;
+    // from w3
+    msg.Empty             sendMail           = 14;
+    Dn_SetActivity        setActivity        = 15;
+    Dn_FinishActivityTask finishActivityTask = 16;
+    Dn_OpAssets           opAssets           = 17; // 资源操作
+    Dn_LeaveBattle        leaveBattle        = 18; // 离开战斗
+    Dn_PassFpsStage       passFpsStage       = 19; // FPS战斗通过
+    Dn_Teleport           teleport           = 20; // 主基地瞬移
+    Dn_AddTime            setTime            = 21; // 加减时间类型
+    Dn_Refund             refund             = 22; // 退款
+    Dn_BuyBack            buyBack            = 23; // 回购
+    Dn_SetActivityPoint   setActivityPoint   = 24; // 设置活动积分
+    Dn_CutStrength        cutStrength        = 25; // 扣减体力
+    msg.Empty             sendQueueCitizen   = 26; // gm发居民到队列
+
+    Dn_OccupyVillage      occupyVillage      = 30; // 立即占领村庄
+    Dn_GiveupVillage      giveupVillage      = 31; // 立即放弃村庄
+    Dn_DeclareWar         declareWar         = 32; // gm宣战/预宣战 绕过检查
+    Dn_OpenVillage        openVillage        = 33;  // 从未开放到开放村庄
+    Dn_SetVillageHP       setVillageHP       = 34; // 设置村庄血量
+
+    Dn_AddGuildGvgPoint   addGuildGvgPoint   = 40; // 增加公会GvG积分
+    Dn_GvGToNextStage     gvgToNextStage     = 41; // GvG村庄到下一阶段
+    msg.Empty             genGvGReward       = 42; // 生成GvG氛围奖励 通过视野下发
+    Dn_BtMsgCheck         btMsgCheck         = 50; // 战斗校验
+
+    Dn_QueryInfo          queryInfo          = 60; // 查询信息
+  }
+}
+
+//------------------------------------------------------------------------------------------
+message Up_UpgradeHomeToLv {
+  uint32 level = 1;
+}
+
+message Dn_UpgradeHomeToLv {
+  repeated msg.SBuilding buildings = 1;
+}
+
+message Up_ChangeGameTime {
+  uint32 hour = 1;
+  uint32 minute = 2;
+}
+
+message Dn_ChangeGameTime {
+  int64 gameStartTime = 1;
+}
+
+
+
+message Up_Teleport {
+  msg.IntPos pos = 1[(gogoproto.nullable) = false]; // 主基地瞬移位置
+}
+
+message Dn_Teleport {
+  msg.IntPos pos = 1[(gogoproto.nullable) = false]; // 主基地瞬移位置
+}
+
+message Up_GenGvGReward {
+  uint64 villageID = 1; // 村庄objID
+}
+
+// 服务器根据当前状态判断是预宣战还是宣战
+message Up_DeclareWar {
+  uint64 villageID = 1; // 村庄objID
+  string announce  = 2; // 宣战公告
+}
+
+message Dn_DeclareWar {
+  msg.ClientMapObj obj = 1; // 村庄信息
+}
+
+
+// 按玩家当前公会占领村庄
+message Up_OccupyVillage {
+  uint64 villageID = 1; // 村庄objID
+}
+
+message Dn_OccupyVillage {
+  msg.ClientMapObj obj = 1; // 村庄信息
+}
+
+message Up_GiveupVillage {
+  uint64 villageID = 1; // 村庄objID
+}
+
+message Dn_GiveupVillage {
+  msg.ClientMapObj obj = 1; // 村庄信息
+}
+
+message Up_AddGuildGvgPoint {
+  uint64 villageID = 1; // 村庄objID
+  uint32 point     = 2; // 增加的公会GvG积分
+}
+
+message Dn_AddGuildGvgPoint {
+  msg.ClientMapObj obj = 1; //  gvg点数据
+}
+
+message Up_OpenVillage {
+  uint64 villageID = 1; // 村庄objID
+}
+message Dn_OpenVillage {
+  msg.ClientMapObj obj = 1; // 村庄信息
+}
+
+message Up_SetVillageHP {
+  uint64 villageID = 1; // 村庄objID
+  uint32        hp = 2; // 血量
+}
+
+message Dn_SetVillageHP {
+  msg.ClientMapObj obj = 1; // 村庄信息
+}
+
+// GvG村庄到下一阶段, 保护期 -> 争夺期 & 争夺期 -> 保护期
+message Up_GvGToNextStage {
+  uint64 villageID = 1; // 村庄objID
+}
+
+message Dn_GvGToNextStage {
+  msg.ClientMapObj obj = 1; // 村庄信息
+}
+
+//////////////////////////////////////////////////////////////////////
+
+message Up_UnlockBuilding {
+  repeated uint32 buildingIDList = 2;
+}
+
+message Dn_UnlockBuilding {
+  repeated uint32       newBieFpsStages = 1;
+  repeated msg.Building buildingList    = 2;
+}
+
+message Up_LockBuilding {
+  repeated uint32 buildingIDList = 2;
+}
+
+message Dn_LockBuilding {
+  repeated uint32       newBieFpsStages = 1;
+  repeated msg.Building buildingList    = 2;
+}
+
+message Up_Common {
+  repeated string params = 1;
+}
+
+// GM战斗记录信息
+message GMBattleRecordInfo {
+  string           battleId      = 1;  // 战斗ID
+  string           battleType    = 2;  // 战斗类型
+  string           battleTime    = 3;  // 战斗时间
+  string           duration      = 4;  // 战斗持续时间
+  uint32           atkUid        = 5;  // 攻击方UID
+  uint32           defUid        = 6;  // 防守方UID
+  uint32           defMonsterId  = 7;  // 防守方怪物ID
+  string           battleResult  = 8;  // 战斗结果
+  msg.BtRecord     record        = 9;  // 完整的战斗记录
+}
+
+// GM查询战斗记录返回
+message Dn_QueryBtRecord {
+  uint32                       count   = 1; // 记录数量
+  repeated GMBattleRecordInfo  records = 2; // 战斗记录列表
+}
+
+message Dn_Common {
+  msg.SupplyCase   supplyCases     = 1;
+  msg.Building     building        = 2;
+  msg.Campaign     campaign        = 3;
+  Dn_QueryBtRecord queryBtRecord   = 4; // 查询战斗记录结果
+}
+
+message Up_AddAsset {
+  enumx.AssetType assetType = 1;
+  uint32          assetID   = 2;
+  int64 amount = 3;
+  repeated msg.Asset addAssets = 4;
+}
+
+message Dn_AddAsset {
+}
+
+message Up_AddBuff {
+  repeated msg.Buff buffs = 1[(gogoproto.nullable) = false];
+}
+
+message Dn_AddBuff {
+}
+
+// UnlockHomeProgress
+message Up_UnlockHomeProgress {
+}
+
+message Dn_UnlockHomeProgress {
+  repeated msg.Building     buildings     = 1;
+  repeated msg.HomeGridData hisGridDataL  = 2;
+  repeated msg.HomeMistData homeMistDataL = 3;
+  msg.Campaign              campaign      = 4; // 战役数据
+}
+
+message Up_FinishTask {
+  repeated uint32 taskID = 1;
+}
+
+message Dn_FinishTask {
+  repeated msg.Task tasks = 1;
+}
+
+message Up_AddActivity {
+  uint64 scheduleId = 1;
+  int64  startTs    = 2;
+}
+
+message Dn_AddActivity {
+}
+
+message Up_SendMail {
+  repeated uint32 keys = 1; // 不填则默认全发
+  uint32          cnt  = 2; // 默认发1封
+}
+
+message Up_Charge {
+  uint32 bundleGroupID = 1; // 充值的礼包组ID
+  uint32 bundleID      = 2; // 充值的礼包ID
+  uint64 scheduleID    = 3; // 礼包scheduleID
+}
+
+message Dn_Charge {
+  msg.Reward           reward = 1; // 奖励
+  msg.GiftPackageGroup group  = 2; // 礼包组
+}
+
+
+message Up_SetActivity {
+  uint64 scheduleId = 1;
+  int64  startTs    = 2;
+}
+
+message Dn_SetActivity {
+}
+
+message Up_FinishActivityTask {
+  msg.ActivityKey      actKey  = 1[(gogoproto.nullable) = false]; // 活动任务唯一标识
+  enumx.ActivityModule module  = 2;
+  repeated uint32      taskIds = 3; // 任务ID
+}
+
+message Dn_FinishActivityTask {
+}
+
+message AssetUnit {
+  enumx.AssetType assetType = 1;
+  uint32          assetID   = 2;
+  int64           amount    = 3; // 为负数表示扣除
+}
+
+message Up_OpAssets {
+  repeated AssetUnit assets = 1[(gogoproto.nullable) = false]; // 资产列表
+}
+
+message Dn_OpAssets {
+}
+
+message Up_LeaveBattle {
+  enumx.BattleType      battleType = 1;
+  uint32                gridId     = 2; // 下城区地格ID
+  uint32                stageId    = 3;
+  enumx.BattleResult    result     = 4; // 战斗结果， 暂时相信客户端
+  msg.Formation         formation  = 5;
+  repeated msg.Uint64KV skillSeqs  = 6; // 技能释放序列
+  double                battleTime = 7; // 战斗时间
+}
+
+message Dn_LeaveBattle {
+  enumx.BattleType           battleType     = 1;
+  uint32                     stageId        = 2;
+  enumx.BattleResult         result         = 3;
+  msg.Formation              formation      = 4;
+  msg.Formation              enemyFormation = 5;
+
+  // 下城区数据 更新
+  msg.HomeGridData           homeGridData   = 7;
+  repeated msg.HomeStageData homeStageData  = 8;
+  msg.Reward                 reward         = 9; // 奖励
+  msg.Campaign               campaign       = 10; // 战役数据
+}
+
+// PassFpsStage
+message Up_PassFpsStage {
+  enumx.FpsBattleType fpsBattleType = 1; // FPS战斗类型
+  uint32              buildingID    = 2;
+  uint32              gridID        = 3; // 地格ID
+  uint32              fpsStage      = 4;
+}
+
+message Dn_PassFpsStage {
+  uint32         buildingID = 1;
+  uint32         fpsStage   = 2;
+  msg.CostReward costReward = 3;
+}
+
+
+message Up_AddTime {
+  enumx.AssetTimeType assetTimeType = 1;
+  uint32              subEnumValue  = 2; // 子表enum值，用于同种timeType的子类，只有一种可以不填
+  int64               seconds       = 3; // 多少秒，扣除用负数
+}
+
+message Dn_AddTime {
+}
+
+message Up_Refund {
+  string serial = 1; // 订单ID
+}
+
+message Dn_Refund {
+}
+
+message Up_BuyBack {
+  uint32 refundMailID  = 1; // 邮件ID
+  uint32 bundleGroupID = 2; // 充值的礼包组ID
+  uint32 bundleID      = 3; // 充值的礼包ID
+}
+
+message Dn_BuyBack {
+  msg.Reward reward       = 1; // 奖励
+  uint32     refundMailID = 2;
+}
+message Up_SetActivityPoint {
+  uint32 scheduleID = 1; // 活动ID
+  uint32 pointCount = 2; // 积分数量
+}
+
+message Dn_SetActivityPoint {
+}
+
+message Up_CutStrength {
+  uint32 cnt = 1; // 扣减数量
+}
+
+message Dn_CutStrength {
+  msg.RecoverData strength = 1;
+}
+
+message Up_SendQueueCitizen {
+  uint32 citizenID = 1; // 居民ID
+}
+
+message Dn_BtMsgCheck {
+  msg.BtMsgCheckConfig result = 1;
+}
+
+message Up_QueryInfo {
+  repeated string params = 1; // 查询参数
+}
+
+message Dn_QueryInfo {
+  string info = 1; // 查询信息
+}

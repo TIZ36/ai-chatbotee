@@ -1,0 +1,225 @@
+syntax = "proto3";
+package enumx;
+
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+option go_package = "verse/backend/pb/enumx";
+option (gogoproto.goproto_enum_prefix_all) = false;
+
+// 目前枚举只起到说明文档的作用
+
+enum Event {
+  reserved 100000 to max; // 100000以上码段的属于客户端枚举，不加到服务器枚举event.proto中
+  Event_None                    = 0;
+  Event_BuildingUpgrade=1;//建筑升级完成
+  Event_ComponentUpgrade=2;//组件升级
+  Event_FinishOrder=3;//完成订单
+  Event_PowerRankLvUp=4;//上位之路升级
+  Event_AssignStuff=5;//派遣员工
+  Event_PassHomePveStage=6;//通过主城PVE关卡
+  Event_UpdateCounter=7;//更新计数器
+  Event_CompleteChapterTask=8;//完成章节子任务
+  Event_CompleteChapter=9;//完成主章节
+  Event_TimedTaskSubmmit=10;//完成timedtask任务
+  Event_CompleteTimelineEpisode=11;//完成timelineEpisode
+  Event_CardLvUpByLv=12;//兵卡升级，传入兵卡等级
+  Event_CardStarUpByStar=13;//兵卡升星，传入兵卡星级
+  Event_DrawCard=14;//抽卡
+  Event_AddCard=15;//添加兵卡
+  Event_UpdateFightPower=16;//更新战力
+  Event_DailyLogin=17;//每日登录
+  Event_ScienceLvUp=18;//科技升级
+  Event_CardLvUpByID=19;//兵卡升级，传入兵卡ID
+  Event_BuyChargeBundle=20;//购买礼包，传groupID和ChargeBundleID
+  Event_ChangeName=21;//修改玩家名称
+  Event_BuildingUpgradeStart=22;//建筑升级开始
+  Event_ServerOpenDays=23;//开服天数变动
+  Event_VipLvUp=24;//vip等级提升
+  Event_PrivilegeCardActive=25;//特权卡激活
+  Event_IsInGuild=26;//是否加入联盟
+  Event_VipActive=27;//vip激活
+  Event_GuildTechLvUp=28;//联盟科技升级
+  Event_GuildMemberJoin=29;//联盟成员加入
+  Event_GuildPowerChange=30;//联盟战力变化
+  Event_GuildGiftLvUp=31;//联盟礼包升级
+  Event_RadarLevelUp=32;//雷达等级提升
+  Event_HitMonster=33;//击败野怪
+  Event_RankScoreChange=34;//排行榜分数变化
+  Event_ScienceTreeProgressUp=35;//科技升级
+  Event_NewArenaRank=36;//获得新的演习场排名
+  Event_GuildHelp=37;//公会帮助
+  Event_RadarTaskFinish=38;//雷达任务完成
+  Event_MineGetResource=39;//采集获得资源
+  Event_TrainSoldier=40;//训练士兵
+  Event_CardSkillLevelUp=41;//兵卡技能升级
+  Event_SpeedUpCutTime=42;//加速时间减少
+}
+
+// 表达式检查主要原因是客户端在登录之后,持有的用户数据有限,对于一些表达式,缺少运算数据.
+// 增加表达检查,是为了将这部分场景提前暴露.服务器与客户端共同协商,在运算表达式之前给客户端补足数据.
+// 详情在wiki[表达式检查]中有
+// 增加condition时需要考虑是否增加对应event
+// 如有新增，记得叫策划维护一下飞书文档：https://lilithgames.feishu.cn/wiki/wikcnRcjHT5Y66T1uiTSjvyTbnf
+enum Condition {
+  reserved 100000 to max; // 100000以上码段的属于客户端枚举，不加到服务器枚举event.proto中
+  Condition_None                         = 0;
+  Condition_SBuildingLv=1;
+  Condition_SComponentLv=2;
+  Condition_OrderNum=3;
+  Condition_PowerRankLv=4;
+  Condition_BuildingStaffNum=5;
+  Condition_PassHomePveStage=6; // 是否通过主城PVE关卡, eg:PassHomePveStage(1) // 关卡id
+  Condition_Counter=7; // 判断计数器 eg:Counter(3) // counter表id
+  Condition_IsChapterTaskFinished=8;
+  Condition_IsChapterFinished=9;
+  Condition_IsTimedTaskSubmmited=10;
+  Condition_IsEpisodeComplete=11;
+  Condition_CardCntByLv=12; // 指定等级兵卡数量 CardCntByLv(lv)>=count
+  Condition_CardStarUpByStar=13;
+  Condition_OrderItemTimes=14;
+  Condition_DrawCardCnt=15; // 抽卡次数 DrawCardCnt()
+  Condition_HasCard=16; // 是否拥有指定兵卡 HasCard(cardID)
+  Condition_IsReachPower=17; // 是否达到战力
+  Condition_FightPower=18; // 战力 eg:FightPower() // 总战力值
+  Condition_DiffLoginDaysByStartActivity=19; // 自活动开始登录经过的天数（从1开始） eg:DiffLoginDaysByStartActivity(10001) // 活动ScheduleId
+  Condition_ScienceLvByID=20; // 指定科技达到等级 ScienceLvByID(id)>=lv
+  Condition_CardLvByID=21; // 指定兵卡达到等级 CardLvByID(cardID)>=lv
+  Condition_DaysAfterBuyGiftPackage=22; // 购买指定礼包的第几天，DaysAfterBuyGiftPackage(groupID, bundleID)>=days，购买当天算第一天
+  Condition_HasBoughtGiftPackage=23; // 是否购买了指定礼包，HasBoughtGiftPackage(groupID, bundleID)
+  Condition_ChangeName=24; // 是否修改了玩家名称 ChangeName()
+  Condition_IsBuildingUpgradeStart=25; // 是否开始建筑升级 IsBuildingUpgradeStart(buildingID)
+  Condition_ServerOpenDays=26; // 开服天数（从1开始）： ServerOpenDays()
+  Condition_VipLevel=27; // 是否达到vip等级 VipLevel(id)
+  Condition_IsPrivilegeCardActive=28; // 特权卡是否有效 IsPrivilegeCardActive(cardEnum的值)
+  Condition_IsInGuild=29; // 是否加入联盟 IsInGuild()
+  Condition_IsVipActive=30; // 是VIP有效 IsVipActive()
+  Condition_GuildTechLvByID=31; // 联盟科技达到等级 GuildTechLvByID(id)>=lv，点击研究就算达到等级
+  Condition_GuildMemberCount=32; // 联盟成员数量 GuildMemberCount() 返回成员数量
+  Condition_GuildPower=33; // 联盟战力 GuildPower() 返回战力
+  Condition_GuildGiftLv=34; // 联盟礼包等级 GuildGiftLv() 返回等级
+  Condition_RadarLevel=35; // 雷达等级 RadarLevel() 返回等级
+  Condition_HitMonsterCnt=36; // 击败野怪数量 HitMonsterCnt(enumx.MapMonsterType) 返回数量
+  Condition_RankScore=37; // 排行榜分数 RankScore(rankBoardType) 返回分数
+  Condition_ScienceTreeProgress=38; // X科技树研究进度达到Y% ScienceTreeProgress(X) 返回进度 X为tech group id
+  Condition_GuildTechResearchCount=39; // 联盟科技累计研究次数 GuildTechResearchCount() 返回次数
+  Condition_NewArenaRank=40; // 最新获得的演习场排名 AreaRankNewCnt() 返回排名名次
+  Condition_GuildHelpCnt=41; // 公会帮助次数 GuildHelpCnt() 返回任务计数
+  Condition_RadarTaskFinishCnt=42; // 雷达任务完成 RadarTaskFinishCnt() 返回每次触发event的任务完成次数
+  Condition_DailyLoginCnt=43; // 活动期间登录 DailyLoginCnt() 触发一次返回一次
+  Condition_BuyAnyBundle=44; // 购买一次礼包 BuyAnyBundle() 触发一次返回一次
+  Condition_MineGetResourceCnt=45; // 采集获得资源 MineGetResourceCnt() 返回采集资源的amount
+}
+
+// 目前都是服务器condition，如果需要新增纯客户端condition需要讨论
+
+// Action不可以摸非玩家表格的数据，例如竞技场数据
+// 如有新增，记得叫策划维护一下飞书文档：https://lilithgames.feishu.cn/wiki/wikcnRcjHT5Y66T1uiTSjvyTbnf
+enum Action {
+  Action_None             = 0;
+  Action_SendMail         = 1; // 发邮件，参数为enumx.MailKey，且必须是无富文本的邮件，eg：SendMail(TestAllMail)
+  Action_HeroLvByHid      = 2;
+  Action_HeroCntByLv      = 3;
+  Action_DrawCnt          = 4;
+  Action_ConquerPoint     = 5;
+  Action_ShopBuyCnt       = 6;
+  Action_UnlockTaskSystem = 7; // 解锁任务系统 eg: UnlockTaskSystem(BlockadeLine) 解锁封锁线任务
+  Action_UnlockTask       = 8; // 解锁任务 eg: UnlockTask(TaskId) 解锁任务id
+}
+
+enum EventParamType {
+  EventParamType_None             = 0;
+  EventParamType_DrawCardCnt      = 1;
+  EventParamType_BuildingID       = 2;
+  EventParamType_CardID           = 3;
+  EventParamType_OfficerID        = 4;
+  EventParamType_ChangeName       = 5;
+  EventParamType_CardAppointHero  = 6; // 任命军官
+  EventParamType_SupplyCaseID     = 7;
+  EventParamType_ShopID           = 8;
+  EventParamType_ReserveID        = 9;
+  EventParamType_ReserveNum       = 10;
+  EventParamType_SpeedUpType      = 11;
+  EventParamType_SpeedUpMinutes   = 12;
+  EventParamType_ParamCnt         = 13;
+  EventParamType_DrawCardType     = 14;
+  EventParamType_FightPowerType   = 15;
+  EventParamType_CitizenType      = 16;
+  EventParamType_ReserveLv        = 17;
+  EventParamType_AssetID          = 18;
+  EventParamType_VillageLv        = 19;
+  EventParamType_MapMonsterType   = 20;
+  EventParamType_OccupyGvgVillage = 21;
+}
+
+enum Counter {
+  Counter_None                        = 0;
+  Counter_DailyLogin                  = 1; // 每日登录
+  Counter_AirdropClaim                = 2; // 获取空投
+  Counter_DrawCard                    = 3; // 抽卡
+  Counter_ArenaBattle                 = 4; // 竞技场战斗
+  Counter_ShopBuy                     = 5; // 商店购买
+  Counter_ReceiveResourceFromBuilding = 6; // 从建筑收集资源
+  Counter_UpgradeBuilding             = 7; // 升级建筑
+  Counter_DoSpeedUp                   = 8; // 进行加速
+  Counter_UpgradeCard                 = 9; // 升级兵卡
+  Counter_DoCharge                    = 10; // 付费
+  Counter_EnterCampaign               = 11; // 进入战役
+  Counter_ResearchScience             = 12; // 科技研究
+  Counter_ClaimCampaign               = 13; // 获取战役奖励
+  Counter_GuildHelp                   = 14; // 联盟帮助
+  Counter_GuildTechDonate             = 15; // 联盟科技捐献次数
+  Counter_GuildAttackCity             = 16; // 联盟进攻完一次城市
+  Counter_GuildFinishWar              = 17; // 联盟完成一次战斗
+  Counter_ReserveKilledLv1            = 18; // 击杀lv1预备役数量
+  Counter_ReserveKilledLv2            = 19; // 击杀lv2预备役数量
+  Counter_ReserveKilledLv3            = 20; // 击杀lv3预备役数量
+  Counter_ReserveKilledLv4            = 21; // 击杀lv4预备役数量
+  Counter_ReserveKilledLv5            = 22; // 击杀lv5预备役数量
+  Counter_ReserveKilledLv6            = 23; // 击杀lv6预备役数量
+  Counter_ReserveKilledLv7            = 24; // 击杀lv7预备役数量
+  Counter_ReserveKilledLv8            = 25; // 击杀lv8预备役数量
+  Counter_ReserveKilledLv9            = 26; // 击杀lv9预备役数量
+  Counter_ReserveKilledLv10           = 27; // 击杀lv10预备役数量
+  Counter_StrengthCost                = 28; // 消耗体力数量
+  Counter_ResCollect                  = 29; // 收集资源数量
+  Counter_ReserveKilled               = 30; // 击杀预备役数量
+  Counter_VillageCount                = 31; // 联盟进攻完一次城市
+  Counter_MapMonsterKilled            = 32; // mapMonster击杀数量
+  Counter_MainBaseAttack              = 33; // 进攻其他指挥官
+  Counter_HuntTroopRob                = 34; // 狩猎小队抢劫
+  Counter_DroneLvUp                   = 35; // 无人机升级
+  Counter_ReserverRecruit             = 36; // 预备役招募
+  Counter_TruckRob                    = 37; // 货车抢劫
+  Counter_TruckSend                   = 38; // 发送货车
+  Counter_RadarTaskFinish             = 39; // 完成雷达任务
+  Counter_CitizenAppoint              = 40; // 居民委派
+  Counter_CitizenQueueSubmit          = 41; // 居民接待来访，收留
+  Counter_OccupyVillage               = 42; // 占领村庄
+  Counter_MapPVPSoldiersKilled        = 43; // 地图PVP士兵击杀数量
+
+  // 活动相关的Counter
+  Counter_ActivityAssemblyHit         = 100; // 狙击试炼击败活动集结怪数量
+  Counter_ActivityAssemblyParticipate = 101; // 狙击试炼每日参与计数（不包含发起集结）
+
+    Counter_ProduceColaTimes   = 201; // 可乐制作
+  Counter_ProduceCrystalTimes   = 202; // 水晶制作
+  Counter_ProduceCigaretteTimes   = 203; // 香烟制作
+  Counter_PlantWeedTimes   = 204; // 烟田种植
+  Counter_PlantCocoaTimes   = 205; // 可可种植
+  Counter_ProduceCigaretteNum   = 206; // 香烟制造累计
+  Counter_ProduceCrystalNum   = 207; // 水晶制造累计
+  Counter_ProduceColaNum   = 208; // 可乐制造累计
+  Counter_GetCigaretteNum   = 209; // 香烟获取累计
+  Counter_GetCrystalNum   = 210; // 水晶获取累计
+  Counter_GetColaNum   = 211; // 可乐获取累计
+}
+
+enum BestCondition{
+  BestCondition_None = 0;
+}
+
+enum CounterCondition {
+  CounterCondition_None                    = 0;
+  CounterCondition_IsIDMatched             = 1; // IsIDMatched(SupplyCaseID,1001)
+  CounterCondition_IsAssetMatched          = 2; // IsAssetMatched(AssetType, Steel)
+  CounterCondition_IsMapMonsterTypeMatched = 3; // IsMapMonsterTypeMatched(Normal) 这里使用 enumx-> MapMonsterType
+}

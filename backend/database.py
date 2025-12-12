@@ -570,6 +570,52 @@ def create_tables():
         
         cursor.execute(create_message_executions_table)
         print("✓ Table 'message_executions' created/verified successfully")
+
+        # ==================== Research 相关表 ====================
+        # Research Sources：存储网址/文件/图片/目录等来源记录
+        create_research_sources_table = """
+        CREATE TABLE IF NOT EXISTS `research_sources` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `source_id` VARCHAR(120) NOT NULL UNIQUE COMMENT '来源ID',
+            `session_id` VARCHAR(100) NOT NULL COMMENT 'Research 会话ID（对应 sessions.session_id）',
+            `source_type` VARCHAR(20) NOT NULL COMMENT '来源类型：url/file/image/dir',
+            `title` VARCHAR(255) DEFAULT NULL COMMENT '来源标题/显示名',
+            `url` TEXT DEFAULT NULL COMMENT 'URL（当 source_type=url 时）',
+            `file_path` VARCHAR(800) DEFAULT NULL COMMENT '服务器侧文件路径（当 source_type=file/image/dir 时）',
+            `mime_type` VARCHAR(120) DEFAULT NULL COMMENT 'MIME 类型（文件/图片）',
+            `meta` JSON DEFAULT NULL COMMENT '扩展信息（JSON）',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+            INDEX `idx_rs_session_id` (`session_id`),
+            INDEX `idx_rs_source_type` (`source_type`),
+            INDEX `idx_rs_created_at` (`created_at`),
+            FOREIGN KEY (`session_id`) REFERENCES `sessions`(`session_id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Research Sources';
+        """
+
+        cursor.execute(create_research_sources_table)
+        print("✓ Table 'research_sources' created/verified successfully")
+
+        # Research Documents：目录/文件文本抽取后的文档库（用于检索）
+        create_research_documents_table = """
+        CREATE TABLE IF NOT EXISTS `research_documents` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `doc_id` VARCHAR(140) NOT NULL UNIQUE COMMENT '文档ID',
+            `session_id` VARCHAR(100) NOT NULL COMMENT 'Research 会话ID',
+            `source_id` VARCHAR(120) NOT NULL COMMENT '来源ID',
+            `rel_path` TEXT DEFAULT NULL COMMENT '相对路径（目录索引时）',
+            `content_text` LONGTEXT NOT NULL COMMENT '抽取的纯文本内容',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+            INDEX `idx_rd_session_id` (`session_id`),
+            INDEX `idx_rd_source_id` (`source_id`),
+            INDEX `idx_rd_created_at` (`created_at`),
+            FULLTEXT KEY `ft_rd_content` (`content_text`, `rel_path`),
+            FOREIGN KEY (`session_id`) REFERENCES `sessions`(`session_id`) ON DELETE CASCADE,
+            FOREIGN KEY (`source_id`) REFERENCES `research_sources`(`source_id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Research Documents (FTS)';
+        """
+
+        cursor.execute(create_research_documents_table)
+        print("✓ Table 'research_documents' created/verified successfully")
         
         # 爬虫模块表
         create_crawler_modules_table = """

@@ -1,0 +1,378 @@
+// Notify Msg
+syntax = "proto3";
+package push;
+
+import "cs/extra/extra.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+import "msg/msg.proto";
+import "msg/mail_msg.proto";
+import "msg/map_msg.proto";
+import "enumx/enumx.proto";
+import "cs/view/view.proto";
+import "cs/user_info/user_info.proto";
+import "enumx/csv_enumx.proto";
+import "cs_common/cs_common.proto";
+option go_package = "verse/backend/pb/pb_push";
+option (gogoproto.goproto_getters_all) = false;
+
+//------------------------------------ Push 服务器主动下发的通知 ------------------------------------------------------
+message Push {
+  uint32 svrSeq = 1; //客户端 Up 协议需要带上最新的 svr_seq; svr_seq 为 0 时表示不缓存的推送，客户端不要把 svr_seq 设置成 0; 非0时直接覆盖 svr_seq;
+  oneof body {
+    extra.Extra                extra                 = 10;
+    view.Dn_ClientMapView      mapView               = 11; // 服务器推送客户端地图视图更新
+    //    cs_common.Dn_ChargeMaintenance chargeMaintenance    = 11; // 充值的维护状态 true 表示充值在维护中,需要拦截充值
+    //    int64                          backdoorTs           = 12; // backdoor最新版本号
+    msg.MailSummary            newMail               = 12; // 新邮件
+    msg.MailsUpdate            mailsUpdate           = 13; // 邮件更新
+    PushTranslate              translate             = 14; // 翻译结果
+    user_info.Dn_GetPlayerInfo getPlayerInfo         = 15; // 玩家信息
+    PushMarquee                marquee               = 16; // 消息跑马灯
+    PushBuyGiftPackage         giftPackage           = 17; // 新增的礼包组
+    PushGmtUserInfo            gmtUserInfo           = 18; // Gmt修改用户信息
+    view.Dn_MapObjectAdd       mapObjectAdd          = 19; // 地图对象添加
+    view.Dn_MapObjectChange    mapObjectChange       = 20; // 地图对象变更
+    PushBuyBackInfo            buyBackInfo           = 21; // 回购通知
+    PushGuild                  guild                 = 22; // 公会推送
+    view.Dn_MapObjectRemove    mapObjectRemove       = 24; // 地图对象删除
+    PushBattle                 battle                = 25; // 战斗推送
+    PushTruckDefend            truckDefend           = 26; // 卡车防守信息
+    PushMiniMapUpdate          miniMapUpdate         = 27; // 小地图更新
+    PushGuildVillageChange     guildVillageChange    = 28; // 领地归属变化(全地图广播)
+    PushEmergency              emergency             = 29; // 紧急搜救站
+    PushHonorPowerChange       honorPowerChange      = 30; // 荣誉战力值变化
+    PushPreWarning             preWarning            = 31; // 大地图预警信息
+    PushCityBossDealDamage     cityBossDealDamage    = 32; // 对世界BOSS造成伤害
+    PushRadarTaskStatus        radarTaskStatus       = 33; // 雷达任务状态变化
+    PushLike                   like                  = 34; // 点赞信息
+    PushHuntTroopHelped        huntTroopHelped       = 35; // 任务帮助完成
+    PushHuntTroopRobbed        huntTroopRobbed       = 36; // 任务被抢劫
+    PushWantedHuntTroopTask    wantedHuntTroopTask   = 37; // 通缉任务
+    PushMasterRelocateChoice   masterRelocateChoice  = 38; // 会长迁城选择通知
+    PushTruckRobbed            truckRobbed           = 39; // 卡车被抢劫
+    PushChatGroup              chatGroup             = 40; // 群聊信息
+    PushBaseRelocate           baseRelocate          = 41; // 基地被迁城通知(比如加入联盟)
+    PushRecvdMilestoneTaskID   recvdMilestoneTaskIDs = 42; // 里程碑奖励领取
+    PushRedNameChange          redNameChange         = 44; // 红名状态变化 (新增或者删除)
+    PushRadarTaskPosChanged     radarTaskPosChanged   = 45; // 雷达任务位置变化
+    PushHuntTroopPosChanged     huntTroopPosChanged   = 46; // 任务位置变化
+    // PushRadarTaskDoingStatus    radarTaskDoingStatus  = 47; // 雷达任务执行状态变化
+    PushOfflineProduce          offlineProduce        = 48; // 离线奖励
+    PushProduceAndStaffAttr    sproduceAndStaffAttr   = 49; // 当前资源和员工属性
+  }
+}
+
+// 基地被迁城通知(比如加入联盟)
+message PushBaseRelocate {
+  msg.ClientMapObj baseObj = 1; // 基地对象信息
+}
+
+message PushLike {
+  repeated msg.Like likeList = 1; // 点赞列表
+}
+
+// 实际只会下发给会长自己 (开城7日内创建公会触发)
+message PushMasterRelocateChoice {
+  uint32 masterUid = 1; // 会长uid
+}
+
+// 红名状态变化 (新增或者删除)
+message PushRedNameChange {
+  repeated msg.ClientRedNameEnemy  newRedNames  = 1[(gogoproto.nullable) = false]; // 新增的红名敌人列表
+  repeated uint32                  removeUids   = 2; // 需要移除红名状态的玩家uid列表
+  bool                             isFullUpdate = 3; // 是否是全量更新 (玩家加入/离开公会的时候全量更新)
+}
+
+message PushHonorPowerChange {
+  uint64                     totalPower    = 1; // 荣誉战力值
+  repeated msg.SpecificPower specificPower = 2; // 细分战力值
+  uint32                     bestTitle     = 3; // 最强称号id
+  uint32                     rank          = 4; // 排名
+  uint32                     historyTitle  = 5; // 历史最高荣誉称号id
+}
+
+message PushMiniMapUpdate {
+  msg.MiniMapInfo miniMapInfos = 1 [(gogoproto.nullable) = false]; // 小地图信息, 可能是delta或者全量
+  repeated uint32 removeUIDs   = 2;  // 需要删除的小地图对象uid列表(玩家退出联盟或者被踢等情况)
+  bool            isFullUpdate = 3;  // 是否是全量更新, 联盟解散的时候, 需要全量更新
+}
+
+message PushGuildVillageChange {
+  repeated msg.GuildVillageInfo changedVillages = 1 [(gogoproto.nullable) = false]; // 变化的公会领地信息
+  repeated msg.GuildSimpleInfo  guildInfos      = 2 [(gogoproto.nullable) = false]; // 相关的公会简要信息
+}
+
+message PushTranslate {
+  string     content    = 1; // 翻译内容
+  enumx.Lang targetLang = 2; // 翻译语言
+  string     result     = 3;  // 翻译结果
+}
+
+message Marquee {
+  enumx.MarqueeType type     = 1; // 消息类型
+  string            userName = 2; // 消息来源玩家
+  uint32            id       = 3; // 获得道具id
+}
+
+message PushMarquee {
+  repeated Marquee marquees = 1;
+}
+
+message PushBuyGiftPackage {
+  msg.GiftPackageGroup giftPackage = 1; // 新增的礼包组
+  msg.Reward           reward      = 2; // 奖励
+  uint32               bundleID    = 3; // 礼包id
+  uint32               uniqueID    = 4; // 唯一id, 用于客户端区分不同的购买订单
+}
+
+message PushGmtUserInfo{
+  msg.NameCard   nameCard   = 2; // 用户名
+  msg.AvatarCard avatarCard = 3; // 头像
+}
+message PushBuyBackInfo {
+  msg.Reward reward       = 1; // 奖励
+  uint32     refundMailID = 2; // 退款邮件id
+}
+
+message PushGuild {
+  enumx.GuildPushType type = 1; // 公会推送类型
+  oneof body {
+    enumx.GuildMemberPos      pos                    = 2; // 公会成员职位
+    enumx.GuildSeniorOfficial seniorOfficial         = 3; // 公会高级官员
+    msg.Empty                 kickMember             = 4; // 踢出公会
+    int64                     denyApply              = 5; // 拒绝入会，这里是拒绝入会的Gid
+    GuildNewGift              newGift                = 6; // 新礼物信息
+    GuildGiftLvExp            giftLvExpChange        = 7; // 公会礼物等级和经验变化
+    PushGuildHelp             newHelp                = 8; // 公会帮助信息, 新增帮助信息
+    PushDelHelpInfo           deleteHelp             = 9; // 删除帮助信息, 这里下发的是帮助的uniqueid
+    PushGuildApproveJoin        approveJoin            = 10; // 公会批准入会
+    uint32                    useSkill               = 11; // 使用技能, 这里下发的是技能id
+    GuildTransferMaster       transferMaster         = 12; // 转让盟主
+    PushGuildOfferHelp        offerHelp              = 13; // 公会提供帮助信息
+    GuildMarkChange           guildMarkChange        = 14; // 联盟标记变化
+    int64                     newMember              = 15; // 新成员加入
+    string                    changeShortName        = 16; // 修改联盟简称
+    msg.ClientGuildGvGInfo    clientGuildGvGInfo     = 17; // 公会战信息
+    GuildMemberChange         memberChange           = 18; // 公会成员变化
+    AssemblyShowChange        assemblyShowChange     = 19; // 集结展示信息变化
+    PushGVGResult             gvgResult              = 20; // 公会战结果
+    msg.GuildMilestone        milestone              = 21; // 联盟里程碑任务数据变化
+    msg.GuildCityClash        cityClash              = 22; // 城市竞赛任务数据变化
+    msg.GuildBossBattle       bossBattle             = 23; // 联盟Boss
+    msg.IntPos                rendezvousPoint        = 24; // 聚集点变化信息
+    int64                     invite2RendezvousPoint = 25; // 邀请成员到聚集点
+    bool                      canFreeTeleport        = 26; // 是否可以免费迁城 - true 是
+    GuildPersonalWarChange    guildPersonalWarChange = 27; // 联盟个人战争信息变更
+    GvgWarPreviewChange       gvgWarPreviewChange    = 28; // gvg战事预览信息变更
+    GuildMemberUidList        memberUidList          = 29; // 公会成员uid列表
+    PushInviteJoinAssembly    inviteJoinAssembly     = 30; // 邀请加入集结
+    PushHelpReachMaxCnt       helpReachMaxCnt        = 31; // 帮助达到上限次数（帮助次数达到最大值时推送）
+  }
+}
+
+// PushHelpReachMaxCnt 帮助达到上限次数推送（当帮助次数达到最大值时推送）
+message PushHelpReachMaxCnt {
+  repeated uint64 uniqueIDs = 1; // 达到上限的帮助信息uniqueID列表
+}
+
+message GuildMemberUidList {
+  repeated int64 uidList = 1;
+}
+
+message PushGuildApproveJoin {
+  cs_common.Dn_Guild approveJoin = 1; // 公会批准入会
+  bool isFirstJoin = 2; // 是否是第一次加入公会
+}
+
+message GuildPersonalWarChange {
+  msg.GuildPersonalWar addOrEdit    = 1;  // 个人战争新增或修改
+  uint64               delArmyObjID = 2; // 个人战争删除
+}
+
+message GvgWarPreviewChange {
+  msg.GvgWarPreview add      = 1; // gvg战事新增
+  uint64            delObjID = 2; // gvg战事删除
+}
+
+message AssemblyShowChange {
+  repeated msg.AssemblyShow showInfo   = 1; // 新增或者变化的集结展示信息
+  repeated msg.AssemblyKey  removeKeys = 2[(gogoproto.nullable) = false]; // 删除的集结key列表
+}
+
+message PushInviteJoinAssembly {
+  msg.AssemblyKey  key = 1[(gogoproto.nullable) = false]; // 集结key
+}
+
+message GuildNewGift {
+  repeated msg.GuildGiftInfo newGifts = 1; // 新增的公会礼物
+}
+
+message PushGuildHelp {
+  repeated msg.GuildHelpInfo helpInfos = 1; // 公会帮助信息
+}
+
+message PushDelHelpInfo {
+  repeated uint64 uniqueIDs = 1;
+}
+
+message GuildOfferHelp {
+  string            offerUserName = 1; // 提供帮助的玩家名称
+  msg.GuildHelpInfo helpInfo      = 2; // 帮助信息
+}
+
+message PushGuildOfferHelp {
+  repeated GuildOfferHelp offerHelps = 1; // 公会提供帮助信息
+}
+
+message GuildGiftLvExp {
+  uint32 lv  = 1; // 礼物等级
+  int64  exp = 2; // 礼物经验
+}
+
+message GuildTransferMaster {
+  msg.GSummary                          gSummary = 1; // 公会信息
+  repeated cs_common.GuildMemberSummary members  = 2;  // 成员列表
+}
+
+message GuildMarkChange {
+  msg.MapMark          addMark      = 1; // 新增的联盟标记
+  repeated msg.MapMark delMark      = 2; // 删除的联盟标记
+  string               operatorName = 3; // 操作人名称
+}
+
+message GuildMemberChange {
+  int64 addUid = 1; // 新加入的玩家UID
+  int64 delUid = 2; // 离开的玩家UID
+}
+
+message BattleResult {
+  bool   victory      = 1; // 是否胜利
+  uint32 victoryCount = 2; // 连胜次数
+}
+
+// 灭火
+message CancelBurning {
+  msg.Avatar helper = 1; // 帮助灭火的玩家
+}
+
+message PushGVGResult {
+  enumx.GvGResultType resultType   = 1; // 公会战结果类型
+  string              atkGuildName = 2; // 进攻公会名称
+  string              defGuildName = 3; // 防守公会名称
+  uint64              objID        = 4; // 战斗对象ID
+  uint32              buildingID   = 5; // buildingConfID
+  msg.IntPos          pos          = 6 [(gogoproto.nullable) = false]; // 位置
+}
+
+message MonsterBattleResult {
+  bool   result          = 1; // 战斗结果 true:胜利 false:失败
+  uint64 killedMonsterID = 2; // 被击杀的怪物ID
+  uint32 armyID          = 3;
+  uint64 armyObjID       = 4;
+}
+
+// BattleVictory 战斗胜利通知
+message BattleVictory {
+  uint64     objID                     = 1; // 战斗对象ID
+  uint64     armyObjID                 = 2; // 军队对象ID
+  uint32     victoryCount              = 3; // 连胜次数
+  uint32     svrID                     = 4; // 服务器ID
+  string     armyPlayerName            = 5; // 军队所属玩家名称
+  string     armyPlayerGuildSimpleName = 6; // 军队所属玩家公会简称
+  msg.Avatar armyPlayerAvatar          = 7; // 军队所属玩家头像
+  uint32     guildID                   = 8; // 公会ID
+}
+
+message PushBattle {
+  enumx.BattlePushType type       = 1; // 战斗推送类型
+  msg.IntPos           battlePos  = 2[(gogoproto.nullable) = false]; // 位置
+  int64                paramInt64 = 3; // 参数int64
+  oneof body {
+    MonsterBattleResult monsterBattleResult = 6; // 战斗结果 true:胜利 false:失败
+    BattleResult        attackWallResult    = 7; // 攻城战结果
+    CancelBurning       cancelBurning       = 8; // 灭火
+    BattleVictory       battleVictory       = 9; // 战斗胜利
+  }
+}
+
+message PushTruckDefend {
+  string              truckID         = 1; // 卡车id
+  msg.TruckRobbedData truckRobbedData = 2; // 卡车被抢劫数据
+}
+
+message PushEmergency {
+  msg.EmergencyRescueData data = 1; // 紧急搜救站数据变化通知
+}
+
+message PushPreWarning {
+  msg.AssemblySimple assembly    = 1; // 集结军队简要信息，新增或变动
+  msg.PreWarningInfo warning     = 2; // 预警指挥官信息，新增或变动
+  msg.AssemblyKey    delAssembly = 3; // 删除的集结
+  msg.PreWarningInfo delWarning  = 4; // 删除的预警
+}
+
+message PushCityBossDealDamage {
+  uint64          damage  = 1; // 对世界BOSS造成的伤害
+  repeated uint32 cardIDs = 2; // 兵卡ID
+  uint32          atkCnt  = 3; // 攻击次数
+}
+
+message PushHuntTroopHelped {
+  msg.HuntTroopHelpedData helpedData = 1; // 帮助数据
+}
+
+message PushHuntTroopRobbed {
+  msg.HuntTroopRobbedData robbedData = 1; // 被抢夺数据
+}
+
+message PushWantedHuntTroopTask {
+  msg.HuntTroopTask task = 1; // 任务数据
+}
+
+// 卡车被抢劫
+message PushTruckRobbed {
+  msg.TruckData robbedTruckData = 1; // 被抢夺数据
+}
+
+
+message PushChatGroup {
+  enumx.ChatGroupPushType type = 1; // 公会推送类型
+  oneof body {
+    msg.Int64Pair newApply = 2; // val1:群ID val2:申请UID
+  }
+}
+
+message GroupTransferMaster {
+}
+
+message PushRecvdMilestoneTaskID {
+  repeated uint32 recvdTaskIDs = 1; // 领取的里程碑任务ID列表
+}
+
+
+message PushRadarTaskPosChanged {
+  uint64 taskID = 1; // 任务ID
+  msg.IntPos pos = 2; // 位置
+  uint64 mapObjID = 3; // 地图对象ID
+}
+
+message PushHuntTroopPosChanged {
+  uint64 taskID = 1; // 任务ID
+  msg.IntPos pos = 2; // 位置
+}
+
+message PushRadarTaskStatus {
+  uint64 taskID = 1; // 任务ID
+  enumx.RadarTaskStatus status = 2; // 任务状态
+}
+
+message PushOfflineProduce{
+  repeated msg.Asset    res     = 1[(gogoproto.nullable) = false]; //期间产出资源
+  int64                 lastSettleTime      = 2; // 上次结算奖励时间
+}
+
+message PushProduceAndStaffAttr {
+  repeated msg.Asset    res                   = 1[(gogoproto.nullable) = false]; //当前资源
+  msg.StaffAttribute staffAttr                = 2[(gogoproto.nullable) = false];  // 员工主属性
+  repeated msg.StaffAttributePush staffsAttr  = 3[(gogoproto.nullable) = false]; //所有员工的属性列表
+}

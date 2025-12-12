@@ -1,0 +1,30 @@
+syntax = "proto3";
+package like;
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+import "enumx/enumx.proto";
+
+option go_package = "verse/backend/pb/pb_like";
+option (gogoproto.goproto_getters_all) = false;
+//------------------------------------------------------------------------------------------
+message Up_Union {
+  oneof body {
+    option (validator.oneof) = {required: true};
+    Up_SetLike setLike = 1;
+  }
+}
+
+message Dn_Union {
+  oneof body {
+    Dn_SetLike setLike = 1; // 点赞
+  }
+}
+
+message Up_SetLike {
+  int64 targetUID = 1;
+  enumx.LikeSourceType source = 2;
+}
+
+message Dn_SetLike {
+  int64 targetCnt = 1;
+}

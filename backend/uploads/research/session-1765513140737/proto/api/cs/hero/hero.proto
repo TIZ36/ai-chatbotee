@@ -1,0 +1,56 @@
+syntax = "proto3";
+package hero;
+import "msg/msg.proto";
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb/pb_hero";
+option (gogoproto.goproto_getters_all) = false;
+
+//------------------------------------------------------------------------------------------
+message Up_Union {
+  oneof body {
+    option (validator.oneof) = {required: true};
+    Up_UnlockHero          unlockHero          = 1;
+    Up_HeroLevelUp         heroLevelUp         = 2;
+    Up_HeroFragmentConvert heroFragmentConvert = 3;
+  }
+}
+
+message Dn_Union {
+  oneof body {
+    Dn_UnlockHero          unlockHero          = 1;
+    Dn_HeroLevelUp         heroLevelUp         = 2;
+    Dn_HeroFragmentConvert heroFragmentConvert = 3;
+  }
+}
+
+message Up_UnlockHero {
+  uint32 heroTid = 1;
+}
+
+message Dn_UnlockHero {
+  uint32         heroTid    = 1;
+  msg.CostReward costReward = 2;
+}
+
+
+message Up_HeroLevelUp {
+  uint32 heroTid = 1;
+}
+
+message Dn_HeroLevelUp {
+  uint32         heroTid    = 1;
+  uint32         level      = 2;
+  msg.CostReward costReward = 3;
+}
+
+// 军官碎片兑换
+message Up_HeroFragmentConvert {
+  uint32 belongHeroTid = 1; // 所属军官Tid
+  uint32 fragmentCount = 2; // 兑换数量
+}
+
+message Dn_HeroFragmentConvert {
+  msg.CostReward costReward = 1;
+}

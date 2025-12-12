@@ -1,0 +1,203 @@
+syntax = "proto3";
+package cs;
+
+import "cs/extra/extra.proto";
+import "cs/conn/conn.proto";
+import "cs/gm/gm.proto";
+import "cs/battle/battle.proto";
+import "cs/newbie/newbie.proto";
+import "cs/card/card.proto";
+import "cs/map_cs/map_cs.proto"; // 地图上 除视野外的上下行 协议
+import "cs/view/view.proto";
+import "cs/hero/hero.proto";
+import "cs/misc/misc.proto";
+import "cs/mix/mix.proto";
+import "cs/task/task.proto";
+import "cs/shop/shop.proto";
+import "cs/science/science.proto";
+import "cs/guide/guide.proto";
+import "cs/bag/bag.proto";
+import "cs/rank/rank.proto";
+import "cs/user_info/user_info.proto";
+import "cs/chat/chat.proto";
+import "cs/mail/mail.proto";
+import "cs/gift_package/gift_package.proto";
+import "cs/arena/arena.proto";
+import "cs/activity/activity.proto";
+import "cs/btrecord/btrecord.proto";
+import "cs/guild/guild.proto";
+import "cs/reserve/reserve.proto";
+import "cs/vip/vip.proto";
+import "cs/privilege/privilege.proto";
+import "cs/citizen/citizen.proto";
+import "cs/red_dot/red_dot.proto";
+import "cs/free_reward/free_reward.proto";
+import "cs/truck/truck.proto";
+import "cs/city_boss/city_boss.proto";
+import "cs/assembly/assembly.proto";
+
+
+import "cs/emoji/emoji.proto";
+import "cs/feedback/feedback.proto";
+import "cs/stronger/stronger.proto";
+import "cs/like/like.proto";
+import "cs/catalog/catalog.proto";
+
+import "cs/hunttroop/hunttroop.proto";
+import "cs/radar/radar.proto";
+import "cs/chat_group/chat_group.proto";
+
+
+import "cs/shome/shome.proto";
+import "cs/sproduce/sproduce.proto";
+import "cs/drug_order/drug_order.proto";
+import "cs/power_rank/power_rank.proto";
+import "cs/chapter/chapter.proto";
+import "cs/timed_task/timed_task.proto";
+import "cs/incident/incident.proto";
+import "cs/sguide/sguide.proto";
+import "cs/equip/equip.proto";
+import "cs/staff/staff.proto";
+
+
+import "errorx/errorx.proto";
+
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb/pb_cs";
+option (gogoproto.goproto_getters_all) = false;
+
+//------------------------------------------------------------------------------------------
+// 客户端向服务器发送请求,
+// 注意：fieldName 必须是包名的驼峰拼写, 例如包名是 map_cs, 则 fieldName 必须是 mapCs
+// 1. 在 biz 目录下创建对应的plugin目录， 比如 biz/map_cs/plugin/map_cs.req.go 实现 z.req.go 里面的req方法
+// 2. 同时需要在 uprocess.biz 中注册对应的plugin iFace, 例如 map_cs.MapCs
+message Up {
+  uint32                cliSeq      = 1; // 客户端维护的seq
+  uint32                svrSeq      = 2; // 服务器维护的seq,包含回复请求以及通知请求.再重连请求中，服务器依据此字段补notify.其他情况下服务器依据此数据删除缓存.
+
+  oneof  req {
+    option (validator.oneof)          = {required: true};
+    conn.Up_Union         conn        = 11;
+    gm.Up_Union           gm          = 12;
+    battle.Up_Union       battle      = 14;
+    newbie.Up_Union       newbie      = 15;
+    card.Up_Union         card        = 16;
+    hero.Up_Union         hero        = 17;
+    misc.Up_Union         misc        = 18;
+    task.Up_Union         task        = 19;
+    shop.Up_Union         shop        = 20;
+    science.Up_Union      science     = 21;
+    guide.Up_Union        guide       = 22;
+    bag.Up_Union          bag         = 23;
+    rank.Up_Union         rank        = 24;
+    user_info.Up_Union    user_info   = 25;
+    chat.Up_Union         chat        = 26;
+    mail.Up_Union         mail        = 27;
+    gift_package.Up_Union giftPackage = 28;
+    arena.Up_Union        arena       = 29;
+    activity.Up_Union     activity    = 30;
+    mix.Up_Union          mix         = 31;
+    btrecord.Up_Union     btrecord    = 32;
+    guild.Up_Union        guild       = 33;
+    reserve.Up_Union      reserve     = 34;
+    vip.Up_Union          vip         = 35;
+    privilege.Up_Union    privilege   = 36;
+    citizen.Up_Union      citizen     = 37;
+    red_dot.Up_Union      redDot      = 38;
+    free_reward.Up_Union  free_reward = 41;
+    city_boss.Up_Union    cityBoss    = 42;
+    equip.Up_Union        equip       = 43;
+    emoji.Up_Union        emoji       = 44;
+    stronger.Up_Union     stronger    = 45;
+    like.Up_Union        like         = 46;
+    catalog.Up_Union      catalog     = 47;
+    chat_group.Up_Union   chat_group  = 48;
+    feedback.Up_Union     feedback    = 49;
+
+     shome.Up_Union shome = 60;
+    sproduce.Up_Union sproduce = 61;
+    drug_order.Up_Union drugOrder = 62;
+    power_rank.Up_Union powerRank = 63;
+    chapter.Up_Union      chapter       = 64;
+    timed_task.Up_Union      timed_task       = 65;
+    incident.Up_Union      incident = 66;
+    sguide.Up_Union          sguide         = 68;
+    staff.Up_Union staff = 69;
+
+
+    // 地图视野相关的从100开始
+    view.Up_Union         view        = 100; // 视图相关
+    map_cs.Up_Union       mapCs       = 101; // 地图上 除视野外的上下行 协议
+    truck.Up_Union        truck       = 102; // 抢车相关
+    hunttroop.Up_Union    hunttroop   = 103; // 狩猎小队相关
+    assembly.Up_Union     assembly    = 104; // 集结相关
+    radar.Up_Union        radar       = 105; // 雷达相关
+  }
+}
+
+message Dn {
+  uint32                cliSeq      = 1;
+  uint32                svrSeq      = 2;
+  int64                 svrMs       = 3;
+  errorx.Dn_Error       error       = 4;
+  extra.Extra           extra       = 5;
+
+  oneof reply {
+    conn.Dn_Union         conn        = 11;
+    gm.Dn_Union           gm          = 12;
+    battle.Dn_Union       battle      = 14;
+    newbie.Dn_Union       newbie      = 15;
+    card.Dn_Union         card        = 16;
+    hero.Dn_Union         hero        = 17;
+    misc.Dn_Union         misc        = 18;
+    task.Dn_Union         task        = 19;
+    shop.Dn_Union         shop        = 20;
+    science.Dn_Union      science     = 21;
+    guide.Dn_Union        guide       = 22;
+    bag.Dn_Union          bag         = 23;
+    rank.Dn_Union         rank        = 24;
+    user_info.Dn_Union    user_info   = 25;
+    chat.Dn_Union         chat        = 26;
+    mail.Dn_Union         mail        = 27;
+    gift_package.Dn_Union giftPackage = 28;
+    arena.Dn_Union        arena       = 29;
+    activity.Dn_Union     activity    = 30;
+    mix.Dn_Union          mix         = 31;
+    btrecord.Dn_Union     btrecord    = 32;
+    guild.Dn_Union        guild       = 33;
+    reserve.Dn_Union      reserve     = 34;
+    vip.Dn_Union          vip         = 35;
+    privilege.Dn_Union    privilege   = 36;
+    citizen.Dn_Union      citizen     = 37;
+    red_dot.Dn_Union      redDot      = 38;
+    free_reward.Dn_Union  free_reward = 41;
+    city_boss.Dn_Union    cityBoss    = 42;
+    equip.Dn_Union        equip       = 43;
+    emoji.Dn_Union        emoji       = 44;
+    stronger.Dn_Union     stronger    = 45;
+    like.Dn_Union         like        = 46;
+    catalog.Dn_Union      catalog     = 47;
+    chat_group.Dn_Union   chat_group  = 48;
+    feedback.Dn_Union     feedback    = 49;
+
+    shome.Dn_Union shome = 60;
+    sproduce.Dn_Union sproduce = 61;
+    drug_order.Dn_Union drugOrder = 62;
+    power_rank.Dn_Union powerRank = 63;
+    chapter.Dn_Union         chapter          = 64;
+    timed_task.Dn_Union      timed_task       = 65;
+    incident.Dn_Union      incident = 66;
+    sguide.Dn_Union         sguide         = 68;
+    staff.Dn_Union staff = 69;
+
+    // 地图视野相关的从100开始
+    view.Dn_Union         view        = 100; // 视野信息
+    map_cs.Dn_Union       mapCs       = 101; // 地图上 除视野外的上下行 协议
+    truck.Dn_Union        truck       = 102; // 抢车相关
+    hunttroop.Dn_Union    hunttroop   = 103; // 狩猎小队相关
+    assembly.Dn_Union     assembly    = 104; // 集结相关
+    radar.Dn_Union        radar       = 105; // 雷达相关
+  }
+}

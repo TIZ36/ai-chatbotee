@@ -1,0 +1,18 @@
+// DO NOT EDIT!!
+syntax = "proto3";
+package enumx;
+
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option (gogoproto.goproto_enum_prefix_all) = false;
+option go_package = "verse/backend/pb/enumx";
+
+
+enum ParamName {
+    ParamName_None = 0;
+}
+
+enum ParamCD{
+  ParamCD_None                           = 0;
+  ParamCD_BattleReportClientRawCD        = 1;
+}

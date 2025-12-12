@@ -1,0 +1,61 @@
+syntax = "proto3";
+package feedback;
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+import "enumx/enumx.proto";
+import "msg/msg.proto";
+
+option go_package = "verse/backend/pb/pb_feedback";
+option (gogoproto.goproto_getters_all) = false;
+//------------------------------------------------------------------------------------------
+message Up_Union {
+  oneof body {
+    option (validator.oneof) = {required: true};
+    Up_ClickSocialMedia   clickSocialMedia = 1;
+    Up_GetQnrReward           getQnrReward = 2; // 获取问卷调查奖励
+    Up_GetClickReward getClickSocialReward = 3; // 获取点击社交媒体奖励
+    Up_GetQnrUrl                 getQnrUrl = 4; // 获取问卷调查url
+  }
+}
+
+message Dn_Union {
+  oneof body {
+    Dn_ClickSocialMedia   clickSocialMedia = 1; // 点击社交媒体
+    Dn_GetQnrReward           getQnrReward = 2; // 获取问卷调查奖励
+    Dn_GetClickReward getClickSocialReward = 3; // 获取点击社交媒体奖励
+    Dn_GetQnrUrl                 getQnrUrl = 4; // 获取问卷调查url
+  }
+}
+
+message Up_ClickSocialMedia {
+  enumx.SocialMediaType socialMediaType = 1;
+}
+
+message Dn_ClickSocialMedia {
+  enumx.TaskStateType taskState = 1; // 访问社交媒体任务状态
+}
+
+message Up_GetClickReward {
+}
+
+message Dn_GetClickReward {
+  msg.Reward reward = 1;
+}
+
+message Up_GetQnrReward {
+  string sourceID = 1;
+}
+
+message Dn_GetQnrReward {
+  msg.Reward reward = 1;
+}
+
+message Up_GetQnrUrl {
+  uint32 scheduleID = 1;
+}
+
+message Dn_GetQnrUrl {
+  string qnrUrl = 1;
+  uint32 qnrID = 2;
+  string sourceID = 3;
+}

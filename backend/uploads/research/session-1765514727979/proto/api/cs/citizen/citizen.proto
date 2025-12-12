@@ -1,0 +1,81 @@
+syntax = "proto3";
+package citizen;
+import "msg/msg.proto";
+import "enumx/csv_enumx.proto";
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb/pb_citizen";
+option (gogoproto.goproto_getters_all) = false;
+
+//------------------------------------------------------------------------------------------
+message Up_Union {
+  oneof body {
+    option (validator.oneof) = {required: true};
+    Up_CitizenStarUp          citizenStarUp          = 1;
+    Up_CitizenAppointBuilding citizenAppointBuilding = 2;
+    Up_CitizenFragmentRecruit citizenFragmentRecruit = 3;
+    Up_CitizenGetOnlineReward citizenGetOnlineReward = 4;
+    Up_CitizenQueueSubmit     citizenQueueSubmit     = 5;
+  }
+}
+
+message Dn_Union {
+  oneof body {
+    Dn_CitizenStarUp          citizenStarUp          = 1;
+    Dn_CitizenAppointBuilding citizenAppointBuilding = 2;
+    Dn_CitizenFragmentRecruit citizenFragmentRecruit = 3;
+    Dn_CitizenGetOnlineReward citizenGetOnlineReward = 4;
+    Dn_CitizenQueueSubmit     citizenQueueSubmit     = 5;
+  }
+}
+
+// 居民升星
+message Up_CitizenStarUp {
+  uint32 citizenTid = 1;
+}
+
+message Dn_CitizenStarUp {
+  uint32         citizenTid = 1;
+  uint32         star       = 2;
+  msg.CostReward costReward = 3;
+}
+
+// 居民任命建筑
+message Up_CitizenAppointBuilding {
+  repeated msg.CitizenAppointInfo appointInfos = 1[(gogoproto.nullable) = false];
+}
+
+message Dn_CitizenAppointBuilding {
+  repeated msg.CitizenAppointInfo appointInfo = 1[(gogoproto.nullable) = false]; // key栏位,val居民tid
+}
+
+// 碎片招募居民
+message Up_CitizenFragmentRecruit {
+  uint32 fragmentTid = 1;
+  uint32 citizenTid  = 2;
+}
+
+message Dn_CitizenFragmentRecruit {
+  uint32         fragmentTid = 1;
+  uint32         citizenTid  = 2;
+  msg.CostReward costReward  = 3;
+}
+// 领在线奖励
+message Up_CitizenGetOnlineReward {
+}
+
+message Dn_CitizenGetOnlineReward {
+}
+
+// 处理居民
+message Up_CitizenQueueSubmit {
+  enumx.CitizenQueue queueType = 1;
+  uint64             ID        = 2;
+}
+
+message Dn_CitizenQueueSubmit {
+  msg.Reward       rewards = 1;
+  msg.CitizenQueue queue   = 2;
+}
+

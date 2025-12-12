@@ -1,0 +1,230 @@
+syntax = "proto3";
+
+import "enumx/enumx.proto";
+import "msg/msg.proto";
+import "msg/mail_msg.proto";
+import "msg/map_msg.proto";
+import "optx/optx.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+package model;
+
+option go_package = "verse/backend/model";
+option (gogoproto.goproto_getters_all) = false;
+
+//-------------------------------------------------------------
+// UTiny 玩家一些零碎信息(需要在离线时查询)，比如各种推送开关
+message UTiny {
+  option (optx.structuralVersion)              = 0;
+  option (gogoproto.equal)                     = true;
+  int64                   uid                  = 1[(optx.primaryKeyPriority) = 1];
+  string                  openID               = 2;
+  enumx.Lang              lang                 = 3;
+  bool                    isOnline             = 6; // 是否在线
+  string                  name                 = 7; // 玩家名字
+  uint32                  svrID                = 8; // server id
+  uint32                  cityID               = 9; // 城市id
+  repeated msg.UintBoolKV NotificationSwitches = 10[(gogoproto.nullable) = false]; // 推送开关列表
+}
+
+//-------------------------------------------------------------
+// UIntlMails
+message UIntlMails {
+  option (optx.structuralVersion)    = 0;
+  int64                 uid          = 1[(optx.primaryKeyPriority) = 1]; // 玩家uid
+  repeated msg.IntlMail intlMails    = 2[(gogoproto.nullable) = false]; // intlMail具体内容
+  uint32                amendVersion = 3; // 数据升级版本号
+}
+
+//-------------------------------------------------------------
+// UMails 玩家所有邮件的简要信息和收藏邮件
+message UMails {
+  option (optx.structuralVersion)             = 0;
+  int64                       uid             = 1[(optx.primaryKeyPriority) = 1]; // 玩家uid
+  repeated msg.SMail          smails          = 2[(gogoproto.nullable) = false]; // 玩家身上存在所有邮件的简要信息
+  uint32                      idx             = 3; // 邮件序号. 用于新邮件id
+  uint32                      lastGlobalID    = 4; // 最后接收到的GlobalMail的id
+  repeated msg.SMail          reminderSmails  = 5[(gogoproto.nullable) = false]; // 定时邮件smail
+  uint32                      amendVersion    = 6; // 数据升级版本号
+  repeated msg.UGuildMailInfo uGuildMailInfos = 7[(gogoproto.nullable) = false]; // 公会邮件游标信息
+}
+
+//-------------------------------------------------------------
+// 公会邮件元信息
+message GuildMailMeta {
+  option (optx.structuralVersion) = 0;
+  int64  guildID                  = 1[(optx.primaryKeyPriority) = 1]; // 公会id
+  uint32 idx                      = 2; // 邮件序号. 用于新邮件id
+  uint32 amendVersion             = 3; // 数据升级版本号
+}
+
+// redis异步消息队列的任务(asynq)的任务类型
+message AsynqTask {
+  enumx.AsynqTaskType typ = 1;
+  oneof body {
+    msg.Mail       mail       = 2;
+    msg.GlobalMail globalMail = 3; // GlobalMail.Key字段不用
+    msg.GuildMail  guildMail  = 4; //
+    //CmsData        cms        = 5;
+  }
+}
+
+///// ------------------ ElasticSearch ------------------ /////
+message ESUser {// 同 es_migrate user_schema 保持一致
+  /*
+    es需要根据uniquekey去标识文档的唯一性
+    默认的uniquekey是id,类型是string
+    没办法在query里面带上id,所以就这样直接写一个id字段放这了
+  */
+  option (gogoproto.equal)        = true;
+  option (optx.structuralVersion) = 0;
+  option (optx.codec)             = "json";
+  string id                       = 1 [(optx.primaryKeyPriority) = 1]; // 用户uid
+  string name                     = 2; // 姓名
+  uint32 svrID                    = 3 [(gogoproto.jsontag) = "svrID"];    // svr id
+  uint32 cityID                   = 4 [(gogoproto.jsontag) = "cityID"];   // 城市id
+  uint32 guildID                  = 5 [(gogoproto.jsontag) = "guildID"];  // 公会id
+  bool   isOnline                 = 6 [(gogoproto.jsontag) = "isOnline"]; // 是否在线
+  uint32 mapID                    = 7 [(gogoproto.jsontag) = "mapID"];    // 地图id
+}
+
+///// ------------------ ElasticSearch End ------------------ /////
+// ChargeOrder --------------------------------------------------------------------------------------------------------
+message ChargeOrder{
+  option (optx.structuralVersion)      = 0;
+  string                 serial        = 1[(optx.primaryKeyPriority) = 1]; // 唯一订单号
+  int64                  uid           = 2; // 玩家id
+  int64                  createTs      = 3; // 订单创建时间
+  int64                  recvTs        = 4; // 后端收到订单的时间
+  uint32                 payType       = 5; // 支付平台类型  https://lilithgames.feishu.cn/wiki/wikcnydZFuGQfO0CHHvPG2qz39f
+  uint32                 appID         = 6; // app id
+  string                 appUID        = 7; // app uid
+  uint32                 amount        = 8; // 支付金额(单位为分)
+  string                 productID     = 9; // 这个是sdk的product_id
+  uint32                 chargeID      = 10; // 对应 Charge表ID product_id -> charge_id
+  uint32                 goodID        = 11; // 商品id
+  enumx.ChargeOrderState state         = 12; // 订单的状态
+  uint32                 payEnv        = 13; // 0 正式订单;1 测试订单 不用上报;2 订阅试用 平台参数
+  bool                   isToVoucher   = 14; // 是否转换成代金券
+  enumx.ChargePayScene   payScene      = 15; // 充值的场景 mobile 、web 、pc
+  uint32                 quantity      = 16; // quantity 充值的单数，为了支持一笔多购，需要数据升级 1013
+  uint32                 extID         = 17; // 这里是ExtID， 用来标识一些订单的额外id信息，比如冲动礼包是 impulseID，其他的后续扩展
+  uint64                 scheduleID    = 18; // 活动id
+  uint32                 bundleGroupID = 19; // 礼包组id
+  msg.Cost               costDiamonds  = 20; // 使用钻石购买的时候记录消耗，用于退款
+  uint32                 refundMailID  = 21; // 退款对应的退款mailID
+  uint32                 actStartTime  = 22; // 活动开始时间,用于回购判断是否同一期活动
+}
+
+message Guild {
+  option (optx.structuralVersion)                     = 1;
+  int64                      gid                      = 1[(optx.primaryKeyPriority) = 1]; // 联盟id
+  uint32                     svrID                    = 2;
+  string                     fullName                 = 3; // 联盟全称
+  string                     shortName                = 4; // 联盟简称
+  int64                      createTs                 = 5; // 创建时间
+  enumx.Lang                 lang                     = 6; // 联盟语言
+  repeated uint32            picture                  = 7; // 联盟旗帜
+  uint32                     level                    = 8; // 联盟等级
+  repeated msg.GuildMember   members                  = 9; // 联盟成员
+  string                     announcement             = 10; // 联盟公告
+  enumx.GuildJoinType        join                     = 11; // 公会加入方式
+  uint32                     amendVersion             = 12;
+  repeated msg.GuildApplying applying                 = 13; // 申请列表
+  uint64                     powerLimit               = 14; // 最低战力要求
+  uint32                     headquartersLvLimit      = 15; // 最低主城等级要求
+  uint64                     power                    = 16; // 联盟所有成员总战力
+  msg.GuildTechData          tech                     = 17; // 科技
+  repeated msg.GuildSkill    skills                   = 18; // 技能
+  uint32                     masterUID                = 19; // 盟主uid
+  int64                      HourlyUpdateTs           = 20; // 每小时更新的时间戳
+
+  // gvg related
+  msg.DeclareWarObjInfo      declWarObjInfo           = 31; // 当前 宣战对象信息
+  uint32                     declareWarCnt            = 32; // 今日宣战次数, 每日重置
+  uint32                     lastAttackAllCmdTs       = 33; // 上次全军攻击的时间戳, 用于CD
+
+  // 聚集点
+  msg.IntPos                 rendezvousPoint          = 34[(gogoproto.nullable) = false]; // 聚集点坐标
+  int64                      invite2RendezvousPointTs = 35; // 邀请加入聚集点的时间
+}
+
+message GuildHelp {
+  option (optx.structuralVersion)        = 1;
+  int64                      gid         = 1[(optx.primaryKeyPriority) = 1]; // 公会gid
+  repeated msg.GuildHelpInfo reqHelpList = 2; // 请求帮助列表
+}
+
+message GuildGift {
+  option (optx.structuralVersion)          = 1;
+  int64                       gid          = 1[(optx.primaryKeyPriority) = 1]; // 联盟id
+  int64                       exp          = 2; // 经验
+  uint32                      lv           = 3; // 等级
+  repeated msg.GuildGiftGroup giftGroups   = 4;
+  uint32                      amendVersion = 5;
+}
+
+message GuildMark {
+  option (optx.structuralVersion) = 1;
+  int64                gid        = 1[(optx.primaryKeyPriority) = 1]; // 联盟id
+  repeated msg.MapMark guildMarks = 2; // 联盟标记
+}
+
+message GuildMiscData {
+  option (optx.structuralVersion) = 0;
+  int64                gid        = 1[(optx.primaryKeyPriority) = 1]; // 联盟id
+  repeated msg.Counter counters   = 2; // 联盟计数器
+  repeated msg.Best    bests      = 3; // 联盟最佳记录
+  msg.GuildMilestone   milestone  = 4; // 联盟里程碑
+  msg.GuildCityClash   cityClash  = 5; // 联盟城市竞赛
+}
+
+// 加上jsontag是因为驼峰在会被转成下划线
+message ESGuild {
+  option (gogoproto.equal)                = true;
+  option (optx.structuralVersion)         = 0;
+  option (optx.codec)                     = "json";
+  int64               id                  = 1[(optx.primaryKeyPriority) = 1]; // 公会gid
+  string              fullName            = 2 [(gogoproto.jsontag) = "fullname"]; // 联盟全称
+  string              shortName           = 3 [(gogoproto.jsontag) = "shortname"]; // 联盟简称
+  uint32              svrID               = 4 [(gogoproto.jsontag) = "svrID"]; // 服
+  int64               createTs            = 5 [(gogoproto.jsontag) = "createTs"]; // 创建时间
+  bool                isFull              = 6 [(gogoproto.jsontag) = "isFull"]; // 是否满员
+  enumx.GuildJoinType join                = 7; // 公会加入方式
+  enumx.Lang          lang                = 8; // 语言
+  uint32              memberCnt           = 9 [(gogoproto.jsontag) = "memberCnt"]; // 人数
+  uint64              powerLimit          = 10; // 最低战力要求
+  uint32              headquartersLvLimit = 11; // 最低主城等级要求
+  uint32              maxMemberCnt        = 12; // 最大成员数
+}
+
+message GroupDivUnit{
+  option (optx.structuralVersion)            = 1;
+  string                      groupDivKey    = 1[(gogoproto.nullable) = false, (optx.primaryKeyPriority) = 1];
+  repeated msg.LevelGroupUnit levelGroupUnit = 2; // 具体某个level的Group信息
+}
+
+message GuildWar {
+  option (optx.structuralVersion)                 = 1;
+  int64                            gid            = 1[(optx.primaryKeyPriority) = 1]; // 联盟id
+  repeated msg.Assembly            asmsToOthers   = 2; // 本盟对其他目标的集结
+  repeated msg.Assembly            asmsFromOthers = 3; // 其他目标对本盟的集结
+  repeated msg.GuildPersonalWar    personalWars   = 4; // 个人战信息
+  repeated msg.GvgWarMapIDAndObjID gvgWarList     = 5; // gvg战事
+}
+
+message UPreWarning {
+  option (optx.structuralVersion) = 0;
+  int64          uid              = 1[(optx.primaryKeyPriority) = 1]; // 联盟id
+  msg.PreWarning warnings         = 2; // 联盟预警信息
+}
+message ChatGroup {
+  option (optx.structuralVersion)      = 0;
+  int64                   cid          = 1[(optx.primaryKeyPriority) = 1]; // chatID
+  uint32                  svrID        = 2;
+  int64                   ownerID      = 3;
+  string                  name         = 4;
+  repeated msg.ChatMember members      = 5;
+  repeated int64          quitUIDs     = 6;
+  repeated msg.ChatMember applyMembers = 7;
+}

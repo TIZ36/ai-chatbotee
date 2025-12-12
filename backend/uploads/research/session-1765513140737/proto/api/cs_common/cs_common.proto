@@ -1,0 +1,426 @@
+syntax = "proto3";
+package cs_common;
+
+import "enumx/enumx.proto";
+import "enumx/csv_enumx.proto";
+import "msg/msg.proto";
+import "msg/map_msg.proto";
+import "msg/city_boss_msg.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb/pb_cs_common";
+option (gogoproto.goproto_getters_all) = false;
+
+message Dn_User {
+  int64                        uid              = 1;
+  Dn_UBasicInfo                basic            = 2;
+  repeated msg.Currency        currencies       = 3;
+  Dn_UHero                     hero             = 5;
+  Dn_UFormation                formation        = 7;
+  Dn_UBattle                   battle           = 8;
+  Dn_UNewBie                   newBie           = 9;
+  Dn_UProduce                  produce          = 10;
+
+  Dn_ResStack                  resStack         = 11;
+  Dn_UState                    uState           = 12; // 玩家状态
+  Dn_UScience                  science          = 13; // 科技数据
+  repeated msg.FightPower      fightPowers      = 14[(gogoproto.nullable) = false]; // 战力
+  Dn_UCD                       cd               = 15; // CD
+  Dn_UShop                     shop             = 16; // 商店
+  repeated uint32              triggers         = 18; // 触发过的trigger
+  repeated msg.Counter         counters         = 19; // 计数器
+  repeated msg.Best            bests            = 20; // 最佳计数器
+
+  Dn_UItemList                 allItems         = 21; // 所有物品
+  repeated msg.Buff            buffs            = 22[(gogoproto.nullable) = false]; // buff列表
+  repeated msg.TaskSystem      tasks            = 23; // 任务列表
+  Dn_UClientRecord             clientRecord     = 24; // 客户端记录
+  Dn_USupply                   supply           = 25; // 卡池信息
+  Dn_UGuide                    guide            = 26; // 引导
+  Dn_UMisc                     misc             = 27; // 混合数据
+  repeated msg.TimeLimitedBuff timeLimitedBuffs = 28[(gogoproto.nullable) = false]; // 限时buff列表
+  Dn_UProfile                  profile          = 29; // 玩家头像内所有档案信息
+
+  Dn_Activity                  activity         = 30; // 活动数据
+  Dn_GiftPackage               giftPackage      = 31; // 礼包数据
+  Dn_Charge                    charge           = 32; // 充值数据
+  Dn_Guild                     guild            = 33; // 联盟
+  Dn_UReserve                  reserve          = 34; // 预备役数据
+  Dn_UBase                     uBase            = 35; // 基地数据
+  Dn_UVip                      vip              = 36; // vip数据
+  Dn_UPrivilege                privilege        = 37; // 特权卡数据
+  msg.DailyTaskData            dailyTaskData    = 38; // 每日任务活跃相关数据
+  Dn_UArmyData                 armyData         = 39; // 玩家军队数据
+
+  Dn_RefundData                refundData       = 40; // 退款数据
+  repeated msg.RedDot          redDots          = 41; // 红点数据
+  Dn_UStrength                 strength         = 42; // 体力数据
+  Dn_UMapMarks                 mapMarks         = 43; // 地图标记数据
+  Dn_USpoil                    spoil            = 44; // 战利品
+  string                       abGroup          = 46; // abtest所属Group 客户端必须放Dn_User才能在他们读表前设置好
+  Dn_UFreeReward               freeReward       = 47; // 每日奖励
+  Dn_UTruck                    truck            = 48; // 抢车数据
+  Dn_UHuntTroop                huntTroop        = 49; // 狩猎小队数据
+
+  Dn_UEmoji                    emoji            = 50; // 表情数据
+  Dn_URadar                    radar            = 51; // 雷达数据
+  Dn_Citizen                   citizen          = 52; // 居民在线信息
+  Dn_UEmergencyRescue          emergencyRescue  = 53; // 紧急搜救站数据
+  Dn_UChatGroup                chatGroup        = 54; // 聊天群数据
+  Dn_UFeedback                 feedback         = 55; // 反馈数据
+  Dn_UCatalog                  catalog          = 56; // 反馈数据
+  Dn_ULike                     like             = 57; // 点赞数据
+
+  Dn_USHome                    shome            = 70; // 主城
+  Dn_USProduce                 sproduce         = 71; // 自动化产出
+  Dn_DrugOrder                 drugOrder        = 72; // 订单
+  Dn_PowerRank                 powerRank        = 73; // 上位之路
+  Dn_Chapter                   chapter          = 74; // 章节
+  Dn_TimedTask                 timedTask        = 75; // 限时任务
+  Dn_Incident                  incident         = 76; // 事件
+  Dn_USGuide                   sguide           = 77; // 引导记录
+  Dn_UStaff                    staff            = 78; // 员工
+  Dn_UGmMisc                   gmMisc           = 79; // gm相关标记
+}
+
+//------------------------------------上下行协议辅助-----------------------------------------------------------------------
+
+// Dn_UBasicInfo 先放这里
+message Dn_UBasicInfo {
+  string     openID         = 1; // 账号信息
+  enumx.Lang lang           = 2; // 语言
+  int64      createTs       = 3; // 创建时间
+  int64      serverOpenTime = 4; // 开服时间
+
+  uint32     map_id         = 5; // 地图实例ID
+  uint32     map_conf_id    = 6; // 地图配置ID
+  uint32     city_id        = 7; // 城市ID
+}
+
+message Dn_UState {
+  repeated msg.TimeLimitState timeStates = 1[(gogoproto.nullable) = false]; // TimeState列表
+}
+
+message Dn_UBase {
+  msg.IntPos   pos            = 1[(gogoproto.nullable) = false]; // 基地中心位置
+  uint32       buildingId     = 2; // 基地配置ID
+  uint32       buildingSkinId = 3; // 基地皮肤ID
+  uint64       mainBaseObjID  = 4; // 主基地ObjID
+  msg.WallData wallData       = 5; // 城墙数据
+  bool         isDestroyed    = 6; // 主基地是否被摧毁
+}
+
+message Dn_UHero {
+  repeated msg.Hero heroList = 1; // 英雄列表
+}
+
+// message Dn_UHome {
+//   repeated msg.AvatarPos     avatarPosL             = 1; // 主城内Avatar位置
+//   repeated msg.Building      buildings              = 2; // 建筑列表
+//   repeated msg.HomeStageData stageData              = 3;  // 主城内已经通关的关卡数据
+//   repeated msg.HomeGridData  hisGridDataL           = 4; // 主城地格历史数据
+//   repeated msg.HomeMistData  mistDataL              = 5; // 主城迷雾
+//   repeated msg.HomeArea      areas                  = 6; // 地格
+//   repeated msg.BuildingQueue buildingQueues         = 7; // 建筑队列
+//   repeated uint32            collections            = 8[(gogoproto.nullable) = false]; // 领取过奖励的连续采集物
+//   repeated msg.Uint32FloatKV specialBattleLevelList = 9[(gogoproto.nullable) = false]; // 特别行动处已完成的关卡记录
+//   repeated msg.UintBoolKV    queueUnlockInfo        = 10[(gogoproto.nullable) = false];// 队列解锁数据
+//   msg.RentInfo               rentQueueInfo          = 11;//租赁队列租赁数据
+// }
+
+message Dn_UFormation {
+  repeated msg.FormationGroup groupList    = 1; // 阵容组列表
+  repeated msg.SMarchPreset   marchPresets = 2; // 行军编队预设列表
+}
+
+message Dn_UBattle {
+  msg.Campaign campaign = 1; // 战役数据
+}
+
+message Dn_UNewBie {
+  repeated uint32        passedFpsStages = 1; // 已经通过的新手FPS关卡
+  repeated msg.TownEvent townEvents      = 2; // 内城事件
+}
+
+message Dn_UProduce {
+  msg.AirdropInfo              airdropInfo  = 1; // 空投信息
+  repeated msg.Uint32KV        resStackList = 2[(gogoproto.nullable) = false]; // 物资堆叠处 key: dropId  val: 数量
+  repeated msg.BuildingProduce produces     = 3; // 建筑生产信息
+  msg.EquipProduce             equipProduce = 4; // 装备生产信息
+}
+
+message Dn_UScience {
+  repeated msg.Science      scienceList      = 1; // 已有科技列表
+  repeated msg.ScienceQueue scienceQueueList = 2; // 科技队列
+  repeated msg.UintBoolKV   queueUnlockInfo  = 3[(gogoproto.nullable) = false]; // 科技队列解锁情况（默认解锁的1号没放进去）
+}
+
+message Dn_UFightPower {
+  repeated msg.UintKV                powerShows    = 1[(gogoproto.nullable) = false]; // key: PowerShowType（展示层枚举），value: 该类型总战力 - old version
+
+  repeated msg.PowerElementDecimalKV powerElements = 2[(gogoproto.nullable) = false]; // key: PowerElementType（战力元素类型），value: 战力值（Decimal）
+}
+
+message Dn_UCD {
+  repeated msg.CD cds = 1; // CD列表
+}
+
+message Dn_ResStack {
+  repeated msg.Asset resStackList = 1[(gogoproto.nullable) = false]; // 物资堆叠处 key: dropId  val: 数量
+}
+
+message Dn_UShop {
+  repeated msg.Shop shopList = 1; // 商店列表
+}
+
+message Dn_UItemList {
+  repeated msg.ItemList allItemList = 1; // 物品列表
+}
+
+message Dn_UClientRecord {
+  repeated msg.UintInt64KV records    = 1[(gogoproto.nullable) = false];  // 通用记录（key范围[0, 200]，如需修改通知服务器）
+  repeated uint64          bitRecords = 2; // 通用bit记录（bit索引范围[1, 512]，如需修改通知服务器）
+}
+
+message Dn_USupply {
+  repeated msg.SupplyCase supplyCases = 1; // 卡池信息
+}
+
+message Dn_UGuide {
+  repeated msg.Uint32KV groupRecords     = 1[(gogoproto.nullable) = false]; // 分组记录 key: groupID, value: 当前分组记录id
+  repeated uint32       finishIds        = 2; // 已完成的强制引导ID
+  bool                  denyEvaluation   = 3; // 是否拒绝评价
+  int64                 evalNotFinishCnt = 4; // 评价未完成次数
+  bool                  finishAll        = 5; // 是否完成所有新手引导
+}
+
+message Dn_UMisc {
+  uint32 commanderLv = 1; // 军衔
+}
+
+message Dn_UProfile {
+  msg.NameCard            nameCard             = 1; // 姓名
+  msg.AvatarCard          avatarCard           = 2; // 头像信息
+  repeated uint32         frames               = 3; // 头像框列表
+  repeated msg.UintBoolKV notificationSwitches = 4[(gogoproto.nullable) = false]; // 推送开关列表
+  msg.GenderCard          genderCard           = 5; // 性别信息
+  msg.SystemSetting       systemSetting        = 6[(gogoproto.nullable) = false]; // 系统设置, 全局系统设置存储
+  msg.UserHonorPower      userHonorPower       = 7; // 我要变强荣誉称号
+}
+
+message Dn_Activity {
+  repeated msg.ActivityData activityList        = 1; // 活动数据
+  repeated msg.ActivityData instantActivityList = 2; // 即时活动数据
+  msg.CityBossData          cityBossData        = 3; // 世界BOSS数据
+  repeated msg.ActivityData GuildActivityList   = 4; // 联盟活动数据
+}
+
+message Dn_GiftPackage {
+  repeated msg.GiftPackageGroup groups            = 1; // 礼包组
+  repeated uint32               pendingTriggerIDs = 2; // 待触发的triggerID
+  repeated msg.GiftPackageGroup airdropGroups     = 3; // 空投礼包组
+}
+
+message Dn_Charge {
+  uint32 sum = 1; // 累计充值总额
+}
+
+message GuildMemberSummary {
+  msg.USummary              userInfo       = 1; // 玩家信息
+  enumx.GuildMemberPos      pos            = 2; // 玩家职位
+  enumx.GuildSeniorOfficial officialType   = 3; // 高级官员类型
+  uint32                    firstChatMsgID = 4;
+  int64                     joinTs         = 5;
+}
+
+message Dn_Guild {
+  int64                        gid                  = 1;
+  repeated msg.UGuildHelpEntry reqHelpList          = 2; // 请求帮助信息
+  repeated int64               appliedGids          = 3; // 已申请过的联盟ID
+  uint32                       dailyGuildCoin       = 4; // 每日获得的公会币，跨天清零
+  uint32                       guildCoin            = 5; // 累计获得公会币
+  enumx.GuildMemberPos         pos                  = 6; // 玩家职位
+  enumx.GuildSeniorOfficial    officialType         = 7; // 高级官员类型
+  msg.UGuildTech               tech                 = 8;
+  string                       shortName            = 9;
+  uint32                       createTs             = 10; // 公会创建时间
+  msg.ClientGuildGvGInfo       clientGuildGvGInfo   = 11; // 公会战信息
+  msg.GuildMilestone           milestone            = 12; // 公会里程碑
+  msg.UGuildMilestone          uMilestone           = 13; // 玩家自己的公会里程碑数据
+  msg.GuildCityClash           cityClash            = 14; // 城市竞赛
+  repeated int64               memberUids           = 15; // 联盟成员列表
+  msg.IntPos                   rendezvousPoint      = 16[(gogoproto.nullable) = false]; // 聚集点
+  int64                        setRendezvousPointTs = 17; // 设置聚集点时间
+  bool                         canFreeTeleport      = 18; // 是否可以免费迁城
+  uint32                       masterUid            = 19;
+}
+
+message Dn_UReserve {
+  repeated msg.ReserveUnit     reserveList        = 1; // 预备役列表
+  msg.ReserveQueue             queue              = 2; // 预备役队列
+  repeated msg.Uint32KV        dispatchReserves   = 3; // 已出征预备役列表 key: reserveId, value: 出征数量
+  bool                         isDefendToDeath    = 4; // 是否开启死守模式
+  bool                         isFirstRecruitDone = 5; // 首次征兵是否完成
+  repeated msg.Uint32Float64KV individualId2Power = 6[(gogoproto.nullable) = false]; // 单个预备役经过外部 buff 加成后的战力 key:预备役id, value: 战力
+}
+
+message Dn_UVip {
+  int64           endTs       = 1; // vip结束时间戳，需要讨论第一次使用时间道具从当前时间算起还是当天/明天0点算起
+  uint32          level       = 2; // vip等级
+  msg.VipTimeData vipTimeData = 3;
+}
+message Dn_UPrivilege {
+  repeated msg.PrivilegeCardItem privilegeCards = 1;
+}
+
+message Dn_UArmyData{
+  repeated msg.ArmyInfo              armyInfos        = 1[(gogoproto.nullable) = false]; // 玩家军队数据
+  repeated msg.SelfFormationGarrison selfGarrisonList = 2; // 自己驻防列表
+}
+
+message Dn_RefundData{
+  repeated msg.RefundData refundData = 1[(gogoproto.nullable) = false]; // 玩家退款信息
+}
+
+message Dn_UStrength {
+  msg.RecoverData strength          = 1;
+  int64           strengthLimit     = 2; // 体力上限
+}
+
+message Dn_UMapMarks {
+  repeated msg.MapMark mapMarks = 1; // 地图标记数据
+}
+
+message Dn_USpoil {
+  repeated msg.SpoilItem spoilList = 1; // 战利品列表
+}
+
+message Dn_UFreeReward {
+  repeated msg.FreeRewardData freeReward = 1;
+}
+
+message Dn_UTruck {
+  repeated msg.TruckData      truck           = 1; // 抢车数据
+  int64                       lastRefreshTime = 2; // 最后一次刷新时间
+  uint32                      todaySendCount  = 3; // 今日已发送次数
+  uint32                      todayRobCount   = 4; // 今日已抢车次数
+  repeated msg.TruckData      historyTrucks   = 5; // 历史发车数据，保留20条，最多20天，超过20天则删除
+  repeated uint32             wantedList      = 6; //通缉名单
+  repeated msg.OtherTruckData otherTrucks     = 7; // 刷新到的其他人的卡车数据
+  repeated string             collectedList   = 8; // 收藏的卡车ID列表
+  repeated string             robList         = 9; // 抢别人的卡车ID列表
+}
+
+message Dn_UHuntTroop {
+  repeated msg.HuntTroopTask         currentTasks       = 1; // 当前任务
+  repeated msg.HuntTroopTask         historyTasks       = 2; // 历史任务
+  uint32                             todayTaskSendCount = 4; // 今日已派遣次数
+  uint32                             todayTaskRobCount  = 5; // 今日已抢车次数
+  repeated msg.HuntTroopWantUserItem wantedList         = 9; // 通缉名单
+  uint32                             helpTimes          = 10; // 今日已帮助次数
+  repeated msg.HuntTroopRecord       records            = 11; // 狩猎小队记录
+}
+
+message Dn_UEmoji {
+  repeated msg.Emoji emojiList = 1; // 表情列表
+}
+
+message Dn_URadar {
+  uint32                            level                  = 1; // 雷达等级
+  repeated msg.RadarTaskData        tasks                  = 2; // 雷达任务列表
+  int64                             nextRefreshTime        = 3; // 下次刷新任务时间
+  uint32                            reserveNum             = 4; // 储备任务数量
+  uint32                            finishedTaskCount      = 5; // 当前等级完成任务数量
+  // uint32                            level                  = 1; // 雷达等级
+  // repeated msg.RadarTaskData        tasks                  = 2; // 雷达任务列表
+  // int64                             dailyRefreshTime       = 3; // 每日刷新时间
+  // int64                             lastRefreshTimeStamp   = 4;  // 下次定时刷新时间戳
+  // bool                              isInFirstTask          = 5; // 是否在第一个任务中
+  // bool                              firstOpenPanelFinished = 6; // 是否已经打开过雷达面板
+  // int64                             lastTaskFinishTime     = 7; // 上次完成任务时间
+  // uint32                            currentRadarTaskObjId  = 8; // 当前雷达任务对象ID
+  // uint32                            finishedTaskCount      = 9; // 已经完成任务数量
+  // repeated msg.RadarTaskRefreshInfo cfgID2LastRefreshInfos = 10; // 配置ID2最后刷新时间
+  // uint32                            helpedCnt              = 11; //被盟友帮助的任务数，刷到新任务时可以直接完成
+  // msg.UDigTreasureInfo              digTreasureInfo        = 12; // 挖宝信息
+  // repeated uint32                   levelUpRewards         = 13; // 未领取的升级奖励
+}
+message Dn_Citizen{
+  msg.CitizenOnlineData     onlineData   = 1;
+  repeated msg.CitizenQueue citizenQueue = 2;
+}
+message Dn_UEmergencyRescue {
+  msg.EmergencyRescueData emergencyRescueData = 1; // 紧急搜救站数据
+}
+message ChatGroupMemberSummary {
+  msg.USummary userInfo = 1; // 玩家信息
+  int64        joinTs   = 2;
+}
+message Dn_UChatGroup{
+  int64 lastCreateTime = 1;
+}
+
+message Dn_UFeedback {
+  enumx.TaskStateType  clickSocialMediaState = 1; // 访问社交媒体任务状态
+  repeated msg.QnrInfo qnrInfos              = 2; // 最新一条问卷任务信息
+}
+message Dn_UCatalog{
+  uint32                     exp        = 1;
+  uint32                     level      = 2;
+  repeated msg.CatalogInfo   infoMap    = 3;
+  uint32                     stars      = 4;
+  repeated msg.CatalogInfo   extraMap   = 5;
+  repeated msg.GetRewardInfo rewardInfo = 6;
+}
+
+message Dn_ULike {
+  repeated msg.Like likeList = 1; // 点赞列表
+  int64             likeCnt  = 2; // 被点赞总数
+}
+
+message Dn_USHome {
+  repeated msg.SBuilding          buildings      = 1; // 建筑列表
+  repeated msg.SBuildingComponent components     = 2; // 组件列表
+  repeated msg.BuildingQueue      buildingQueues = 3; // 建筑队列
+}
+
+message Dn_USProduce {
+  msg.SProduceValueClient produceValue = 1; //自动化相关变量
+}
+
+message Dn_UStaff {
+  repeated msg.Staff staffs = 1; //所有员工
+}
+
+message Dn_DrugOrder {
+  msg.DrugOrderSys order = 1;  //订单
+}
+
+message Dn_PowerRank {
+  msg.PowerRank powerRank = 1; 
+}
+
+message Dn_Task {
+  repeated msg.TaskSystem tasks = 1; // 任务列表
+}
+
+message Dn_Chapter {
+  msg.ChapterInfo chapter = 1; 
+}
+
+message Dn_TimedTask {
+  repeated msg.TimedTask timedTasks = 1; 
+}
+
+message Dn_Incident {
+  msg.Incident incident = 1;
+}
+
+message Dn_USGuide {
+  repeated uint32          finishGuideIds    = 1; // 已完成的引导id
+  repeated enumx.EpisodeId triggerEpisodeIds = 2; // 已触发的timelineEpisode
+}
+
+message Dn_UGmMisc {
+  bool unlockAllFunc = 1; // 解锁所有模块
+}

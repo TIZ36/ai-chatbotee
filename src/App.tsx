@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
-import { Brain, Plug, Workflow as WorkflowIcon, Settings, Code, Terminal, MessageCircle, Globe, Sparkles, Bot, Users } from 'lucide-react';
+import { Brain, Plug, Workflow as WorkflowIcon, Settings, Code, Terminal, MessageCircle, Globe, Sparkles, Bot, Users, BookOpen } from 'lucide-react';
 import TerminalPanel from './components/TerminalPanel';
 import { setTerminalExecutor } from './utils/terminalExecutor';
 import SettingsPanel from './components/SettingsPanel';
@@ -12,6 +12,7 @@ import CrawlerConfigPage from './components/CrawlerConfigPage';
 import AgentsPage from './components/AgentsPage';
 import SessionSidebar from './components/SessionSidebar';
 import RoundTableChat from './components/RoundTableChat';
+import ResearchPanel from './components/ResearchPanel';
 
 // 导航项组件 - 带动画和tooltip
 interface NavItemProps {
@@ -145,18 +146,34 @@ const App: React.FC = () => {
   const [isRoundTableMode, setIsRoundTableMode] = useState(false);
   const [currentRoundTableId, setCurrentRoundTableId] = useState<string | null>(null);
   const [participantRefreshKey, setParticipantRefreshKey] = useState(0);
+  
+  // Research 模式状态
+  const [isResearchMode, setIsResearchMode] = useState(false);
+  const [currentResearchSessionId, setCurrentResearchSessionId] = useState<string | null>(null);
 
   const handleToggleRoundTable = async () => {
     if (!isRoundTableMode) {
       // 切换到圆桌模式，但不自动创建新圆桌
       // 用户可以在圆桌界面选择已有圆桌或手动创建新圆桌
       setIsRoundTableMode(true);
+      setIsResearchMode(false);
     } else {
       // 退出圆桌模式
       setIsRoundTableMode(false);
       // 保留当前圆桌ID，下次进入时可以继续
       // setCurrentRoundTableId(null);
     }
+  };
+  
+  const handleToggleResearch = () => {
+    setIsResearchMode(prev => {
+      const next = !prev;
+      if (next) {
+        // 进入 Research 模式时，退出圆桌模式
+        setIsRoundTableMode(false);
+      }
+      return next;
+    });
   };
 
   const handleAddToRoundTable = async (sessionId: string) => {
@@ -321,7 +338,11 @@ const App: React.FC = () => {
           /* 聊天页面 - 左右布局 - GNOME 风格 */
           <div className="flex flex-1 min-h-0 min-w-0 p-2 gap-2">
             {/* 左侧会话列表面板 */}
-            <div className="rounded-xl bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] shadow-lg dark:shadow-[0_4px_24px_rgba(0,0,0,0.4)] overflow-hidden">
+            <div
+              className={`rounded-xl bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] shadow-lg dark:shadow-[0_4px_24px_rgba(0,0,0,0.4)] overflow-hidden transition-all duration-300 ${
+                isResearchMode ? 'w-0 opacity-0 pointer-events-none border-transparent shadow-none' : 'opacity-100'
+              }`}
+            >
               <SessionSidebar
                 selectedSessionId={selectedSessionId}
                 onSelectSession={handleSelectSession}
@@ -333,25 +354,58 @@ const App: React.FC = () => {
             </div>
             
             {/* 中间会议按钮 */}
-            <div className="w-0 flex items-center justify-center relative group">
-              <button
-                onClick={handleToggleRoundTable}
-                className={`
-                  absolute left-1/2 -translate-x-1/2 w-7 h-14 rounded-lg transition-all z-10
-                  shadow-md dark:shadow-[0_2px_8px_rgba(0,0,0,0.3)]
-                  ${isRoundTableMode
-                    ? 'bg-[#7c3aed] text-white'
-                    : 'bg-white dark:bg-[#363636] text-gray-500 dark:text-[#b0b0b0] hover:bg-[#7c3aed]/10 dark:hover:bg-[#7c3aed]/20 hover:text-[#7c3aed]'
-                  }
-                `}
-                title={isRoundTableMode ? '退出圆桌会议' : '进入圆桌会议'}
-              >
-                <Users className="w-4 h-4 mx-auto" />
-              </button>
+            <div className="w-0 flex items-center justify-center relative">
+              <div className="absolute left-1/2 -translate-x-1/2 flex flex-col gap-2 z-10">
+                <button
+                  onClick={handleToggleRoundTable}
+                  className={`
+                    w-7 h-14 rounded-lg transition-all
+                    shadow-md dark:shadow-[0_2px_8px_rgba(0,0,0,0.3)]
+                    ${isRoundTableMode
+                      ? 'bg-[#7c3aed] text-white'
+                      : 'bg-white dark:bg-[#363636] text-gray-500 dark:text-[#b0b0b0] hover:bg-[#7c3aed]/10 dark:hover:bg-[#7c3aed]/20 hover:text-[#7c3aed]'
+                    }
+                  `}
+                  title={isRoundTableMode ? '退出圆桌会议' : '进入圆桌会议'}
+                >
+                  <Users className="w-4 h-4 mx-auto" />
+                </button>
+                
+                <button
+                  onClick={handleToggleResearch}
+                  className={`
+                    w-7 h-14 rounded-lg transition-all
+                    shadow-md dark:shadow-[0_2px_8px_rgba(0,0,0,0.3)]
+                    ${isResearchMode
+                      ? 'bg-[#7c3aed] text-white'
+                      : 'bg-white dark:bg-[#363636] text-gray-500 dark:text-[#b0b0b0] hover:bg-[#7c3aed]/10 dark:hover:bg-[#7c3aed]/20 hover:text-[#7c3aed]'
+                    }
+                  `}
+                  title={isResearchMode ? '退出 Research' : '进入 Research'}
+                >
+                  <BookOpen className="w-4 h-4 mx-auto" />
+                </button>
+              </div>
             </div>
             
+            {/* Research 主面板 */}
+            {isResearchMode && (
+              <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden rounded-xl bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] shadow-lg dark:shadow-[0_4px_24px_rgba(0,0,0,0.4)]">
+                <ResearchPanel
+                  chatSessionId={selectedSessionId}
+                  researchSessionId={currentResearchSessionId}
+                  onResearchSessionChange={setCurrentResearchSessionId}
+                  onExit={() => setIsResearchMode(false)}
+                />
+              </div>
+            )}
+
             {/* 右侧聊天区域面板 */}
-            <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden rounded-xl bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] shadow-lg dark:shadow-[0_4px_24px_rgba(0,0,0,0.4)]">
+            <div
+              className={`flex flex-col min-h-0 min-w-0 overflow-hidden rounded-xl bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] shadow-lg dark:shadow-[0_4px_24px_rgba(0,0,0,0.4)] transition-all duration-300 ${
+                isResearchMode ? 'w-0 opacity-0 pointer-events-none border-transparent shadow-none' : 'flex-1 opacity-100'
+              }`}
+            >
               {isRoundTableMode ? (
                 /* 圆桌聊天 */
                 <RoundTableChat

@@ -10,7 +10,7 @@ export interface Session {
   avatar?: string; // base64编码的头像
   system_prompt?: string; // 系统提示词（人设）
   media_output_path?: string; // 媒体输出本地路径（图片/视频/音频）
-  session_type?: 'temporary' | 'memory' | 'agent'; // 会话类型：临时会话/记忆体/智能体
+  session_type?: 'temporary' | 'memory' | 'agent' | 'research'; // 会话类型：临时会话/记忆体/智能体/研究
   created_at?: string;
   updated_at?: string;
   last_message_at?: string;
@@ -119,7 +119,7 @@ export async function getAgents(): Promise<Session[]> {
 export async function createSession(
   llm_config_id?: string,
   title?: string,
-  session_type?: 'temporary' | 'memory' | 'agent'
+  session_type?: 'temporary' | 'memory' | 'agent' | 'research'
 ): Promise<Session> {
   const response = await fetch(`${API_BASE}/sessions`, {
     method: 'POST',

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from flask import Flask, request, jsonify, send_file, Response, stream_with_context
 from flask_cors import CORS
+from werkzeug.exceptions import RequestEntityTooLarge
 import yt_dlp
 import queue
 
@@ -41,6 +42,33 @@ def load_config():
         return yaml.safe_load(f)
 
 config = load_config()
+
+# ==================== Upload Limits (Research / multipart) ====================
+# 防止目录/大文件上传触发 werkzeug 413（默认限制较小）
+try:
+    research_cfg = (config or {}).get('research', {}) or {}
+    upload_max_mb = int(research_cfg.get('upload_max_mb', 512))
+    max_form_memory_mb = int(research_cfg.get('max_form_memory_mb', 64))
+    max_form_parts = int(research_cfg.get('max_form_parts', 20000))
+
+    app.config['MAX_CONTENT_LENGTH'] = upload_max_mb * 1024 * 1024
+    app.config['MAX_FORM_MEMORY_SIZE'] = max_form_memory_mb * 1024 * 1024
+    app.config['MAX_FORM_PARTS'] = max_form_parts
+    print(f"[Upload Limits] MAX_CONTENT_LENGTH={app.config['MAX_CONTENT_LENGTH']} bytes, "
+          f"MAX_FORM_MEMORY_SIZE={app.config['MAX_FORM_MEMORY_SIZE']} bytes, "
+          f"MAX_FORM_PARTS={app.config['MAX_FORM_PARTS']}")
+except Exception as e:
+    print(f"[Upload Limits] ⚠️ Failed to apply upload limits: {e}")
+
+@app.errorhandler(RequestEntityTooLarge)
+def handle_request_entity_too_large(e):
+    """统一将 413 返回为 JSON，前端可展示友好提示"""
+    limit = app.config.get('MAX_CONTENT_LENGTH')
+    return jsonify({
+        'error': 'RequestEntityTooLarge',
+        'message': 'Upload too large. Reduce file count/size or increase backend config research.upload_max_mb.',
+        'max_bytes': limit,
+    }), 413
 
 # ==================== CORS 统一配置 ====================
 # 统一定义所有允许的CORS请求头，确保所有API接口使用相同的配置
@@ -5330,6 +5358,503 @@ def delete_message(session_id, message_id):
                 
     except Exception as e:
         print(f"[Session API] Error deleting message: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+# ==================== Research Sources / Retrieval API ====================
+
+def _research_safe_relpath(name: str) -> str:
+    """Allow client to pass webkitRelativePath as filename; prevent path traversal."""
+    import re
+    # Normalize slashes
+    name = (name or '').replace('\\', '/')
+    # Remove drive letters and leading slashes
+    name = re.sub(r'^[a-zA-Z]:', '', name).lstrip('/')
+    # Drop .. segments
+    parts = [p for p in name.split('/') if p and p not in ('.', '..')]
+    safe = '/'.join(parts)
+    # Fallback
+    return safe or f'file-{int(time.time() * 1000)}'
+
+def _unique_source_title(cursor, session_id: str, base_title: str) -> str:
+    """Make source title unique within a session (for $alias reference)."""
+    base = (base_title or '').strip() or f'source-{int(time.time()*1000)}'
+    title = base
+    i = 2
+    while True:
+        cursor.execute("""
+            SELECT 1 FROM research_sources WHERE session_id=%s AND title=%s LIMIT 1
+        """, (session_id, title))
+        if not cursor.fetchone():
+            return title
+        title = f"{base}-{i}"
+        i += 1
+
+def _is_text_mime(mime: str) -> bool:
+    if not mime:
+        return False
+    mime = mime.lower()
+    return mime.startswith('text/') or mime in (
+        'application/json',
+        'application/xml',
+        'application/x-yaml',
+        'application/yaml',
+        'application/javascript',
+    )
+
+@app.route('/api/research/sources/url', methods=['POST', 'OPTIONS'])
+def research_add_url_source():
+    """添加 URL 来源记录（仅登记，不自动抓取）"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+
+        data = request.json or {}
+        session_id = data.get('session_id')
+        url = data.get('url')
+        title = data.get('title') or url
+        if not session_id or not url:
+            return jsonify({'error': 'session_id and url are required'}), 400
+
+        source_id = data.get('source_id') or f"rs-{int(time.time() * 1000)}"
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                INSERT INTO research_sources (source_id, session_id, source_type, title, url, meta)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (
+                source_id,
+                session_id,
+                'url',
+                title,
+                url,
+                json.dumps({'added_by': 'user'}, ensure_ascii=False),
+            ))
+            conn.commit()
+            return jsonify({'source_id': source_id, 'session_id': session_id, 'source_type': 'url', 'title': title, 'url': url}), 201
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+    except Exception as e:
+        print(f"[Research API] Error adding url source: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/research/sources/upload', methods=['POST', 'OPTIONS'])
+def research_upload_sources():
+    """
+    上传文件/图片/目录（通过 webkitdirectory 上传时 filename 带相对路径），并将可文本化的内容写入 research_documents。
+    """
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+
+        session_id = request.form.get('session_id')
+        if not session_id:
+            return jsonify({'error': 'session_id is required'}), 400
+
+        upload_kind = request.form.get('upload_kind') or 'files'  # files|dir
+        dir_alias = request.form.get('dir_alias')  # optional human alias for directory
+
+        files = request.files.getlist('files')
+        if not files:
+            return jsonify({'error': 'files are required'}), 400
+
+        import mimetypes
+        from pathlib import Path
+
+        base_dir = Path(__file__).resolve().parent / 'uploads' / 'research' / session_id
+        base_dir.mkdir(parents=True, exist_ok=True)
+
+        created_sources = []
+        created_docs = 0
+
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+            # If uploading a directory, create ONE dir source (alias) and index docs under it.
+            dir_source_id = None
+            dir_title = None
+            if upload_kind == 'dir':
+                dir_source_id = f"rs-dir-{int(time.time() * 1000)}"
+                dir_title = _unique_source_title(cursor, session_id, dir_alias or f"dir-{int(time.time()*1000)}")
+                cursor.execute("""
+                    INSERT INTO research_sources (source_id, session_id, source_type, title, file_path, mime_type, meta)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    dir_source_id,
+                    session_id,
+                    'dir',
+                    dir_title,
+                    str(base_dir),
+                    None,
+                    json.dumps({'kind': 'dir', 'alias': dir_title}, ensure_ascii=False),
+                ))
+                created_sources.append({
+                    'source_id': dir_source_id,
+                    'session_id': session_id,
+                    'source_type': 'dir',
+                    'title': dir_title,
+                    'file_path': str(base_dir),
+                })
+
+            for f in files:
+                rel = _research_safe_relpath(f.filename)
+                target_path = (base_dir / rel).resolve()
+                # Ensure under base_dir
+                if str(target_path).startswith(str(base_dir.resolve())) is False:
+                    continue
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+
+                # Save file
+                f.save(str(target_path))
+
+                guessed_mime, _ = mimetypes.guess_type(str(target_path))
+                mime = f.mimetype or guessed_mime or 'application/octet-stream'
+
+                # For directory upload, do NOT create per-file source records.
+                # For normal file upload, create per-file sources as before.
+                source_id_for_doc = None
+                if upload_kind == 'dir' and dir_source_id:
+                    source_id_for_doc = dir_source_id
+                else:
+                    source_type = 'image' if mime.lower().startswith('image/') else 'file'
+                    source_id = f"rs-{int(time.time() * 1000)}-{created_docs}"
+                    title = _unique_source_title(cursor, session_id, rel)
+                    cursor.execute("""
+                        INSERT INTO research_sources (source_id, session_id, source_type, title, file_path, mime_type, meta)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        source_id,
+                        session_id,
+                        source_type,
+                        title,
+                        str(target_path),
+                        mime,
+                        json.dumps({'rel_path': rel}, ensure_ascii=False),
+                    ))
+                    created_sources.append({
+                        'source_id': source_id,
+                        'session_id': session_id,
+                        'source_type': source_type,
+                        'title': title,
+                        'file_path': str(target_path),
+                        'mime_type': mime,
+                    })
+                    source_id_for_doc = source_id
+
+                # Index text-like files
+                if _is_text_mime(mime):
+                    try:
+                        # Limit size to 2MB per file to avoid huge DB writes
+                        size = target_path.stat().st_size
+                        if size <= 2 * 1024 * 1024:
+                            content_text = target_path.read_text(encoding='utf-8', errors='ignore')
+                            doc_id = f"rd-{int(time.time() * 1000)}-{created_docs}"
+                            cursor.execute("""
+                                INSERT INTO research_documents (doc_id, session_id, source_id, rel_path, content_text)
+                                VALUES (%s, %s, %s, %s, %s)
+                            """, (doc_id, session_id, source_id_for_doc, rel, content_text))
+                            created_docs += 1
+                    except Exception as ie:
+                        print(f"[Research API] Index text failed: {ie}")
+
+            conn.commit()
+            return jsonify({'sources': created_sources, 'indexed_documents': created_docs}), 201
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+    except RequestEntityTooLarge as e:
+        # 解析 multipart 前就会触发；不要转 500
+        limit = app.config.get('MAX_CONTENT_LENGTH')
+        return jsonify({
+            'error': 'RequestEntityTooLarge',
+            'message': 'Upload too large. Please reduce file count/size, or increase research.upload_max_mb in backend/config.yaml.',
+            'max_bytes': limit,
+        }), 413
+    except Exception as e:
+        print(f"[Research API] Error uploading sources: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/research/sources', methods=['GET', 'OPTIONS'])
+def research_list_sources():
+    """列出指定 Research 会话的 sources"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+
+        session_id = request.args.get('session_id')
+        if not session_id:
+            return jsonify({'error': 'session_id is required'}), 400
+
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT source_id, session_id, source_type, title, url, file_path, mime_type, meta, created_at
+                FROM research_sources
+                WHERE session_id = %s
+                ORDER BY created_at DESC
+                LIMIT 500
+            """, (session_id,))
+            rows = cursor.fetchall()
+            for r in rows:
+                try:
+                    if r.get('meta') and isinstance(r['meta'], str):
+                        r['meta'] = json.loads(r['meta'])
+                except Exception:
+                    pass
+                if r.get('created_at'):
+                    r['created_at'] = r['created_at'].isoformat()
+            return jsonify({'sources': rows}), 200
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+    except Exception as e:
+        print(f"[Research API] Error listing sources: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/research/sources/file', methods=['GET', 'OPTIONS'])
+def research_get_source_file():
+    """下载/预览某个 source 对应的文件内容（用于图片缩略图等）。"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+
+        session_id = request.args.get('session_id')
+        source_id = request.args.get('source_id')
+        if not session_id or not source_id:
+            return jsonify({'error': 'session_id and source_id are required'}), 400
+
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT source_id, session_id, source_type, title, file_path, mime_type
+                FROM research_sources
+                WHERE session_id=%s AND source_id=%s
+                LIMIT 1
+            """, (session_id, source_id))
+            row = cursor.fetchone()
+            if not row:
+                return jsonify({'error': 'source not found'}), 404
+            file_path = row.get('file_path')
+            if not file_path:
+                return jsonify({'error': 'source has no file_path'}), 400
+
+            # Security: ensure file under backend/uploads/research/<session_id>/
+            try:
+                base_dir = (Path(__file__).resolve().parent / 'uploads' / 'research' / session_id).resolve()
+                target = Path(file_path).resolve()
+                if base_dir not in target.parents and target != base_dir:
+                    return jsonify({'error': 'invalid file path'}), 403
+                if not target.exists() or not target.is_file():
+                    return jsonify({'error': 'file not found on server'}), 404
+            except Exception:
+                return jsonify({'error': 'invalid file path'}), 403
+
+            mime = row.get('mime_type') or 'application/octet-stream'
+            # inline preview (no attachment) so <img src> works
+            return send_file(str(target), mimetype=mime, as_attachment=False, download_name=row.get('title') or target.name)
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+    except Exception as e:
+        print(f"[Research API] Error get source file: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/research/retrieve', methods=['POST', 'OPTIONS'])
+def research_retrieve():
+    """基于 MySQL FULLTEXT 检索 research_documents"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+
+        data = request.json or {}
+        session_id = data.get('session_id')
+        query = data.get('query')
+        limit = int(data.get('limit', 8))
+        if not session_id or not query:
+            return jsonify({'error': 'session_id and query are required'}), 400
+
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT
+                    doc_id,
+                    source_id,
+                    rel_path,
+                    MATCH(content_text, rel_path) AGAINST (%s IN NATURAL LANGUAGE MODE) AS score,
+                    LEFT(content_text, 800) AS snippet
+                FROM research_documents
+                WHERE session_id = %s
+                  AND MATCH(content_text, rel_path) AGAINST (%s IN NATURAL LANGUAGE MODE)
+                ORDER BY score DESC
+                LIMIT %s
+            """, (query, session_id, query, limit))
+            rows = cursor.fetchall()
+            return jsonify({'results': rows}), 200
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+    except Exception as e:
+        print(f"[Research API] Error retrieve: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/research/sources/resolve', methods=['POST', 'OPTIONS'])
+def research_resolve_sources():
+    """Resolve $alias references into structured info (url/snippet/dir stats)."""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+
+        data = request.json or {}
+        session_id = data.get('session_id')
+        tokens = data.get('tokens') or []
+        if not session_id or not isinstance(tokens, list) or len(tokens) == 0:
+            return jsonify({'error': 'session_id and tokens[] are required'}), 400
+
+        tokens = [str(t) for t in tokens if str(t).strip()]
+        if not tokens:
+            return jsonify({'resolved': []}), 200
+
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT source_id, session_id, source_type, title, url, file_path, mime_type, meta, created_at
+                FROM research_sources
+                WHERE session_id = %s
+                ORDER BY created_at DESC
+                LIMIT 2000
+            """, (session_id,))
+            sources = cursor.fetchall() or []
+            for s in sources:
+                try:
+                    if s.get('meta') and isinstance(s['meta'], str):
+                        s['meta'] = json.loads(s['meta'])
+                except Exception:
+                    s['meta'] = None
+                if s.get('created_at'):
+                    s['created_at'] = s['created_at'].isoformat()
+
+            def find_source(tok: str):
+                # exact match by source_id
+                for s in sources:
+                    if s.get('source_id') == tok:
+                        return s
+                # exact match by title (alias)
+                for s in sources:
+                    if (s.get('title') or '') == tok:
+                        return s
+                # exact match by url
+                for s in sources:
+                    if (s.get('url') or '') == tok:
+                        return s
+                # fallback: prefix match title
+                for s in sources:
+                    if (s.get('title') or '').startswith(tok):
+                        return s
+                return None
+
+            resolved = []
+            for tok in tokens:
+                s = find_source(tok)
+                if not s:
+                    resolved.append({'token': tok, 'found': False})
+                    continue
+                item = {'token': tok, 'found': True, 'source': s}
+
+                if s.get('source_type') == 'url':
+                    item['url'] = s.get('url')
+                elif s.get('source_type') == 'dir':
+                    cursor.execute("""
+                        SELECT COUNT(*) AS total
+                        FROM research_documents
+                        WHERE session_id=%s AND source_id=%s
+                    """, (session_id, s.get('source_id')))
+                    total = cursor.fetchone().get('total', 0)
+                    cursor.execute("""
+                        SELECT rel_path
+                        FROM research_documents
+                        WHERE session_id=%s AND source_id=%s
+                        ORDER BY created_at DESC
+                        LIMIT 30
+                    """, (session_id, s.get('source_id')))
+                    paths = [r.get('rel_path') for r in cursor.fetchall() or [] if r.get('rel_path')]
+                    item['dir'] = {'doc_count': total, 'sample_paths': paths}
+                else:
+                    # file/image: try return snippet if indexed
+                    cursor.execute("""
+                        SELECT LEFT(content_text, 2500) AS snippet, rel_path
+                        FROM research_documents
+                        WHERE session_id=%s AND source_id=%s
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    """, (session_id, s.get('source_id')))
+                    row = cursor.fetchone()
+                    if row and row.get('snippet'):
+                        item['snippet'] = row.get('snippet')
+                        item['rel_path'] = row.get('rel_path')
+
+                resolved.append(item)
+
+            return jsonify({'resolved': resolved}), 200
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+    except Exception as e:
+        print(f"[Research API] Error resolve sources: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500

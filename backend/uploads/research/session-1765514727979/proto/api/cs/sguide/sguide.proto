@@ -1,0 +1,45 @@
+syntax = "proto3";
+package sguide;
+import "msg/msg.proto";
+import "enumx/enumx.proto";
+import "enumx/csv_enumx.proto";
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb/pb_sguide";
+option (gogoproto.goproto_getters_all) = false;
+
+//------------------------------------------------------------------------------------------
+message Up_Union {
+  oneof body {
+    option (validator.oneof)            = {required: true};
+    Up_SFinishGuide       finishGuide       = 1; // 完成引导
+    Up_STriggerEpisode    triggerEpisode    = 2; // 触发timelineEpisode
+    msg.Empty             completeEpisode   = 3; // timelineEpisode播放完毕
+  }
+}
+
+message Dn_Union {
+  oneof body {
+      Dn_SFinishGuide       finishGuide       = 1; // 完成引导
+      Dn_STriggerEpisode    triggerEpisode    = 2; // 触发timelineEpisode
+      msg.Empty             completeEpisode   = 3; // timelineEpisode播放完毕
+  }
+}
+
+message Up_SFinishGuide {
+  uint32 guideId = 1; // 引导id
+}
+
+message Dn_SFinishGuide {
+  repeated uint32 finishGuideIds = 1; // 已完成的引导id
+}
+
+message Up_STriggerEpisode {
+  enumx.EpisodeId episodeId = 1; // episodeId
+}
+
+message Dn_STriggerEpisode {
+  repeated enumx.EpisodeId triggerEpisodeIds = 1; // 已触发的episodeId
+  msg.CostReward costReward = 2; // 消耗&奖励
+}

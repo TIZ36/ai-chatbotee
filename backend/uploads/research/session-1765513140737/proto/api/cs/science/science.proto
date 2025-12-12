@@ -1,0 +1,83 @@
+syntax = "proto3";
+package science;
+import "msg/msg.proto";
+import "enumx/enumx.proto";
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb/pb_science";
+option (gogoproto.goproto_getters_all) = false;
+
+// science
+//------------------------------------------------------------------------------------------
+message Up_Union {
+  oneof body {
+    option (validator.oneof) = {required: true};
+    Up_ScienceResearch    scienceResearch    = 1; // 科技研究
+    Up_ScienceQueueFinish scienceQueueFinish = 2; // 科技队列完成
+    Up_ScienceSpeedUp     scienceSpeedUp     = 3; // 科技加速
+    Up_ScienceResearchNow scienceResearchNow = 4; // 立即研究
+    Up_ScienceCancelQueue scienceCancelQueue = 5; // 科技队列取消
+  }
+}
+
+message Dn_Union {
+  oneof body {
+    Dn_ScienceResearch    scienceResearch    = 1;
+    Dn_ScienceQueueFinish scienceQueueFinish = 2;
+    Dn_ScienceSpeedUp     scienceSpeedUp     = 3;
+    Dn_ScienceResearchNow scienceResearchNow = 4;
+    Dn_ScienceCancelQueue scienceCancelQueue = 5;
+  }
+}
+
+// 科技研究
+message Up_ScienceResearch {
+  uint32                 scienceID = 1;
+  enumx.ScienceQueueType queueID   = 2; // 科技队列ID
+}
+
+message Dn_ScienceResearch {
+  msg.ScienceQueue scienceQueue = 1;
+  msg.Science      science      = 2;
+  msg.CostReward   costReward   = 3;
+}
+
+// 科技队列完成
+message Up_ScienceQueueFinish {
+  uint32 scienceID = 1;
+}
+
+message Dn_ScienceQueueFinish {
+  msg.Science science = 1;
+}
+
+message Up_ScienceSpeedUp {
+  uint32              id                = 1;
+  repeated msg.UintKV items             = 2[(gogoproto.nullable) = false]; // 加速道具列表
+  uint64              clientSpeedUpTime = 3; // 客户端加速时间
+}
+
+message Dn_ScienceSpeedUp {
+  msg.CostReward   costReward   = 1;
+  msg.ScienceQueue scienceQueue = 2;
+  msg.Science      science      = 3;
+}
+
+message Up_ScienceResearchNow {
+  uint32              scienceID     = 1;     //建筑id
+  bool                isInQueue     = 2;    //是否在队列中
+  uint32              costDiamond   = 3;    //消耗的钻石
+}
+
+message Dn_ScienceResearchNow {
+  msg.Science science = 1;
+}
+
+message Up_ScienceCancelQueue {
+  uint32 id = 1; // 科技ID
+}
+
+message Dn_ScienceCancelQueue {
+  msg.Reward reward = 1;
+}

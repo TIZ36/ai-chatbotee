@@ -1,0 +1,31 @@
+syntax = "proto3";
+package free_reward;
+import "msg/msg.proto";
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb/pb_free_reward";
+option (gogoproto.goproto_getters_all) = false;
+
+//------------------------------------------------------------------------------------------
+message Up_Union {
+  oneof body {
+    option (validator.oneof)             = {required: true};
+    Up_GetFreeReward getFreeReward = 1; // 获取免费奖励
+  }
+}
+
+message Dn_Union {
+  oneof body {
+    Dn_GetFreeReward getFreeReward = 1; // 获取免费奖励
+  }
+}
+
+message Up_GetFreeReward {
+  repeated uint32 rewardIDs = 1; // 要领取的ID
+}
+
+message Dn_GetFreeReward {
+  msg.Reward reward      = 1;
+  int64      nextGetTime = 2;
+}

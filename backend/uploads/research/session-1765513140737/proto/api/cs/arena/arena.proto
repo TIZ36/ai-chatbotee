@@ -1,0 +1,123 @@
+syntax = "proto3";
+package arena;
+import "msg/msg.proto";
+import "msg/battle_msg.proto";
+import "msg/arena_msg.proto";
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb/pb_arena";
+option (gogoproto.goproto_getters_all) = false;
+
+//------------------------------------------------------------------------------------------
+message Up_Union {
+  oneof body {
+    option (validator.oneof) = {required: true};
+    Up_Challenge         challenge         = 1; // 挑战
+    Up_RefreshOpponent   refreshOpponent   = 2; // 刷新对手
+    Up_ReceiveAccReward  receiveAccReward  = 4; // 领取累次奖励
+    Up_QueryRecord       queryRecord       = 5; // 查询战斗记录
+    Up_QueryLegionDetail queryLegionDetail = 6; // 查询对手阵容
+    Up_QueryOpponents    queryOpponents    = 9; // 查询对手列表
+    Up_QueryAccReward    queryAccReward    = 10; // 查询累计奖励信息
+    msg.Empty            queryArenaInfo    = 11; // 查询竞技场信息
+  }
+}
+
+message Dn_Union {
+  oneof body {
+    Dn_Challenge         challenge         = 1; // 挑战
+    Dn_RefreshOpponent   refreshOpponent   = 2; // 刷新对手
+    Dn_ReceiveAccReward  receiveAccReward  = 4; // 领取累计奖励
+    Dn_QueryRecord       queryRecord       = 5; // 查询战斗记录
+    Dn_QueryLegionDetail queryLegionDetail = 6; // 查询对手阵容
+    Dn_QueryOpponents    queryOpponents    = 9; // 查询对手列表
+    Dn_QueryAccReward    queryAccReward    = 10; // 查询累计奖励信息
+    Dn_QueryArenaInfo    queryArenaInfo    = 11; // 查询竞技场信息
+  }
+}
+
+message Up_Challenge {
+  int64         uid       = 1; // 对手UID（如果为0，表示挑战机器人）
+  msg.Formation formation = 2;
+  int64         recordId  = 3; // 战斗记录ID，不为0表示反击
+}
+
+message Dn_Challenge {
+  int64          uid        = 1; // 对手UID
+  //bool result = 2; // 战斗结果 (TODO)
+  msg.CostReward costReward = 3; // 对战奖励
+  msg.Int64Pair  atkRank    = 4[(gogoproto.nullable) = false]; // 攻击方排名
+  msg.Int64Pair  atkScore   = 5[(gogoproto.nullable) = false]; // 攻击方积分
+  msg.Int64Pair  dfdScore   = 6[(gogoproto.nullable) = false]; // 防守方积分（仅玩家有效）
+  int64          recordId   = 7; // 战斗记录ID
+  msg.BtMsg      btMsg      = 8; // 战斗记录
+}
+
+message Up_RefreshOpponent {
+}
+
+message Dn_RefreshOpponent {
+  repeated msg.RankEntry opponentList = 1; // 对手列表
+  msg.CostReward         costReward   = 2; // 消耗奖励
+}
+
+message Up_ReceiveAccReward {
+}
+
+message Dn_ReceiveAccReward {
+  repeated uint32 tids       = 1; // 奖励索引
+  msg.CostReward  costReward = 2; // 消耗奖励
+}
+
+message Up_QueryRecord {
+  int64 queryStartTs = 1; // 查询起始时间戳
+}
+
+message Dn_QueryRecord {
+  int64                    queryStartTs = 1; // 查询起始时间戳
+  repeated msg.ArenaRecord records      = 2; // 战斗记录
+}
+
+// 查询阵容详情
+message Up_QueryLegionDetail {
+  int64 uid = 1; // 对手UID
+}
+
+message Dn_QueryLegionDetail {
+  msg.ArenaPlayerDetail legionInfo = 1; // 对手阵容
+}
+
+// 查询对手列表
+message Up_QueryOpponents {
+}
+
+message Dn_QueryOpponents {
+  repeated msg.RankEntry opponentList     = 1; // 对手列表
+  bool                   isPlayerOpponent = 2; // 是否是玩家对手
+}
+
+// 查询累计奖励信息
+message Up_QueryAccReward {
+}
+
+message Dn_QueryAccReward {
+  repeated uint32 accRewardIndexList = 1; // 累次奖励领取索引
+  uint32          accCount           = 2; // 累计次数
+}
+
+message PackArenaInfo {
+  repeated msg.RankEntry opponentList       = 1; // 对手列表
+  bool                   isPlayerOpponent   = 2; // 是否是玩家对手
+
+  repeated uint32        accRewardIndexList = 3; // 累次奖励领取索引
+  uint32                 accCount           = 4; // 累计次数
+
+  // 前几名和自己
+  repeated msg.RankEntry entries            = 5;
+  msg.RankEntry          self               = 6;
+}
+
+message Dn_QueryArenaInfo {
+  PackArenaInfo arenaInfo = 1; // 竞技场信息
+}

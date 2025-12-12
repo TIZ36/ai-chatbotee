@@ -1,0 +1,207 @@
+syntax = "proto3";
+package radar;
+import "msg/msg.proto";
+import "msg/map_msg.proto";
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+import "msg/battle_msg.proto";
+option go_package = "verse/backend/pb/pb_radar";
+option (gogoproto.goproto_getters_all) = false;
+//------------------------------------------------------------------------------------------
+message Up_Union {
+  oneof body {
+    option (validator.oneof) = {required: true};
+    Up_OpenRadarPanel       openRadarPanel       = 1; // 拉数据，触发刷新
+    Up_CreateRadarTaskInMap createRadarTaskInMap = 2; // 创建任务的大地图obj
+    Up_GetRadarTaskReward   getRadarTaskReward   = 3; // 单个/批量领取任务气泡奖励，并升级雷达
+    Up_StartRadarTask       startRadarTask       = 4; // 开始任务
+    Up_QuitRadarTask        quitRadarTask        = 5; // 中途放弃任务
+
+    
+
+
+
+    // Up_FinishRadarTask      finishRadarTask      = 14;
+    // Up_GetDadarTaskList     getDadarTaskList     = 15;
+    // Up_GetLevelUpReward     getLevelUpReward     = 17;
+    // Up_DigRadarTreasure     digRadarTreasure = 18;
+    // Up_PickRadarTreasure    pickRadarTreasure = 19;
+    // Up_GetRadarTaskDetail   getRadarTaskDetail   = 110;
+    // Up_GetAllLevelUpReward  getAllLevelUpReward  = 111;
+    // Up_FinishAllGuildHelpTask finishAllGuildHelpTask = 112;
+    // Up_GetAllTaskReward getAllTaskReward = 113;
+    // Up_RadarPVEFight radarPVEFight = 114;
+  }
+}
+
+message Dn_Union {
+  oneof body {
+    Dn_OpenRadarPanel       openRadarPanel       = 1;
+    Dn_CreateRadarTaskInMap createRadarTaskInMap = 2;
+    Dn_GetRadarTaskReward   getRadarTaskReward   = 3;
+    Dn_StartRadarTask       startRadarTask       = 4;
+    Dn_QuitRadarTask        quitRadarTask        = 5;
+
+    // Dn_GetDadarTaskList     getDadarTaskList     = 11;
+    // Dn_FinishRadarTask      finishRadarTask      = 15;
+    // Dn_GetLevelUpReward     getLevelUpReward     = 17;
+    // Dn_DigRadarTreasure     digRadarTreasure = 18;
+    // Dn_PickRadarTreasure    pickRadarTreasure = 19;
+    // Dn_GetRadarTaskDetail   getRadarTaskDetail   = 110;
+    // Dn_GetAllLevelUpReward  getAllLevelUpReward  = 111;
+    // Dn_FinishAllGuildHelpTask finishAllGuildHelpTask = 112;
+    // Dn_GetAllTaskReward getAllTaskReward = 113;
+    // Dn_RadarPVEFight radarPVEFight = 114;
+  }
+}
+
+message Up_OpenRadarPanel {
+}
+
+message Dn_OpenRadarPanel {
+  uint32                     level = 1;
+  repeated msg.RadarTaskData tasks = 2;
+  int64 nextRefreshTime = 3;
+  uint32 finishedTaskCount = 4;
+}
+
+message Up_CreateRadarTaskInMap {
+  uint64 taskId = 1;
+}
+
+message Dn_CreateRadarTaskInMap {
+  msg.RadarTaskData task = 1;
+}
+
+message Up_GetRadarTaskReward {
+  repeated uint64 taskIDs = 1;
+}
+
+message Dn_GetRadarTaskReward {
+  msg.Reward taskReward                = 1;
+  repeated msg.RadarTaskData addedTask = 2;
+  int64      nextRefreshTime           = 3;
+  uint32     level                     = 4;
+  msg.Reward levelReward               = 5;
+  uint32     finishedTaskCount         = 6;
+}
+
+
+message Up_StartRadarTask {
+  uint64 taskId = 1;
+  msg.Formation formation = 2;
+}
+
+message Dn_StartRadarTask {
+  msg.Cost cost = 1;
+  msg.RadarTaskData task = 2;
+  msg.BtMsg btMsg = 3;
+  msg.ClientMapObj fakeObject = 4; // 派送任务的临时obj
+}
+
+message Up_QuitRadarTask {
+  uint64 taskId = 1;
+}
+
+message Dn_QuitRadarTask {
+  msg.RadarTaskData task = 1;
+}
+
+
+
+// message Up_FinishRadarTask {
+//   uint64 taskId = 1;
+//   msg.Formation formation = 2;
+
+// }
+
+// message Dn_FinishRadarTask {
+//   msg.RadarTaskData task   = 1;
+//   msg.Reward        reward = 2;
+//   msg.BtMsg         btMsg  = 3;
+// }
+
+
+
+// message Up_GetDadarTaskList {
+// }
+
+// message Dn_GetDadarTaskList {
+//   repeated msg.RadarTaskData tasks = 1;
+// }
+
+
+
+// message Up_GetLevelUpReward {
+//   //uint32 fromLevel = 1;
+// }
+
+// message Dn_GetLevelUpReward {
+//   repeated msg.RadarTaskData addTasks        = 1;
+//   repeated msg.RadarTaskData currentTaskList = 2;
+// }
+
+// message Up_DigRadarTreasure {
+//   uint32 armyID      = 1; // 攻击的军队ID
+//   uint64 targetObjID = 2; // 地图对象ID
+// }
+
+// message Dn_DigRadarTreasure {
+//   msg.Reward reward = 1; // 发的奖励(如果有)
+//   uint64 targetObjID = 2; // 地图对象ID
+// }
+
+// message Up_PickRadarTreasure {
+//   uint64 targetObjID = 1; // 地图对象ID
+// }
+
+// message Dn_PickRadarTreasure {
+//   msg.Reward reward = 1;
+// }
+
+// message Up_GetRadarTaskDetail {
+//   uint64 taskId = 1;
+// }
+
+// message Dn_GetRadarTaskDetail {
+//   msg.ClientMapObj mapObject = 1;
+// }
+
+// message Up_GetAllLevelUpReward {
+// }
+
+// message Dn_GetAllLevelUpReward {
+//   repeated msg.RadarTaskData addTasks        = 1;
+//   repeated msg.RadarTaskData currentTaskList = 2;
+// }
+
+// message Up_FinishAllGuildHelpTask {
+// }
+
+// message Dn_FinishAllGuildHelpTask {
+//   repeated msg.Reward rewards = 1;
+//   repeated msg.RadarTaskData currentTaskList = 2;
+// }
+
+// message Up_GetAllTaskReward {
+//   repeated uint64 taskIDs = 1;
+// }
+
+// message Dn_GetAllTaskReward {
+//   msg.Reward reward = 1;
+//   uint32 level = 2;
+//   repeated msg.RadarTaskData addedTask = 3;
+//   uint32 finishedTaskCount = 4;
+//   repeated msg.RadarTaskData currentTaskList = 5;
+//   int64 lastRefreshTime = 6;
+//   uint32 todayGiftBoxCount = 7;
+// }
+
+// message Up_RadarPVEFight {
+//   uint64 taskId = 1;
+//   msg.Formation formation = 2;
+// }
+
+// message Dn_RadarPVEFight {
+//   msg.BtMsg btMsg = 1;
+// }

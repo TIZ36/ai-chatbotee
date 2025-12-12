@@ -1,0 +1,42 @@
+syntax = "proto3";
+package chapter;
+import "msg/msg.proto";
+import "enumx/enumx.proto";
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb/pb_chapter";
+option (gogoproto.goproto_getters_all) = false;
+
+//------------------------------------------------------------------------------------------
+message Up_Union {
+  oneof body {
+    option (validator.oneof) = {required: true};
+    Up_Submit           submit                = 1;
+    Up_SubmitChapter    submitChapter         = 2;
+  }
+}
+
+message Dn_Union {
+  oneof body {
+    Dn_Submit           submit                = 1;
+    Dn_SubmitChapter    submitChapter         = 2;
+  }
+}
+
+message Up_Submit {
+  uint32 taskID = 1;
+}
+
+
+message Dn_Submit {
+  msg.Reward reward = 1;
+}
+
+message Up_SubmitChapter {
+
+}
+
+message Dn_SubmitChapter {
+  msg.Reward reward = 1;
+}

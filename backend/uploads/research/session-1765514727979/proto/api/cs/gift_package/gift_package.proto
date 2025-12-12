@@ -1,0 +1,82 @@
+syntax = "proto3";
+package gift_package;
+import "msg/msg.proto";
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb/pb_gift_package";
+option (gogoproto.goproto_getters_all) = false;
+
+//------------------------------------------------------------------------------------------
+message Up_Union {
+  oneof body {
+    option (validator.oneof)             = {required: true};
+    Up_BuyGiftPackage        buyGiftPackage        = 1; // 购买礼包
+    Up_TriggerBundle         triggerBundle         = 2; // 触发礼包活动
+    Up_RecvAirDropFreeReward recvAirDropFreeReward = 3; // 领取免费空投奖励
+    Up_BuyBundleCheck        buyBundleCheck        = 4; // 购买礼包前check
+    Up_BuyBackGiftPackage    buyBackGiftPackage    = 5; // 回购礼包
+  }
+}
+
+message Dn_Union {
+  oneof body {
+    Dn_BuyGiftPackage        buyGiftPackage        = 1; // 购买礼包
+    Dn_TriggerBundle         triggerBundle         = 2; // 触发礼包活动
+    Dn_RecvAirDropFreeReward recvAirDropFreeReward = 3; // 购买礼包空投
+    Dn_BuyBundleCheck        buyBundleCheck        = 4; // 购买礼包前check
+    Dn_BuyBackGiftPackage    buyBackGiftPackage    = 5; // 回购礼包
+  }
+}
+
+message Up_TriggerBundle {
+  repeated uint32 triggerIDs = 1; // 触发的礼包ID
+}
+
+message Dn_TriggerBundle {
+  repeated msg.GiftPackageGroup groups = 1; // 礼包组
+}
+
+message Up_BuyGiftPackage {
+  uint32 groupID    = 1; // 礼包组ID
+  uint64 scheduleID = 2; // 活动id
+  uint32 packageID  = 3; // 礼包ID
+}
+
+message Dn_BuyGiftPackage {
+  msg.Reward           reward = 1; // 奖励
+  msg.GiftPackageGroup group  = 2; // 礼包组
+}
+
+message Up_RecvAirDropFreeReward {
+  uint32 groupID = 1;
+  uint32 slotID  = 2; // 槽位ID
+}
+
+message Dn_RecvAirDropFreeReward {
+  msg.Reward           reward = 1; // 奖励
+  msg.GiftPackageGroup group  = 2; // 礼包组
+}
+
+message Up_BuyBundleCheck {
+  uint32 GroupID      = 1;
+  uint32 bundleID     = 2;
+  uint32 wantBuyCount = 3;
+  uint64 scheduleID   = 4;
+}
+
+message Dn_BuyBundleCheck {
+  bool result = 1;
+}
+
+
+message Up_BuyBackGiftPackage {
+  uint32 groupID      = 1; // 礼包组ID
+  uint64 scheduleID   = 2; // 活动id
+  uint32 packageID    = 3; // 礼包ID
+  uint32 refundMailID = 4; // 回购邮件ID
+}
+
+message Dn_BuyBackGiftPackage {
+  msg.Reward reward = 1; // 奖励
+}

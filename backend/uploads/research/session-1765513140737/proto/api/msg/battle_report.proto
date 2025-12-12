@@ -1,0 +1,235 @@
+syntax = "proto3";
+package msg;
+
+import "optx/optx.proto";
+import "msg/msg.proto";
+import "enumx/enumx.proto";
+import "msg/battle_msg.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb";
+option (gogoproto.goproto_getters_all) = false;
+
+message BattleReportFormation {
+  repeated BtArmyData        armyList        = 1; // 阵容兵卡
+  repeated BtMonsterArmyData monsterArmyList = 2; // 阵容怪物兵卡
+  uint32              formationId = 3;  // 编队ID (1-5)
+  repeated Buff       formationBuffs = 4[(gogoproto.nullable) = false]; // 过滤后的战斗buff（包含全局和特定场景下生效的）
+  
+  // 新增：各编队战力详情（部队战报用）
+  repeated FormationPowerDetail formationPowers = 100; // 废弃不用了
+}
+
+// 战报基础信息
+message BattleReportBasic {
+  IntPos battlePos = 1[(gogoproto.nullable) = false]; // 触发战斗的位置
+}
+
+message BattleReportPlayer {
+  uint32                uid                      = 1; // 玩家id
+  string                name                     = 2; // 名字
+  Avatar                avatar                   = 3; // 头像
+  IntPos                basePos                  = 4[(gogoproto.nullable)=false]; // 基地位置
+  repeated ScienceGroup battleReportScienceGroup = 5[(gogoproto.nullable) = false]; // 战报相关的科技组信息
+  //repeated Uint32KV reserveList = 6; // 预备役列表
+  repeated ReportPower  powers                   = 7[(gogoproto.nullable) = false]; // 模块战力
+  repeated BuffLabel    buffs                    = 8; // 玩家buff列表
+  uint32                guildID                  = 9; // 公会ID, 0表示没有公会
+}
+
+// 战报所属方信息
+message BattleReportMember {
+  uint32                uid          = 1; // 玩家id
+  uint32                monsterId    = 2; // 怪物ID, 0表示玩家
+  BattleReportFormation formation    = 3; // 阵容信息
+  repeated ReportPower  powers       = 4[(gogoproto.nullable) = false]; // 模块战力 - 已废弃
+  repeated BtArmyResult results      = 5;  // 兵卡结果
+  uint32                guildID      = 6; // 公会ID, 0表示没有公会
+  float                 woundedRatio = 7; // 伤兵比例
+  repeated CardReserve  oldReserves  = 8; // 战前预备役
+  repeated CardReserve  newReserves  = 9; // 战后预备役
+  string                abGroup      = 10; // abtestGroup
+  
+  repeated msg.UintKV powerShows = 11[(gogoproto.nullable) = false]; // key: PowerShowType，value: 该类型总战力
+  
+  // 新增：展示数据（客户端UI用）
+  BattleReportDisplayData displayData = 12; // 展示数据（无人机、建筑、军官等详情）
+
+  // new version
+  repeated PowerElementDecimalKV powerElements = 13[(gogoproto.nullable) = false]; // 战力明细（KV格式）
+  uint32 mainBaseLv = 14; // 主基地等级
+  uint32 monsterIndex = 15; // 怪物守军索引, 从0开始
+  uint64 armyObjID = 16;
+  uint32 battleIndex = 17; // 交战顺序
+}
+
+message BattleReport {
+  BattleReportMember       atk           = 1; // 攻击方信息
+  BattleReportMember       def           = 2; // 防守方信息
+  int64                    recordId      = 3; // 战报记录id, 用于唯一标识战报
+  uint32                   batch         = 4; // 战报轮次
+  bool isAtkWin = 5; // 攻击方是否获胜
+  BattleReportMemberPower  attacker_power= 10; // 攻击方战力详情 - 废弃不用了
+  BattleReportMemberPower  defender_power= 11; // 防守方战力详情 - 废弃不用了
+}
+
+message BattleReportParam {
+  BattleReportMember     atk               = 1; // 战报攻击方信息
+  BattleReportMember     def               = 2; // 战报防守方信息
+  uint32                 atkKillReserveNum = 3; // 攻击方击杀预备役数量
+  uint32                 defKillReserveNum = 4; // 防守方击杀预备役数量
+  bool                   isAtkWin          = 5; // 攻击方是否获胜
+  enumx.BattleReportType reportType        = 6; // 战报类型
+  int64                  recordId          = 7; // 战报记录id, 用于唯一标识战报
+  uint32                 batch             = 8; // 战报轮次
+  BattleReportBasic      basic             = 9; // 战报基础信息
+  uint64 mask            = 10; // 战报掩码 对应 ReportMask枚举
+}
+
+message BattleReportSummary {
+  string selfName       = 1; // 自己
+  string otherName      = 2; // 对手
+  uint32 otherMonsterId = 3; // 对手怪物id, 0表示玩家
+  bool   isWin          = 4; // 是否获胜
+  uint32 killReserveNum = 5; // 击败预备役数量
+  uint32 selfUid      = 6; // 自己的uid
+  uint32 otherUid     = 7; // 对手的uid
+
+  // 称号
+  uint32 selfHonorTitle  = 8; // 自己荣誉称号
+  uint32 selfBestTitle   = 9; // 自己最强称号
+  uint32 otherHonorTitle = 10; // 对手荣誉称号
+  uint32 otherBestTitle  = 11; // 对手最强称号
+
+  bool isAttacker = 12; // 是否是攻击方
+  uint32 GvgBuildingId = 13; // GvG战报的建筑ID，非GvG战报为0
+  uint64 mask = 14; // 战报掩码 对应 ReportMask 枚举
+}
+
+message ReportGuildInfo {
+  uint32 guildID   = 1; // 公会ID
+  string name      = 2; // 公会名称
+  string shortName = 3; // 公会简称
+}
+
+// 战报内容
+message MailBattleReportContent {
+  BattleReportSummary         summary  = 1; // 战报摘要
+  BattleReportBasic           basic    = 2; // 战报基础信息
+  repeated BattleReportPlayer players  = 3; // 玩家信息
+  repeated BattleReport       reports  = 4; // 战报列表
+  repeated ReportGuildInfo    guilds   = 5; // 公会信息
+  int64                       createTS = 6; // 战报创建时间
+  repeated BattleReportMember atkNoBattleMembers = 7; // 未参战攻击方成员
+}
+
+// old version
+// 编队战力详情（部队战报用） - old version
+message FormationPowerDetail {
+  uint32              formationId = 1;  // 编队ID (1-5)
+  uint64              totalPower  = 2;  // 该编队总战力
+  repeated msg.UintKV powers      = 10[(gogoproto.nullable) = false]; // 战力明细（KV格式）
+  repeated SoldierInfo soldiers   = 20; // 士兵信息
+}
+
+// 士兵信息 - old version
+message SoldierInfo {
+  uint32 soldierId = 1; // 士兵ID
+  uint32 level     = 2; // 等级
+  uint32 num       = 3; // 数量
+  uint32 morale    = 4; // 士气
+}
+
+// 战报成员战力（战报详情用） - old version
+message BattleReportMemberPower {
+  uint32              uid           = 1;  // 玩家UID
+  uint32              formation_id  = 2;  // 编队ID
+  double              soldier_ratio = 3;  // 士兵收敛系数
+  ReportDetailPower   detail        = 10; // 战报详情页战力
+  ReportTroopPower    troop         = 11; // 战报部队战力
+}
+
+// 战报详情页战力 - old version
+message ReportDetailPower {
+  double squad_officer_power = 1; // 编队军官战力
+  double squad_soldier_power = 2; // 编队士兵战力
+  double squad_drone_power   = 3; // 编队无人机战力
+  double squad_other_power   = 4; // 编队其他战力
+}
+
+// 战报部队战力 - old version
+message ReportTroopPower {
+  double formation        = 1;  // 编队战力
+  double officer_skill    = 10; // 军官技能战力
+  double officer_accessory= 11; // 军官装备战力
+  double soldier          = 30; // 士兵战力
+  double building         = 40; // 建筑战力
+  double tech             = 50; // 科技战力
+  double citizen          = 60; // 居民战力
+}
+
+// 战报展示数据（客户端UI用）
+message BattleReportDisplayData {
+
+  // old version
+  // 建筑信息
+  repeated ReportBuildingInfo buildings = 2;
+  
+  // 军官信息
+  repeated ReportOfficerInfo officers = 3;
+  
+  // 居民信息
+  repeated ReportCitizenInfo citizens = 4;
+  
+  // 士兵信息（按部队、等级分组）
+  repeated ReportSoldierDetailInfo soldiers = 5;
+  
+  // new version - current use ----------------------
+  // 科技信息（按科技组聚合）
+  repeated ScienceGroup sciences = 13;
+}
+
+// 技能展示信息
+message ReportSkillInfo {
+  uint32 skillId = 1; // 技能ID
+  uint32 level   = 2; // 等级
+}
+
+// old version--------------
+// 建筑展示信息
+message ReportBuildingInfo {
+  uint32 buildingId = 1; // 建筑ID
+  uint32 level      = 2; // 等级
+}
+
+// 军官展示信息
+message ReportOfficerInfo {
+  uint32 officerId = 1; // 军官ID
+  uint32 level     = 2; // 等级
+  uint32 star      = 3; // 星级
+  repeated ReportEquipInfo equips = 4; // 装备列表
+
+  // new add
+  repeated ReportSkillInfo skills = 5; // 技能列表
+}
+
+// 居民展示信息
+message ReportCitizenInfo {
+  uint32 citizenId = 1; // 居民ID
+  uint32 star      = 2; // 星级（如果需要）
+}
+
+// 装备展示信息
+message ReportEquipInfo {
+  uint32 equipId = 1; // 装备ID
+  uint32 level   = 2; // 等级
+}
+
+// 士兵详细信息（按部队、等级分组）
+message ReportSoldierDetailInfo {
+  //uint32 formationId = 1; // 攻守方标识（1=攻方，2=守方）TODO: 下个版本废弃，改为按等级合并所有士兵
+  uint32 soldierId   = 2; // 士兵ID
+  uint32 level       = 3; // 等级
+  uint32 num         = 4; // 数量
+  uint32 morale      = 5; // 士气
+}

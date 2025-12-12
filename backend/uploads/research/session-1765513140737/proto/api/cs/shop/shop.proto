@@ -1,0 +1,46 @@
+syntax = "proto3";
+package shop;
+import "msg/msg.proto";
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb/pb_shop";
+option (gogoproto.goproto_getters_all) = false;
+
+// shop 商店相关操作
+//------------------------------------------------------------------------------------------
+message Up_Union {
+  oneof body {
+    option (validator.oneof) = {required: true};
+    Up_RefreshShop refreshShop = 1; // 刷新商店
+    Up_BuyGoods    buyGoods    = 2; // 购买商品
+  }
+}
+
+message Dn_Union {
+  oneof body {
+    Dn_RefreshShop refreshShop = 1;
+    Dn_BuyGoods    buyGoods    = 2;
+  }
+}
+
+message Up_RefreshShop {
+  uint32 shopId = 1;
+  bool   isAuto = 2;
+}
+
+message Dn_RefreshShop {
+  msg.Shop       shop       = 1;
+  msg.CostReward costReward = 2; // 消耗信息
+}
+
+message Up_BuyGoods {
+  uint32 shopId = 1;
+  uint32 slotId = 2;
+  uint32 times  = 3;
+}
+
+message Dn_BuyGoods {
+  msg.ShopSlot   slot       = 1;
+  msg.CostReward costReward = 2; // 消耗信息
+}

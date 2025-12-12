@@ -1,0 +1,1301 @@
+syntax = "proto3";
+
+// copy from lim
+package im;
+import "err_code.proto";
+option go_package = "./;pb_gen";
+
+// 客户端类型
+enum ClientType {
+  CT_UNKNOWN   = 0;
+  CT_WEB_IM    = 1;  // IM内部使用
+  CT_GAME      = 2;  // 游戏内
+}
+
+// 聊天频道的类型
+// 最大支持10位数，即[0, 99]，请不要超过范围，会导致hbase数据异常
+enum ChatChannelType {
+  CCH_UNKNOWN        = 0;
+  CCH_GAME_GROUP     = 1; // game group - 公会群，联盟群
+  CCH_PRIVATE_CHAT   = 2; // private chat | Peer - 私聊
+  CCH_GAME_ROOM      = 4; // game room - 世界群，国家群
+  CCH_CUSTOM_GROUP   = 5; // group create by users - 自建群
+  CCH_BOT_CHAT       = 6; // bot_chat 聊天机器人
+  CCH_OFFICIAL       = 10; // 官方消息 预留字段
+  CCH_COMMENT        = 100; // 评论频道, 子频道
+  CCH_SLG_NOTICE     = 1000; // SLG公告频道
+}
+
+// 聊天内容的类型/消息类型
+enum ChatContentType {
+  CCO_UNKNOWN         = 0;
+  CCO_TEXT            = 1;  // 文本消息
+  CCO_AUDIO           = 2;  // 语音消息
+  CCO_IMAGE           = 3;  // 图片消息
+  CCO_RICH_TEXT       = 4;  // 富文本消息,弃用仅用与兼容老版本占位
+  CCO_IM_NOTICE       = 5;  // IM系统消息, 只能IM服务器发送
+  CCO_GAME_NOTICE     = 6;  // 游戏系统消息, 只能游戏服务器发送
+  CCO_BOT_CHAT        = 7;  // 机器人消息，只有机器人能发送，sender_uid = bot_id
+  CCO_CUSTOM          = 10; // 自定义消息
+  CCO_EMOTION         = 11; // 表情消息
+  CCO_SLG_NOTICE      = 1000; // SLG公告消息
+}
+
+enum OSType {
+  OS_ANDROID         = 0;
+  OS_IOS             = 1;
+  OS_WINDOWS         = 2;
+  OS_MACOS           = 3;
+  OS_HARMONY_OS      = 4;
+}
+
+// 定义api version
+// 协议变动时请修改API_VERSION_CUR值
+// 协议向下兼容, 客户端的协议版本 <= 服务器的协议版本
+enum APIVersion {
+  API_VERSION_0      = 0; //imgo1.1
+  API_VERSION_1      = 1; //imgo1.2
+  API_VERSION_2      = 2; //imgo1.3
+  API_VERSION_3      = 3; //imgo1.4.0
+  API_VERSION_4      = 4; //imgo1.4.1
+  API_VERSION_5      = 5; //imgo1.4.2(1.4.3没有新增协议)
+  API_VERSION_6      = 6; //imgo1.4.4 
+  API_VERSION_7      = 7; //imgo1.5.0
+  API_VERSION_8      = 8; //imgo1.5.0.1 (删除联盟所有公告和公告消息关联)
+  API_VERSION_9      = 9; //imgo1.5.1
+  API_VERSION_CUR    = 10; //imgo1.5.2
+}
+
+message PBResult {
+  PBErrCode err_code        = 1; // 响应码，0表示成功, 非0表示失败
+  string    err_msg         = 2; // 错误信息
+  PBErrMsgKind err_msg_kind = 3; // 错误信息类型
+}
+
+message PBHeartbeat {}
+
+message PBHeartbeatResp {}
+
+message PBUserLogin {
+  int32  client_type     = 1;  // 客户端类型(多端登录预留字段)
+  int64  uid             = 2;  // 玩家的id，需保证每个环境唯一
+  string lang            = 3;  // 客户端语言，使用lilith语言码
+  string env             = 4;  // 环境标识
+  string im_token        = 5;  // 登录的token，用于游戏服务器验证
+  //客户端透传数据 用于风控，内容安全，im通用日志等
+  string open_id         = 6;  // 莉莉丝账号ID  必填
+  string ip              = 7;  // 客户端登陆IP  必填
+  OSType os              = 8;  // 操作系统
+  string idfa            = 9;  // 设备IDFA，IOS设备广告标示符，IOS客户端必填
+  string google_aid      = 10; // 设备GoogleAID，Google广告平台账号，安装了Google Play的设备可取到
+  string android_id      = 11; // 安卓设备ID,安卓客户端必填
+  string windows_id      = 12; // windows PC 设备ID
+  string package_name    = 13; // 游戏客户端的包名
+  string os_version      = 14; // 操作系统版本
+  string app_version     = 15; // 客户端版本
+  string device_model    = 16; // 设备型号
+  string server_id       = 17; // 游戏服ID
+  int64  app_id          = 18; // app_id,  必填
+  int64  app_uid         = 19; // app_uid, 数字必题（渠道服来的app_uid有可能是字符串，可填0）
+  uint32 port            = 20; // 客户端端口,内容安全需要（网安新增）
+  //协议向下兼容, 客户端的协议版本 > 服务器的协议版本时禁止登录
+  APIVersion api_version = 21; // 协议版本号，必须填入API_VERSION_CUR枚举值
+  // 相关文档
+  // 风控:https://lilithgames.feishu.cn/wiki/wikcnTNgdgTKeUskc1cpFesCAod
+  // 内容安全:https://lilithgames.feishu.cn/wiki/wikcnddF46lVLy3yXFHGc4RsjJc
+  // 通用日志:https://lilithgames.feishu.cn/wiki/RmrTwOHwTiydmMk1pA7ccbhjnif
+  // 莉莉丝语言码:https://lilithgames.feishu.cn/wiki/wikcn67tpBEkrOUw5KoWX6D2soc
+}
+
+message PBUserLoginResp {
+  string version = 1;
+  // 禁言信息
+  // 开关控制，如果开关关闭，服务器不会返回禁言信息
+  PBUserMuteInfo user_mute_info = 2;
+}
+
+//仅透传游戏服务器的数据。
+//如果客户端支持从游戏服务器获取更方便，可以不用使用这个协议
+message PBUserList {
+  repeated int64 uids = 1;  // 最大20个，超过报错
+}
+
+message PBUserListResp {
+  repeated PBUserDetailInfo user_detail_infos = 1;
+}
+
+message PBFriendList {}
+
+message PBFriendListResp {
+  repeated int64 friend_uids = 1;
+}
+
+message PBFriendRemove {
+  int64 friend_uid = 1;
+}
+
+message PBFriendRemoveResp {}
+
+message PBFriendRequestList {}
+
+message PBFriendRequestListResp {
+  repeated PBFriendRequestInfo send_requests     = 1;
+  repeated PBFriendRequestInfo receive_requests  = 2;
+}
+
+message PBFriendRequestInfo {
+  PBUserSnapInfo user_snap_info     = 1;
+  int64          request_uid        = 2;  // 请求方
+  int64          target_uid         = 3;  // 被请求方
+  int64          timestamp          = 4;
+  bool           is_offline_request = 5;
+}
+
+message PBFriendRequestSend {
+  int64 target_uid = 1;
+}
+
+message PBFriendRequestSendResp {}
+
+message PBFriendRequestAccept {
+  int64 request_uid = 1;
+}
+
+message PBFriendRequestAcceptResp {}
+
+message PBFriendRequestRefuse {
+  int64 request_uid = 1;
+}
+
+message PBFriendRequestRefuseResp {}
+
+message PBFriendRequestCancel {
+  int64 target_uid = 1;
+}
+
+message PBFriendRequestCancelResp {}
+
+message PBBlacklist {}
+
+message PBBlacklistResp {
+  repeated int64 black_uids = 1;
+}
+
+message PBBlacklistAdd {
+  int64 black_uid = 1;
+}
+
+message PBBlacklistAddResp {}
+
+message PBBlacklistRemove {
+  int64 black_uid = 1;
+}
+
+message PBBlacklistRemoveResp {}
+
+message PBBlacklistExist {
+  int64 target_uid = 1;
+}
+
+message PBBlacklistExistResp {
+  bool in_blacklist = 1;
+}
+
+// 设置仅接收好友消息（一键防护，一键防网暴）
+// 生效期间：
+//   1. 玩家不会接受非好友的私聊消息
+//   2. 群聊仅允许好友@自己。注意依赖服务器定义的@规则PBMentionInfo，客户端自己实现的不会生效；@所有人不受影响
+message PBPrivChatSetFriendsOnly {
+  int64 expTime = 1; //过期时间-单位秒(负数代表无穷大)
+}
+
+message PBPrivChatSetFriendsOnlyResp {
+}
+
+// 获取仅接收好友消息（一键防护，一键防网暴）
+message PBPrivChatGetFriendsOnly {
+}
+
+message PBPrivChatGetFriendsOnlyResp {
+  int64 expTime = 1; //过期时间-单位秒(负数代表无穷大)
+}
+
+//仅透传游戏服务器的数据。
+//如果客户端支持从游戏服务器获取更方便，可以不用使用这个协议
+message PBUserDetailInfo {
+  int64  uid             = 1;
+  string name            = 2;
+  string avatar          = 3;
+  string avatar_frame    = 4;
+  int64  user_level      = 5;
+  int64  guild_id        = 6;
+  string extra           = 7;
+  int64 last_trade_time  = 8; // 账号交易相关字段，最近一次交易时间，单位秒
+}
+
+message PBUserSnapInfo {
+  int64  uid         = 1;
+  string avatar_url  = 2;
+  string nickname    = 3;
+}
+
+message PBUserSubTitleItem {
+  string bgurl   = 1;
+  string content = 2;
+  string key     = 3;
+}
+
+message PBGuildInfo {
+  int64  gid         = 1;
+  string name        = 2;
+  string abbr        = 3;
+  string avatar_url  = 4;
+}
+
+message PBKingDom {
+  int64  story_id    = 1;
+  int64  kingdom_id  = 2;
+  string avatar_url  = 3;
+}
+
+message PBChatChannelList {}
+
+message PBChatChannelListResp {
+  repeated PBChatChannelInfo chat_channel_infos = 1;
+}
+
+//游戏群数据(来自游戏服务器数据)
+message PBChatGameGroupInfo {
+  ChatChannelType channel_type = 1;  //频道类型
+  int64           channel_id   = 2;  //频道ID-私聊代表对方UID, 机器人代表机器人ID或玩家ID
+  string          name         = 3;  //频道名称
+  string          avatar       = 4;  //频道头像
+  string          extra        = 5;  //游戏群扩展数据, 可选（透传字段, 对IM服务器透明。格式由游戏服务器和游戏客户端定义）
+}
+
+message PBChatChannelInfo {
+  ChatChannelType channel_type        = 1;  //频道类型
+  int64           channel_id          = 2;  //频道ID-私聊代表对方UID, 机器人代表机器人ID或玩家ID
+  string          name                = 3;  //频道名称
+  string          avatar              = 4;  //频道头像
+  bool            is_mute             = 5;  //屏蔽频道标记(客户端实现)
+  bool            is_pinned           = 6;  //置顶频道标记(客户端实现)
+  int64           last_discard_msg_id = 7;  //最后一条丢弃消息ID取值[0, last_msg_id]
+  int64           last_hide_msg_id    = 8;  //最后一条隐藏消息ID取值[0, last_msg_id]
+  int64           last_read_msg_id    = 9;  //最后一条已读消息ID,取值[0, last_msg_id]
+  PBChatMessage   last_msg            = 10; //最后一条消息(msgId = 0，代表频道没有消息)
+  string          extra               = 11; //游戏群扩展数据, 可选（透传字段, 对IM服务器透明。格式由游戏服务器和游戏客户端定义）
+  repeated int64  mention_msg_ids     = 12; //未读的提及(@)我消息ID列表(升序排序)，客户端可根据此列表高亮显示@消息并提醒用户
+  int64           pin_timestamp_ms    = 13; //置顶时间戳,单位毫秒 is_pinned = pin_timestamp_ms > 0 (1.4.2新增, 用于做排序)
+  
+  //SLG公告功能
+  int64           slg_main_channel_id = 1000; //SLG公告主频道ID
+  /*
+  相关说明
+  ===========================================================
+  channel_id：
+  游戏群:频道ID
+  自建群:频道ID
+  私聊:  对方的uid
+  机器人:机器人ID或玩家ID
+        content_type = CCO_CHAT_BOT仅机器人能发送,此时的sender_uid = bot_id， channel_id = user_id
+  ===========================================================
+  ===========================================================
+  name和avatar：
+  发生变更时，服务器推送PBChatChannelUpdatePush通知客户端更新
+  ===========================================================
+  is_mute,is_pinned,last_discard_msg_id,last_hide_msg_id:
+  为频道属性，服务器仅存储标记，不处理逻辑。相关的显示逻辑客户端自行处理
+  ===========================================================
+  未读消息数客户端自行计算
+  unread_count = last_msg_id - last_read_msg_id
+  ===========================================================
+  last_discard_msg_id： 是否隐藏频道并丢弃历史消息
+  1. last_discard_msg_id < last_msg_id 显示频道,仅显示msg_id > last_discard_msg_id的消息
+  2. last_discard_msg_id == last_msg_id 隐藏频道
+  3. 玩家发送PBChatChannelDiscard请求时,客户端更新last_discard_msg_id,last_read_msg_id
+  4. 玩家拉取消息时PBChatChannelMessageList，客户端需要处理，from不能小于last_discard_msg_id
+  ===========================================================
+  last_hide_msg_id: 隐藏频道但不丢弃历史消息
+  1. last_hide_msg_id = 0, 显示频道
+  2. last_hide_msg_id == last_msg_id, 隐藏频道
+  3. last_hide_msg_id < last_msg_id, 显示频道，隐藏频道后，有新消息来了
+  4. 玩家发送PBChatChannelHide请求时需要客户端主动更新last_hide_msg_id,last_read_msg_id
+  ===========================================================
+  last_read_msg_id:标记已读消息的位置, 客户端主动更新
+  1. 客户端PBChatChannelMarkRead请求，需要更新
+  2. 客户端PBChatChannelMessageSend请求，需要更新
+  2. 客户端PBChatChannelDiscard请求，需要更新
+  2. 客户端PBChatChannelHide请求，需要更新
+  ============================================================
+  last_msg:频道最后一条消息
+  1. last_msg为空，代表频道没有消息
+  2. last_msg变更时，服务器推送PBChatMessagePush通知客户端更新
+  ============================================================
+  mention_msg_ids:跟last_read_msg_id绑定，小于等于last_read_msg_id的消息无效
+  ============================================================
+  */
+}
+
+// 拉取消息限制(客户端拉取消息时，数量需要遵守以下限制)
+// 1. 最多拉取20个MsgRange
+// 2. 每个MsgRange最多拉取30条消息(to - from < 30)
+message PBChatChannelMessageList {
+  repeated PBChatChannelMessageRange msg_ranges = 1; // 最多20个
+}
+
+message PBChatChannelMessageListResp {
+  repeated PBChatChannelMessageListResult msg_list_results = 1;
+}
+
+message PBChatChannelMessageRange {
+  ChatChannelType channel_type = 1;
+  int64 channel_id             = 2;
+  int64 from                   = 3; // 取值范围[1, to]
+  int64 to                     = 4; // 取值范围 [1, LastMsgID] && TO - FROM < 30(最多拉取30条消息)
+  // 评论频道额外字段，channel_type=CCH_SLG_COMMENT
+  ChatChannelType parent_channel_type = 100; // 父频道类型
+  int64 parent_channel_id             = 101; // 父频道id  
+  /*
+  1. msg_id 递增和连续问题
+  msg_id是递增的，近似连续(99.9999%连续)
+  2. 如何判断不连续或msg丢失
+  可通过lenth(messages) < to - from + 1 判断消息不连续
+  例如：from=7, to=11, messages=[7, 8, 10]，说明9,11消息丢失
+   */
+}
+
+message PBChatChannelMessageListResult {
+  repeated PBChatMessage messages  = 1;
+  ChatChannelType channel_type     = 2;
+  int64 channel_id                 = 3;
+  int64 last_msg_id                = 4; // 频道当前的最后一条消息ID，用于客户端判断是否存在新消息
+  //根据玩家登录语言,查找缓存的翻译内容（后台配置生效）
+  map<int64, string> translated_msg_contents = 5; //翻译后的文本 {msg_id: 翻译的聊天内容} 
+  // 评论频道额外字段，channel_type=CCH_SLG_COMMENT
+  ChatChannelType parent_channel_type = 100; // 父频道类型
+  int64 parent_channel_id             = 101; // 父频道id
+}
+
+
+// 批量翻译频道消息并缓存翻译内容 (1.4.2新增翻译过的内容自动翻译，需要后台配置开启支持)
+// 仅翻译文本消息
+message PBChatChannelMessageBatchTranslate {
+  PBChatChannelMessageRange msg_range = 1; // 消息范围
+  string lang                         = 2; //目标语言(lilith语言码)
+  string rule                         = 3; //翻译规则
+}
+
+message PBChatChannelMessageBatchTranslateResp {
+  map<int64, string> translated_msg_contents = 1; //翻译后的文本 {msg_id: 翻译后的聊天内容}
+}
+
+// 提及信息
+message PBMention {
+  int64 pos        = 1; // 提及位置(字符位置)
+  int64 uid        = 2; // 提及的uid
+}
+
+// 提及信息
+message PBMentionInfo {
+  repeated  PBMention  mentions = 1; // 提及信息@的玩家不能超过20个
+}
+// 消息
+message PBChatMessage {
+  ChatChannelType channel_type      = 1;
+  int64 channel_id                  = 2; // 接收消息的用户ID
+  int64 sender_uid                  = 3;
+  ChatContentType content_type      = 4;
+  string content                    = 5;
+  string ext_content                = 6; //透传数据，不检查内容安全, 使用json字符串
+  int64 timestamp                   = 7;
+  int64 msg_id                      = 8; //消息ID
+  int32 msg_state                   = 9; //语音读取标记
+  int32 gear_block                  = 10; //弃用
+  map<uint32, PBFeedBackEmoji> emoji_map  = 11; // 反馈表情, id取值范围[1, 500]
+  int64 reference_msg_id            = 12; //引用（回复）的消息ID
+  PBMentionInfo mention_info        = 13; //提及信息@的玩家不能超过20个
+  // 评论频道额外字段，channel_type=CCH_SLG_COMMENT
+  ChatChannelType parent_channel_type = 100; //父频道类型
+  int64 parent_channel_id             = 101; //父频道id
+  int64 child_last_msg_id             = 102; //子频道最后一条消息ID，因为消息连续的，也表示子频道所有消息数量（评论数量）
+  // SLG公告
+  PBSLGNotice slg_notice              = 1000; // SLG公告消息数据
+}
+
+enum SLGNoticeType {
+    SLG_NOTICE_TYPE_TEXT = 0; // 文本公告
+    SLG_NOTICE_TYPE_VOTE = 1; // 投票公告
+}
+
+message PBSLGNoticeText {
+  string image_url = 1;
+}
+
+//投票公告1.5.1+新增
+message PBSLGNoticeVote {
+  repeated PBVoteOption vote_options = 1; // 投票选项(数组第1个item为选项1, 依次类推)
+  int64  vote_end_time               = 2; // 投票结束时间戳(秒)
+  bool   is_multi_select             = 3; // 是否支持多选
+  bool   is_anonymous_vote           = 4; // 是否匿名投票
+  uint64 max_voter_count             = 5; // 最大投票人数(大于0)
+  uint64 voted_count                 = 6; // 已投票人数
+}
+
+// 投票选项结果统计
+message PBVoteOption {
+  string option_text = 1; // 投票选项文本内容
+  uint64 vote_count  = 2; // 该选项的投票数
+  bool   has_voted   = 3; // 拉取投票信息时，拉取消息的玩家是否已经投过票(仅拉取聊天消息时有效)
+}
+
+
+message PBSLGNotice {
+  SLGNoticeType   slg_notice_type = 1;  // 公告类型
+  bool            already_push    = 2;  // 是否已推送
+  uint64          marked_id       = 3;  // 标记消息ID
+  bool            is_admin        = 4;  // 是否是管理员群广告
+  PBLinkNoticeKey link_notice_key = 5;  // 删除公告时同步删除联盟频道或R4&R5聊天频道的公告消息(1.5.0.1新增)
+  PBSLGNoticeText text            = 100;// 文本公告
+  PBSLGNoticeVote vote            = 101;// 投票公告 1.5.1+ 新增投票公告
+}
+
+//1.5.0.1新增，关联的消息(content_type=CCO_SLG_NOTICE)
+message PBLinkNoticeKey {
+  ChatChannelType channel_type = 1; //ChannelType:CCH_GAME_GROUP, CCH_SLG_NOTICE
+  int64           channel_id   = 2;
+  int64           msg_id       = 3;
+}
+
+// 反馈表情数据
+message PBFeedBackEmoji {
+  uint32 emoji_id     = 1; // 表情ID,id取值范围[1, 500]
+  uint64 emoji_count  = 2; // 表情计数 (0计数为零，曾经有过反馈，后来被删除了)
+  bool has_feedback   = 3; // 是否已反馈该表情
+  /*
+  has_feedback仅客户端拉取消息(PBChatChannelMessageList)时有效，其他情况忽略
+  客户端拉取消息时，如果玩家已反馈该表情，则has_feedback为true
+  客户端拉取消息时，如果玩家未反馈该表情，则has_feedback为false
+  */
+}
+
+message PBChatChannelMarkRead {
+  repeated PBLastReadMsgId last_read_msg_ids = 1;
+}
+
+message PBChatChannelMarkReadResp {}
+
+message PBLastReadMsgId {
+  ChatChannelType channel_type      = 1;
+  int64           channel_id        = 2;
+  int64           last_read_msg_id  = 3; // 用于更新已读位置
+}
+
+// 发送消息
+// 
+// 评论频道说明
+// 1. 通过parent_channel_type + parent_channel_id + channel_id即可定位到评论频道入口
+// 2. 评论频道不允许嵌套，即评论频道不能作为父频道
+// 3. 私聊不支持评论
+// 3. 字段说明
+//   - channel_type固定为CCH_SLG_COMMENT
+//   - channel_id为父频道消息id，即评论入口
+//   - content_type固定为CCO_TEXT文本消息，目前不支持其他类型
+//   - parent_channel_type为父频道的类型
+//   - parent_channel_id为父频道的id
+message PBChatChannelMessageSend {
+  ChatChannelType channel_type      = 1;
+  // 频道ID
+  // 当channel_type为CCH_PRIVATE_CHAT私聊时，channel_id是对方的uid
+  int64           channel_id        = 2;
+  ChatContentType content_type      = 3;
+  string          content           = 4; //必须 <= 2048个字节
+  string          ext_content       = 5; //透传数据，游戏方定义（建议使用json字符串）
+  int64           reference_msg_id  = 6; // 引用(回复)的消息ID
+  PBMentionInfo   mention_info      = 7; // 提及信息
+  // 评论频道额外字段，channel_type=CCH_SLG_COMMENT
+  ChatChannelType parent_channel_type = 100; // 父频道类型
+  int64 parent_channel_id             = 101; // 父频道id
+}
+
+// 发送消息应答
+message PBChatChannelMessageSendResp {
+  int64 timestamp                    = 1;
+  int64 msg_id                       = 2; //消息发送成功，默认消息已读
+  int64 last_read_msg_id             = 3; //发送消息,默认已读(本字段提醒客户端更新已读位置)
+  string replaced_content            = 4; //被替换的内容,如果为空，不更新本地内容，否则直接更新
+  /*
+   * 脱敏静默说明：
+   * 当msg_id=0, last_read_msg_id=0时，表示开启了脱敏静默(filtered_silence),
+   * replaced_content不为空，使用replaced_content静默显示给玩家
+   * replaced_content为空，使用原文本静默显示给玩家
+ */
+}
+
+//频道
+message PBChatChannelDiscard {
+  ChatChannelType channel_type      = 1;
+  int64 channel_id                  = 2; //如果是私聊，这里是对方的uid
+}
+
+// 丢弃频道会修改已读位置
+message PBChatChannelDiscardResp {
+  int64 last_discard_msg_id = 1; // 用于更新丢弃位置
+  int64 last_read_msg_id    = 2; // 用于更新已读位置
+}
+
+//批量丢弃频道, 最多处理20条（ptslg有一个批量丢弃私聊频道的功能）
+message PBChatChannelBatchDiscard {
+  repeated PBChatChannelDiscard discard_list = 1;
+}
+
+message PBChatChannelBatchDiscardResp {
+  repeated PBChatChannelDiscardResp discard_resp_list = 1;
+}
+
+message PBChatChannelHide {
+  ChatChannelType channel_type      = 1;
+  int64 channel_id                  = 2; //如果是私聊，这里是对方的uid
+  bool is_hide                      = 3;
+}
+
+// 隐藏频道会修改已读位置
+message PBChatChannelHideResp {
+  int64 last_hide_msg_id    = 1; // 用于更新隐藏位置
+  int64 last_read_msg_id    = 2; // 用于更新已读位置
+}
+
+message PBChatChannelMute {
+  ChatChannelType channel_type      = 1;
+  int64 channel_id                  = 2;
+  bool is_mute                      = 3;
+}
+
+message PBChatChannelMuteResp {}
+
+message PBChatChannelPinned {
+  ChatChannelType channel_type      = 1;
+  int64 channel_id                  = 2;
+  bool is_pinned                    = 3;
+}
+
+message PBChatChannelPinnedResp {}
+
+// 拉取聊天群最近发言人列表(1.5.0新增)
+message PBChatChannelRecentSenderList {
+  ChatChannelType channel_type = 1;  // 频道类型 (仅支持CCH_GAME_ROOM, CCH_GAME_GROUP, CCH_CUSTOM_GROUP)
+  int64           channel_id   = 2;  // 频道ID
+}
+
+message PBChatChannelRecentSenderListResp {
+  repeated PBRecentSender senders = 1; 
+  /* 
+     senders 说明：
+     1. 若最近发言人不足100人，则会补充最近加入群聊但尚未发言的玩家，这些玩家会排在所有发言人之后。
+     2. 最近发言玩家的 score 字段为其最近发言的毫秒级时间戳。
+     3. 最近加入群聊但未发言玩家的 score 字段为其加入群聊的秒级时间戳。
+     4. 若 score 大于 1000000000000，表示该玩家为最近发言人；否则为最近加入但未发言的玩家。
+     5. 若该频道在最近1个月内无发言、无成员变动（无成员加入或离开），则发言人列表会被自动清理（过期）。
+     6. 功能首次上线或发言人列表过期后，会根据该频道最近200条发言记录初始化最近发言人列表。
+  */
+}
+
+message PBRecentSender {
+  int64 uid   = 1; // 发言玩家uid
+  int64 score = 2; // 用于排序(服务器返回按降序排列)
+}
+
+// 按玩家名称关键词搜索群成员(1.5.0新增)
+message PBChatChannelMemberSearch {
+  ChatChannelType channel_type = 1;  // 频道类型 (仅支持CCH_GAME_ROOM, CCH_GAME_GROUP, CCH_CUSTOM_GROUP)
+  int64           channel_id   = 2;  // 频道ID
+  string          key_word     = 3;  // 玩家名称关键词(模糊搜索)
+  int64           page         = 4;  // 页码，从1开始
+  int64           page_size    = 5;  // 每页数量(最多100条)
+  bool            is_highlight = 6;  // 是否高亮
+}
+
+message PBChatChannelMemberSearchResp {
+  repeated PBChatChannelSearchMember members = 1; // 搜索到的玩家列表
+  int64 total = 2; // 总数(命中的成员数量, 上限1000)
+}
+
+message PBChatChannelSearchMember {
+  int64  uid =  1; // 玩家uid
+  string name = 2; // 玩家名称(is_highlight为true，返回高亮格式)
+  // 高亮字符是"<em>"和"</em>"中间的的字符，
+  // 比如"<em>张三</em>丰"，则张三两个字高亮
+}
+
+
+// 创建自建群
+message PBChatChannelCreate {
+  ChatChannelType channel_type      = 1; // 仅支持CCH_CUSTOM_GROUP
+  // 群名称
+  // 如果设置，会进行内容安全审核
+  // 如果不设置，会自动用玩家名称拼接，最多使用6名玩家
+  string name                       = 2;
+  repeated int64 members            = 3;
+}
+
+message PBChatChannelCreateResp {
+  PBChannelInfo channel             = 1;
+}
+
+// 主动退出自建群
+message PBChatChannelQuit {
+  ChatChannelType channel_type      = 1; // 仅支持CCH_CUSTOM_GROUP
+  int64 channel_id                  = 2;
+}
+
+message PBChatChannelQuitResp {
+  PBChannelInfo info                = 1;
+}
+
+message PBChatChannelMemberAdd {
+  ChatChannelType channel_type      = 1; // 仅支持CCH_CUSTOM_GROUP
+  int64 channel_id                  = 2;
+  repeated int64 members            = 3;
+}
+
+message PBChatChannelMemberAddResp {
+  PBChannelInfo channel_info        = 1; //返回频道信息
+}
+
+//被移出自建群
+message PBChatChannelMemberRemove {
+  ChatChannelType channel_type      = 1; // 仅支持CCH_CUSTOM_GROUP
+  int64 channel_id                  = 2;
+  repeated int64 members            = 3;
+}
+
+message PBChatChannelMemberRemoveResp {
+  PBChannelInfo channel_info        = 1; //返回频道信息
+}
+
+message PBChatChannelSetName {
+  ChatChannelType channel_type      = 1; // 仅支持CCH_CUSTOM_GROUP
+  int64 channel_id                  = 2;
+  string name                       = 3;
+}
+
+message PBChatChannelSetNameResp {
+  PBChannelInfo channel_info        = 1; //返回频道信息
+}
+
+
+
+message PBChatChannelGet {
+  ChatChannelType channel_type      = 1;
+  int64 channel_id                  = 2;
+}
+
+message PBChatChannelGetResp {
+  PBChannelInfo channel_info        = 1;
+}
+
+message PBChannelInfo {
+  ChatChannelType channel_type      = 1;
+  int64 channel_id                  = 2;
+  string name                       = 3;
+  string avatar                     = 4;
+  repeated PBMemberInfo members     = 5;
+  int64 creator                     = 6;
+  int64 admin                       = 7;
+}
+
+message PBMemberInfo {
+  int64 uid                         = 1;
+  string name                       = 2;
+  string avatar                     = 3;
+}
+
+// 撤回消息(发送消息后，两分钟内可以撤回，不能撤回系统消息)
+message PBChatChannelMessageRecall {
+  ChatChannelType channel_type      = 1;
+  int64 channel_id                  = 2; //如果是私聊，这里是对方的uid
+  int64 msg_id                      = 3;
+  // 评论频道额外字段，channel_type=CCH_SLG_COMMENT
+  ChatChannelType parent_channel_type = 100; // 父频道类型
+  int64 parent_channel_id             = 101; // 父频道id
+}
+
+message PBChatChannelMessageRecallResp {}
+
+// 添加消息反馈表情(比如点赞)
+message PBChatChannelMessageAddEmoji {
+  ChatChannelType channel_type      = 1;
+  int64 channel_id                  = 2; //如果是私聊，这里是对方的uid
+  int64 msg_id                      = 3;
+  uint32 emoji_id                   = 4; //id取值范围[1, 500], 必传参数，0无效
+  // 评论频道额外字段，channel_type=CCH_SLG_COMMENT
+  ChatChannelType parent_channel_type = 100; // 父频道类型
+  int64 parent_channel_id             = 101; // 父频道id
+}
+
+
+message PBChatChannelMessageAddEmojiResp {}
+
+// 移除消息反馈表情(比如取消点赞)
+message PBChatChannelMessageRemoveEmoji {
+  ChatChannelType channel_type      = 1;
+  int64 channel_id                  = 2; //私聊频道: 对方的uid, 机器人频道:机器人id
+  int64 msg_id                      = 3;
+  uint32 emoji_id                   = 4; //id取值范围[1, 500]
+  // 评论频道额外字段，channel_type=CCH_SLG_COMMENT
+  ChatChannelType parent_channel_type = 100; // 父频道类型
+  int64 parent_channel_id             = 101; // 父频道id
+}
+
+message PBChatChannelMessageRemoveEmojiResp {}
+
+// https://lilithgames.feishu.cn/docx/ZwLpdXummowBpgxpfXzcXWwQnZd#share-LrB3dGiQLo0rQGxFdiScddhxnRe
+enum ReportReasonType {
+  RRT_PORN_INFO            = 0;  // 涉黄信息 (porn_info)
+  RRT_POLITICS_INFO        = 1;  // 涉政信息 (politics_info)
+  RRT_AD_INFO              = 2;  // 广告信息 (ad_info)
+  RRT_BLOODY_INFO          = 3;  // 血腥信息 (bloody_info)
+  RRT_INSULT_INFO          = 4;  // 辱骂信息 (insult_info)
+  RRT_SENSITIVE_INFO       = 5;  // 敏感信息 (sensitive_info)
+  RRT_INFRINGEMENT_INFO    = 6;  // 侵权信息 (infringement_info)
+  RRT_SCRIPT_BEHAVIOR      = 7;  // 脚本外挂 (script_behavior)
+  RRT_NEGATIVE_BEHAVIOR    = 8;  // 消极游戏 (negative_behavior)
+  RRT_RESTRADE_BEHAVIOR    = 9; // 资源交易 (restrade_behavior)
+  RRT_SUSPECTED_UNDERAGE   = 10; // 疑似未成年 (suspected_underage)
+  RRT_FRAUDULENT_OFFICIAL  = 11; // 冒充官方人员 (fraudulent_official)
+  RRT_OTHER                = 12;  // 其他 (other)
+}
+
+message MessageReport {
+  ChatChannelType channel_type      = 1;
+  int64 channel_id                  = 2;//私聊频道: 对方的uid, 机器人频道:机器人id
+  int64 msg_id                      = 3;
+  repeated ReportReasonType reasons = 4; // 举报原因
+  string ext                        = 5; // 选填，json字符串,ext是透传数据
+  ChatChannelType parent_channel_type = 6; // 父频道类型 1.5.1+新增 支持评论举报
+  int64 parent_channel_id             = 7; // 父频道id 1.5.1+新增 支持评论举报
+
+}
+
+// 批量举报消息
+//https://lilithgames.feishu.cn/wiki/UOXNwsUKQiJ8hPkycN5cvj5anTV
+//https://lilithgames.feishu.cn/docx/ZwLpdXummowBpgxpfXzcXWwQnZd#share-TLLldUUcmojGKDxH9UecMsgTnqb
+//支持批量举报，限制:一次最多举报20条消息
+message PBChatChannelMessageReport {
+  repeated MessageReport reports = 1;
+  string callback_ext            = 2; // 选填
+  // 游戏内举报触发时，将回调接收所需字段给到IM服务器
+  // callback_ext非空时，必须是json字符串,其中必须包括callback_url字段，且callback_url不能为空
+}
+
+message PBChatChannelMessageReportResp {}
+
+//文本翻译(gear代理)
+//莉莉丝语言码:https://lilithgames.feishu.cn/wiki/wikcn67tpBEkrOUw5KoWX6D2soc
+message PBTextTranslate {
+  string text                       = 1; //翻译文本
+  string lang                       = 2; //目标语言(lilith语言码)
+  string rule                       = 3; //翻译规则
+}
+
+message PBTextTranslateResp {
+  string translated_text            = 1; //翻译后的文本
+}
+
+// https://lilithgames.feishu.cn/wiki/Czr4wfeMLiM3lVknJwIcq9aNnHg
+message PBBatchTextTranslate {
+  repeated string texts              = 1; //批量翻译文本(最多15条)
+  string lang                       = 2; //目标语言(lilith语言码)
+  string rule                       = 3; //翻译规则
+}
+
+message PBBatchTextTranslateResp {
+  repeated string translated_texts   = 1; //翻译后的文本
+}
+
+// 拉取频道发言规则(1.4.4+)
+message PBGetChannelRuleConfig {
+}
+
+message PBGetChannelRuleConfigResp {
+  repeated ChatChannelRuleConfig chat_rules = 1; // 聊天规则配置(1.4.4+)
+}
+
+// 聊天频道发言规则配置(如果没有频道配置，则默认允许发言, 1.4.4+版本新增)
+message ChatChannelRuleConfig {
+  ChatChannelType channel_type = 1; //频道类型
+  repeated LevelLimitConfig level_configs = 2; // 等级限制, 按等级范围从低到高排序
+}
+//参考玩家等级限制内容https://lilithgames.feishu.cn/wiki/HEVhwV0BiiaSI0k5ze6cgYtsncb
+//level_configs 配置示例
+/*[
+  {
+    "level": 2,             //等级范围[0-2]
+    "is_allowed": false,    //禁止发言
+    "char_limit": 0,        //无效
+    "freq_limit_ms": 0      //无效
+},
+{
+    "level": 10,           //等级范围[3-10]
+    "is_allowed": true,    //允许发言
+    "char_limit": 500,     //文本长度最大500字符
+    "freq_limit_ms": 2000. //最快2000毫秒（2秒）发送一条信息，触发后返回：EC_SEND_MSG_FREQUENCY_LIMIT
+},
+{
+    "level": 9999999,      //等级范围[11-9999999]
+    "is_allowed": true,    //允许发言
+    "char_limit": 1024,    //文本长度最大1024字符，触发后返回：EC_SEND_MSG_LENGTH_LIMIT
+    "freq_limit_ms": 1000. //最快1000毫秒（1秒）发送一条信息，触发后返回：EC_SEND_MSG_FREQUENCY_LIMIT
+}
+]
+*/
+message LevelLimitConfig {
+  int64 level = 1;          // 等级范围
+  bool  is_allowed = 2;     // 是否允许发言
+  int64 char_limit = 3;     // 文本长度最大字符数(汉字和英文字母都算1个字符)
+  int64 freq_limit_ms = 4;  // 最快发送频率(消息发送成功后至下一次开始发送消前的最小时间间隔, 单位毫秒)
+}
+
+
+//文件上传认证(fau代理)
+//用于获取文件上传凭证，客户端通过返回的参数将文件直接上传到云存储
+//详细文档：https://lilithgames.feishu.cn/wiki/wikcnz1irRcQYPSa3pMEQ2Q63E0
+message PBGetUploadUrl {
+  string file_name = 1; //文件名（不要包含路径,建议根据某个值生成md5，避免重复和被预测
+}
+
+message PBGetUploadUrlResp {
+  string url = 1; // 服务地址
+  string cdn = 2; // 文件的cdn地址
+  map<string, string> fields = 3; // 上传参数
+/*
+ 客户端需根据返回结果将文件直接上传至云存储，无需经过服务器中转，以减少流量消耗并提高上传速度。
+ 详细文档：https://lilithgames.feishu.cn/wiki/wikcnz1irRcQYPSa3pMEQ2Q63E0#XwyCuo
+ 上传步骤（使用multipart/form-data格式）:
+ 1. 构建multipart表单，将fields中所有键值对添加为表单字段
+ 2. 将文件内容添加为名为"file"的表单字段
+ 3. 发送POST请求到url字段指定的地址
+ 上传成功会返回HTTP 204状态码（无内容），表示上传完成，此时可使用cdn字段访问该文件
+*/
+}
+
+//客户端发送json字符串
+message PBJsonReq {
+  string json_req = 1;
+}
+
+//服务器发送json字符串
+message PBJsonResp {
+  string json_resp = 1;
+}
+
+//服务器推送json字符串
+message PBJsonPush {
+  string json_push = 1;
+}
+
+//SLG公告相关
+//发送SLG公告
+message PBSLGNoticeSend {
+  int64  channel_id             = 1;
+  string content                = 2;
+  string  ext_content           = 3;
+  bool is_admin                 = 4; //是否R4/R5的公告
+  SLGNoticeType slg_notice_type = 5;
+  PBSLGNoticeTextInfo text_info = 100;
+  PBSLGNoticeVoteInfo vote_info = 101;
+}
+message PBSLGNoticeTextInfo {
+  string image_url = 1;
+}
+
+// 发送投票公告时的投票信息1.5.1+新增
+message PBSLGNoticeVoteInfo{
+  repeated string option_text_list = 1; // 投票选项文本列表
+  // 1. 选项文本数量范围：[2, 100]
+  // 2. 选项文本前后不能有空白字符
+  // 3. 选项文本不能为空
+  // 4. 选项文本字符长度不能超过200字符, 中文字算一个字符，英文字母算一个字符
+  // 5. 选项文本不能重复
+  int64 vote_duration_seconds      = 2; // 投票持续时间(秒)
+  bool is_multi_select             = 3; // 是否支持多选
+  bool is_anonymous_vote           = 4; // 是否匿名投票
+  uint64 max_voter_count           = 5; // 最大投票人数(大于0)
+}
+
+message PBSLGNoticeSendResp {
+  int64 timestamp                    = 1;
+  int64 msg_id                       = 2;
+  string replaced_content                   = 3; //被替换的内容,如果为空，不更新本地内容，否则直接更新
+  repeated string replaced_option_text_list = 4; //被替换投票选项文本列表,如果为空，不更新本地内容。否则直接更新
+  /*
+   * 脱敏静默说明：
+   * 当msg_id=0, last_read_msg_id=0时，表示开启了脱敏静默(filtered_silence),
+   * replaced_content不为空，使用replaced_content静默显示给玩家
+   * replaced_content为空，使用原文本静默显示给玩家
+ */
+}
+
+// 获取SLG全部公告 
+message PBSLGNoticeGetAll {
+  int64 channel_id                  = 1;
+}
+
+message PBSLGNoticeGetAllResp {
+  repeated PBChatMessage slg_notice_msgs  = 1;
+}
+
+// 删除SLG公告
+message PBSLGNoticeDelete {
+  int64 channel_id                  = 2;
+  int64 msg_id                      = 3;
+}
+
+message PBSLGNoticeDeleteResp {}
+
+// 标记SLG公告 TODO
+message PBSLGNoticeMark {
+  int64 channel_id                  = 1;
+  int64 msg_id                      = 2;
+}
+
+message PBSLGNoticeMarkResp {}
+
+// 取消标记SLG公告 TODO
+message PBSLGNoticeUnmark {
+  int64 channel_id                  = 1;
+  int64 msg_id                      = 2;
+}
+
+message PBSLGNoticeUnmarkResp {}
+
+// 交换SLG公告标记
+message PBSLGNoticeSwapMark {
+  int64 channel_id                  = 1;
+  int64 from_msg_id                 = 2;
+  int64 to_msg_id                   = 3;
+}
+
+message PBSLGNoticeSwapMarkResp {}
+
+// 紧急发布
+// channel_type值固定为CCH_SLG_NOTICE
+// channel_id与公会频道的id相同
+// 如何判断当前公告属于公会聊天频道还是R4&R5聊天频道？
+// 通过msg.slg_notice.is_admin字段判断，true为R4&R5聊天频道，false为公会聊天频道
+// 如何获取R4&R5聊天频道的id？
+// 从游戏服务器获取的玩家群组列表中，公会频道会携带admin_group_id字段，即是R4&R5聊天频道id
+message PBSLGNoticePublish {
+  int64 channel_id                  = 1;
+  int64 msg_id                      = 2;
+}
+
+message PBSLGNoticePublishResp {
+  int64 last_publish_ts              = 1; // 发布时间，单位秒，0表示没有上一次发布记录
+  int64 publish_cd                   = 2; // 总的CD时间，单位秒
+  int64 daily_remain_count           = 3; // 每天发布的剩余次数, 次日0点重置(1.5.1+新增字段)
+  int64 daily_max_count              = 4; // 每天最大发布次数(1.5.1+新增字段)
+}
+
+// 获取紧急发布信息，发布时间和CD
+message PBSLGNoticePublishCDGet {
+  int64 channel_id                  = 1;
+}
+
+message PBSLGNoticePublishCDGetResp {
+  int64 last_publish_ts             = 1; // 发布时间，单位秒，0表示没有上一次发布记录
+  int64 publish_cd                  = 2; // 总的CD时间，单位秒
+  int64 daily_remain_count          = 3; // 每天发布的剩余次数, 次日0点重置(1.5.1+新增字段)
+  int64 daily_max_count             = 4; // 每天最大发布次数(1.5.1+新增字段)
+}
+
+// 投票操作 1.5.1+
+message PBSLGNoticeVoteSubmit {
+  int64 channel_id                 = 1; // 频道ID
+  int64 msg_id                     = 2; // 投票消息ID
+  repeated uint32 selected_options = 3; // 选择的投票选项序列号
+  /*
+   * 1. 选择的投票选项序列号不能为空
+   * 2. 选择的投票选项序列号不能重复
+   * 3. 选择的投票选项序列号的取值范围在[1, 最大选项数量]
+   * 4. 选择的投票选项序列号不能超过投票选项数量
+   * 5. 投票时间过期无法投票
+   * 6. 投票人数超过最大投票数无法投票
+   */
+}
+
+message PBSLGNoticeVoteSubmitResp {}
+
+// 获取投票选项信息 1.5.1+
+message PBSLGNoticeVoteOptionInfoGet {
+  int64  channel_id                = 1; // 频道ID
+  int64  msg_id                    = 2; // 投票消息ID
+  uint32 option_index              = 3; // 第几个选项(取值范围[1, 最大选项数量])
+}
+
+message PBSLGNoticeVoteOptionInfoGetResp {
+  string option_text        = 1; // 选项文本内容
+  repeated int64 voter_uids = 2; // 投票人UID列表(按投票时间戳降序排序)
+}
+
+// 消息推送
+// 当评论频道发送消息成功时，会有两条推送，一条是父频道UPDATE，一条是子频道LAST
+message PBChatMessagePush {
+  enum MsgPushType {
+    LAST         = 0; //最后一条消息
+    RECALL       = 1; //撤回消息
+    UPDATE       = 2; //更新消息
+    ADD_EMOJI    = 3; //添加消息反馈表情
+    REMOVE_EMOJI = 4; //移除消息反馈表情
+    DELETE       = 5; //删除消息
+    //SLG公告
+    SLG_NOTICE_PUSH        = 1000; //SLG公告推送
+    SLG_NOTICE_DELETE      = 1001; //SLG公告删除
+    SLG_NOTICE_MARK        = 1002; //SLG公告标记
+    SLG_NOTICE_UNMARK      = 1003; //SLG公告取消标记
+    SLG_NOTICE_SWAP_MARK   = 1004; //SLG公告交换标记
+    SLG_NOTICE_VOTE_SUBMIT = 1005; //SLG公告提交投票
+  }
+  MsgPushType push_type = 1; //消息推送类型
+  PBChatMessage msg     = 2; // 聊天消息
+  /*
+  MsgPushType 说明：
+  1. LAST 代表 msg 是最后一条消息，客户端需要更新频道的last_msg。
+   当频道中有人发消息时，消息会通过这个协议推送给客户端。
+   为节省网络流量，把近期(约1秒)内的最后一条消息推送到客户端
+   例如，在 1 秒内，某个频道发送了 100 条消息，只会推送最后一条给客户端。
+  2. RECALL 代表消息被撤回，当有人撤回消息时，立即推送给客户端。
+   撤回后的消息会被修改为系统消息，但 msgid 保持不变。
+  3. UPDATE 代表消息被更新，当有人修改消息后，立即推送给客户端。
+   通常是由游戏服务器通过 IM 提供的 API 发起的消息更新。
+  4. ADD_EMOJI 代表消息添加反馈表情，当有人添加消息反馈表情时，立即推送给客户端。
+  5. REMOVE_EMOJI 代表消息移除反馈表情，当有人移除消息反馈表情时，立即推送给客户端。
+  */
+}
+
+message PBRelationUpdatePush {
+  repeated PBUserSnapInfo friends_add = 1; // 有新的好友  
+  repeated int64 friends_remove       = 2; // 好友被移除
+  repeated PBUserSnapInfo blacks_add  = 3; // 有新加入黑名单的玩家
+  repeated int64 blacks_remove        = 4; // 玩家从黑名单被移除
+  repeated PBFriendRequestInfo requests_add      = 5; // 有新的好友请求
+  repeated int64 requests_remove                 = 6; // 好友请求被移除(接受/拒绝/取消操作都会移除)
+  repeated PBFriendRequestInfo send_requests_add = 7; // 自己发送的好友请求
+  repeated int64 send_requests_remove            = 8; // 自己发送的请求被移除(接受/拒绝操作都会移除)
+}
+/*
+PBRelationUpdatePush 说明：
+1. 如果游戏好友数据存放在游戏服务器， 忽略好友相关的协议
+2. 如果游戏黑名单数据存放在游戏服务器， 忽略黑名单相关的协议
+*/
+
+//自建群和游戏群相关变更推送
+message PBChatChannelUpdatePush {
+  repeated PBChatChannelInfo channels_add             = 1; //向加入频道的玩家推送(创建和加入)
+  repeated PBChannelInfoSnap channels_remove          = 2; //向移除频道的玩家推送(解散，退出和移出)
+  repeated PBChatChannelName channels_name_change     = 3; //向频道所有在线玩家推送(自建群：名字被修改)
+  repeated PBChatGameGroupInfo groups_info_change     = 4; //向频道所有在线玩家推送（游戏群：数据变动包括extra字段）
+  repeated PBChannelMention channels_mention_add      = 5; //新增的未读@消息ID，客户端可据此高亮显示并提醒用户，当用户阅读后应调用PBChatChannelMarkRead更新已读状态
+  /*
+  PBChatChannelUpdatePush 仅仅处理自建群(CUSTOM_GROUP)，游戏群(GAME_GROUP, GAME_ROOM)的频道
+  新增的私聊频道CCH_PRIVATE_CHAT，需要客户端维护（包括发送方和接收方）
+  新增私聊可通过最后一条消息的推送(PBChatMessagePush)和当前频道列表判断
+  PBChatChannelList的resp会下发的玩家近期发过消息的私聊频道（上限200个）
+   */
+}
+
+// 群聊离开类型 1.5.2+新增
+enum ChannelLeaveType {
+  CHANNEL_LEAVE_TYPE_DISMISS = 0; // 群聊被解散
+  CHANNEL_LEAVE_TYPE_QUIT    = 1; // 主动退出群聊
+  CHANNEL_LEAVE_TYPE_REMOVE  = 2; // 被动移出群聊
+}
+
+message PBChannelInfoSnap {
+  int64 channel_id                  = 1; // 频道ID
+  ChatChannelType channel_type      = 2; // 频道类型
+  ChannelLeaveType leave_type       = 3; // 离开类型 1.5.2+ 新增字段
+}
+
+message PBChatChannelName {
+  int64 channel_id                  = 1;
+  ChatChannelType channel_type      = 2;
+  string          name              = 3;  //频道名称
+}
+
+message PBChannelMention {
+  int64 channel_id                  = 1;
+  ChatChannelType channel_type      = 2;
+  int64 msg_id                      = 3; //被提及(被@)的消息ID
+}
+
+
+message PBIMNull {}
+
+message PBUserKickPush {
+  int32 reason                     = 1;
+}
+
+message PBUserInfoChangePush {
+  PBUserDetailInfo user_detail_info = 1;
+}
+
+// 玩家禁言状态信息
+message PBUserMuteInfo {
+  // 解禁时间，时间戳，单位毫秒
+  // 如果 当前时间 < 解禁时间，则玩家处于禁言状态
+  // 如果 当前时间 >= 解禁时间，则玩家没有被禁言
+  // 如果值为0，则玩家没有被禁言
+  int64 unmute_time = 1;
+}
+
+// 玩家禁言状态变更通知
+// 开关控制，如果开关关闭，服务器不会推送
+message PBUserMutePush {
+  PBUserMuteInfo user_mute_info = 1;
+}
+
+// 拉取频道基础信息，仅返回最后一条消息ID
+message PBChatChannelBaseList {}
+
+message PBChatChannelBaseListResp {
+  repeated PBChatChannelBaseInfo chat_channel_base_infos = 1;
+}
+
+message PBChatChannelBaseInfo {
+  ChatChannelType channel_type = 1;  //频道类型
+  int64 channel_id             = 2;  //频道ID-私聊代表对方UID, 机器人代表机器人ID或玩家ID
+  int64 last_msg_id            = 3;  //最后一条消息ID
+}
+
+// 根据频道ID拉取频道列表
+/*
+参数检查，不通过直接返回报错
+1. 检查频道数量，范围[1, 50]
+2. 检查频道id
+3. 检查频道类型
+4. 如果是群聊，检查玩家是否在频道内
+
+返回结果，仅返回获取成功的频道列表，失败的不返回
+*/
+message PBChatChannelBatchList {
+  repeated PBChatChannelKey channel_keys = 1;
+}
+
+message PBChatChannelBatchListResp {
+  repeated PBChatChannelInfo chat_channel_infos = 1;
+}
+
+message PBChatChannelKey {
+  ChatChannelType channel_type = 1;
+  int64 channel_id             = 2;
+}
+
+// 批量获取游戏自定义的频道配置
+/*
+参数检查，不通过直接返回报错
+1. 检查频道数量，范围[1, 50]
+2. 检查频道id
+3. 检查频道类型，只允许自建群(CUSTOM_GROUP)、公会群(GAME_GROUP)、世界群(GAME_ROOM)
+4. 如果是群聊，检查玩家是否在频道内
+
+返回结果，仅返回获取成功的频道设置，失败的不返回
+*/
+message PBChatChannelGameSettings {
+  repeated PBChatChannelKey channel_keys = 1;
+}
+
+message PBChatChannelGameSettingsResp {
+  repeated PBChatChannelGameSetting chat_channel_game_settings = 1;
+}
+
+message PBChatChannelGameSetting {
+  ChatChannelType channel_type = 1;
+  int64 channel_id             = 2;
+  string setting               = 3;  // 游戏定义的频道设置
+}
+
+// 批量获取客户端自定义的频道配置
+/*
+参数检查，不通过直接返回报错
+1. 检查频道数量，范围[1, 50]
+2. 检查频道id
+3. 检查频道类型
+4. 如果是群聊，检查玩家是否在频道内
+
+返回结果，仅返回获取成功的频道设置，失败的不返回
+*/
+message PBChatChannelClientSettings {
+  repeated PBChatChannelKey channel_keys = 1;
+}
+
+message PBChatChannelClientSettingsResp {
+  repeated PBChatChannelClientSetting chat_channel_client_settings = 1;
+}
+
+message PBChatChannelClientSetting {
+  ChatChannelType channel_type = 1;
+  int64 channel_id             = 2;
+  string setting               = 3;  // 客户端定义的频道设置，默认为空字符串
+  string version               = 4;  // 版本号，更新时需要携带该字段，用于防止旧数据覆盖新数据，默认为空字符串
+}
+
+// 批量更新客户端自定义的频道配置
+/*
+参数检查，不通过直接返回报错
+1. 检查频道数量，范围[1, 50]
+2. 检查频道id
+3. 检查频道类型
+4. 如果是群聊，检查玩家是否在频道内
+
+更新：
+1. 更新时，setting是待更新数据，version是服务器返回的旧数据的版本号，用于判断是否需要更新
+2. 更新操作是全量覆盖更新
+
+返回结果
+1. is_success 表示该频道设置是否更新成功
+2. 无论是否更新成功，都返回服务器保存的最新的频道设置。对于更新失败，客户端可以使用返回的最新数据，与客户端修改的数据进行合并后，再提交更新
+*/
+message PBChatChannelClientSettingsUpdate {
+  repeated PBChatChannelClientSetting chat_channel_client_settings = 1;
+}
+
+message PBChatChannelClientSettingsUpdateResp {
+  repeated PBChatChannelClientSettingsUpdateResult chat_channel_client_settings_update_results = 1;
+}
+
+message PBChatChannelClientSettingsUpdateResult {
+  bool is_success                                                 = 1;  // 是否更新成功
+  PBChatChannelClientSetting chat_channel_client_setting          = 2;  // 更新后的频道设置
+}
+
+// 频道设置变更推送
+message PBChatChannelSettingChangePush {
+  repeated PBChatChannelGameSetting game_settings_change     = 1;  // 游戏定义的频道设置发生变更
+  repeated PBChatChannelClientSetting client_settings_change = 2;  // 客户端定义的频道设置发生变更
+}
+
+// 对他人添加备注，非原子操作，一旦有失败，则中断并返回错误，已成功的不回滚
+// 1. 不支持自己给自己添加备注
+// 2. 不支持添加超过20条备注，如果超过20条，则返回错误
+// 3. 备注最多100个字符长度，不管汉字还是数字或者是字母都算是一个字符
+message PBUserSetRemarks {
+  repeated PBUserRemark user_set_remarks = 1;
+}
+
+message PBUserSetRemarksResp {}
+
+// 获取我对他人的设置。最多支持50条，如果超过50条，则返回错误
+// 非原子操作，仅返回获取成功的备注，失败的或者不存在的忽略
+message PBUserGetRemarks {
+  repeated int64 target_uids = 1;
+}
+
+message PBUserGetRemarksResp {
+  repeated PBUserRemark user_get_remarks = 1;
+}
+
+message PBUserRemark {
+  int64 target_uid = 1; // 目标id
+  string remark = 2; // 备注，最多100个字符长度，不管汉字还是数字或者是字母都算是一个字符
+}

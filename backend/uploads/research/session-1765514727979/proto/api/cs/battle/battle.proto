@@ -1,0 +1,160 @@
+syntax = "proto3";
+package battle;
+
+import "enumx/enumx.proto";
+import "msg/msg.proto";
+//import "msg/battle_msg.proto";
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb/pb_battle";
+option (gogoproto.goproto_getters_all) = false;
+
+//------------------------------------------------------------------------------------------
+message Up_Union {
+  oneof body {
+    option (validator.oneof) = {required: true};
+    Up_SetFormation               setFormation               = 1;
+    Up_EnterBattle                enterBattle                = 2;
+    Up_LeaveBattle                leaveBattle                = 3;
+    Up_SetBarracksFormation       setBarracksFormation       = 4;
+    Up_ReceiveCampaignReward      receiveCampaignReward      = 5;
+    Up_SetMarchPreset             setMarchPreset             = 6; // 设置行军编队预设
+    // W3
+    Up_CampaignQuickCombat        campaignQuickCombat        = 11;
+    Up_ReceiveCampaignStageReward receiveCampaignStageReward = 12; // 领取战役阶段奖励
+    Up_ChangeSelfGarrison         changeSelfGarrison         = 13; // 设置自己驻防
+    Up_GetPlayerKilledNum         getPlayerKilledNum         = 14; // 获取玩家pvp击杀数
+  }
+}
+
+message Dn_Union {
+  oneof body {
+    Dn_SetFormation               setFormation               = 1;
+    Dn_EnterBattle                enterBattle                = 2;
+    Dn_LeaveBattle                leaveBattle                = 3;
+    Dn_SetBarracksFormation       setBarracksFormation       = 4;
+    Dn_ReceiveCampaignReward      receiveCampaignReward      = 5;
+    msg.Empty                     setMarchPreset             = 6;
+    // W3
+    Dn_CampaignQuickCombat        campaignQuickCombat        = 11;
+    Dn_ReceiveCampaignStageReward receiveCampaignStageReward = 12; // 领取战役阶段奖励
+    msg.Empty                     changeSelfGarrison         = 13; // 设置自己驻防
+    Dn_GetPlayerKilledNum         getPlayerKilledNum         = 14; // 获取玩家击杀数
+  }
+}
+
+//------------------------------------------------------------------------------------------
+// 设置阵型
+message Up_SetFormation {
+  enumx.FormationType formationType = 1;
+  msg.Formation       formation     = 2;
+}
+
+message Dn_SetFormation {
+  msg.FormationGroup formationGroup = 1;
+}
+
+message Up_SetBarracksFormation {
+  msg.Formation       formation           = 1;
+  repeated msg.UintKV cardAppointHeroList = 2[(gogoproto.nullable) = false]; // 兵卡任命军官
+}
+
+message Dn_SetBarracksFormation {
+  msg.FormationGroup formationGroup = 1;
+}
+
+//------------------------------------------------------------------------------------------
+// 进入战斗
+message Up_EnterBattle {
+  enumx.BattleType battleType = 1;
+  uint32            stageId    = 2;
+  msg.Formation    formation  = 4;
+}
+
+message Dn_EnterBattle {
+  enumx.BattleType battleType = 1;
+  uint32            stageId    = 2;
+  uint32            seed       = 3;
+
+  msg.Formation    formation  = 4;
+  msg.Formation    enemyFormation = 5; // 敌方阵型, 暂时客户端自己生成
+}
+//------------------------------------------------------------------------------------------
+// 离开战斗
+message Up_LeaveBattle {
+  enumx.BattleType     battleType  = 1;
+  uint32               stageId     = 2;
+  enumx.BattleResult   result      = 3; // 战斗结果， 暂时相信客户端
+
+  msg.Formation         formation  = 4;
+  repeated msg.Uint64KV  skillSeqs = 5; // 技能释放序列
+}
+
+message Dn_LeaveBattle {
+  enumx.BattleType    battleType = 1;
+  uint32              stageId    = 2;
+  enumx.BattleResult  result     = 3;
+  msg.Formation       formation  = 4;
+  msg.Formation       enemyFormation = 5;
+
+  repeated  msg.HomeStageData homeStageData = 6;
+  msg.Reward         reward      = 7; // 奖励
+  msg.Campaign campaign = 8; // 战役数据
+  msg.PowerRank powerRank = 9; //上位之路数据
+}
+//------------------------------------------------------------------------------------------
+
+// 领取战役奖励
+// 领取挂机奖励
+message Up_ReceiveCampaignReward {
+  bool isReceive = 1;    //是否领取，false：显示，true：领取
+}
+
+message Dn_ReceiveCampaignReward {
+  msg.CostReward costReward = 1; // 领取的奖励
+  msg.Campaign campaign = 2; // 战役数据
+}
+
+
+// 战役快速战斗
+message Up_CampaignQuickCombat {
+  uint32        stageId   = 1; // 战役关卡ID
+  msg.Formation formation = 2;
+}
+
+message Dn_CampaignQuickCombat {
+  uint32         stageId    = 1; // 战役关卡ID
+  msg.Campaign   campaign   = 2; // 战役数据
+  msg.CostReward costReward = 3; // 消耗奖励
+  bool           result     = 4; // 快速战斗结果
+}
+
+message Up_ReceiveCampaignStageReward {
+
+}
+
+message Dn_ReceiveCampaignStageReward {
+  msg.CostReward costReward     = 1;
+  uint32         curRewardStage = 2; // 当前领取的阶段
+}
+
+message Up_ChangeSelfGarrison {
+  repeated uint32 selfGarrisonList = 1; // 自己驻防ID列表
+}
+
+
+// ---------------------------------------------------------------------------------------------------------------------
+message Up_GetPlayerKilledNum { // 获取玩家击杀数， 如果非自己的uid，则需要rpc
+  uint32  uid = 1; // 玩家uid
+}
+
+message Dn_GetPlayerKilledNum {
+  uint32       uid = 1; // 玩家uid
+  int64  killedNum = 2; // 击杀数
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+message Up_SetMarchPreset {
+  msg.SMarchPreset preset = 1;
+}

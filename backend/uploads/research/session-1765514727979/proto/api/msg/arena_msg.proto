@@ -1,0 +1,51 @@
+syntax = "proto3";
+package msg;
+option go_package = "verse/backend/pb";
+
+import "optx/optx.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+import "msg/msg.proto";
+import "msg/battle_msg.proto";
+import "enumx/enumx.proto";
+option (gogoproto.goproto_getters_all) = false;
+
+message ArenaLegionDetail {
+  uint32         pos        = 1; // 站位 （1-5）
+  uint32         cardId     = 2; // 卡牌id
+  uint32         cardLevel  = 3; // 兵卡等级
+  uint32         cardStar   = 4; // 兵卡星级
+  repeated Skill cardSkills = 5; // 技能
+  uint32         heroId     = 6; // 军官id
+  uint32         heroLevel  = 7; // 军官等级
+}
+
+message ArenaRecord {
+  int64              id           = 1; // 战斗记录ID
+  int64              timestamp    = 2; // 时间戳（秒）
+  ArenaPlayerDetail  atk          = 3; // 攻击方
+  ArenaPlayerDetail  def          = 4; // 防守方
+  uint32             monsterId    = 5; // 怪物ID
+  enumx.BattleResult result       = 6; // 战斗结果
+  int32              scoreChange  = 7; // 积分变化
+  bool               hasFightBack = 8; // 是否已经反击
+  float              duration     = 10; // 战斗持续时间（秒）
+}
+
+message ArenaPlayerCache {
+  option (optx.structuralVersion)            = 0;
+  string                key             = 1[(optx.primaryKeyPriority) = 1]; // 玩家信息key
+  int64                 uid             = 4; // 玩家UID
+  repeated BtArmyData   formationDetail = 2; // 阵容详情
+  uint64                fightPower      = 3; //阵容战力
+  uint32 reserveId       = 7; // 预备役ID
+  repeated msg.UintKV   formationDevelopPower  = 9; // 阵容战力 - key: card id, value: 养成线战力
+}
+
+// 竞技场玩家详情
+message ArenaPlayerDetail {
+  string                     name = 2; // 昵称
+  Avatar                     avatar = 3; // 头像
+  repeated msg.Buff battleBuffs = 6[ (gogoproto.nullable) = false ]; // 战斗buff列表
+  ArenaPlayerCache cache = 7; // 玩家缓存数据
+  string guildSimpleName = 8; // 联盟简称
+}

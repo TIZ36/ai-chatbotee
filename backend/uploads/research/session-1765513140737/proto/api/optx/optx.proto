@@ -1,0 +1,26 @@
+// optx 标识符
+syntax = "proto3";
+package optx;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "verse/backend/pb/pb_optx";
+
+extend google.protobuf.OneofOptions  {
+  optional string moduleCheckAll = 52000;
+}
+
+extend google.protobuf.FieldOptions {
+  optional string moduleCheckField   = 53000;
+  optional uint32 primaryKeyPriority = 53001; //主键优先级 (从1开始),存在两个以上会生成XXXKey方法
+  optional string itemAsset          = 53002; //背包物品资源名
+  optional bool   maskable           = 53003; //字段是否支持增量更新掩码
+  optional string maskGroup          = 53004; //字段掩码分组，用于相关字段的批量更新
+}
+
+extend google.protobuf.MessageOptions {
+  optional uint32 structuralVersion = 54000;
+  optional string codec             = 54001; //默认protobuf ,目前支持 "json"
+  optional bool   withMask          = 54002; //是否生成带掩码的wrapper结构体
+  optional string maskName          = 54003; //自定义掩码结构体名称后缀，默认WithMask
+}

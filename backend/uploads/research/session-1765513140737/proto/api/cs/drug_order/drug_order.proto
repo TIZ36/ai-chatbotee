@@ -1,0 +1,88 @@
+syntax = "proto3";
+package drug_order;
+import "msg/msg.proto";
+import "enumx/enumx.proto";
+import "enumx/csv_enumx.proto";
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb/pb_drug_order";
+option (gogoproto.goproto_getters_all) = false;
+
+// 生产相关玩法 订单系统
+
+//------------------------------------------------------------------------------------------
+message Up_Union {
+  oneof body {
+    option (validator.oneof) = {required: true};
+    Up_DrugOrderRefresh     orderRefresh    = 1;  //刷新订单
+    Up_DrugOrderPack        orderPack       = 2;  //订单打包
+    Up_DrugOrderStart       orderStart      = 3;  //出发
+    Up_DrugOrderReward      orderReward     = 4;  //收取奖励
+    Up_DrugOrderDealerStart orderDealerStart = 5; //经销商出发
+    Up_DrugOrderDealerReward orderDealerReward = 6; //收取经销商奖励
+  }
+}
+
+message Dn_Union {
+  oneof body {
+    Dn_DrugOrderRefresh    orderRefresh       = 1;  //刷新订单
+    Dn_DrugOrderPack       orderPack          = 2;  //订单打包
+    Dn_DrugOrderStart      orderStart         = 3;  //出发订单
+    Dn_DrugOrderReward     orderReward        = 4;  //收取奖励
+    Dn_DrugOrderDealerStart orderDealerStart  = 5; //经销商出发
+    Dn_DrugOrderDealerReward orderDealerReward = 6; //收取经销商奖励
+  }
+}
+
+
+//------------------------------------------------------------------------------------------
+
+message Up_DrugOrderPack {
+  uint32  orderId  = 1; //订单id
+}
+
+message Dn_DrugOrderPack {
+  uint64 price = 1; //价格
+}
+
+message Up_DrugOrderReward {
+}
+
+message Dn_DrugOrderReward {
+  msg.Reward   reward = 1;    //产出
+}
+
+message Up_DrugOrderRefresh {
+}
+
+message Dn_DrugOrderRefresh {
+}
+
+message Up_DrugOrderStart {
+}
+
+message Dn_DrugOrderStart {
+  int64 sendTime = 1; //发货时间
+}
+
+message Up_DrugOrderDealerStart {
+  repeated msg.Asset goods = 1[(gogoproto.nullable) = false]; //商品
+} 
+
+message Dn_DrugOrderDealerStart {
+  int64 sendTime = 1;
+  int64 dealerEndTs = 2;
+  uint64 dealerPrice = 3;
+  int64 dealerRewardTs = 4;
+}
+
+message Up_DrugOrderDealerReward {
+  int64 clientRewardTs = 1; // 客户端计算截止时间
+}
+
+message Dn_DrugOrderDealerReward {
+  msg.Reward reward = 1; // 奖励
+  int64 dealerRewardTs = 2; // 更新
+  int64 nextDealerTs = 3; // 更新
+}

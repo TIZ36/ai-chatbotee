@@ -1,0 +1,77 @@
+syntax = "proto3";
+package bag;
+import "msg/msg.proto";
+import "enumx/enumx.proto";
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb/pb_bag";
+option (gogoproto.goproto_getters_all) = false;
+
+//------------------------------------------------------------------------------------------
+message Up_Union {
+  oneof body {
+    option (validator.oneof) = {required: true};
+    Up_UseItem              useItem              = 1; // 使用道具
+    Up_GoldExchangeResource goldExchangeResource = 2; // 黄金购买资源（会加到背包）,并使用
+    Up_ReceiveAllSpoil      receiveAllSpoil      = 3; // 获取所有战利品
+    Up_UseExchangeItem      useExchangeItem      = 4; // 兑换并直接使用道具(并不真正添加到背包)
+    Up_ExchangeItem         exchangeItem         = 5; // 兑换item并添加到背包
+  }
+}
+
+message Dn_Union {
+  oneof body {
+    Dn_UseItem              useItem              = 1;
+    Dn_GoldExchangeResource goldExchangeResource = 2; // 黄金兑换资源
+    Dn_ReceiveAllSpoil      receiveAllSpoil      = 3; // 获取所有战利品
+    Dn_UseExchangeItem      useExchangeItem      = 4; // 兑换并直接使用道具(并不真正添加到背包)
+    Dn_ExchangeItem         exchangeItem         = 5; // 兑换item并添加到背包
+  }
+}
+
+message UseItem {
+  msg.Asset asset       = 1[(gogoproto.nullable) = false]; // 道具
+  uint32    selectIndex = 4; // 选择的索引（从0开始，针对AssetChestChoice）
+}
+
+message Up_UseItem {
+  repeated UseItem userItems = 1; // 使用道具列表
+}
+
+message Dn_UseItem {
+  msg.CostReward costReward = 1; // 使用道具的结果
+}
+
+message Up_UseExchangeItem {
+  msg.Asset    exchangeAsset = 1; // 期望兑换的等效道具,比如8小时保护罩（通过item表的ASR价格来兑换）
+}
+
+message Dn_UseExchangeItem {
+  msg.CostReward costReward = 1; // 使用道具的结果
+}
+
+message Up_GoldExchangeResource {
+  enumx.AssetID assetId  = 1; // 基础资源ID（仅限基础资源）
+  uint32        costGold = 2; // 消耗的黄金
+}
+
+message Dn_GoldExchangeResource {
+  msg.CostReward costReward = 1; // 消耗的资源
+}
+
+message Up_ReceiveAllSpoil {
+  repeated int64 ids = 1; // 战利品ID列表（服务器战利品的过期时间要比客户端多几秒，以客户端所见为准）
+}
+message Dn_ReceiveAllSpoil {
+  msg.Reward reward = 1;
+}
+
+message Up_ExchangeItem {
+  uint32 itemId = 1; //兑换的道具 
+  uint64 num = 2; // 兑换的数量
+}
+
+message Dn_ExchangeItem {
+  msg.CostReward costReward = 1; // 获得的道具
+}

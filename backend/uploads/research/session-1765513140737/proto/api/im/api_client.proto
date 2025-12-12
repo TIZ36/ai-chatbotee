@@ -1,0 +1,392 @@
+syntax = "proto3";
+
+package im;
+import "api_def.proto";
+option go_package = "./;pb_gen";
+
+//1. PackType枚举值等于相关协议的标签编号
+//2. 上行协议PackType + 1 = 下行协议PackType
+enum PackType {
+  UNKNOWN                          = 0;
+  HEARTBEAT                        = 10;
+  HEARTBEAT_RESP                   = 11;
+  //玩家
+  USER_LOGIN                       = 100;
+  USER_LOGIN_RESP                  = 101;
+  USER_LIST                        = 102;
+  USER_LIST_RESP                   = 103;
+  //好友
+  FRIEND_LIST                      = 120;
+  FRIEND_LIST_RESP                 = 121;
+  FRIEND_REMOVE                    = 122;
+  FRIEND_REMOVE_RESP               = 123;
+  FRIEND_REQUEST_LIST              = 124;
+  FRIEND_REQUEST_LIST_RESP         = 125;
+  FRIEND_REQUEST_SEND              = 126;
+  FRIEND_REQUEST_SEND_RESP         = 127;
+  FRIEND_REQUEST_ACCEPT            = 128;
+  FRIEND_REQUEST_ACCEPT_RESP       = 129;
+  FRIEND_REQUEST_REFUSE            = 130;
+  FRIEND_REQUEST_REFUSE_RESP       = 131;
+  FRIEND_REQUEST_CANCEL            = 132;
+  FRIEND_REQUEST_CANCEL_RESP       = 133;
+  //黑名单
+  BLACKLIST                        = 140;
+  BLACKLIST_RESP                   = 141;
+  BLACKLIST_ADD                    = 142;
+  BLACKLIST_ADD_RESP               = 143;
+  BLACKLIST_REMOVE                 = 144;
+  BLACKLIST_REMOVE_RESP            = 145;
+  BLACKLIST_EXIST                  = 146;
+  BLACKLIST_EXIST_RESP             = 147;
+  //消息
+  CHAT_CHANNEL_MESSAGE_LIST        = 200;
+  CHAT_CHANNEL_MESSAGE_LIST_RESP   = 201;
+  CHAT_CHANNEL_MESSAGE_SEND        = 202;
+  CHAT_CHANNEL_MESSAGE_SEND_RESP   = 203;
+  CHAT_CHANNEL_MESSAGE_RECALL      = 204;
+  CHAT_CHANNEL_MESSAGE_RECALL_RESP = 205;
+  CHAT_CHANNEL_MESSAGE_ADD_EMOJI         = 206;
+  CHAT_CHANNEL_MESSAGE_ADD_EMOJI_RESP    = 207;
+  CHAT_CHANNEL_MESSAGE_REMOVE_EMOJI      = 208;
+  CHAT_CHANNEL_MESSAGE_REMOVE_EMOJI_RESP = 209;
+  CHAT_CHANNEL_MESSAGE_BATCH_TRANSLATE      = 210;
+  CHAT_CHANNEL_MESSAGE_BATCH_TRANSLATE_RESP = 211;
+  // 举报消息
+  CHAT_CHANNEL_MESSAGE_REPORT            = 310; 
+  CHAT_CHANNEL_MESSAGE_REPORT_RESP       = 311;
+  //频道
+  CHAT_CHANNEL_LIST                        = 220;
+  CHAT_CHANNEL_LIST_RESP                   = 221;
+  CHAT_CHANNEL_GET                         = 222;
+  CHAT_CHANNEL_GET_RESP                    = 223;
+  CHAT_CHANNEL_BASE_LIST                   = 224;
+  CHAT_CHANNEL_BASE_LIST_RESP              = 225;
+  CHAT_CHANNEL_BATCH_LIST                  = 226;
+  CHAT_CHANNEL_BATCH_LIST_RESP             = 227;
+  CHAT_CHANNEL_GAME_SETTINGS               = 228;
+  CHAT_CHANNEL_GAME_SETTINGS_RESP          = 229;
+  CHAT_CHANNEL_CLIENT_SETTINGS             = 230;
+  CHAT_CHANNEL_CLIENT_SETTINGS_RESP        = 231;
+  CHAT_CHANNEL_CLIENT_SETTINGS_UPDATE      = 232;
+  CHAT_CHANNEL_CLIENT_SETTINGS_UPDATE_RESP = 233;
+  //频道操作
+  CHAT_CHANNEL_MARK_READ           = 240;
+  CHAT_CHANNEL_MARK_READ_RESP      = 241;
+  CHAT_CHANNEL_DISCARD             = 242;
+  CHAT_CHANNEL_DISCARD_RESP        = 243;
+  CHAT_CHANNEL_HIDE                = 244;
+  CHAT_CHANNEL_HIDE_RESP           = 245;
+  CHAT_CHANNEL_MUTE                = 246;
+  CHAT_CHANNEL_MUTE_RESP           = 247;
+  CHAT_CHANNEL_PINNED              = 248;
+  CHAT_CHANNEL_PINNED_RESP         = 249;
+  //批量丢弃频道
+  CHAT_CHANNEL_BATCH_DISCARD       = 250;
+  CHAT_CHANNEL_BATCH_DISCARD_RESP  = 251;
+  // 聊天群最近发言人列表
+  CHAT_CHANNEL_RECENT_SENDER_LIST      = 252;
+  CHAT_CHANNEL_RECENT_SENDER_LIST_RESP = 253;
+  // 按玩家名称搜索频道成员(1.5.0新增)
+  CHAT_CHANNEL_MEMBER_SEARCH      = 254;
+  CHAT_CHANNEL_MEMBER_SEARCH_RESP = 255;
+  //自建群操作
+  CHAT_CHANNEL_CREATE              = 260;
+  CHAT_CHANNEL_CREATE_RESP         = 261;
+  CHAT_CHANNEL_QUIT                = 262;
+  CHAT_CHANNEL_QUIT_RESP           = 263;
+  CHAT_CHANNEL_MEMBER_ADD          = 264;
+  CHAT_CHANNEL_MEMBER_ADD_RESP     = 265;
+  CHAT_CHANNEL_MEMBER_REMOVE       = 266;
+  CHAT_CHANNEL_MEMBER_REMOVE_RESP  = 267;
+  CHAT_CHANNEL_SET_NAME            = 268;
+  CHAT_CHANNEL_SET_NAME_RESP       = 269;
+  //私聊限制设置
+  PRIV_CHAT_SET_FRIENDS_ONLY      = 280;
+  PRIV_CHAT_SET_FRIENDS_ONLY_RESP = 281;
+  PRIV_CHAT_GET_FRIENDS_ONLY      = 282;
+  PRIV_CHAT_GET_FRIENDS_ONLY_RESP = 283;
+  //翻译代理
+  TEXT_TRANSLATE                   = 300;
+  TEXT_TRANSLATE_RESP              = 301;
+  //文件上传认证(fau代理)
+  GET_UPLOAD_URL                   = 302;
+  GET_UPLOAD_URL_RESP              = 303;
+  //批量翻译(gear代理)
+  BATCH_TEXT_TRANSLATE             = 304;
+  BATCH_TEXT_TRANSLATE_RESP        = 305;
+  //拉取频道发言规则(1.4.4+)
+  GET_CHANNEL_RULE_CONFIG          = 306;
+  GET_CHANNEL_RULE_CONFIG_RESP     = 307;
+  // 对他人的设置
+  USER_SET_REMARKS                 = 320;
+  USER_SET_REMARKS_RESP            = 321;
+  USER_GET_REMARKS                 = 322;
+  USER_GET_REMARKS_RESP            = 323;
+  //json协议, 仅在客户端无法热更协议，且情况紧急时使用
+  JSON_REQ                         = 400;
+  JSON_RESP                        = 401;
+  JSON_PUSH                        = 402;
+  //SLG公告相关
+  SLG_NOTICE_SEND              = 900;
+  SLG_NOTICE_SEND_RESP         = 901;
+  SLG_NOTICE_GET_ALL           = 902;
+  SLG_NOTICE_GET_ALL_RESP      = 903;
+  SLG_NOTICE_DELETE            = 904;
+  SLG_NOTICE_DELETE_RESP       = 905;
+  SLG_NOTICE_MARK              = 906;
+  SLG_NOTICE_MARK_RESP         = 907;
+  SLG_NOTICE_UNMARK            = 908;
+  SLG_NOTICE_UNMARK_RESP       = 909;
+  SLG_NOTICE_SWAP_MARK         = 910;
+  SLG_NOTICE_SWAP_MARK_RESP    = 911;
+  SLG_NOTICE_PUBLISH           = 912;
+  SLG_NOTICE_PUBLISH_RESP      = 913;
+  SLG_NOTICE_PUBLISH_CD_GET       = 914;
+  SLG_NOTICE_PUBLISH_CD_GET_RESP  = 915;
+  SLG_NOTICE_VOTE_SUBMIT          = 916;
+  SLG_NOTICE_VOTE_SUBMIT_RESP     = 917;
+  SLG_NOTICE_VOTE_OPTION_INFO_GET       = 918;
+  SLG_NOTICE_VOTE_OPTION_INFO_GET_RESP  = 919;
+  //推送
+  CHAT_MESSAGE_PUSH                 = 1000;
+  RELATION_UPDATE_PUSH              = 1001;
+  CHAT_CHANNEL_UPDATE_PUSH          = 1002;
+  FRIEND_ONLINESTAT_PUSH            = 1003;
+  USER_KICK_PUSH                    = 1004;
+  USER_INFO_CHANGE_PUSH             = 1005; // 玩家信息变更通知
+  USER_MUTE_PUSH                    = 1006; // 玩家禁言状态变更通知
+  CHAT_CHANNEL_SETTING_CHANGE_PUSH  = 1007; // 频道设置变更通知，游戏定义的频道设置和客户端定义的频道设置
+}
+
+message PBPack {
+  int32 seq                          = 1;    // 请求序号
+  PackType type                      = 2;    // 请求类型, 响应类型=请求类型+1
+  // 客户端收到响应后，先判断result.err_code
+  // err_code=0 请求成功, err_code!=0 请求失败
+  PBResult result                    = 3; //所有请求的返回消息都有result
+  // string trace                    = 4; // TODO 链路追踪使用
+
+  //120秒收不到消息客户端消息，连接就会断开
+  //心跳间隔可以设置30秒-60秒，尽量不要超过60秒
+  PBHeartbeat heartbeat              = 10; // 心跳，登录成功后调用
+  PBHeartbeatResp heartbeat_resp     = 11;
+  // 登录
+  PBUserLogin user_login             = 100;
+  PBUserLoginResp user_login_resp    = 101;
+  // 批量拉取玩家数据
+  PBUserList user_list               = 102;
+  PBUserListResp user_list_resp      = 103;
+
+  // 拉取好友列表
+  PBFriendList friend_list           = 120;
+  PBFriendListResp friend_list_resp  = 121;
+  // 移除好友
+  PBFriendRemove friend_remove       = 122;
+  PBFriendRemoveResp friend_remove_resp = 123;
+  // 拉取好友申请列表(发送和收到的)
+  PBFriendRequestList friend_request_list = 124;
+  PBFriendRequestListResp friend_request_list_resp = 125;
+  // 发送好友申请
+  PBFriendRequestSend friend_request_send = 126;
+  PBFriendRequestSendResp friend_request_send_resp = 127;
+  // 接受收到的好友申请
+  PBFriendRequestAccept friend_request_accept = 128;
+  PBFriendRequestAcceptResp friend_request_accept_resp = 129;
+  // 拒绝收到的好友申请
+  PBFriendRequestRefuse friend_request_refuse = 130;
+  PBFriendRequestRefuseResp friend_request_refuse_resp = 131;
+  // 取消发送的好友申请
+  PBFriendRequestCancel friend_request_cancel = 132;
+  PBFriendRequestCancelResp friend_request_cancel_resp = 133;
+
+
+  // 获取黑名单列表
+  PBBlacklist blacklist              = 140;
+  PBBlacklistResp blacklist_resp     = 141;
+  // 加入黑名单
+  PBBlacklistAdd blacklist_add       = 142;
+  PBBlacklistAddResp blacklist_add_resp = 143;
+  // 移除黑名单
+  PBBlacklistRemove blacklist_remove = 144;
+  PBBlacklistRemoveResp blacklist_remove_resp = 145;
+  // 检查玩家是否在黑名单
+  PBBlacklistExist blacklist_exist   = 146;
+  PBBlacklistExistResp blacklist_exist_resp = 147;
+
+
+  // 拉取指定频道的消息
+  PBChatChannelMessageList chat_channel_message_list = 200;
+  PBChatChannelMessageListResp chat_channel_message_list_resp = 201;
+  // 在指定频道发送消息
+  PBChatChannelMessageSend chat_channel_message_send = 202;
+  PBChatChannelMessageSendResp chat_channel_message_send_resp = 203;
+  // 撤回消息(发送消息后，两分钟内可以撤回，不能撤回系统消息)
+  PBChatChannelMessageRecall chat_channel_message_recall = 204;
+  PBChatChannelMessageRecallResp chat_channel_message_recall_resp = 205;
+
+  // 添加消息反馈表情(比如点赞)
+  // 也可以扩展，用来标记消息状态，例如红包是否已领取，语音是否已播放等
+  PBChatChannelMessageAddEmoji chat_channel_message_add_emoji = 206;
+  PBChatChannelMessageAddEmojiResp chat_channel_message_add_emoji_resp = 207;
+  // 移除消息反馈表情(比如取消点赞)
+  PBChatChannelMessageRemoveEmoji chat_channel_message_remove_emoji = 208;
+  PBChatChannelMessageRemoveEmojiResp chat_channel_message_remove_emoji_resp = 209;
+  // 批量翻译频道消息并缓存翻译内容 (1.4.2新增翻译过的内容自动翻译，需要后台配置开启支持)
+  PBChatChannelMessageBatchTranslate chat_channel_message_batch_translate = 210;
+  PBChatChannelMessageBatchTranslateResp chat_channel_message_batch_translate_resp = 211;
+
+  // 举报消息
+  PBChatChannelMessageReport chat_channel_message_report = 310;
+  PBChatChannelMessageReportResp chat_channel_message_report_resp = 311;
+
+  // 拉取频道列表
+  // 该接口偏重，请不要频繁调用
+  // 登陆后请优先调用该接口，登陆后频道变更根据推送更新
+  PBChatChannelList chat_channel_list = 220;
+  PBChatChannelListResp chat_channel_list_resp = 221;
+  // 获取频道信息(仅支持自定义群组)
+  PBChatChannelGet chat_channel_get = 222;
+  PBChatChannelGetResp chat_channel_get_resp = 223;
+  // （可选协议）拉取频道列表的基础数据，仅返回最后一条消息ID
+  // 如有减少带宽需要可使用，性能与PBChatChannelList一致
+  // wgame专用，如无必要，不要使用
+  PBChatChannelBaseList chat_channel_base_list = 224;
+  PBChatChannelBaseListResp chat_channel_base_list_resp = 225;
+  // （可选协议）批量拉取频道列表，返回所指定频道的信息，最多100个频道ID
+  // 如有减少带宽需要可使用，性能与PBChatChannelList几乎一致
+  // wgame专用，如无必要，不要使用
+  PBChatChannelBatchList chat_channel_batch_list = 226;
+  PBChatChannelBatchListResp chat_channel_batch_list_resp = 227;
+  // （可选协议）批量获取游戏自定义的频道配置
+  // 只允许获取自建群、公会群、世界群的配置
+  PBChatChannelGameSettings chat_channel_game_settings = 228;
+  PBChatChannelGameSettingsResp chat_channel_game_settings_resp = 229;
+  // （可选协议）批量获取客户端自定义的频道配置
+  // 只允许获取自建群、公会群、世界群的配置
+  PBChatChannelClientSettings chat_channel_client_settings = 230;
+  PBChatChannelClientSettingsResp chat_channel_client_settings_resp = 231;
+  // （可选协议）批量更新客户端自定义的频道配置
+  // 只允许更新自建群、公会群、世界群的配置
+  PBChatChannelClientSettingsUpdate chat_channel_client_settings_update = 232;
+  PBChatChannelClientSettingsUpdateResp chat_channel_client_settings_update_resp = 233;
+
+  // 标记指定频道消息的已读位置
+  PBChatChannelMarkRead chat_channel_mark_read = 240;
+  PBChatChannelMarkReadResp chat_channel_mark_read_resp = 241;
+  // 丢弃频道，仍然会接收到该群组的消息 但是不能看到历史消息
+  PBChatChannelDiscard chat_channel_discard = 242;
+  PBChatChannelDiscardResp chat_channel_discard_resp = 243;
+  // 隐藏频道，仍然会接收到该群组的消息 但是能看到历史消息
+  PBChatChannelHide chat_channel_hide = 244;
+  PBChatChannelHideResp chat_channel_hide_resp = 245;
+  // 屏蔽频道(又称消息免打扰)
+  PBChatChannelMute chat_channel_mute = 246;
+  PBChatChannelMuteResp chat_channel_mute_resp = 247;
+  // 置顶频道
+  PBChatChannelPinned chat_channel_pinned = 248;
+  PBChatChannelPinnedResp chat_channel_pinned_resp = 249;
+
+  // 批量丢弃频道
+  PBChatChannelBatchDiscard chat_channel_batch_discard = 250;
+  PBChatChannelBatchDiscardResp chat_channel_batch_discard_resp = 251;
+
+  //拉取聊天群最近发言人列表(1.5.0新增)
+  PBChatChannelRecentSenderList chat_channel_recent_sender_list = 252;
+  PBChatChannelRecentSenderListResp chat_channel_recent_sender_list_resp = 253;
+
+  // 按玩家名称搜索频道成员(1.5.0新增)
+  PBChatChannelMemberSearch chat_channel_member_search = 254;
+  PBChatChannelMemberSearchResp chat_channel_member_search_resp = 255;
+
+  // 创建频道，只支持自建群
+  PBChatChannelCreate chat_channel_create = 260;
+  PBChatChannelCreateResp chat_channel_create_resp = 261;
+  // 离开频道，只支持自建群
+  PBChatChannelQuit chat_channel_quit = 262;
+  PBChatChannelQuitResp chat_channel_quit_resp = 263;
+  // 添加频道成员，只支持自建群
+  PBChatChannelMemberAdd chat_channel_member_add = 264;
+  PBChatChannelMemberAddResp chat_channel_member_add_resp = 265;
+  // 移除频道成员，只支持自建群
+  PBChatChannelMemberRemove chat_channel_member_remove = 266;
+  PBChatChannelMemberRemoveResp chat_channel_member_remove_resp = 267;
+  // 设置频道名称，只支持自建群
+  PBChatChannelSetName chat_channel_set_name = 268;
+  PBChatChannelSetNameResp chat_channel_set_name_resp = 269;
+
+  // 国服合规需求，设置仅接收好友消息（一键防护，一键防网暴）
+  // 生效期间：
+  //   1. 玩家不会接受非好友的私聊消息
+  //   2. 群聊仅允许好友@自己。注意依赖服务器定义的@规则PBMentionInfo，客户端自己实现的不会生效；@所有人不受影响
+  PBPrivChatSetFriendsOnly priv_chat_set_friends_only = 280;
+  PBPrivChatSetFriendsOnlyResp priv_chat_set_friends_only_resp = 281;
+  // 获取仅接收好友消息（一键防护，一键防网暴）
+  PBPrivChatGetFriendsOnly priv_chat_get_friends_only = 282;
+  PBPrivChatGetFriendsOnlyResp priv_chat_get_friends_only_resp = 283;
+  //文本翻译(gear代理)
+  PBTextTranslate text_translate = 300;
+  PBTextTranslateResp text_translate_resp = 301;
+  //文件上传认证(fau代理)
+  PBGetUploadUrl get_upload_url = 302;
+  PBGetUploadUrlResp get_upload_url_resp = 303;
+  //批量翻译(gear代理)
+  PBBatchTextTranslate batch_text_translate = 304;
+  PBBatchTextTranslateResp batch_text_translate_resp = 305;
+  //拉取频道发言规则(1.4.4+)
+  PBGetChannelRuleConfig get_channel_rule_config = 306;
+  PBGetChannelRuleConfigResp get_channel_rule_config_resp = 307;
+
+  // 对他人的添加备注
+  PBUserSetRemarks user_set_remarks = 320;
+  PBUserSetRemarksResp user_set_remarks_resp = 321;
+  // 获取我对他人的备注
+  PBUserGetRemarks user_get_remarks = 322;
+  PBUserGetRemarksResp user_get_remarks_resp = 323;
+
+  //仅在客户端无法热更协议，且情况紧急时使用
+  PBJsonReq  json_req  = 400;
+  PBJsonResp json_resp = 401;
+  PBJsonPush json_push = 402;
+
+  //SLG公告相关
+  // 发送SLG公告
+  PBSLGNoticeSend slg_notice_send = 900;
+  PBSLGNoticeSendResp slg_notice_send_resp = 901;
+  // 获取SLG全部公告
+  PBSLGNoticeGetAll slg_notice_get_all = 902;
+  PBSLGNoticeGetAllResp slg_notice_get_all_resp = 903;
+  // 删除SLG公告
+  PBSLGNoticeDelete slg_notice_delete = 904;
+  PBSLGNoticeDeleteResp slg_notice_delete_resp = 905;
+  // 标记SLG公告
+  PBSLGNoticeMark slg_notice_mark = 906;
+  PBSLGNoticeMarkResp slg_notice_mark_resp = 907;
+  // 取消标记SLG公告
+  PBSLGNoticeUnmark slg_notice_unmark = 908;
+  PBSLGNoticeUnmarkResp slg_notice_unmark_resp = 909;
+  // 交换SLG公告标记
+  PBSLGNoticeSwapMark slg_notice_swap_mark = 910;
+  PBSLGNoticeSwapMarkResp slg_notice_swap_mark_resp = 911;
+  // 紧急发布
+  PBSLGNoticePublish slg_notice_publish = 912;
+  PBSLGNoticePublishResp slg_notice_publish_resp = 913;
+  // 获取紧急发布信息
+  PBSLGNoticePublishCDGet slg_notice_publish_cd_get = 914;
+  PBSLGNoticePublishCDGetResp slg_notice_publish_cd_get_resp = 915;
+  // 投票操作
+  PBSLGNoticeVoteSubmit slg_notice_vote_submit = 916;
+  PBSLGNoticeVoteSubmitResp slg_notice_vote_submit_resp = 917;
+  // 获取投票选项信息
+  PBSLGNoticeVoteOptionInfoGet slg_notice_vote_option_info_get = 918;
+  PBSLGNoticeVoteOptionInfoGetResp slg_notice_vote_option_info_get_resp = 919;
+
+  // 推送消息
+  PBChatMessagePush chat_message_push = 1000; // 聊天消息推送
+  PBRelationUpdatePush relation_update_push = 1001; // 好友｜好友申请｜黑名单关系变更推送
+  PBChatChannelUpdatePush chat_channel_update_push = 1002; // 有新的频道｜频道被移除推送
+  PBUserKickPush user_kick_push = 1004; // 被踢下线推送
+  PBUserInfoChangePush user_info_change_push = 1005; // 玩家信息变更通知
+  PBUserMutePush user_mute_push = 1006; // 玩家禁言状态变更通知
+  PBChatChannelSettingChangePush chat_channel_setting_change_push = 1007; // 频道设置变更通知，游戏定义的频道设置和客户端定义的频道设置
+}

@@ -1,0 +1,849 @@
+syntax = "proto3";
+package msg;
+
+import "enumx/csv_enumx.proto";
+import "enumx/enumx.proto";
+import "msg/msg.proto";
+import "msg/battle_msg.proto";
+import "optx/optx.proto";
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb";
+option (gogoproto.goproto_getters_all) = false;
+
+// 地图收藏标记, 唯一id = mapID + pos
+message MapMark {
+  uint32            worldID         = 1; // 世界ID, 将来可能跨服
+  uint32            cityID          = 2; // 城市配置ID, 客户端读取城市名称 [deprecated]
+  uint32            mapID           = 3; // 地图ID, 将来可能跨城
+  enumx.MapMarkType type            = 4; // 标记类型
+  IntPos            pos             = 5 [(gogoproto.nullable) = false]; // 标记位置
+  string            notes           = 6; // 备注
+  uint32            editTime        = 7; // 创建时间 秒级时间戳
+  uint32            countDownSecs   = 8; // 倒计时，秒
+  bool              isCountDownTips = 9; // 是否开启倒计时3分钟自动通知
+  uint32            iconID          = 10;
+  uint32            mapConfID       = 11; // 地图配置ID
+}
+
+//////////////////////// Red Name (Enemy) ////////////////////////
+message ClientRedNameEnemy {
+  uint32 attackerUID    = 1; // 攻击者UID
+  uint32 lastAttackTime = 2; // 最后攻击时间，秒时间戳 [5分钟不攻击则移除红名]
+}
+
+message RedNameEnemy {
+  uint32 attackerUID    = 1; // 攻击者UID
+  uint32 defenderUID    = 2; // 被攻击者UID [用于脱离公会的时候从公会红名列表移除]
+  uint64 defenderGvGID  = 3; // 被攻击村庄id/或者被攻击者公会id (防守方是村庄/基地)
+  uint32 lastAttackTime = 4; // 最后攻击时间，秒时间戳 [5分钟不攻击则移除红名]
+}
+
+message GuildRedNameInfo {
+  uint32                guildID       = 1; // 公会ID
+  repeated RedNameEnemy redNameEnemys = 2 [(gogoproto.nullable) = false]; // 红名敌人列表
+}
+
+////////////////////////  GVG  ////////////////////////
+
+// store on village
+message MapGuildGvGInfo {
+  uint32                   guildID         = 1; // 公会ID
+  uint64                   objID           = 2; //  gvg 点objID
+  repeated msg.UintInt64KV participator    = 3 [(gogoproto.nullable) = false]; // 参与者积分, key=uid, value=积分, 首战奖励需要
+  uint64                   point           = 4; // 公会积分
+  int64                    declareWarTime  = 5; // 宣战时间, 毫秒
+  int64                    firstAttackTime = 6; // 宣战时间, 毫秒
+
+  // 以下数据仅下发客户端时填写
+  string                   guildName       = 10; // 公会名称
+  string                   shortName       = 11; // 公会简称
+  repeated uint32          icons           = 12 [(gogoproto.nullable) = false]; // 公会图标
+}
+
+//////////////////////// GvG end ////////////////////////
+
+// 基地数据，目前仅迁城返回client使用
+message BaseData {
+  uint64     baseId = 1;  // 基地obj_id
+  msg.IntPos pos    = 2;  // 基地位置
+  uint32     cityId = 3;  // 城市id
+}
+
+// 地图侧UserBasicInfo, 保持最小化； 如果要扩展， 添加到 ClientMapPlayerInfo
+message MapUBI {
+  option (gogoproto.equal) = true;
+  uint32     uid     = 1;
+  uint32     worldID = 2; // 世界ID
+  string     name    = 3;
+  Avatar     avatar  = 4; // 头像信息
+  msg.IntPos pos     = 5[(gogoproto.nullable) = false]; // 玩家主基地位置
+}
+
+// 客户端地图上玩家基础信息
+message ClientMapPlayerInfo {
+  option (gogoproto.equal) = true;
+
+  MapUBI mapUbi       = 1[(gogoproto.nullable) = false];  // 玩家基本信息
+  uint64 power        = 2;  // 战力
+  uint32 mapId        = 3;  // 地图ID
+  uint32 guildId      = 4;  // 公会ID
+  uint32 mainBaseLv   = 5;  // 主基地等级
+  uint32 historyTitle = 7; // 历史最高到达的荣誉称号id
+  uint32 bestTitle    = 8; // 最强称号id
+}
+
+// 小地图信息，主要是同一个公会的玩家在小地图上显示
+message MiniMapInfo {
+  uint32          mapID     = 1; // 地图ID
+  uint32          guildID   = 2; // 公会ID
+  uint32          masterUid = 3; // 会长uid
+  repeated MapUBI players   = 4[(gogoproto.nullable) = false]; // 公会成员列表
+}
+
+// 地图上同步的公会信息
+message ClientMapGuildInfo {
+  option (gogoproto.equal)          = true;
+  uint32          guildId           = 1;  // 公会ID
+  string          shortName         = 2;  // 公会简称
+  string          fullName          = 3;  // 公会全称
+  repeated uint32 icons             = 4;  // 公会图标
+  uint32          masterUid         = 5;  // 会长uid
+  string          masterName        = 6;   // 会长名字
+  uint32          worldId           = 7;   // 联盟所在服务器id
+  uint64          guildPower        = 8;   // 联盟战力
+  uint32          guildMemberNum    = 9;   // 联盟人数
+  uint32          guildMaxMemberNum = 10;  // 联盟最大人数
+  enumx.Lang      lang              = 11;  // 联盟标签语言
+  IntPos          rendezvousPoint   = 12[(gogoproto.nullable) = false];  // 联盟聚集点
+}
+
+message UBIGuildInfo {
+  repeated ClientMapPlayerInfo playerInfos = 1;  // 公会成员信息
+  repeated ClientMapGuildInfo  guildInfos  = 2;  // 公会信息
+}
+
+message ClientGridView {
+  uint32                      gridID        = 1; // 视野格子, 不同层级计算的格子id可能不同
+  repeated ClientMapObj       mapObjs       = 2; // L1,L2层使用详细的地图对象信息
+  repeated SimpleClientMapObj simpleMapObjs = 3 [(gogoproto.nullable) = false]; // L3,L4层使用简化的地图对象信息
+  uint64                      createTime    = 4; // 创建时间 ms
+  repeated uint64             delObjIDs     = 5; // 此格子删除的objID列表, 基地迁移可能出现在其他格子中
+}
+
+// push 的时候下发的是增量信息，包含删除的objID列表
+message ClientMapView {
+  uint32                      mapID        = 1; // 地图ID
+  enumx.MapViewLayer          layer        = 2; // 视野层级
+  UBIGuildInfo                ubiGuildInfo = 3; // 玩家|公会信息
+  repeated ClientGridView     Grids        = 4; // 视野格子
+  repeated SimpleClientMapObj simpleObjs   = 5 [(gogoproto.nullable) = false]; // L4层使用全地图的objs(不使用grid划分)
+  bool                        isFull       = 6; // 是否是全量数据
+}
+
+
+////////////////////////////////////////// 视野 //////////////////////////////////////////
+// L3,L4层使用简化的建筑信息
+message SimpleClientBuilding {
+  uint32                buildingID    = 1;  // 配置id
+  enumx.MapBuildingType buildingType  = 2;  // 建筑子类型
+  uint32                level         = 3;  // 建筑等级
+  uint32                guildID       = 4;  // 占领的公会ID(仅gvg点）
+  repeated uint32       declareGuilds = 5;  // 宣战的公会ID列表 (包含预宣战和正式宣战的公会)
+  msg.TimeLimitState    shieldState   = 6[(gogoproto.nullable) = false]; // 保护罩状态
+  enumx.GvGState        gvgState      = 7;  // GvG状态
+  msg.RecoverData       hpData        = 8[(gogoproto.nullable) = false];  // hp 目前仅village使用，玩家基地使用WallData
+}
+
+message ClientBuilding {
+  option (optx.withMask)                 = true;  // 自动生成XXXWithMask
+
+  uint32                    buildingID   = 1;  // 配置id
+  enumx.MapBuildingType     buildingType = 2;  // 建筑子类型
+  msg.RecoverData           hpData       = 3;  // hp 目前仅village使用，玩家基地使用WallData
+  msg.WallData              wallData     = 4;  // 基地城防数据
+  repeated msg.EmojiMessage emojiList    = 5;  // 表情
+
+  // 具体的建筑信息
+  ClientMainBase            mainBase     = 10;  // 玩家主基地
+  ClientVillage             village      = 11;  // 村庄gvg点
+}
+
+// 宣战信息，存guild, 客户端显示使用
+message DeclareWarObjInfo {
+  uint32     declareTime  = 1; // 宣战时间, 秒时间
+  uint32     uid          = 2; // 宣战者uid
+  uint64     objID        = 3; // objID
+  uint32     buildingID   = 4; // building 配置ID
+  msg.IntPos pos          = 5 [(gogoproto.nullable) = false]; // obj 位置
+  bool       isPreDeclare = 6; // 是否是预宣战
+  uint32     mapID        = 7; // 地图ID
+  uint32     defenderGid  = 8; // 防守方公会ID
+}
+
+// 公会的gvg战斗信息
+message ClientGuildGvGInfo {
+  uint32            declareWarCnt      = 1; // 今日宣战次数, 每日重置
+  DeclareWarObjInfo declareWarInfo     = 2; // 宣战信息
+  uint32            lastAttackAllCmdTs = 3; // 上次全军攻击的时间戳, 用于CD
+}
+
+// store on village
+message GvGRoundInfo {
+  uint32                       roundSeq            = 1; // 轮次序号, 从1开始
+  uint32                       firstDeclareGuildID = 2; // 本论第一个宣战的公会ID
+  repeated msg.MapGuildGvGInfo gvgInfos            = 3; // 本论参战的公会 记录信息
+  uint32                       enterWarTime        = 4; // 进入争夺期时间，秒时间缀
+}
+
+// 村庄，也即gvg点
+message ClientVillage {
+  uint32          guildID        = 1;  // 当前占领的公会ID
+  uint32          occupyTime     = 2;  // 占领时间
+  uint32          giveUpTime     = 3;  // 开始放弃的时间， 0表示未放弃, > 0 表示放弃中
+  uint32          openTime       = 4;  // 开放时间, 如果是 > now, 则表示未开放
+  uint32          protectEndTime = 5;  // 保护结束时间, 占领后开始保护30分钟, > now 表示保护中， 0 < protectEndTime < now 表示上轮保护结束时间
+
+  bool            isEverOccupied = 6;  // 是否被占领过, 首战有单独的奖励
+  repeated uint32 declareGuilds  = 7;  // 宣战的公会ID列表 (包含预宣战和正式宣战的公会)
+  enumx.GvGState  gvgState       = 8;  // GvG状态
+
+  // gvg 轮次信息, 可能在预宣战阶段就存在, 单独请求illageInfo接口获取
+  uint32          lastRoundSeq   = 9;  // 上一轮次序号, 0表示没有上一轮
+  GvGRoundInfo    roundInfo      = 10; // 开战后两小时内的信息, 战斗结束后清空
+}
+
+// 地图上显示的简化公会信息（地图染色等）
+message GuildSimpleInfo {
+  uint32          guildID   = 1; // 公会ID
+  string          shortName = 2; // 公会简称
+  repeated uint32 icons     = 3 [(gogoproto.nullable) = false]; // 公会图标
+}
+
+// 公会占领村庄基本信息，在线玩家会全图广播
+message GuildVillageInfo {
+  option (gogoproto.equal)      = true;
+
+  uint32         mapID          = 1; // 地图ID
+  uint32         guildID        = 2; // 占领的公会ID, 0表示未占领
+  uint32         buildingID     = 3; // gvg点buildingID, 读取配置相关字段
+  uint64         objID          = 4; // gvg点objID
+  msg.IntPos     pos            = 5 [(gogoproto.nullable) = false]; // gvg点位置
+  enumx.GvGState gvgState       = 6; // GvG状态
+  bool           isDeclareWar   = 7; // 是否有公会宣战
+
+  uint32         openTime       = 10; // 开放时间, 如果是 > now, 则表示未开放
+  uint32         giveupTime     = 11; // 开始放弃的时间， 0表示未放弃, > 0 表示放弃中
+  uint32         protectEndTime = 12; // 保护结束时间, 占领后开始保护30分钟, > now 表示保护中， 0 < protectEndTime < now 表示上轮保护结束时间
+  uint32         startWarTime   = 13; // 开战时间, 秒时间戳
+  uint32         occupyTime     = 14; // 占领时间, 秒时间戳
+}
+
+// 理论上只有boss级别的 才在L3,L4层显示
+message SimpleClientMonster {
+  uint64 objID = 1; // 仅用于反向索引
+  uint32 cfgId = 2; // 配置ID
+}
+
+// 中立建筑和野怪
+message ClientMonster {
+  //option (optx.withMask) = true;  // 自动生成XXXWithMask
+
+  uint64               objID       = 1; // 仅用于反向索引
+  uint32               cfgId       = 2; // 配置ID
+
+  enumx.MapMonsterType monsterType = 3; // 野怪类型
+  GuildBossMapExt      guildBoss   = 4; // 联盟boss额外信息
+  uint64               radarTaskID = 5; // 雷达任务ID
+  uint32               scheduleID  = 6; // 关联的ScheduleID
+}
+
+message GuildBossMapExt {
+  uint32 gid             = 1; // 所属联盟
+  int64  battleStartTS   = 2; // 战斗开始时间
+  int64  battleEndTS     = 3; // 战斗结束时间
+  uint32 bossLv          = 4; // boss等级
+  uint32 mapMonsterCfgID = 5; // 地图野怪配置ID
+  uint32 rewardStage     = 6; // 奖励阶段
+  uint32 mvpMultiplier   = 7; // mvp奖励倍数
+  int64  totalDamage     = 8; // 造成总伤害
+  string gShortName      = 9; // 联盟简称
+  int64  appointStartTS  = 10; // 预约开始时间（即准备阶段结束时间）
+}
+
+message SimpleClientArmy {
+  //option (optx.withMask)                               = true;  // 自动生成XXXWithMask
+
+  uint32            armyID        = 1;
+  double            originalSpeed = 2; // 原始速度
+  double            currentSpeed  = 3; // 当前速度
+  enumx.ArmySubType armySubType   = 4; // 部队子类型
+  enumx.ArmyStatus  armyStatus    = 5; // 军队状态
+  //repeated msg.MapArmyDisplayLegionInfo legionInfoList = 6[(gogoproto.nullable) = false]; // 部队显示信息列表
+  //msg.ArmyBattle                        armyBattle     = 7; // 战斗数据
+}
+
+message ClientArmy {
+  option (optx.withMask)                               = true;  // 自动生成XXXWithMask
+
+  uint32                                armyID         = 1;
+  double                                originalSpeed  = 2; // 原始速度
+  double                                currentSpeed   = 3; // 当前速度
+  enumx.ArmySubType                     armySubType    = 4; //  部队子类型
+  enumx.ArmyStatus                      armyStatus     = 5; // 军队状态
+  repeated msg.MapArmyDisplayLegionInfo legionInfoList = 6[(gogoproto.nullable) = false]; // 部队显示信息列表
+  msg.ArmyBattle                        armyBattle     = 7; // 战斗数据
+  repeated msg.EmojiMessage             emojiList      = 9;  // 表情
+  ClientArmyShow                        armyShow       = 10; // 部队展示信息
+  ClientArmyAssembly                    assembly       = 11; // 集结信息
+  CollectData                           collectData    = 12; // 集结信息
+}
+
+message ClientArmyShow {
+  uint32           topCardId = 1; //最强兵卡ID
+  msg.Avatar       avatar    = 2; // 头像信息
+  string           name      = 3;
+  msg.SMarchLineup lineup    = 4; // 部队信息
+}
+
+// 一只部队里面的单张卡片
+message TroopCard {
+  uint32 armyID = 1; // 部队ID
+  uint32 cardID = 2; // 兵卡ID
+  uint32 level  = 3; // 兵卡等级
+  uint32 star   = 4; // 兵卡星级
+}
+
+// 探查显示的援军和驻防 单只部队信息
+message GarrisonArmyInfo {
+  msg.MapUBI         ownerInfo  = 1[(gogoproto.nullable) = false]; // 部队所有者信息
+  repeated TroopCard troopCards = 2[(gogoproto.nullable) = false]; // 部队兵卡信息
+  uint64             fightPower = 3; // 部队战力
+}
+
+message ArmyAssembly {
+  repeated ClientArmyShow armyList = 1;
+  Assembly                assembly = 2;
+}
+
+message ClientArmyAssembly {
+  repeated ClientArmyShow armyList = 1;
+}
+
+// 玩家基地数据
+message ClientMainBase {
+  option (optx.withMask)         = true;  // 自动生成XXXWithMask
+
+  uint32             level       = 1; // 基地等级
+  msg.TimeLimitState shieldState = 2[(gogoproto.nullable) = false]; // 保护罩状态
+  msg.IntPos         oldPos      = 3[(gogoproto.nullable) = false];  // 迁城前位置, 客户端播放迁城动画使用, tick后清除
+}
+
+// 地图非战斗单位, 仅L1,L2层显示
+message ClientWildItem {
+  option (optx.withMask)            = true;  // 自动生成XXXWithMask
+
+  uint64              objID         = 1; // 仅用于反向索引
+  enumx.WildItemType  wildItemType  = 2; // 野物类型
+  uint32              cfgId         = 3; // 配置ID
+
+  msg.ClientMapMine   mine          = 7;  // 普通采矿点
+  msg.ClientGuildMine guildMine     = 8;  // 联盟采矿点
+  msg.MapRewardItem   rewardItem    = 9;  // 地图奖励物品
+  msg.RadarTreasure   radarTreasure = 10; // 雷达宝藏数据
+}
+
+message SimpleClientWildItem {
+  uint64             objID        = 1; // 仅用于反向索引
+  enumx.WildItemType wildItemType = 2; // 野物类型
+  uint32             cfgId        = 3; // 配置ID
+
+  //msg.MapMine        mine         = 7;  // 普通采矿点
+  //msg.GuildMine     guildMine    = 8;  // 联盟采矿点
+  //msg.MapRewardItem rewardItem   = 9;  // 地图奖励物品
+}
+
+// 采矿点
+message MapMine {
+  uint32          totalResource = 2;
+  uint32          mineType      = 3;
+  msg.CollectData collectData   = 4;
+}
+
+message ClientMapMine {
+  option (optx.withMask)        = true;  // 自动生成XXXWithMask
+  uint32          totalResource = 2;
+  uint32          mineType      = 3;
+  msg.CollectData collectData   = 4;
+}
+
+// 联盟采矿点
+message GuildMine {
+  uint32 guildID = 1; // 占领的公会ID
+  uint32 level   = 2; // 联盟采矿点等级
+}
+
+message ClientGuildMine {
+  option (gogoproto.equal) = true;
+  option (optx.withMask)   = true;  // 自动生成XXXWithMask
+
+  uint32 guildID = 1; // 占领的公会ID
+  uint32 level   = 2; // 联盟采矿点等级
+}
+
+message PickUserInfo {
+  uint32     uid      = 1; // 玩家uid
+  string     name     = 2; // 玩家名称
+  msg.Avatar avatar   = 3; // 头像信息
+  uint32     takeTime = 4; // 拾取时间
+}
+
+// 地图奖励物品
+message MapRewardItem {
+  option (optx.withMask)              = true;  // 自动生成XXXWithMask
+
+  repeated msg.Asset    assets        = 1 [(gogoproto.nullable) = false]; // 奖励物品
+  uint32                createTime    = 2; // 创建时间, 秒时间戳
+  uint32                expireTime    = 3; // 过期时间, 秒时间戳, 0表示不过期
+  uint32                maxPickCnt    = 4; // 最大可拾取次数, > 0 有效, 否则都是1次
+  repeated PickUserInfo pickUserInfos = 6 [(gogoproto.nullable) = false]; // 已经拾取的玩家uid列表, 单个玩家只能拾取一次
+  uint32                ownerGuild    = 7; // 归属公会ID, 0表示不归属任何公会, 只有公会成员可以拾取
+}
+
+message SimpleMoveInfo {
+  option (optx.withMask)     = true;  // 自动生成XXXWithMask
+
+  double     speed           = 1; // 移动速度
+  int64      startMS         = 2;
+  IntPos     startPos        = 3 [(gogoproto.nullable) = false];         // 全程开始六边形坐标
+  IntPos     endPos          = 4 [(gogoproto.nullable) = false];         // 全程结束六边形坐标
+  Float64Pos startFloat64Pos = 5 [(gogoproto.nullable) = false];  // 全程开始浮点数坐标
+  Float64Pos endFloat64Pos   = 6 [(gogoproto.nullable) = false];  // 全程结束浮点数坐标
+}
+
+message SimpleRadarTaskData {
+  uint32 ownerUID = 1; // 任务拥有者UID
+  uint64 guildID  = 2; // 任务拥有者联盟ID
+  uint32 cfgID    = 3; // 任务配置ID
+}
+
+
+// 详细的地图对象信息，L1,L2 层通用
+message ClientMapObj {
+  option (optx.withMask)           = true;  // 自动生成ClientMapObjWithMask
+
+  uint64                 objID         = 1; // 地图唯一ID (不可增量更新)
+  uint32                 ownerID       = 2 [(optx.maskable) = true]; // 所有者ID
+  int64                  createTime    = 4; // 创建时间 (不可增量更新)
+  enumx.ObjType          objType       = 5; // 物体类型 (不可增量更新)
+  IntPos                 pos           = 6 [(gogoproto.nullable) = false, (optx.maskable) = true]; // 物体位置
+  Float64Pos             floatPos      = 7 [(gogoproto.nullable) = false, (optx.maskable) = true]; // 浮点坐标，部队使用
+  int64                  expiredTime   = 8; // 过期时间, 0表示不过期
+  enumx.MapObjDetailType objDetailType = 9; // obj 详细类型
+
+  ClientBuilding         building      = 21 [(optx.maskable) = true];
+  ClientMonster          monster       = 22 [(optx.maskable) = true];
+  ClientArmy             army          = 23 [(optx.maskable) = true];
+  ClientWildItem         wildItem      = 24 [(optx.maskable) = true]; // 地图上的野物品
+  msg.MoveInfo           moveInfo      = 30 [(optx.maskable) = true]; // 移动信息
+  ClientBattleInfo       battleInfo    = 31 [(optx.maskable) = true]; // 战斗信息
+  msg.TruckData          truckData     = 32 [(optx.maskable) = true]; // 卡车数据
+  msg.CollectData        collectData   = 33 [(optx.maskable) = true]; // 卡车数据
+  ClientAssemblyInfo     assemblyInfo  = 34 [(optx.maskable) = true]; // 集结信息
+  msg.RadarTaskData      radarTaskData = 35 [(optx.maskable) = true]; // 雷达任务数据
+  msg.HuntTroopTask      huntTroopTask = 36 [(optx.maskable) = true]; // 狩猎小队数据
+}
+
+message AtkAssemblyUnit {
+  uint32 atkUid   = 1;
+  int64  endTs    = 2;
+  uint64 atkObjID = 3;
+}
+
+message ClientAssemblyInfo {
+  bool                     hasAsm      = 1; // 是否有集结
+  repeated AtkAssemblyUnit atkAsmUnits = 2; // 集结单位信息
+}
+
+message ClientBattleInfo {
+  uint32          garrisonCount    = 1; // 驻防部队数量
+  repeated uint64 attackerList     = 2; // 攻击者列表
+  repeated uint64 garrisonObjIDs   = 3; // 驻防战斗的部队objID
+  uint32          killedGuardCount = 4; // 被击杀的守卫部队数量 [通过battleInfo.MonsterDefender计算]
+}
+
+message SimpleBattleInfo {
+  uint32          garrisonCount  = 1; // 驻防部队数量 [deprecated]
+  repeated uint64 garrisonObjIDs = 2; // 驻防战斗的部队objID
+}
+
+// 简化的地图对象信息, L3,L4 层使用
+message SimpleClientMapObj {
+  uint64                 objID         = 1; // 地图唯一ID
+  enumx.ObjType          objType       = 2; // 物体类型
+  IntPos                 pos           = 3 [(gogoproto.nullable) = false]; // 物体位置
+  Float64Pos             floatPos      = 4 [(gogoproto.nullable) = false, (optx.maskable) = true]; // 浮点坐标，部队使用
+  uint32                 ownerID       = 5; // 所有者ID
+  int64                  createTime    = 6;
+  enumx.MapObjDetailType objDetailType = 7; // obj 详细类型
+  
+  SimpleClientBuilding   building      = 21 [(gogoproto.nullable) = false];
+  SimpleClientMonster    monster       = 22 [(gogoproto.nullable) = false];
+  SimpleClientArmy       army          = 23 [(gogoproto.nullable) = false];
+  SimpleClientWildItem   wildItem      = 24 [(gogoproto.nullable) = false]; // 地图上的野物品
+  SimpleBattleInfo       battleInfo    = 25; // 战斗信息
+  SimpleMoveInfo         moveInfo      = 30; // 移动信息
+  SimpleRadarTaskData    radarTaskData = 31 [(optx.maskable) = true]; // 雷达任务数据
+}
+
+/////////////////////  服务器内部使用  ///////////////////////
+
+// 视野缓存对象
+message ViewCacheObj {
+  ClientMapObj clientObj    = 1;
+  int64        lastUpdateTS = 2; // 最后更新时间
+}
+
+// 视野观察者
+message MapViewObserver {
+  uint32             uid        = 1;  // 观察者uid
+  int32              viewGridID = 2;  // 观察者所在的视野格子, 切换layer或者pos时需要更新, 实际观察的是以此为中心的9宫格
+  IntPos             pos        = 3 [(gogoproto.nullable) = false];         // 观察者的位置
+  uint32             gameID     = 4;      // gameID
+  uint32             gateID     = 5;      // 网关ID
+  enumx.MapViewLayer layerID    = 6;     // 观察者所在的视野层级
+  bool               isViewUser = 8;  // 是否是其他地图过来的观察者
+}
+
+message ArmyBattle {
+  uint64             battleSeq             = 1; // 战斗序列号
+  int64              startTs               = 2; // 战斗开始时间戳（毫秒）
+  int64              endTs                 = 3; // 战斗结束时间戳
+  uint64             oppObjID              = 4; // 对手ID
+  bool               enterBattle           = 5; // 是否进入战斗
+  uint32             batchIndex            = 6; // 当前轮次
+  uint32             garrisonIndexCurBatch = 7; // 当前轮次驻防方索引
+  enumx.BattleResult battleResult          = 8; // 战斗结果
+}
+
+message GarrisonArmy {
+  uint64                   objID         = 1; // 驻防的对象ID
+  uint32                   uid           = 2; // 驻防的对象所属玩家ID
+  repeated msg.CardReserve cardReserves  = 3; // 兵卡预备役信息
+  int64                    startTs       = 4; // 驻防开始时间（按照时间排序）
+  enumx.GarrisonArmyStatus status        = 5; // 驻防状态
+  int64                    endTs         = 6; // 预计到达时间
+  int64                    startBattleTs = 7; // 开始战斗时间
+}
+
+message SelfGarrisonArmy {
+  uint64 objID = 1; // 驻防的部队ID
+}
+
+message SelfGarrison {
+  repeated SelfGarrisonArmy selfArmies = 1; // 自己驻防的部队列表
+}
+
+// 当前交战信息
+message BattleNow {
+  int64  startTs                     = 1; // 战斗开始时间（秒）
+  uint64 atkObjID                    = 2; // 攻击方objID
+  uint64 defObjID                    = 3; // 防守方objID
+  uint32 curAtkSelfGarrisonArmyIndex = 5; // 当前交战的自己的驻防部队索引
+}
+
+message AssemblyBattleInfo {
+  int32 curArmyIndex = 1; // 当前交战的集结部队索引（从0开始）
+}
+
+message BattleAttackerArmy {
+  uint64       objID        = 1; // 攻击者部队objID
+  // repeated msg.CardReserve cardReserves = 2; // 兵卡预备役信息
+  SMarchLineup lineup       = 2; // 编队阵容
+  bool         failed       = 3; // 部队是否战败
+  uint32       victoryCount = 4; // 部队胜利次数
+}
+
+message BattleAttacker {
+  uint64                      objID        = 1; // 攻击者objID
+  repeated BattleAttackerArmy armyList     = 2; // 攻击者部队列表
+  int32                       curArmyIndex = 3; // 当前交战的部队索引
+  repeated msg.Buff           buffs        = 4[(gogoproto.nullable) = false]; // 给整队提供的buff
+  AssemblyKey                 asmKey       = 5; // 注意：这个可能为nil，如果是集结才有数据
+  uint64                      armyMask     = 6; // 攻击者部队掩码，用于标识部队状态
+  bool                        enterBattle  = 7; // 是否进入战斗
+}
+
+message MonsterDefenderArmy {
+  uint32               index        = 1;
+  repeated CardReserve leftReserves = 3; // 野怪剩余预备役信息
+  bool                 failed       = 4; // 是否战败
+}
+
+message MonsterDefender {
+  uint32                       validMonsterIndex = 1;
+  repeated MonsterDefenderArmy monsterReserves   = 2; // 野怪预备役信息
+}
+
+message BattleInfo {
+  repeated GarrisonArmy   garrisonArmies  = 1; // 驻防的部队列表（最新的在最后）
+  SelfGarrison            selfGarrison    = 2; // 自己驻防的部队信息
+  uint64                  battleMask      = 3; // 战斗掩码，用于标识战斗状态
+  repeated BattleAttacker attackers       = 4; // 所有攻击者详细信息（包括在路上的）
+  repeated uint64         waitAttackers   = 5; // 待触发战斗攻击者列表（objID）
+  MonsterDefender         monsterDefender = 6; // 防守怪信息（野怪守军、或者gvg守军）
+  BattleNow               battleNow       = 10; // 当前交战信息
+}
+
+// AssemblyArmy 集结部队
+message AssemblyArmy {
+  uint64       armyObjID    = 1;
+  int64        endTs        = 2; // 预计到达时间
+  bool         isReached    = 4; // 是否已经到达
+  int64        startTs      = 5; // 出发时间
+  uint32       uid          = 6; // 部队所属玩家ID
+  SMarchLineup lineup       = 7; // 编队阵容
+  // repeated msg.CardReserve cardReserves = 7; // 兵卡预备役信息
+  uint32       costStrength = 8; // 消耗的体力
+  uint32       victoryCount = 9;
+}
+
+message AssemblyArmyCard {
+  uint32               cardId    = 1; // 兵卡ID
+  uint32               cardLevel = 2; // 兵卡等级
+  uint32               cardStar  = 3; // 兵卡星级
+  repeated BtSkillData skills    = 4; // 技能
+}
+
+// AssemblyArmyDetail 集结部队详情
+message AssemblyArmyDetail {
+  uint64                    armyObjID = 1;
+  uint32                    uid       = 2; // 部队所属玩家ID
+  bool                      isReached = 4; // 是否已经到达
+  int64                     startTs   = 5;
+  int64                     endTs     = 6; // 预计到达时间
+  uint64                    power     = 7; // 部队战力
+  string                    name      = 8; // 玩家名称
+  msg.Avatar                avatar    = 9; // 头像信息
+  repeated AssemblyArmyCard cards     = 10;
+  repeated UintKV           soldiers  = 11; // 部队 id-num
+}
+
+message ArmyShowCard {
+  uint32               cardId       = 1; // 兵卡ID
+  uint32               cardLevel    = 2; // 兵卡等级
+  uint32               cardStar     = 3; // 兵卡星级
+  repeated BtSkillData skills       = 4; // 技能
+  uint32               maxTroopSize = 5; // 带兵上限
+}
+
+message ArmyShowDetail {
+  // base msg
+  uint64                armyObjID    = 1;
+  uint32                uid          = 2; // 部队所属玩家ID
+  uint64                power        = 3; // 部队战力
+  string                name         = 4; // 玩家名称
+  msg.Avatar            avatar       = 5; // 头像信息
+  repeated ArmyShowCard cards        = 6;
+
+  // other msg
+  bool                  isReached    = 11; // 是否已经到达
+  int64                 startTs      = 12;
+  int64                 endTs        = 13; // 预计到达时间
+  repeated CardReserve  cardReserves = 14; // 当前兵力
+}
+
+// 集结目标玩家基地信息
+message AssemblyTargetMainBase {
+  string     name   = 1; // 玩家名称
+  msg.Avatar avatar = 2; // 头像信息
+  uint32     level  = 3; // 基地等级
+  uint32     uid    = 4; // 玩家uid
+}
+
+message AssemblyTarget {
+  enumx.RallyTargetType  assemblyType   = 1; // 集结类型
+  msg.IntPos             pos            = 2 [(gogoproto.nullable) = false]; // 目标位置
+  oneof target {
+    uint32                 monsterCfgID   = 5; // 目标是野怪
+    uint32                 buildingCfgID  = 6; // 目标是建筑
+    AssemblyTargetMainBase targetMainBase = 7; // 目标是玩家基地
+  }
+}
+
+message AssemblyGuildInfo {
+  string name      = 1; // 公会名称
+  string shortName = 2; // 公会简称
+}
+
+// 集结详情
+message AssemblyDetail {
+  AssemblyBase                base      = 1;
+  repeated AssemblyArmyDetail armyList  = 2; // 所有集结部队
+  AssemblyGuildInfo           guildInfo = 3; // 公会信息
+}
+
+
+message AssemblyArmySimple {
+  uint32     uid    = 1;
+  msg.Avatar avatar = 2; // 头像信息
+  int64      endTs  = 3; // 预计到达时间
+  uint32     svrID  = 4; // 玩家服ID
+  uint64     power  = 5; // 玩家战力
+}
+
+// AssemblySimple 集结简要信息（集结列表展示信息）
+message AssemblySimple {
+  AssemblyBase                base         = 1; // 集结基础数据
+  repeated AssemblyArmySimple armyList     = 2; // 部队简要信息
+  string                      ownerName    = 3; // 发起者名称
+  AssemblyGuildInfo           guildInfo    = 4; // 公会信息
+  uint32                      soliderCount = 5; // 当前士兵数量
+}
+
+// AssemblyBase 集结基础数据（simple、detail以及内部的部分公共数据）
+message AssemblyBase {
+  msg.AssemblyKey      key             = 1[(gogoproto.nullable) = false]; // 集结key
+  uint32               gid             = 2; // 公会ID
+  uint64               objID           = 3; // 队伍objID
+  int64                startTs         = 4;
+  int64                endTs           = 5; // 集结中表示集结结束时间，行军中表示行军结束时间
+  msg.IntPos           startPos        = 6[(gogoproto.nullable) = false];
+  msg.IntPos           targetPos       = 7[(gogoproto.nullable) = false];
+  enumx.RallyGoType    goType          = 8; // 集结前进类型
+  uint32               mapID           = 9; // 地图ID
+  uint32               mapConfigID     = 10; // 地图配置ID
+  enumx.AssemblyStatus AssemblyStatus  = 11; // 集结状态
+  AssemblyTarget       target          = 12; // 目标详情
+  repeated msg.Buff    buffs           = 13[(gogoproto.nullable) = false]; // 给整队提供的buff
+  uint64               startObjID      = 14;
+  uint64               endObjID        = 15;
+  uint32               maxArmyCount    = 16; // 最大集结部队数量
+  uint32               maxSoldierCount = 17; // 最大
+  repeated uint32      invitedUIDs     = 18; // 邀请过的玩家列表
+}
+
+message AssemblyPlaceHold {
+  uint64 armyObjID     = 1;
+  bool   isReached     = 2; // 是否已经到达
+  uint32 soldier_count = 3; // 部队数量
+}
+
+// Assembly 集结内部数据
+message Assembly {
+  AssemblyBase               base          = 1; // 集结基础数据
+  repeated AssemblyArmy      armyList      = 2; // 所有集结部队
+  bool                       isSweep       = 4; // 是否是扫荡集结
+  repeated AssemblyPlaceHold placeHoldInfo = 5; //占位
+}
+
+// 玩家主基地集结数据
+message AssemblyInfo {
+  repeated Assembly        allAssemblies = 1; // 我发起的所有的集结列表
+  repeated AtkAssemblyUnit atkAsmUnits   = 2; // 攻击者集结信息
+}
+
+message AssemblyShow {
+  msg.AssemblyKey                 key       = 1[(gogoproto.nullable) = false]; // 集结key
+  string                          ownerName = 3; // 发起者名称
+  int64                           endTs     = 4; // 集结中表示集结结束时间，行军中表示行军结束时间
+  enumx.AssemblyStatus            status    = 5; // 集结状态
+  AssemblyTarget                  target    = 6; // 目标
+  repeated msg.AssemblyArmyDetail armyList  = 7; // 所有集结部队
+}
+
+////////////////////////////////////////// 预警 //////////////////////////////////////////
+message PreWarning {
+  repeated PreWarningAssembly assemblies = 1; // 集结军队简要信息
+  repeated PreWarningInfo     warnings   = 2; // 进攻和驻防信息
+}
+
+message PreWarningAssembly {
+  msg.AssemblySimple assembly          = 1;
+  uint64             garrisonArmyObjID = 2; // 如果当前是驻防部队被攻击，那么这个值就是我派过去的驻防部队objId
+}
+
+message PreWarningInfo {
+  uint64                       armyObjID         = 1; // 预警行军队伍的objID，唯一标识，和AssemblyBase.ObjID相同
+  enumx.ArmyCmdType            typ               = 2; // 预警类型
+  int64                        uid               = 3; // 发起的玩家uid
+  int64                        startMS           = 4; // 发起时间,毫秒
+  int64                        endMS             = 5; // 行军结束时间,毫秒
+  int64                        targetUid         = 6; // 目标玩家uid
+  repeated PreWarningCommander commanders        = 7; // 行军中的指挥官信息
+  int64                        expireTs          = 8; // 自动过期时间
+  msg.IntPos                   startPos          = 9 [(gogoproto.nullable) = false]; // 出发位置
+  msg.IntPos                   endPos            = 10 [(gogoproto.nullable) = false]; // 目标位置
+  uint32                       mapID             = 11; // 地图ID
+  uint32                       mapConfigID       = 12; // 地图配置ID
+  uint64                       startObjID        = 13;
+  uint64                       endObjID          = 14;
+  uint32                       villageCfgID      = 15; // gvg村庄配置id
+  uint64                       garrisonArmyObjID = 16; // 如果当前是驻防部队被攻击，那么这个值就是我派过去的驻军objId
+}
+
+message PreWarningCommander {
+  int64                   uid            = 1; // 玩家uid
+  string                  name           = 2; // 玩家名称
+  Avatar                  avatar         = 3; // 玩家头像
+  uint64                  power          = 4; // 玩家战力
+  uint32                  svrID          = 5; // 玩家服ID
+  string                  guildShortName = 6; // 玩家公会简称
+  repeated PreWarningCard cards          = 7; // 兵卡信息
+}
+
+message PreWarningCard {
+  uint32               cardId    = 1; // 兵卡ID
+  uint32               cardLevel = 2; // 兵卡等级
+  uint32               cardStar  = 3; // 兵卡星级
+  repeated BtSkillData skills    = 4;
+}
+
+////////////////////////////////////////// 预警 //////////////////////////////////////////
+
+message RadarTreasure {
+  uint64                           taskID             = 1; // 任务ID
+  repeated msg.RadarTreasureMember memberList         = 2; // 参加的成员列表
+  uint32                           originAmount       = 3; // 原始数量
+  uint32                           leftAmount         = 4; // 剩余数量
+  //repeated uint32                  canRewardList = 5; // 可领取的奖励列表
+  bool                             isFinished         = 6; // 是否完成
+  int64                            lastCalcTime       = 7; // 上次计算时间
+  int64                            finishTime         = 8; // 完成时间
+  int64                            destroyTime        = 9; // 销毁时间
+  repeated uint32                  doubleRewardIndexs = 13; // 双倍奖励领取者索引列表
+  int64                            leftTime           = 11; // 剩余时间
+  repeated uint32                  rewardedUidList    = 12; // 已领取奖励的uid列表
+}
+
+// 联盟gvg战争预览信息
+message GvgWarPreview {
+  uint64                   villageObjID        = 1;
+  uint32                   buildingID          = 2;
+  msg.IntPos               villagePos          = 3[(gogoproto.nullable) = false];
+  uint32                   villageGid          = 4; // 占领村庄的公会ID
+  repeated uint32          historyDefenderUids = 5; // 历史累计参与这场战斗的防守人数
+  uint32                   killedGuardCount    = 6; // 被击杀的城墙守军数量
+  msg.RecoverData          wallHpData          = 7; // 城墙耐久度
+  int64                    startTs             = 8; // 开始时间
+  repeated GvgGuildPreview attackers           = 9; // 参与这场战斗的进攻公会列表
+  string                   gldShortName        = 10; // 村庄所属联盟的简称
+  uint32                   garrisonArmyCnt     = 11; // 当前驻防部队数量
+}
+
+message GvgGuildPreview {
+  uint32          gid        = 1;
+  string          fullName   = 2;
+  string          shortName  = 3;
+  string          masterName = 4;
+  uint64          point      = 5;
+  repeated uint32 picture    = 7; // 联盟旗帜
+  repeated uint32 joinUids   = 8;
+}
+
+message GvgWarMapIDAndObjID {
+  uint32 mapID    = 1;
+  uint64 objID    = 2;
+  int64  expireTs = 3;
+}

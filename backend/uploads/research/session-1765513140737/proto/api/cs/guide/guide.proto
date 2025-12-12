@@ -1,0 +1,36 @@
+syntax = "proto3";
+package guide;
+import "msg/msg.proto";
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb/pb_guide";
+option (gogoproto.goproto_getters_all) = false;
+
+//------------------------------------------------------------------------------------------
+message Up_Union {
+  oneof body {
+    option (validator.oneof)            = {required: true};
+    Up_SetGuideStage setGuideStage       = 1; // 设置引导阶段
+    msg.Empty        denyEvaluation      = 2; // 玩家拒绝评价
+    msg.Empty        addEvalNotFinishCnt = 3; // 增加评价未完成次数
+  }
+}
+
+message Dn_Union {
+  oneof body {
+    Dn_SetGuideStage setGuideStage       = 1;
+    msg.Empty        denyEvaluation      = 2; // 是否拒绝评价
+    msg.Empty        addEvalNotFinishCnt = 3; // 增加评价未完成次数
+  }
+}
+
+message Up_SetGuideStage {
+  uint32 group   = 1; // 引导组
+  uint32 stageId = 2; // 引导阶段
+}
+
+message Dn_SetGuideStage {
+  uint32 group   = 1; // 引导组
+  uint32 stageId = 2; // 引导阶段
+}

@@ -1,0 +1,37 @@
+syntax = "proto3";
+package privilege;
+import "msg/msg.proto";
+import "enumx/csv_enumx.proto";
+import "third/github.com/go-proto-validators/validator.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb/pb_privilege";
+option (gogoproto.goproto_getters_all) = false;
+
+//----------------------------------- UP MSG -------------------------------------------------------
+message Up_Union {
+  oneof body {
+    option (validator.oneof)                           = {required: true};
+    Up_GetCardDailyReward getCardDailyReward = 1;
+  }
+}
+
+
+//----------------------------------- DOWN MSG -------------------------------------------------------
+message Dn_Union {
+  oneof body {
+    Dn_GetCardDailyReward getCardDailyReward = 1;
+  }
+}
+
+//-------------------------------------------------------------------------------------------------------
+// 领每日奖励
+message Up_GetCardDailyReward {
+  repeated enumx.PrivilegeCard CardId = 1; // 卡ID
+}
+
+
+message Dn_GetCardDailyReward {
+  int64      nextGetTime = 1; // 更新领取时间
+  msg.Reward rewards     = 2;
+}

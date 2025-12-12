@@ -1,0 +1,45 @@
+syntax = "proto3";
+package ss;
+
+//import "msg/msg.proto";
+import "msg/battle_msg.proto";
+//import "model/user.proto";
+import "enumx/event.proto";
+import "enumx/enumx.proto";
+//import "model/model.proto";
+import "third/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option go_package = "verse/backend/pb/ss";
+option (gogoproto.goproto_getters_all) = false;
+
+//------------------------------------------------------------------------------------------
+message Dn_GetUBasicInfo {
+  enumx.Lang lang         = 1;
+  bool       isOnline     = 2;
+  int64      lastLogoutTs = 3;
+  string     name         = 4;
+  int64      gid          = 5;
+}
+
+message Dn_BtCheck {
+  bytes     error = 1;
+  msg.BtMsg btMsg = 2;
+}
+
+//message RollBackData {
+//  int64              uid          = 1;
+//  model.User         user         = 2;
+//  model.UMails        UMails        = 3;
+//  model.UIntlMails    UIntlMails    = 4;
+//  repeated msg.Mail  mails        = 5;
+// }
+
+message Counter {
+  enumx.Counter typ = 1;
+  int64         num = 2;
+}
+
+message SvrOnline {
+  uint32 svrID   = 1;
+  uint32 userCnt = 2;
+}
