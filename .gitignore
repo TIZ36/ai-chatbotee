@@ -42,6 +42,7 @@ logs/
 *.temp
 backend/temp/
 backend/downloads/
+backend/uploads/
 temp/
 downloads/
 
