@@ -1064,6 +1064,26 @@ def create_tables():
         cursor.execute(create_skill_pack_assignments_table)
         print("✓ Table 'skill_pack_assignments' created/verified successfully")
         
+        # 自定义维度选项表
+        create_role_dimension_options_table = """
+        CREATE TABLE IF NOT EXISTS `role_dimension_options` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `option_id` VARCHAR(100) NOT NULL UNIQUE COMMENT '选项ID',
+            `dimension_type` VARCHAR(50) NOT NULL COMMENT '维度类型: profession, gender, ageRange, personality, background, conversationStyle, skill, gameClass, race, alignment, levelRange, skillTree, gameConversationStyle, avatarStyle',
+            `role_type` VARCHAR(20) NOT NULL COMMENT '角色类型: career, game',
+            `option_value` VARCHAR(255) NOT NULL COMMENT '选项值',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+            INDEX `idx_dimension_type` (`dimension_type`),
+            INDEX `idx_role_type` (`role_type`),
+            INDEX `idx_option_value` (`option_value`),
+            UNIQUE KEY `uk_dimension_role_value` (`dimension_type`, `role_type`, `option_value`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='角色生成器自定义维度选项表';
+        """
+        
+        cursor.execute(create_role_dimension_options_table)
+        print("✓ Table 'role_dimension_options' created/verified successfully")
+        
         cursor.close()
         conn.close()  # 归还连接到连接池
         

@@ -32,7 +32,6 @@ import {
 } from '../services/sessionApi';
 import { activateRoleVersion, applyRoleToSession, createSessionFromRole, listRoleVersions, updateRoleProfile, type RoleVersion } from '../services/roleApi';
 import { emitSessionsChanged, SESSIONS_CHANGED_EVENT } from '../utils/sessionEvents';
-import { RoleGeneratorDrawer } from './RoleGeneratorDrawer';
 
 interface SessionSidebarProps {
   selectedSessionId: string | null;
@@ -64,8 +63,6 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const [roleVersions, setRoleVersions] = useState<RoleVersion[]>([]);
   const [isLoadingRoleVersions, setIsLoadingRoleVersions] = useState(false);
   const [activatingVersionId, setActivatingVersionId] = useState<string | null>(null);
-  const [roleGeneratorRoleId, setRoleGeneratorRoleId] = useState<string | null>(null);
-  const [isRoleGeneratorOpen, setIsRoleGeneratorOpen] = useState(false);
   const [roleScope, setRoleScope] = useState<Session | null>(null);
   const [showAllChats, setShowAllChats] = useState(false);
   const createMenuRef = React.useRef<HTMLDivElement>(null);
@@ -262,25 +259,6 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
     }
   };
 
-  // 创建新角色并打开“角色生成器”抽屉
-  const handleCreateRoleWithGenerator = async () => {
-    try {
-      setShowCreateMenu(false);
-      const newRole = await createSession(undefined, undefined, 'agent');
-      await loadAllSessions();
-      setActiveTab('roles');
-      onSelectSession(newRole.session_id);
-      setRoleGeneratorRoleId(newRole.session_id);
-      setIsRoleGeneratorOpen(true);
-    } catch (error) {
-      console.error('Failed to create role:', error);
-      toast({
-        title: '创建角色失败',
-        description: error instanceof Error ? error.message : String(error),
-        variant: 'destructive',
-      });
-    }
-  };
 
   // 创建临时会话
   const handleCreateTemporary = () => {
@@ -740,15 +718,8 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
                     ) : (
                       <>
                         <button
-                          onClick={handleCreateRoleWithGenerator}
-                          className="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-[#e0e0e0] hover:bg-gray-100 dark:hover:bg-[#404040] flex items-center gap-2 transition-colors"
-                        >
-                          <Sparkles className="w-4 h-4" />
-                          <span>新建角色</span>
-                        </button>
-                        <button
                           onClick={handleCreateAgent}
-                          className="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-[#e0e0e0] hover:bg-gray-100 dark:hover:bg-[#404040] flex items-center gap-2 transition-colors border-t border-gray-100 dark:border-[#404040]"
+                          className="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-[#e0e0e0] hover:bg-gray-100 dark:hover:bg-[#404040] flex items-center gap-2 transition-colors"
                         >
                           <Plus className="w-4 h-4" />
                           <span>空白角色</span>
@@ -982,16 +953,6 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <RoleGeneratorDrawer
-        open={isRoleGeneratorOpen}
-        roleId={roleGeneratorRoleId}
-        onOpenChange={(next) => {
-          setIsRoleGeneratorOpen(next);
-          if (!next) setRoleGeneratorRoleId(null);
-        }}
-        onOpenRoleConfig={(id) => onConfigSession?.(id)}
-      />
 
       <Dialog
         open={upgradeTarget !== null}

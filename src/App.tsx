@@ -13,6 +13,7 @@ import AgentsPage from './components/AgentsPage';
 import SessionSidebar from './components/SessionSidebar';
 import RoundTableChat from './components/RoundTableChat';
 import ResearchPanel from './components/ResearchPanel';
+import RoleGeneratorPage from './components/RoleGeneratorPage';
 import {
   PanelGroup,
   Panel,
@@ -302,6 +303,13 @@ const App: React.FC = () => {
             title="工作流编辑器"
             isActive={location.pathname === '/workflow-editor'}
           />
+
+          <NavItem
+            to="/role-generator"
+            icon={<Sparkles className="w-[18px] h-[18px]" strokeWidth={1.5} />}
+            title="角色生成器"
+            isActive={location.pathname === '/role-generator'}
+          />
         </div>
         
         <div className="flex-1 app-drag" />
@@ -501,6 +509,9 @@ const App: React.FC = () => {
 
                     {/* 工作流编辑器 */}
                     <Route path="/workflow-editor" element={<WorkflowEditor />} />
+
+                    {/* 角色生成器 */}
+                    <Route path="/role-generator" element={<RoleGeneratorPage />} />
 
                     {/* LLM配置页面 */}
                     <Route path="/llm-config" element={<LLMConfigPanel />} />

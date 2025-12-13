@@ -7044,6 +7044,111 @@ def list_agents():
         return jsonify({'agents': [], 'total': 0, 'error': str(e)}), 500
 
 
+@app.route('/api/role-generator/dimension-options', methods=['GET', 'OPTIONS'])
+def get_role_dimension_options():
+    """获取自定义维度选项"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'options': []}), 503
+        
+        dimension_type = request.args.get('dimension_type')
+        role_type = request.args.get('role_type')
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            query = "SELECT option_value FROM role_dimension_options WHERE 1=1"
+            params = []
+            
+            if dimension_type:
+                query += " AND dimension_type = %s"
+                params.append(dimension_type)
+            
+            if role_type:
+                query += " AND role_type = %s"
+                params.append(role_type)
+            
+            query += " ORDER BY created_at DESC"
+            
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            
+            options = [row['option_value'] for row in rows]
+            
+            return jsonify({'options': options})
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[RoleDimensionOptions] Error getting options: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'options': [], 'error': str(e)}), 500
+
+@app.route('/api/role-generator/dimension-options', methods=['POST', 'OPTIONS'])
+def save_role_dimension_option():
+    """保存自定义维度选项"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        data = request.json
+        dimension_type = data.get('dimension_type')
+        role_type = data.get('role_type')
+        option_value = data.get('option_value')
+        
+        if not dimension_type or not role_type or not option_value:
+            return jsonify({'error': 'dimension_type, role_type, and option_value are required'}), 400
+        
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            
+            option_id = str(uuid.uuid4())
+            
+            cursor.execute("""
+                INSERT INTO role_dimension_options 
+                (option_id, dimension_type, role_type, option_value)
+                VALUES (%s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    updated_at = CURRENT_TIMESTAMP
+            """, (option_id, dimension_type, role_type, option_value))
+            
+            conn.commit()
+            
+            return jsonify({
+                'success': True,
+                'option_id': option_id,
+                'option_value': option_value
+            }), 201
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[RoleDimensionOptions] Error saving option: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/agents/<role_id>/profile', methods=['PUT', 'OPTIONS'])
 def update_agent_profile(role_id):
     """批量更新角色档案（避免多次更新导致版本噪音）"""

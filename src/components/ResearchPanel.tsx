@@ -2,12 +2,16 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { BookOpen, ChevronLeft, ChevronRight, Download, FileText, FolderOpen, Hand, Info, Link as LinkIcon, PanelLeftClose, PanelLeftOpen, Play, Plus, Search, Upload, Settings, X } from 'lucide-react';
+import { BookOpen, ChevronLeft, ChevronRight, Download, FileText, FolderOpen, Hand, Info, Link as LinkIcon, PanelLeftClose, PanelLeftOpen, Play, Plus, Search, Upload, Settings, X, Image as ImageIcon } from 'lucide-react';
 import { createSession, getAgents, getSession, getSessionMessages, saveMessage, updateSessionAvatar, updateSessionLLMConfig, updateSessionSystemPrompt, type Session } from '../services/sessionApi';
 import { getLLMConfig, getLLMConfigApiKey, getLLMConfigs, type LLMConfigFromDB } from '../services/llmApi';
 import { LLMClient } from '../services/llmClient';
 import { parseMentions } from '../services/roundTableApi';
 import { addUrlSource, getSourceFileUrl, listSources, resolveSources, retrieve, uploadSources, type ResearchSource } from '../services/researchApi';
+import { getMCPServers, MCPServerConfig } from '../services/mcpApi';
+import { mcpManager, MCPTool } from '../services/mcpClient';
+import { getWorkflows, Workflow as WorkflowType } from '../services/workflowApi';
+import InputToolTags from './ui/InputToolTags';
 
 export interface ResearchPanelProps {
   chatSessionId: string | null;
@@ -209,6 +213,21 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
   const [acStart, setAcStart] = useState<number>(0);
   const [acIndex, setAcIndex] = useState(0);
   
+  // MCP 和工作流（与会话/会议界面统一）
+  const [mcpServers, setMcpServers] = useState<MCPServerConfig[]>([]);
+  const [selectedMcpServerIds, setSelectedMcpServerIds] = useState<Set<string>>(new Set());
+  const [connectedMcpServerIds, setConnectedMcpServerIds] = useState<Set<string>>(new Set());
+  const [connectingMcpServerIds, setConnectingMcpServerIds] = useState<Set<string>>(new Set());
+  const [workflows, setWorkflows] = useState<WorkflowType[]>([]);
+  const [selectedWorkflowIds, setSelectedWorkflowIds] = useState<Set<string>>(new Set());
+  
+  // 附件（多模态）
+  const [attachedMedia, setAttachedMedia] = useState<Array<{
+    type: 'image' | 'video';
+    mimeType: string;
+    data: string;
+    preview?: string;
+  }>>([]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -229,6 +248,38 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
       } catch (e) {
         console.warn('[Research] Failed to load llm configs:', e);
         setLlmConfigs([]);
+      }
+    })();
+  }, []);
+  
+  // 加载 MCP 服务器和工作流
+  useEffect(() => {
+    (async () => {
+      try {
+        const servers = await getMCPServers();
+        setMcpServers(servers);
+        // 标记已连接的服务器
+        const connectedIds = new Set<string>();
+        for (const s of servers) {
+          const serverId = s.server_id || s.id;
+          if (s.enabled && mcpManager.isConnected(serverId)) {
+            connectedIds.add(serverId);
+          }
+        }
+        setConnectedMcpServerIds(connectedIds);
+      } catch (e) {
+        console.warn('[Research] Failed to load MCP servers:', e);
+      }
+    })();
+  }, []);
+  
+  useEffect(() => {
+    (async () => {
+      try {
+        const wfs = await getWorkflows();
+        setWorkflows(wfs);
+      } catch (e) {
+        console.warn('[Research] Failed to load workflows:', e);
       }
     })();
   }, []);
@@ -720,6 +771,54 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
       setInput(prev => (prev ? `${prev} $${token}` : `$${token}`));
     }
   }, [sources]);
+  
+  // MCP 连接处理
+  const handleConnectMCP = useCallback(async (serverId: string) => {
+    if (connectingMcpServerIds.has(serverId)) return;
+    setConnectingMcpServerIds(prev => new Set([...prev, serverId]));
+    try {
+      const server = mcpServers.find(s => (s.server_id || s.id) === serverId);
+      if (!server) throw new Error('Server not found');
+      await mcpManager.connect({
+        id: serverId,
+        name: server.name,
+        transport_type: server.transport_type,
+        api_url: server.api_url,
+        command: server.command,
+        args: server.args,
+        env: server.env,
+      });
+      setConnectedMcpServerIds(prev => new Set([...prev, serverId]));
+      setSelectedMcpServerIds(prev => new Set([...prev, serverId]));
+    } catch (e) {
+      console.error('[Research] MCP connect failed:', e);
+    } finally {
+      setConnectingMcpServerIds(prev => {
+        const next = new Set(prev);
+        next.delete(serverId);
+        return next;
+      });
+    }
+  }, [connectingMcpServerIds, mcpServers]);
+  
+  // 处理文件附件
+  const handleAttachFile = useCallback((files: FileList) => {
+    Array.from(files).forEach(file => {
+      if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const result = e.target?.result as string;
+        const base64Data = result.includes(',') ? result.split(',')[1] : result;
+        setAttachedMedia(prev => [...prev, {
+          type: file.type.startsWith('image/') ? 'image' : 'video',
+          mimeType: file.type,
+          data: base64Data,
+          preview: result,
+        }]);
+      };
+      reader.readAsDataURL(file);
+    });
+  }, []);
 
   const handleDropFilesToPanel = useCallback(async (files: File[]) => {
     if (!researchSessionId) return;
@@ -1629,7 +1728,28 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
           {/* 输入区（集成课题组/成员/发送） */}
           <div className="flex-shrink-0 px-3 pb-3">
             <div className="relative rounded-xl bg-white dark:bg-[#262626] shadow-md overflow-hidden">
-              {/* 课题组成员栏（集成在输入框内顶部） */}
+              {/* 附件预览 */}
+              {attachedMedia.length > 0 && (
+                <div className="px-3 py-2 border-b border-gray-100 dark:border-[#363636] flex flex-wrap gap-2">
+                  {attachedMedia.map((media, index) => (
+                    <div key={index} className="relative group">
+                      <img
+                        src={media.preview}
+                        alt={`附件 ${index + 1}`}
+                        className="h-12 w-auto rounded-lg border border-gray-200 dark:border-[#404040] object-cover"
+                      />
+                      <button
+                        onClick={() => setAttachedMedia(prev => prev.filter((_, i) => i !== index))}
+                        className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              {/* 课题组成员栏 + 工具 Tags（集成在输入框内顶部） */}
               <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-100 dark:border-[#363636]">
                 <div className="flex items-center gap-1.5 min-w-0">
                   {/* 研究员 */}
@@ -1666,6 +1786,47 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
                       </button>
                     ))}
                   </div>
+                  
+                  {/* 分隔符 */}
+                  <div className="w-px h-4 bg-gray-200 dark:bg-[#404040] mx-1" />
+                  
+                  {/* MCP、工作流、Sources、附件 - 统一 Tag 样式 */}
+                  <InputToolTags
+                    mcpServers={mcpServers.map(s => ({
+                      id: s.server_id || s.id,
+                      name: s.name,
+                      display_name: s.display_name,
+                    }))}
+                    selectedMcpServerIds={selectedMcpServerIds}
+                    connectedMcpServerIds={connectedMcpServerIds}
+                    connectingMcpServerIds={connectingMcpServerIds}
+                    onSelectMCP={(id) => setSelectedMcpServerIds(prev => new Set([...prev, id]))}
+                    onDeselectMCP={(id) => setSelectedMcpServerIds(prev => { const next = new Set(prev); next.delete(id); return next; })}
+                    onConnectMCP={handleConnectMCP}
+                    workflows={workflows.map(w => ({
+                      workflow_id: w.workflow_id,
+                      name: w.name,
+                      description: w.description,
+                    }))}
+                    selectedWorkflowIds={selectedWorkflowIds}
+                    onSelectWorkflow={(id) => setSelectedWorkflowIds(prev => new Set([...prev, id]))}
+                    onDeselectWorkflow={(id) => setSelectedWorkflowIds(prev => { const next = new Set(prev); next.delete(id); return next; })}
+                    sources={sources.map(s => ({
+                      source_id: s.source_id,
+                      title: s.title,
+                      source_type: s.source_type,
+                      url: s.url,
+                      mime_type: s.mime_type,
+                    }))}
+                    pinnedSourceIds={pinnedSourceIds}
+                    onPinSource={pinSource}
+                    onUnpinSource={(id) => setPinnedSourceIds(prev => prev.filter(x => x !== id))}
+                    onInsertSourceToken={(token) => setInput(prev => (prev ? `${prev} $${token}` : `$${token}`))}
+                    showSources={true}
+                    showSkillPack={false}
+                    onAttachFile={handleAttachFile}
+                    attachedMediaCount={attachedMedia.length}
+                  />
                 </div>
                 <div className="relative">
                   <details className="group">

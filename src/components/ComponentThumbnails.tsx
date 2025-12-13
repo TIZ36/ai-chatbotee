@@ -91,7 +91,7 @@ const ComponentThumbnails: React.FC<ComponentThumbnailsProps> = ({
               setShowWorkflowList(false);
             }}
             className={`
-              flex items-center justify-center px-1.5 py-0.5 rounded text-[11px] transition-all relative
+              flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] transition-all
               ${selectedMcpServerIds.size > 0
                 ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 font-medium ring-1 ring-primary-200 dark:ring-primary-800'
                 : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'
@@ -99,9 +99,9 @@ const ComponentThumbnails: React.FC<ComponentThumbnailsProps> = ({
             `}
             title={`MCP 服务器 (${connectedCount}/${mcpServers.length}已连接${selectedMcpServerIds.size > 0 ? `, ${selectedMcpServerIds.size}个已选` : ''}) - 点击查看列表`}
           >
-            <Plug className="w-4 h-4 flex-shrink-0" />
+            <Plug className="w-3.5 h-3.5 flex-shrink-0" />
             {selectedMcpServerIds.size > 0 && (
-              <span className="ml-0.5 text-[10px] font-bold">{selectedMcpServerIds.size}</span>
+              <span className="text-[10px] font-medium">{selectedMcpServerIds.size}</span>
             )}
           </button>
 
@@ -227,7 +227,7 @@ const ComponentThumbnails: React.FC<ComponentThumbnailsProps> = ({
               setShowMCPList(false);
             }}
             className={`
-              flex items-center justify-center px-1.5 py-0.5 rounded text-[11px] transition-all relative
+              flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] transition-all
               ${selectedWorkflowIds.size > 0
                 ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 font-medium ring-1 ring-primary-200 dark:ring-primary-800'
                 : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'
@@ -235,9 +235,9 @@ const ComponentThumbnails: React.FC<ComponentThumbnailsProps> = ({
             `}
             title={`工作流${selectedWorkflowIds.size > 0 ? ` (${selectedWorkflowIds.size}个已选)` : ''} - 点击查看列表`}
           >
-            <WorkflowIcon className="w-4 h-4 flex-shrink-0" />
+            <WorkflowIcon className="w-3.5 h-3.5 flex-shrink-0" />
             {selectedWorkflowIds.size > 0 && (
-              <span className="ml-0.5 text-[10px] font-bold">{selectedWorkflowIds.size}</span>
+              <span className="text-[10px] font-medium">{selectedWorkflowIds.size}</span>
             )}
           </button>
 
@@ -328,17 +328,17 @@ const ComponentThumbnails: React.FC<ComponentThumbnailsProps> = ({
               setShowWorkflowList(false);
             }}
             className={`
-              flex items-center justify-center px-1.5 py-0.5 rounded text-[11px] transition-all relative
+              flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] transition-all
               ${selectedSkillPackIds.size > 0
-                ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 font-medium ring-1 ring-primary-200 dark:ring-primary-800'
+                ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 font-medium ring-1 ring-amber-200 dark:ring-amber-800'
                 : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'
               }
             `}
             title={`技能包${selectedSkillPackIds.size > 0 ? ` (${selectedSkillPackIds.size}个已选)` : ''} - 点击查看列表`}
           >
-            <Package className="w-4 h-4 flex-shrink-0" />
+            <Package className="w-3.5 h-3.5 flex-shrink-0" />
             {selectedSkillPackIds.size > 0 && (
-              <span className="ml-0.5 text-[10px] font-bold">{selectedSkillPackIds.size}</span>
+              <span className="text-[10px] font-medium">{selectedSkillPackIds.size}</span>
             )}
           </button>
 
@@ -427,8 +427,8 @@ const ComponentThumbnails: React.FC<ComponentThumbnailsProps> = ({
       )}
 
       {/* 附件上传按钮 - Tag样式 */}
-      <label className="cursor-pointer flex items-center justify-center px-1.5 py-0.5 rounded text-[11px] transition-all text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400" title="上传图片或视频">
-        <Paperclip className="w-3 h-3 flex-shrink-0" />
+      <label className="cursor-pointer flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] transition-all text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300" title="上传图片或视频">
+        <Paperclip className="w-3.5 h-3.5 flex-shrink-0" />
         <input
           type="file"
           accept="image/*,video/*"

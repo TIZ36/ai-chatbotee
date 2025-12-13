@@ -59,6 +59,7 @@ import { mcpManager, MCPTool, MCPServer } from '../services/mcpClient';
 import { getWorkflows, Workflow as WorkflowType } from '../services/workflowApi';
 import { estimate_messages_tokens, get_model_max_tokens } from '../services/tokenCounter';
 import { updateSessionMediaOutputPath } from '../services/sessionApi';
+import InputToolTags from './ui/InputToolTags';
 
 export interface RoundTablePanelRef {
   refresh: () => Promise<void>;
@@ -1843,50 +1844,60 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
               {/* 底部工具栏 */}
               <div className="flex items-center justify-between px-3 py-2 border-t border-gray-100 dark:border-[#404040]/50">
                 {/* 左侧：功能开关 */}
-                <div className="flex items-center space-x-3 text-xs">
+                <div className="flex items-center gap-2 text-xs">
                   {/* 目标模式开关 */}
                   <button
                     onClick={() => setIsTargetMode(!isTargetMode)}
-                    className={`flex items-center space-x-1 px-2 py-1 rounded-lg transition-all ${
+                    className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] transition-all ${
                       isTargetMode 
                         ? 'bg-[var(--color-accent)]/10 text-[var(--color-accent)]' 
-                        : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#363636]'
+                        : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'
                     }`}
                     title={isTargetMode ? '目标式发言（点击切换）' : '普通发言（点击切换为目标式）'}
                   >
                     <span>🎯</span>
-                    <span className="hidden sm:inline">{isTargetMode ? '目标式' : '普通'}</span>
+                    <span className="hidden sm:inline text-[10px]">{isTargetMode ? '目标式' : '普通'}</span>
                   </button>
                   
-                  {/* MCP 开关 */}
-                  <button
-                    onClick={() => setEnableMCP(!enableMCP)}
-                    className={`flex items-center space-x-1 px-2 py-1 rounded-lg transition-all ${
-                      enableMCP 
-                        ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' 
-                        : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#363636]'
-                    }`}
-                    title={enableMCP ? '已启用 MCP 工具' : '点击启用 MCP 工具'}
-                  >
-                    <Plug className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">MCP</span>
-                    {enableMCP && <span className="text-[10px]">({mcpServers.filter(s => s.enabled).length})</span>}
-                  </button>
-                  
-                  {/* 工作流开关 */}
-                  <button
-                    onClick={() => setEnableWorkflow(!enableWorkflow)}
-                    className={`flex items-center space-x-1 px-2 py-1 rounded-lg transition-all ${
-                      enableWorkflow 
-                        ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' 
-                        : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#363636]'
-                    }`}
-                    title={enableWorkflow ? '已启用工作流' : '点击启用工作流'}
-                  >
-                    <Workflow className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">流程</span>
-                    {enableWorkflow && <span className="text-[10px]">({workflows.length})</span>}
-                  </button>
+                  {/* MCP、工作流、附件 - 统一 Tag 样式 */}
+                  <InputToolTags
+                    mcpServers={mcpServers.filter(s => s.enabled).map(s => ({
+                      id: s.server_id || s.id,
+                      name: s.name,
+                      display_name: s.display_name,
+                    }))}
+                    workflows={workflows.map(w => ({
+                      workflow_id: w.workflow_id,
+                      name: w.name,
+                      description: w.description,
+                    }))}
+                    enableMCP={enableMCP}
+                    onToggleMCP={setEnableMCP}
+                    enableWorkflow={enableWorkflow}
+                    onToggleWorkflow={setEnableWorkflow}
+                    mcpMode="toggle"
+                    workflowMode="toggle"
+                    showSkillPack={false}
+                    showSources={false}
+                    onAttachFile={(files) => {
+                      Array.from(files).forEach(file => {
+                        if (!file.type.startsWith('image/')) return;
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                          const result = e.target?.result as string;
+                          const base64Data = result.includes(',') ? result.split(',')[1] : result;
+                          setAttachedMedia(prev => [...prev, {
+                            type: 'image',
+                            mimeType: file.type,
+                            data: base64Data,
+                            preview: result,
+                          }]);
+                        };
+                        reader.readAsDataURL(file);
+                      });
+                    }}
+                    attachedMediaCount={attachedMedia.length}
+                  />
                   
                   {/* Token 计数 */}
                   {currentTokenCount > 0 && (
