@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# Ubuntu 环境初始化脚本
-# 安装所有必要的系统依赖
+# Ubuntu/Linux 环境依赖安装脚本
+# 安装所有必要的系统依赖和项目依赖
 
 set -e
 
 echo "=========================================="
-echo "  Ubuntu 环境初始化脚本"
+echo "  Ubuntu/Linux 环境依赖安装脚本"
 echo "=========================================="
 echo ""
 
@@ -130,6 +130,7 @@ if [ -d "backend" ] && [ -f "backend/requirements.txt" ]; then
             echo "❌ 虚拟环境创建失败"
             echo "   尝试: sudo apt install python3-venv"
             cd "$SCRIPT_DIR"
+            exit 1
         else
             echo "✅ 虚拟环境创建成功"
         fi
@@ -142,7 +143,7 @@ if [ -d "backend" ] && [ -f "backend/requirements.txt" ]; then
         pip install --upgrade pip
         pip install -r requirements.txt
         
-        # 检查是否需要安装 playwright 浏览器（可选，用于动态网页爬取）
+        # 检查是否需要安装 playwright 浏览器（可选）
         if python -c "import playwright" 2>/dev/null; then
             echo "📦 安装 Playwright 浏览器（用于动态网页爬取）..."
             playwright install chromium 2>/dev/null || echo "⚠️  Playwright 浏览器安装跳过（可选）"
@@ -153,6 +154,8 @@ if [ -d "backend" ] && [ -f "backend/requirements.txt" ]; then
     else
         echo "❌ 虚拟环境未正确创建，跳过 Python 依赖安装"
         echo "   请手动运行: cd backend && python3 -m venv venv"
+        cd "$SCRIPT_DIR"
+        exit 1
     fi
     
     cd "$SCRIPT_DIR"
@@ -166,7 +169,7 @@ if [ -f "package.json" ]; then
     npm install
     echo "✅ Node.js 依赖安装完成"
     
-    # 编译原生模块（node-pty 需要编译）
+    # 编译原生模块（node-pty）
     if [ -d "node_modules/node-pty" ]; then
         echo "🔨 编译 node-pty 原生模块..."
         npx electron-rebuild -f -w node-pty 2>/dev/null || {
@@ -174,11 +177,6 @@ if [ -f "package.json" ]; then
             npm rebuild node-pty 2>/dev/null || echo "⚠️  原生模块编译跳过"
         }
         echo "✅ 原生模块编译完成"
-    fi
-    
-    # 检查 react-resizable-panels（前端依赖）
-    if [ -d "node_modules/react-resizable-panels" ]; then
-        echo "✅ react-resizable-panels 已安装"
     fi
     
     # 设置 Electron 沙盒权限（可选，如果不设置会使用 --no-sandbox 模式）
@@ -196,7 +194,7 @@ fi
 
 echo ""
 echo "=========================================="
-echo "✅ 初始化完成！"
+echo "✅ 依赖安装完成！"
 echo "=========================================="
 echo ""
 echo "现在可以运行以下命令启动应用："

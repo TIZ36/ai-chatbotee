@@ -21,6 +21,9 @@ import { createRole, updateRoleProfile } from '../services/roleApi';
 import { emitSessionsChanged } from '../utils/sessionEvents';
 import { getAgents, getSession, type Session } from '../services/sessionApi';
 import { getDimensionOptions, saveDimensionOption } from '../services/roleDimensionApi';
+import CrawlerModuleSelector from './CrawlerModuleSelector';
+import CrawlerBatchItemSelector from './CrawlerBatchItemSelector';
+import { searchModules, getBatch } from '../services/crawlerApi';
 
 type Mode = 'random' | 'manual' | 'import';
 
@@ -485,6 +488,18 @@ const RoleGeneratorPage: React.FC = () => {
   const [importError, setImportError] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const importFileInputRef = useRef<HTMLInputElement>(null);
+  
+  // /模块 选择器状态（用于手动配置人设时引用爬虫批次数据）
+  const [showModuleSelector, setShowModuleSelector] = useState(false);
+  const [moduleSelectorPosition, setModuleSelectorPosition] = useState({ top: 0, left: 0, maxHeight: 256 });
+  const [moduleSelectorQuery, setModuleSelectorQuery] = useState('');
+  const [moduleSelectorIndex, setModuleSelectorIndex] = useState(-1); // /模块 在输入中的位置
+  const manualInputRef = useRef<HTMLTextAreaElement>(null);
+  
+  // 批次数据项选择器状态
+  const [showBatchItemSelector, setShowBatchItemSelector] = useState(false);
+  const [batchItemSelectorPosition, setBatchItemSelectorPosition] = useState({ top: 0, left: 0, maxHeight: 400 });
+  const [selectedBatch, setSelectedBatch] = useState<any>(null);
 
 
   // 加载 LLM 配置
@@ -554,7 +569,337 @@ const RoleGeneratorPage: React.FC = () => {
     };
   }, [selectedAvatarAgentId]);
 
+  // 处理手动输入变化，检测 / 命令
+  const handleManualInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    setManualInput(value);
+    
+    const cursorPosition = e.target.selectionStart || 0;
+    const textBeforeCursor = value.substring(0, cursorPosition);
+    
+    // 检测 / 命令
+    const lastSlashIndex = textBeforeCursor.lastIndexOf('/');
+    if (lastSlashIndex !== -1) {
+      // 检查 / 后面是否有空格或换行（如果有，说明不是在选择）
+      const textAfterSlash = textBeforeCursor.substring(lastSlashIndex + 1);
+      const hasSpaceOrNewline = textAfterSlash.includes(' ') || textAfterSlash.includes('\n');
+      
+      // 检查是否在行首（/ 前面是行首或空格）
+      const textBeforeSlash = textBeforeCursor.substring(0, lastSlashIndex);
+      const isAtLineStart = textBeforeSlash.length === 0 || textBeforeSlash.endsWith('\n') || textBeforeSlash.endsWith(' ');
+      
+      if (!hasSpaceOrNewline && isAtLineStart) {
+        // 显示模块选择器
+        const query = textAfterSlash.toLowerCase();
+        setModuleSelectorIndex(lastSlashIndex);
+        setModuleSelectorQuery(query);
+        
+        // 计算选择器位置
+        if (manualInputRef.current) {
+          const textarea = manualInputRef.current;
+          const textareaRect = textarea.getBoundingClientRect();
+          const styles = window.getComputedStyle(textarea);
+          
+          // 创建镜像元素来计算光标位置
+          const mirror = document.createElement('div');
+          mirror.style.position = 'absolute';
+          mirror.style.visibility = 'hidden';
+          mirror.style.whiteSpace = styles.whiteSpace || 'pre-wrap';
+          mirror.style.wordWrap = styles.wordWrap || 'break-word';
+          mirror.style.overflowWrap = styles.overflowWrap || 'break-word';
+          mirror.style.font = styles.font;
+          mirror.style.fontSize = styles.fontSize;
+          mirror.style.fontFamily = styles.fontFamily;
+          mirror.style.fontWeight = styles.fontWeight;
+          mirror.style.fontStyle = styles.fontStyle;
+          mirror.style.letterSpacing = styles.letterSpacing;
+          mirror.style.padding = styles.padding;
+          mirror.style.border = styles.border;
+          mirror.style.width = `${textarea.offsetWidth}px`;
+          mirror.style.boxSizing = styles.boxSizing;
+          mirror.style.lineHeight = styles.lineHeight;
+          mirror.style.wordSpacing = styles.wordSpacing;
+          mirror.style.top = `${textareaRect.top}px`;
+          mirror.style.left = `${textareaRect.left}px`;
+          mirror.textContent = textBeforeCursor;
+          document.body.appendChild(mirror);
+          
+          let cursorX: number;
+          let cursorY: number;
+          
+          try {
+            const range = document.createRange();
+            const mirrorTextNode = mirror.firstChild;
+            if (mirrorTextNode && mirrorTextNode.nodeType === Node.TEXT_NODE) {
+              const textLength = mirrorTextNode.textContent?.length || 0;
+              range.setStart(mirrorTextNode, textLength);
+              range.setEnd(mirrorTextNode, textLength);
+              const rangeRect = range.getBoundingClientRect();
+              cursorX = rangeRect.right;
+              cursorY = rangeRect.top;
+            } else {
+              throw new Error('No text node found');
+            }
+          } catch (e) {
+            const mirrorRect = mirror.getBoundingClientRect();
+            const lines = textBeforeCursor.split('\n');
+            const lineIndex = lines.length - 1;
+            const lineText = lines[lineIndex] || '';
+            const lineMeasure = document.createElement('span');
+            lineMeasure.style.font = styles.font;
+            lineMeasure.style.fontSize = styles.fontSize;
+            lineMeasure.style.fontFamily = styles.fontFamily;
+            lineMeasure.style.fontWeight = styles.fontWeight;
+            lineMeasure.style.fontStyle = styles.fontStyle;
+            lineMeasure.style.letterSpacing = styles.letterSpacing;
+            lineMeasure.style.whiteSpace = 'pre';
+            lineMeasure.textContent = lineText;
+            lineMeasure.style.position = 'absolute';
+            lineMeasure.style.visibility = 'hidden';
+            document.body.appendChild(lineMeasure);
+            const lineWidth = lineMeasure.offsetWidth;
+            document.body.removeChild(lineMeasure);
+            const lineHeight = parseFloat(styles.lineHeight) || parseFloat(styles.fontSize) * 1.2;
+            const paddingTop = parseFloat(styles.paddingTop) || 0;
+            const paddingLeft = parseFloat(styles.paddingLeft) || 0;
+            cursorX = mirrorRect.left + paddingLeft + lineWidth;
+            cursorY = mirrorRect.top + paddingTop + (lineIndex * lineHeight);
+          }
+          
+          document.body.removeChild(mirror);
+          
+          const selectorMaxHeight = 256;
+          const selectorWidth = 320;
+          const viewportWidth = window.innerWidth;
+          
+          let left = cursorX + 8;
+          if (left + selectorWidth > viewportWidth - 10) {
+            left = cursorX - selectorWidth - 8;
+            if (left < 10) {
+              left = cursorX + 8;
+            }
+          }
+          if (left < 10) {
+            left = 10;
+          }
+          
+          const bottom = window.innerHeight - cursorY + 5;
+          const availableHeightAbove = cursorY - 20;
+          const actualMaxHeight = Math.min(selectorMaxHeight, availableHeightAbove);
+          
+          setModuleSelectorPosition({
+            bottom,
+            left,
+            maxHeight: actualMaxHeight
+          } as any);
+          setShowModuleSelector(true);
+        }
+        return;
+      } else {
+        setShowModuleSelector(false);
+        setModuleSelectorIndex(-1);
+      }
+    } else {
+      if (showModuleSelector) {
+        setShowModuleSelector(false);
+        setModuleSelectorIndex(-1);
+      }
+    }
+  };
 
+  // 处理模块选择（/模块命令）
+  const handleModuleSelect = async (moduleId: string, batchId: string, batchName: string) => {
+    try {
+      // 获取批次数据
+      const batch = await getBatch(moduleId, batchId);
+      
+      // 检查数据是否存在
+      if (!batch || !batch.crawled_data) {
+        toast({ title: '该批次没有数据', variant: 'destructive' });
+        return;
+      }
+      
+      // 优先使用 parsed_data（用户标记后生成的解析数据），如果没有则使用 crawled_data.normalized
+      let normalizedData: any = null;
+      
+      if (batch.parsed_data && Array.isArray(batch.parsed_data)) {
+        normalizedData = {
+          items: batch.parsed_data.map((item, index) => ({
+            id: `item_${index + 1}`,
+            title: item.title || '',
+            content: item.content || ''
+          })),
+          total_count: batch.parsed_data.length,
+          format: 'list'
+        };
+      } else if (batch.parsed_data && typeof batch.parsed_data === 'object') {
+        normalizedData = batch.parsed_data;
+      } else if (batch.crawled_data?.normalized) {
+        normalizedData = batch.crawled_data.normalized;
+      }
+      
+      if (!normalizedData || !normalizedData.items || normalizedData.items.length === 0) {
+        toast({ title: '该批次没有解析数据，请先在爬虫配置页面标记并生成解析数据', variant: 'destructive' });
+        return;
+      }
+      
+      // 如果有多个数据项，显示选择器让用户选择
+      if (normalizedData.items.length > 1) {
+        setSelectedBatch(batch);
+        setShowModuleSelector(false);
+        
+        // 计算批次数据项选择器的位置
+        if (manualInputRef.current && moduleSelectorIndex !== -1) {
+          const textarea = manualInputRef.current;
+          const textareaRect = textarea.getBoundingClientRect();
+          const styles = window.getComputedStyle(textarea);
+          const cursorPosition = moduleSelectorIndex + 1 + moduleSelectorQuery.length;
+          const textBeforeCursor = manualInput.substring(0, cursorPosition);
+          
+          const mirror = document.createElement('div');
+          mirror.style.position = 'absolute';
+          mirror.style.visibility = 'hidden';
+          mirror.style.whiteSpace = styles.whiteSpace || 'pre-wrap';
+          mirror.style.wordWrap = styles.wordWrap || 'break-word';
+          mirror.style.overflowWrap = styles.overflowWrap || 'break-word';
+          mirror.style.font = styles.font;
+          mirror.style.fontSize = styles.fontSize;
+          mirror.style.fontFamily = styles.fontFamily;
+          mirror.style.fontWeight = styles.fontWeight;
+          mirror.style.fontStyle = styles.fontStyle;
+          mirror.style.letterSpacing = styles.letterSpacing;
+          mirror.style.padding = styles.padding;
+          mirror.style.border = styles.border;
+          mirror.style.width = `${textarea.offsetWidth}px`;
+          mirror.style.boxSizing = styles.boxSizing;
+          mirror.style.lineHeight = styles.lineHeight;
+          mirror.style.wordSpacing = styles.wordSpacing;
+          mirror.style.top = `${textareaRect.top}px`;
+          mirror.style.left = `${textareaRect.left}px`;
+          mirror.textContent = textBeforeCursor;
+          document.body.appendChild(mirror);
+          
+          let cursorX: number;
+          let cursorY: number;
+          
+          try {
+            const range = document.createRange();
+            const mirrorTextNode = mirror.firstChild;
+            if (mirrorTextNode && mirrorTextNode.nodeType === Node.TEXT_NODE) {
+              const textLength = mirrorTextNode.textContent?.length || 0;
+              range.setStart(mirrorTextNode, textLength);
+              range.setEnd(mirrorTextNode, textLength);
+              const rangeRect = range.getBoundingClientRect();
+              cursorX = rangeRect.right;
+              cursorY = rangeRect.top;
+            } else {
+              throw new Error('No text node found');
+            }
+          } catch (e) {
+            const mirrorRect = mirror.getBoundingClientRect();
+            const lines = textBeforeCursor.split('\n');
+            const lineIndex = lines.length - 1;
+            const lineText = lines[lineIndex] || '';
+            const lineMeasure = document.createElement('span');
+            lineMeasure.style.font = styles.font;
+            lineMeasure.style.fontSize = styles.fontSize;
+            lineMeasure.style.fontFamily = styles.fontFamily;
+            lineMeasure.style.fontWeight = styles.fontWeight;
+            lineMeasure.style.fontStyle = styles.fontStyle;
+            lineMeasure.style.letterSpacing = styles.letterSpacing;
+            lineMeasure.style.whiteSpace = 'pre';
+            lineMeasure.textContent = lineText;
+            lineMeasure.style.position = 'absolute';
+            lineMeasure.style.visibility = 'hidden';
+            document.body.appendChild(lineMeasure);
+            const lineWidth = lineMeasure.offsetWidth;
+            document.body.removeChild(lineMeasure);
+            const lineHeight = parseFloat(styles.lineHeight) || parseFloat(styles.fontSize) * 1.2;
+            const paddingTop = parseFloat(styles.paddingTop) || 0;
+            const paddingLeft = parseFloat(styles.paddingLeft) || 0;
+            cursorX = mirrorRect.left + paddingLeft + lineWidth;
+            cursorY = mirrorRect.top + paddingTop + (lineIndex * lineHeight);
+          }
+          
+          document.body.removeChild(mirror);
+          
+          const selectorMaxHeight = 400;
+          const selectorWidth = 400;
+          const viewportWidth = window.innerWidth;
+          
+          let left = cursorX + 8;
+          if (left + selectorWidth > viewportWidth - 10) {
+            left = cursorX - selectorWidth - 8;
+            if (left < 10) {
+              left = cursorX + 8;
+            }
+          }
+          if (left < 10) {
+            left = 10;
+          }
+          
+          const bottom = window.innerHeight - cursorY + 5;
+          const availableHeightAbove = cursorY - 20;
+          const actualMaxHeight = Math.min(selectorMaxHeight, availableHeightAbove);
+          
+          setBatchItemSelectorPosition({
+            bottom,
+            left,
+            maxHeight: actualMaxHeight
+          } as any);
+          setShowBatchItemSelector(true);
+        }
+      } else {
+        // 只有一个数据项，直接插入
+        const item = normalizedData.items[0];
+        const referenceText = `[引用：${batchName} - ${item.title || '数据项1'}]\n${item.content || ''}\n\n`;
+        const textBeforeSlash = manualInput.substring(0, moduleSelectorIndex);
+        const textAfterSlash = manualInput.substring(moduleSelectorIndex + 1 + moduleSelectorQuery.length);
+        const newValue = textBeforeSlash + referenceText + textAfterSlash;
+        setManualInput(newValue);
+        setShowModuleSelector(false);
+        setModuleSelectorIndex(-1);
+        setModuleSelectorQuery('');
+        
+        // 恢复光标位置
+        setTimeout(() => {
+          if (manualInputRef.current) {
+            const newCursorPosition = textBeforeSlash.length + referenceText.length;
+            manualInputRef.current.setSelectionRange(newCursorPosition, newCursorPosition);
+            manualInputRef.current.focus();
+          }
+        }, 0);
+      }
+    } catch (error) {
+      console.error('[RoleGenerator] Failed to select module:', error);
+      toast({ title: '选择失败', description: error instanceof Error ? error.message : '未知错误', variant: 'destructive' });
+    }
+  };
+
+  // 处理批次数据项选择
+  const handleBatchItemSelect = (item: any) => {
+    if (!selectedBatch || moduleSelectorIndex === -1) return;
+    
+    const batchName = selectedBatch.batch_name || '批次数据';
+    const referenceText = `[引用：${batchName} - ${item.title || '数据项'}]\n${item.content || ''}\n\n`;
+    const textBeforeSlash = manualInput.substring(0, moduleSelectorIndex);
+    const textAfterSlash = manualInput.substring(moduleSelectorIndex + 1 + moduleSelectorQuery.length);
+    const newValue = textBeforeSlash + referenceText + textAfterSlash;
+    setManualInput(newValue);
+    setShowBatchItemSelector(false);
+    setSelectedBatch(null);
+    setModuleSelectorIndex(-1);
+    setModuleSelectorQuery('');
+    
+    // 恢复光标位置
+    setTimeout(() => {
+      if (manualInputRef.current) {
+        const newCursorPosition = textBeforeSlash.length + referenceText.length;
+        manualInputRef.current.setSelectionRange(newCursorPosition, newCursorPosition);
+        manualInputRef.current.focus();
+      }
+    }, 0);
+  };
 
   // 加载自定义维度选项
   useEffect(() => {
@@ -592,6 +937,31 @@ const RoleGeneratorPage: React.FC = () => {
       canceled = true;
     };
   }, [roleType]);
+
+  // 点击外部关闭选择器
+  useEffect(() => {
+    if (!showModuleSelector && !showBatchItemSelector) return;
+    
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.crawler-module-selector') && !target.closest('.crawler-batch-item-selector')) {
+        if (showModuleSelector) {
+          setShowModuleSelector(false);
+          setModuleSelectorIndex(-1);
+          setModuleSelectorQuery('');
+        }
+        if (showBatchItemSelector) {
+          setShowBatchItemSelector(false);
+          setSelectedBatch(null);
+          setModuleSelectorIndex(-1);
+          setModuleSelectorQuery('');
+        }
+      }
+    };
+    
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showModuleSelector, showBatchItemSelector]);
 
   // 打开添加选项对话框
   const openAddOptionDialog = (dimensionType: string) => {
@@ -2178,9 +2548,18 @@ const RoleGeneratorPage: React.FC = () => {
                     角色描述 / 系统提示词（System Prompt）
                   </Label>
                   <Textarea
+                    ref={manualInputRef}
                     value={manualInput}
-                    onChange={(e) => setManualInput(e.target.value)}
+                    onChange={handleManualInputChange}
+                    onKeyDown={(e) => {
+                      // 如果模块选择器显示，不处理键盘事件（由 CrawlerModuleSelector 处理）
+                      if (showModuleSelector) return;
+                      // 如果批次数据项选择器显示，不处理键盘事件（由 CrawlerBatchItemSelector 处理）
+                      if (showBatchItemSelector) return;
+                    }}
                     placeholder={`可直接粘贴完整的人设/系统提示词，点击"确认使用"即可创建角色
+
+输入 "/" 可以引用爬虫批次数据
 
 也可以输入简短描述，点击"AI扩写"让模型帮你生成完整人设
 
@@ -2512,6 +2891,35 @@ const RoleGeneratorPage: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
+      
+      {/* 爬虫模块选择器 */}
+      {showModuleSelector && (
+        <CrawlerModuleSelector
+          query={moduleSelectorQuery}
+          position={moduleSelectorPosition}
+          onSelect={handleModuleSelect}
+          onClose={() => {
+            setShowModuleSelector(false);
+            setModuleSelectorIndex(-1);
+            setModuleSelectorQuery('');
+          }}
+        />
+      )}
+      
+      {/* 批次数据项选择器 */}
+      {showBatchItemSelector && selectedBatch && (
+        <CrawlerBatchItemSelector
+          batch={selectedBatch}
+          position={batchItemSelectorPosition}
+          onSelect={handleBatchItemSelect}
+          onClose={() => {
+            setShowBatchItemSelector(false);
+            setSelectedBatch(null);
+            setModuleSelectorIndex(-1);
+            setModuleSelectorQuery('');
+          }}
+        />
+      )}
     </div>
   );
 };
