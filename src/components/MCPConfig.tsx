@@ -7,6 +7,8 @@ import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, Edit2, Save, X, Server, AlertCircle, CheckCircle, Wrench, ExternalLink, Plug } from 'lucide-react';
 import PageLayout, { Card, Section, Alert, EmptyState } from './ui/PageLayout';
 import { Button } from './ui/Button';
+import { ConfirmDialog } from './ui/ConfirmDialog';
+import { InputField, TextareaField, FormFieldGroup } from './ui/FormField';
 import { toast } from './ui/use-toast';
 import {
   Select,
@@ -839,22 +841,22 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
               </div>
 
               <div className="flex justify-end space-x-2 mt-4">
-                <button
+                <Button
                   onClick={cancelEdit}
-                  className="btn-secondary flex items-center space-x-2"
+                  variant="secondary"
                 >
                   <X className="w-4 h-4" />
                   <span>取消</span>
-                </button>
-        <button
+                </Button>
+                <Button
                   onClick={handleAddNotionServer}
-          className="btn-primary flex items-center space-x-2"
+                  variant="primary"
                   disabled={!notionIntegrationSecret.trim()}
-        >
+                >
                   <Save className="w-4 h-4" />
                   <span>添加 Notion 服务器</span>
-        </button>
-      </div>
+                </Button>
+              </div>
             </div>
 
             {/* 右侧：获取步骤指南 */}
@@ -1176,10 +1178,11 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                   {/* 获取工具按钮 */}
                   {testResults.get(server.id)?.success && testResults.get(server.id)?.connected && !testResults.get(server.id)?.tools && (
                     <div className="flex justify-center">
-                      <button
+                      <Button
                         onClick={() => handleFetchTools(server)}
                         disabled={testingServers.has(server.id)}
-                        className="btn-primary text-sm flex items-center space-x-2"
+                        variant="primary"
+                        size="sm"
                       >
                         {testingServers.has(server.id) ? (
                           <>
@@ -1192,7 +1195,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                             <span>获取工具列表</span>
                           </>
                         )}
-                      </button>
+                      </Button>
                     </div>
                   )}
 
@@ -1422,37 +1425,21 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
         </div>
       )}
 
-      <Dialog
+      <ConfirmDialog
         open={deleteTarget !== null}
         onOpenChange={(open) => {
           if (!open) setDeleteTarget(null);
         }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>删除 MCP 服务器</DialogTitle>
-            <DialogDescription>
-              确定要删除「{deleteTarget?.name}」吗？此操作不可撤销。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="mt-4">
-            <Button variant="secondary" onClick={() => setDeleteTarget(null)}>
-              取消
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={async () => {
-                if (!deleteTarget) return;
-                const id = deleteTarget.id;
-                setDeleteTarget(null);
-                await handleDeleteServer(id);
-              }}
-            >
-              删除
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        title="删除 MCP 服务器"
+        description={`确定要删除「${deleteTarget?.name}」吗？此操作不可撤销。`}
+        variant="destructive"
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          const id = deleteTarget.id;
+          setDeleteTarget(null);
+          await handleDeleteServer(id);
+        }}
+      />
     </PageLayout>
   );
 };

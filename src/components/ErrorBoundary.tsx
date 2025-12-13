@@ -1,4 +1,5 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
+import { Button } from './ui/Button';
 
 interface Props {
   children: ReactNode;
@@ -34,15 +35,15 @@ class ErrorBoundary extends Component<Props, State> {
             <p className="text-gray-600 dark:text-gray-400 mb-4">
               {this.state.error?.message || '未知错误'}
             </p>
-            <button
+            <Button
               onClick={() => {
                 this.setState({ hasError: false, error: undefined });
                 window.location.reload();
               }}
-              className="btn-primary"
+              variant="primary"
             >
               重新加载
-            </button>
+            </Button>
           </div>
         </div>
       );

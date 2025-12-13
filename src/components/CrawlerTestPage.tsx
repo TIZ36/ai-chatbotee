@@ -8,6 +8,7 @@ import {
   Globe, Loader, CheckCircle, XCircle, ChevronDown, ChevronUp, 
   Save, Play, Eye, EyeOff, X, Plus, Trash2, MousePointer, Tag, Code2, ExternalLink
 } from 'lucide-react';
+import { Button } from './ui/Button';
 import { 
   fetchWebPage, createModule, previewNormalize, saveParsedDataToBatch, CrawlerOptions, CrawlerResult, 
   NormalizeConfig, parseCookieString, formatCookieString 
@@ -962,18 +963,18 @@ ${html}
                 placeholder="https://example.com/article"
                 className="input-field flex-1"
               />
-              <button
+              <Button
                 onClick={handleTestCrawl}
                 disabled={isLoading || !url.trim()}
-                className="btn-primary flex items-center space-x-2 px-4 disabled:opacity-50"
+                variant="primary"
               >
                 {isLoading ? (
-                  <Loader className="w-4 h-4 animate-spin" />
+                  <Loader className="w-4 h-4 mr-2 animate-spin" />
                 ) : (
-                  <Play className="w-4 h-4" />
+                  <Play className="w-4 h-4 mr-2" />
                 )}
                 <span>测试爬取</span>
-              </button>
+              </Button>
             </div>
           </div>
           
@@ -1024,13 +1025,14 @@ ${html}
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <label className="block text-sm font-medium">Headers</label>
-                    <button
+                    <Button
                       onClick={handleAddHeader}
-                      className="btn-secondary text-xs px-2 py-1 flex items-center space-x-1"
+                      variant="secondary"
+                      size="sm"
                     >
-                      <Plus className="w-3 h-3" />
+                      <Plus className="w-3 h-3 mr-1" />
                       <span>添加</span>
-                    </button>
+                    </Button>
                   </div>
                   <div className="space-y-2">
                     {headers.map((header, index) => (
@@ -1694,7 +1696,7 @@ ${html}
                           {previewNormalizedData && previewNormalizedData.items.length > 0 ? (
                             moduleId && batchId ? (
                             <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                              <button
+                              <Button
                                 onClick={async () => {
                                   if (!moduleId || !batchId || !previewNormalizedData) {
                                     console.error('[CrawlerTestPage] Missing required data:', { moduleId, batchId, previewNormalizedData });
@@ -1771,15 +1773,16 @@ ${html}
                                   }
                                 }}
                                 disabled={isLoading}
-                                className="btn-primary flex items-center space-x-2 w-full justify-center disabled:opacity-50"
+                                variant="primary"
+                                className="w-full"
                               >
                                 {isLoading ? (
-                                  <Loader className="w-4 h-4 animate-spin" />
+                                  <Loader className="w-4 h-4 mr-2 animate-spin" />
                                 ) : (
-                                  <Code2 className="w-4 h-4" />
+                                  <Code2 className="w-4 h-4 mr-2" />
                                 )}
                                 <span>生成并保存解析数据（{previewNormalizedData.total_count} 条）</span>
-                              </button>
+                              </Button>
                             </div>
                             ) : (
                               <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
@@ -2159,25 +2162,25 @@ ${html}
         {/* 底部按钮 */}
         <div className="flex items-center justify-end space-x-3 p-4 border-t border-gray-200 dark:border-gray-700">
           {onClose && (
-            <button
+            <Button
               onClick={onClose}
-              className="btn-secondary"
+              variant="secondary"
             >
               取消
-            </button>
+            </Button>
           )}
-          <button
+          <Button
             onClick={handleSaveModule}
             disabled={isLoading || !moduleName.trim() || !url.trim()}
-            className="btn-primary flex items-center space-x-2 disabled:opacity-50"
+            variant="primary"
           >
             {isLoading ? (
-              <Loader className="w-4 h-4 animate-spin" />
+              <Loader className="w-4 h-4 mr-2 animate-spin" />
             ) : (
-              <Save className="w-4 h-4" />
+              <Save className="w-4 h-4 mr-2" />
             )}
             <span>保存模块</span>
-          </button>
+          </Button>
         </div>
       </div>
     </div>

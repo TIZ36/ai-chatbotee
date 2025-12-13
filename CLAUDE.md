@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AI-Chatbotee is a full-stack LLM/MCP workflow management tool with an Electron desktop app (React + TypeScript frontend) and Python Flask backend. It manages LLM configurations, MCP (Model Context Protocol) servers, and AI chat workflows.
+chatee is a full-stack LLM/MCP workflow management tool with an Electron desktop app (React + TypeScript frontend) and Python Flask backend. It manages LLM configurations, MCP (Model Context Protocol) servers, and AI chat workflows.
 
 ## Development Commands
 

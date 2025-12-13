@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import { Brain, Plug, Workflow as WorkflowIcon, Settings, Code, Terminal, MessageCircle, Globe, Sparkles, Bot, Users, BookOpen } from 'lucide-react';
+import appLogoDark from '../assets/app_logo_dark.png';
+import appLogoLight from '../assets/app_logo_light.png';
 import TerminalPanel from './components/TerminalPanel';
 import { setTerminalExecutor } from './utils/terminalExecutor';
 import SettingsPanel from './components/SettingsPanel';
@@ -108,11 +110,17 @@ const App: React.FC = () => {
   }, [selectedSessionId]);
 
   // 应用主题
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    const root = window.document.documentElement;
+    return root.classList.contains('dark');
+  });
+
   useEffect(() => {
     const root = window.document.documentElement;
     const isDark = settings.theme === 'dark' || 
       (settings.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
     
+    setIsDarkMode(isDark);
     if (isDark) {
       root.classList.add('dark');
     } else {
@@ -235,69 +243,18 @@ const App: React.FC = () => {
 
   return (
     <div className="h-screen bg-gray-50 dark:bg-[#1a1a1a] flex flex-col transition-colors duration-200 overflow-hidden">
-      {/* 顶部标题栏区域（可拖拽）- macOS 红黄绿 + 顶部模式切换 */}
-      <div
-        className="w-full h-10 flex-shrink-0 app-drag bg-white/70 dark:bg-[#18181b]/80 backdrop-blur border-b border-gray-200 dark:border-[#27272a]"
-        title="拖动窗口 / 双击最大化"
-        onDoubleClick={() => {
-          window.electronAPI?.toggleMaximize?.();
-        }}
-      >
-        <div className="h-full flex items-center px-3 gap-3">
-          {/* macOS 红黄绿按钮占位（避免内容压到按钮上） */}
-          <div className={isMac ? 'w-[72px]' : 'w-2'} />
-
-          <div className="flex-1" />
-
-          {/* 会话/会议/Research 顶部切换（右对齐，仅聊天页） */}
-          {isChatPage && (
-            <div className="app-no-drag flex items-center gap-1.5 rounded-xl border border-gray-200 dark:border-[#27272a] bg-gray-50 dark:bg-[#202022] p-1">
-              <button
-                onClick={() => {
-                  setIsRoundTableMode(false);
-                  setIsResearchMode(false);
-                }}
-                className={`px-3 h-8 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-1.5 ${
-                  !isRoundTableMode && !isResearchMode
-                    ? 'bg-[var(--color-accent)] text-white shadow-sm'
-                    : 'text-gray-700 dark:text-[#e0e0e0] hover:bg-white/70 dark:hover:bg-[#2b2b2e]'
-                }`}
-              >
-                <Bot className="w-4 h-4" strokeWidth={1.7} />
-                会话
-              </button>
-              <button
-                onClick={handleToggleRoundTable}
-                className={`px-3 h-8 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-1.5 ${
-                  isRoundTableMode
-                    ? 'bg-[var(--color-accent)] text-white shadow-sm'
-                    : 'text-gray-700 dark:text-[#e0e0e0] hover:bg-white/70 dark:hover:bg-[#2b2b2e]'
-                }`}
-              >
-                <Users className="w-4 h-4" strokeWidth={1.7} />
-                会议
-              </button>
-              <button
-                onClick={handleToggleResearch}
-                className={`px-3 h-8 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-1.5 ${
-                  isResearchMode
-                    ? 'bg-[var(--color-accent)] text-white shadow-sm'
-                    : 'text-gray-700 dark:text-[#e0e0e0] hover:bg-white/70 dark:hover:bg-[#2b2b2e]'
-                }`}
-              >
-                <BookOpen className="w-4 h-4" strokeWidth={1.7} />
-                Research
-              </button>
-            </div>
-          )}
-
-          {/* 右侧留白（保留可拖拽空间） */}
-          <div className="w-3" />
-        </div>
-      </div>
+      {/* macOS 专用小标题栏 - 仅用于红黄绿按钮拖拽区域 */}
+      {isMac && (
+        <div
+          className="w-full h-7 flex-shrink-0 app-drag bg-white dark:bg-[#2d2d2d]"
+          onDoubleClick={() => {
+            window.electronAPI?.toggleMaximize?.();
+          }}
+        />
+      )}
       
       <div className="flex flex-1 min-h-0 overflow-hidden">
-      {/* 中间导航栏 - GNOME 风格 */}
+      {/* 左侧导航栏 - GNOME 风格 */}
         <nav className="w-[52px] bg-white dark:bg-[#2d2d2d] border-r border-gray-200 dark:border-[#404040] flex flex-col items-center flex-shrink-0 z-50 pt-3">
 
         {/* 上方导航：聊天、MCP、Workflow */}
@@ -398,14 +355,73 @@ const App: React.FC = () => {
         </div>
       </nav>
 
-      {/* 主要内容区域 - 全屏显示 */}
-      <main
-        className={`flex flex-col flex-1 min-h-0 transition-all duration-200 relative ${
-          isTerminalPage ? 'overflow-visible' : 'overflow-hidden'
-        } bg-gray-100 dark:bg-[#18181b]`}
-      >
-        
-        {isTerminalPage ? (
+      {/* 主要内容区域 - 包含 header 和页面内容 */}
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+        {/* Header - Logo + 模式切换（仅聊天页显示切换按钮） */}
+        <header 
+          className="h-12 flex-shrink-0 bg-white dark:bg-[#2d2d2d] border-b border-gray-200 dark:border-[#404040] flex items-center justify-between px-4"
+        >
+          {/* 左侧 Logo */}
+          <div className="flex items-center gap-3">
+            <img
+              src={isDarkMode ? appLogoDark : appLogoLight}
+              alt="chatee"
+              className="h-7 w-7 object-contain"
+            />
+            <span className="text-base font-semibold text-gray-800 dark:text-gray-100">chatee</span>
+          </div>
+
+          {/* 右侧 会话/会议/Research 切换（仅聊天页显示） */}
+          {isChatPage && (
+            <div className="flex items-center gap-1 rounded-xl border border-gray-200 dark:border-[#3f3f46] bg-gray-50 dark:bg-[#27272a] p-1">
+              <button
+                onClick={() => {
+                  setIsRoundTableMode(false);
+                  setIsResearchMode(false);
+                }}
+                className={`px-3 h-8 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-1.5 ${
+                  !isRoundTableMode && !isResearchMode
+                    ? 'bg-[var(--color-accent)] text-white shadow-sm'
+                    : 'text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-[#3f3f46]'
+                }`}
+              >
+                <Bot className="w-4 h-4" strokeWidth={1.7} />
+                会话
+              </button>
+              <button
+                onClick={handleToggleRoundTable}
+                className={`px-3 h-8 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-1.5 ${
+                  isRoundTableMode
+                    ? 'bg-[var(--color-accent)] text-white shadow-sm'
+                    : 'text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-[#3f3f46]'
+                }`}
+              >
+                <Users className="w-4 h-4" strokeWidth={1.7} />
+                会议
+              </button>
+              <button
+                onClick={handleToggleResearch}
+                className={`px-3 h-8 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-1.5 ${
+                  isResearchMode
+                    ? 'bg-[var(--color-accent)] text-white shadow-sm'
+                    : 'text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-[#3f3f46]'
+                }`}
+              >
+                <BookOpen className="w-4 h-4" strokeWidth={1.7} />
+                Research
+              </button>
+            </div>
+          )}
+        </header>
+
+        {/* 页面内容区域 */}
+        <main
+          className={`flex flex-col flex-1 min-h-0 transition-all duration-200 relative ${
+            isTerminalPage ? 'overflow-visible' : 'overflow-hidden'
+          } bg-gray-100 dark:bg-[#18181b]`}
+        >
+          
+          {isTerminalPage ? (
           /* Terminal 独占页面 */
           <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-visible m-2">
             <div className="flex-1 rounded-xl bg-white dark:bg-[#18181b] border border-gray-200 dark:border-[#27272a] overflow-visible">
@@ -570,7 +586,8 @@ const App: React.FC = () => {
             )}
           </div>
         )}
-      </main>
+        </main>
+      </div>
       </div>
     </div>
   );

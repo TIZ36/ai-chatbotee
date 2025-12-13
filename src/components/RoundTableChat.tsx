@@ -16,6 +16,7 @@ import {
 } from '../services/roundTableApi';
 import RoundTablePanel from './RoundTablePanel';
 import { Button } from './ui/Button';
+import { ConfirmDialog } from './ui/ConfirmDialog';
 import {
   Dialog,
   DialogContent,
@@ -374,37 +375,21 @@ const RoundTableChat: React.FC<RoundTableChatProps> = ({
         </div>
       )}
 
-      <Dialog
+      <ConfirmDialog
         open={deleteTarget !== null}
         onOpenChange={(open) => {
           if (!open) setDeleteTarget(null);
         }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>删除圆桌会议</DialogTitle>
-            <DialogDescription>
-              确定要删除「{deleteTarget?.name}」吗？此操作不可恢复。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="mt-4">
-            <Button variant="secondary" onClick={() => setDeleteTarget(null)}>
-              取消
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={async () => {
-                if (!deleteTarget) return;
-                const id = deleteTarget.id;
-                setDeleteTarget(null);
-                await performDeleteRoundTable(id);
-              }}
-            >
-              删除
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        title="删除圆桌会议"
+        description={`确定要删除「${deleteTarget?.name}」吗？此操作不可恢复。`}
+        variant="destructive"
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          const id = deleteTarget.id;
+          setDeleteTarget(null);
+          await performDeleteRoundTable(id);
+        }}
+      />
     </div>
   );
 };

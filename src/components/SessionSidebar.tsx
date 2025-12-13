@@ -8,8 +8,10 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { MessageCircle, Sparkles, Plus, Trash2, Search, History, ChevronDown, ChevronUp, Download } from 'lucide-react';
 import { Button } from './ui/Button';
+import { IconButton } from './ui/IconButton';
 import { Input } from './ui/Input';
 import { ScrollArea } from './ui/ScrollArea';
+import { ConfirmDialog } from './ui/ConfirmDialog';
 import {
   Dialog,
   DialogContent,
@@ -32,6 +34,7 @@ import {
 } from '../services/sessionApi';
 import { activateRoleVersion, applyRoleToSession, listRoleVersions, updateRoleProfile, type RoleVersion } from '../services/roleApi';
 import { emitSessionsChanged, SESSIONS_CHANGED_EVENT } from '../utils/sessionEvents';
+import { getDimensionOptions } from '../services/roleDimensionApi';
 
 interface SessionSidebarProps {
   selectedSessionId: string | null;
@@ -63,11 +66,72 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const [activatingVersionId, setActivatingVersionId] = useState<string | null>(null);
   const [rolesByProfession, setRolesByProfession] = useState<Record<string, Session[]>>({});
   const [expandedProfessions, setExpandedProfessions] = useState<Set<string>>(new Set());
+  const [careerProfessions, setCareerProfessions] = useState<string[]>([]); // 功能职业列表（包括自定义）
+  const [gameProfessions, setGameProfessions] = useState<string[]>([]); // 游戏职业列表（包括自定义）
   const createMenuRef = React.useRef<HTMLDivElement>(null);
   const missingNameLoggedRef = React.useRef<Set<string>>(new Set());
   const selectedSessionIdRef = React.useRef<string | null>(selectedSessionId);
   const temporarySessionId = 'temporary-session';
   const normalizeText = (text?: string | null) => (text || '').trim();
+  
+  // 默认功能职业列表
+  const DEFAULT_CAREER_PROFESSIONS = [
+    '产品经理', '工程师', '设计师', '作家', '分析师', '教师', '医生',
+    '咨询师', '创业者', '研究员', '营销专家', '财务顾问'
+  ];
+
+  // 默认游戏职业列表
+  const DEFAULT_GAME_PROFESSIONS = [
+    '战士', '法师', '盗贼', '牧师', '游侠', '术士', '圣骑士', '德鲁伊', '野蛮人', '吟游诗人'
+  ];
+  
+  // 从名称或人设中提取职业
+  const extractProfession = (
+    name: string | null | undefined, 
+    systemPrompt: string | null | undefined,
+    professionList: string[]
+  ): string | null => {
+    // 先从名称中提取
+    if (name) {
+      for (const keyword of professionList) {
+        if (name.includes(keyword)) {
+          return keyword;
+        }
+      }
+    }
+    // 再从人设中提取
+    if (systemPrompt) {
+      // 先尝试匹配 "职业：xxx" 格式
+      const professionMatch = systemPrompt.match(/职业[：:]\s*([^\n,，。]+)/);
+      if (professionMatch) {
+        const matched = professionMatch[1].trim();
+        if (professionList.includes(matched)) {
+          return matched;
+        }
+      }
+      // 再尝试关键词匹配
+      for (const keyword of professionList) {
+        if (systemPrompt.includes(keyword)) {
+          return keyword;
+        }
+      }
+    }
+    return null;
+  };
+  
+  // 判断职业类型（从名称或人设中判断）
+  const detectProfessionType = (name: string | null | undefined, systemPrompt: string | null | undefined): 'career' | 'game' => {
+    const allText = `${name || ''} ${systemPrompt || ''}`;
+    // 如果包含游戏职业关键词，判断为游戏职业
+    const allGameProfessions = [...DEFAULT_GAME_PROFESSIONS, ...gameProfessions];
+    for (const keyword of allGameProfessions) {
+      if (allText.includes(keyword)) {
+        return 'game';
+      }
+    }
+    // 默认是功能职业
+    return 'career';
+  };
   const isPlaceholderTitle = (title?: string | null) => {
     const t = normalizeText(title);
     return !t || t === '新会话';
@@ -108,6 +172,23 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
     return msg ? truncatePreview(msg) : undefined;
   };
 
+  // 加载职业列表（包括自定义职业）
+  const loadProfessions = useCallback(async () => {
+    try {
+      const [careerOptions, gameOptions] = await Promise.all([
+        getDimensionOptions('profession', 'career'),
+        getDimensionOptions('profession', 'game'),
+      ]);
+      setCareerProfessions([...DEFAULT_CAREER_PROFESSIONS, ...careerOptions]);
+      setGameProfessions([...DEFAULT_GAME_PROFESSIONS, ...gameOptions]);
+    } catch (error) {
+      console.error('[SessionSidebar] Failed to load professions:', error);
+      // 使用默认职业列表
+      setCareerProfessions(DEFAULT_CAREER_PROFESSIONS);
+      setGameProfessions(DEFAULT_GAME_PROFESSIONS);
+    }
+  }, []);
+
   // 加载所有会话（包括记忆体和智能体）
   const loadAllSessions = useCallback(async () => {
     try {
@@ -125,41 +206,26 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
       setAgentSessions(agents);
       
-      // 按职业分类
+      // 按职业分类（使用动态职业列表）
       const byProfession: Record<string, Session[]> = {};
       const other: Session[] = [];
-      const professionKeywords = [
-        '产品经理', '工程师', '设计师', '作家', '分析师', '教师', '医生',
-        '咨询师', '创业者', '研究员', '营销专家', '财务顾问',
-        '战士', '法师', '盗贼', '牧师', '游侠', '术士', '圣骑士', '德鲁伊', '野蛮人', '吟游诗人'
-      ];
       
       for (const agent of agents) {
-        let profession: string | null = null;
+        // 判断职业类型
+        const professionType = detectProfessionType(agent.name, agent.system_prompt);
+        // 根据职业类型选择对应的职业列表
+        const professionList = professionType === 'career' ? careerProfessions : gameProfessions;
         
-        if (agent.name) {
-          for (const keyword of professionKeywords) {
-            if (agent.name.includes(keyword)) {
-              profession = keyword;
-              break;
-            }
-          }
-        }
-        
-        if (!profession && agent.system_prompt) {
-          for (const keyword of professionKeywords) {
-            if (agent.system_prompt.includes(keyword)) {
-              profession = keyword;
-              break;
-            }
-          }
-        }
+        // 提取职业
+        const profession = extractProfession(agent.name, agent.system_prompt, professionList);
         
         if (profession) {
-          if (!byProfession[profession]) {
-            byProfession[profession] = [];
+          // 添加职业类型前缀以便区分
+          const professionKey = professionType === 'career' ? profession : `[游戏] ${profession}`;
+          if (!byProfession[professionKey]) {
+            byProfession[professionKey] = [];
           }
-          byProfession[profession].push(agent);
+          byProfession[professionKey].push(agent);
         } else {
           other.push(agent);
         }
@@ -169,8 +235,24 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
         byProfession['其他'] = other;
       }
       
-      setRolesByProfession(byProfession);
-      setExpandedProfessions(new Set(Object.keys(byProfession)));
+      // 对职业键进行排序：按英文首字母或中文拼音首字母排序
+      // 使用 localeCompare 支持中文拼音排序，相同首字母的不分先后（稳定排序）
+      const sortedProfessionKeys = Object.keys(byProfession).sort((a, b) => {
+        // "其他" 始终排在最后
+        if (a === '其他') return 1;
+        if (b === '其他') return -1;
+        // 使用 localeCompare 进行排序，支持中文拼音首字母排序
+        return a.localeCompare(b, 'zh-CN', { sensitivity: 'base' });
+      });
+      
+      // 创建排序后的职业对象
+      const sortedByProfession: Record<string, Session[]> = {};
+      for (const key of sortedProfessionKeys) {
+        sortedByProfession[key] = byProfession[key];
+      }
+      
+      setRolesByProfession(sortedByProfession);
+      setExpandedProfessions(new Set(sortedProfessionKeys));
     } catch (error) {
       console.error('Failed to load sessions:', error);
       setAgentSessions([]);
@@ -178,12 +260,19 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [careerProfessions, gameProfessions]);
 
-  // 加载数据
+  // 加载职业列表
   useEffect(() => {
-    loadAllSessions();
-  }, [loadAllSessions]);
+    loadProfessions();
+  }, [loadProfessions]);
+
+  // 加载数据（依赖职业列表，当职业列表更新时重新分组）
+  useEffect(() => {
+    if (careerProfessions.length > 0 || gameProfessions.length > 0) {
+      loadAllSessions();
+    }
+  }, [loadAllSessions, careerProfessions.length, gameProfessions.length]);
 
   // 外部触发：会话/角色数据变更时刷新（例如从聊天配置弹窗"保存为角色"）
   useEffect(() => {
@@ -477,14 +566,26 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
     }
   };
 
-  // 过滤角色（根据搜索）
+  // 过滤角色（根据搜索），保持排序
   const filteredRolesByProfession = useMemo(() => {
     if (!searchQuery.trim()) {
       return rolesByProfession;
     }
     const query = searchQuery.toLowerCase();
     const filtered: Record<string, Session[]> = {};
-    for (const [profession, roles] of Object.entries(rolesByProfession)) {
+    
+    // 获取排序后的职业键（保持与 rolesByProfession 相同的排序）
+    const sortedProfessionKeys = Object.keys(rolesByProfession).sort((a, b) => {
+      // "其他" 始终排在最后
+      if (a === '其他') return 1;
+      if (b === '其他') return -1;
+      // 使用 localeCompare 进行排序，支持中文拼音首字母排序
+      return a.localeCompare(b, 'zh-CN', { sensitivity: 'base' });
+    });
+    
+    // 按照排序后的顺序添加匹配的职业
+    for (const profession of sortedProfessionKeys) {
+      const roles = rolesByProfession[profession];
       const matching = roles.filter(session => {
         const name = getDisplayName(session).toLowerCase();
         return name.includes(query);
@@ -524,15 +625,14 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
           ) : (
             <div className="p-1.5 pr-3 space-y-1.5">
               {/* 新增角色按钮 */}
-              <button
+              <Button
                 onClick={() => onNewRole?.()}
-                className="w-full px-2.5 py-3 rounded-lg border-2 border-dashed border-gray-300 dark:border-[#505050] hover:border-[var(--color-accent)] dark:hover:border-[var(--color-accent)] bg-gray-50/50 dark:bg-[#2d2d2d]/50 hover:bg-[var(--color-accent-bg)]/20 transition-all duration-150 flex items-center justify-center gap-2 group"
+                variant="outline"
+                className="w-full border-2 border-dashed"
               >
-                <Plus className="w-4 h-4 text-gray-400 dark:text-[#808080] group-hover:text-[var(--color-accent)] transition-colors" />
-                <span className="text-sm text-gray-500 dark:text-[#b0b0b0] group-hover:text-[var(--color-accent)] transition-colors">
-                  新增角色
-                </span>
-              </button>
+                <Plus className="w-4 h-4 mr-2" />
+                <span>新增角色</span>
+              </Button>
 
               {/* 按职业分类的角色列表 */}
               {Object.keys(filteredRolesByProfession).length === 0 ? (
@@ -609,36 +709,37 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
                             {/* 操作按钮 */}
                             <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity justify-self-end pointer-events-none group-hover:pointer-events-auto">
-                              <button
+                              <IconButton
+                                icon={Download}
                                 onClick={(e) => handleExportRole(e, session)}
-                                className="p-1 hover:bg-[var(--color-accent-bg)] rounded transition-colors"
-                                title="导出角色"
-                              >
-                                <Download className="w-4 h-4 text-[var(--color-accent)]" />
-                              </button>
-                              <button
+                                label="导出角色"
+                                variant="ghost"
+                                size="icon"
+                              />
+                              <IconButton
+                                icon={History}
                                 onClick={(e) => openRoleVersions(e, session)}
-                                className="p-1 hover:bg-[var(--color-accent-bg)] rounded transition-colors"
-                                title="角色版本历史"
-                              >
-                                <History className="w-4 h-4 text-[var(--color-accent)]" />
-                              </button>
+                                label="角色版本历史"
+                                variant="ghost"
+                                size="icon"
+                              />
                               {isRoundTableMode && (
-                                <button
+                                <IconButton
+                                  icon={Plus}
                                   onClick={(e) => handleAddToRoundTable(e, session.session_id)}
-                                  className="p-1 hover:bg-[var(--color-accent-bg)] rounded transition-colors"
-                                  title="添加到圆桌会议"
-                                >
-                                  <Plus className="w-4 h-4 text-[var(--color-accent)]" />
-                                </button>
+                                  label="添加到圆桌会议"
+                                  variant="ghost"
+                                  size="icon"
+                                />
                               )}
-                              <button
+                              <IconButton
+                                icon={Trash2}
                                 onClick={(e) => handleDeleteSession(e, session.session_id)}
-                                className="p-1 hover:bg-red-500/10 rounded transition-colors"
-                                title="删除"
-                              >
-                                <Trash2 className="w-4 h-4 text-red-500" />
-                              </button>
+                                label="删除"
+                                variant="ghost"
+                                size="icon"
+                                className="text-red-500 hover:bg-red-500/10"
+                              />
                             </div>
                             </div>
                           </div>
@@ -681,37 +782,21 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
         </div>
       </div>
 
-      <Dialog
+      <ConfirmDialog
         open={deleteTarget !== null}
         onOpenChange={(open) => {
           if (!open) setDeleteTarget(null);
         }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>删除会话</DialogTitle>
-            <DialogDescription>
-              确定要删除「{deleteTarget ? getDisplayName(deleteTarget) : ''}」吗？此操作不可撤销。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="mt-4">
-            <Button variant="secondary" onClick={() => setDeleteTarget(null)}>
-              取消
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={async () => {
-                if (!deleteTarget) return;
-                const id = deleteTarget.session_id;
-                setDeleteTarget(null);
-                await performDeleteSession(id);
-              }}
-            >
-              删除
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        title="删除会话"
+        description={`确定要删除「${deleteTarget ? getDisplayName(deleteTarget) : ''}」吗？此操作不可撤销。`}
+        variant="destructive"
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          const id = deleteTarget.session_id;
+          setDeleteTarget(null);
+          await performDeleteSession(id);
+        }}
+      />
 
       <Dialog
         open={upgradeTarget !== null}

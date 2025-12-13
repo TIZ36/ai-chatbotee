@@ -13,6 +13,8 @@ import {
 import { fetchOllamaModels } from '../services/ollamaService';
 import PageLayout, { Card, EmptyState } from './ui/PageLayout';
 import { Button } from './ui/Button';
+import { ConfirmDialog } from './ui/ConfirmDialog';
+import { InputField, TextareaField, FormFieldGroup } from './ui/FormField';
 import { toast } from './ui/use-toast';
 import { Checkbox } from './ui/Checkbox';
 import { Switch } from './ui/Switch';
@@ -633,20 +635,20 @@ const LLMConfigPanel: React.FC = () => {
           }
         >
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {/* 配置名称 */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                配置名称 *
-              </label>
-              <input
-                type="text"
-                value={newConfig.name || ''}
-                onChange={(e) => setNewConfig({ ...newConfig, name: e.target.value })}
-                className="input-field"
-                placeholder="例如: OpenAI GPT-4"
+          <FormFieldGroup spacing="compact">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {/* 配置名称 */}
+              <InputField
+                label="配置名称"
+                required
+                inputProps={{
+                  id: "config-name",
+                  type: "text",
+                  value: newConfig.name || '',
+                  onChange: (e) => setNewConfig({ ...newConfig, name: e.target.value }),
+                  placeholder: "例如: OpenAI GPT-4",
+                }}
               />
-            </div>
 
             {/* 提供商 */}
             <div>
@@ -898,18 +900,17 @@ const LLMConfigPanel: React.FC = () => {
             )}
 
             {/* 描述 */}
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                描述（可选）
-              </label>
-              <textarea
-                value={newConfig.description || ''}
-                onChange={(e) => setNewConfig({ ...newConfig, description: e.target.value })}
-                className="input-field"
-                rows={2}
-                placeholder="模型描述..."
-              />
-            </div>
+            <TextareaField
+              label="描述（可选）"
+              textareaProps={{
+                id: "config-description",
+                value: newConfig.description || '',
+                onChange: (e) => setNewConfig({ ...newConfig, description: e.target.value }),
+                rows: 2,
+                placeholder: "模型描述...",
+              }}
+              className="md:col-span-2"
+            />
 
             {/* Thinking 模式配置 */}
             <div className="md:col-span-2 flex items-center space-x-2">
@@ -1054,22 +1055,23 @@ const LLMConfigPanel: React.FC = () => {
               </label>
             </div>
             </div>
+          </FormFieldGroup>
 
           {/* 操作按钮 */}
           <div className="flex space-x-2 mt-4 pt-4 border-t border-gray-200 dark:border-[#404040]">
-              <button
+              <Button
                 onClick={editingId ? handleUpdateConfig : handleAddConfig}
-                className="gnome-btn gnome-btn-primary"
+                variant="primary"
               >
-              <Save className="w-4 h-4" />
-              <span>{editingId ? '保存' : '添加'}</span>
-              </button>
-              <button
-              onClick={handleCancel}
-                className="gnome-btn gnome-btn-secondary"
+                <Save className="w-4 h-4" />
+                <span>{editingId ? '保存' : '添加'}</span>
+              </Button>
+              <Button
+                onClick={handleCancel}
+                variant="secondary"
               >
                 取消
-              </button>
+              </Button>
           </div>
         </Card>
       )}
@@ -1082,13 +1084,13 @@ const LLMConfigPanel: React.FC = () => {
             title="暂无LLM配置"
             description="点击「添加模型」按钮来添加配置"
             action={
-              <button
+              <Button
                 onClick={() => setIsAdding(true)}
-                className="gnome-btn gnome-btn-primary"
+                variant="primary"
               >
                 <Plus className="w-4 h-4" />
                 <span>添加模型</span>
-              </button>
+              </Button>
             }
           />
         </Card>
@@ -1271,37 +1273,21 @@ const LLMConfigPanel: React.FC = () => {
       )}
       </div>
 
-      <Dialog
+      <ConfirmDialog
         open={deleteTarget !== null}
         onOpenChange={(open) => {
           if (!open) setDeleteTarget(null);
         }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>删除模型配置</DialogTitle>
-            <DialogDescription>
-              确定要删除「{deleteTarget?.name}」吗？此操作不可撤销。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="mt-4">
-            <Button variant="secondary" onClick={() => setDeleteTarget(null)}>
-              取消
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={async () => {
-                if (!deleteTarget) return;
-                const id = deleteTarget.config_id;
-                setDeleteTarget(null);
-                await handleDeleteConfig(id);
-              }}
-            >
-              删除
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        title="删除模型配置"
+        description={`确定要删除「${deleteTarget?.name}」吗？此操作不可撤销。`}
+        variant="destructive"
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          const id = deleteTarget.config_id;
+          setDeleteTarget(null);
+          await handleDeleteConfig(id);
+        }}
+      />
     </PageLayout>
   );
 };

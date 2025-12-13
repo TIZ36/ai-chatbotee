@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { Play, CheckCircle, XCircle, Loader } from 'lucide-react';
+import { Button } from './ui/Button';
 import { MCPTool } from '../services/mcpClient';
 
 interface ToolCallCardProps {
@@ -185,18 +186,18 @@ const ToolCallCard: React.FC<ToolCallCardProps> = ({
           <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-1">{tool.name}</h4>
           <p className="text-sm text-gray-600 dark:text-gray-400">{tool.description}</p>
         </div>
-        <button
+        <Button
           onClick={handleCall}
           disabled={isLoading}
-          className="btn-primary flex items-center space-x-2 disabled:opacity-50"
+          variant="primary"
         >
           {isLoading ? (
-            <Loader className="w-4 h-4 animate-spin" />
+            <Loader className="w-4 h-4 mr-2 animate-spin" />
           ) : (
-            <Play className="w-4 h-4" />
+            <Play className="w-4 h-4 mr-2" />
           )}
           <span>调用</span>
-        </button>
+        </Button>
       </div>
 
       {/* 参数输入 */}

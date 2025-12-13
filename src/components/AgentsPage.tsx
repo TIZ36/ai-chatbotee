@@ -27,6 +27,7 @@ import {
 } from '../services/roundTableApi';
 import RoundTablePanel from './RoundTablePanel';
 import { Button } from './ui/Button';
+import { ConfirmDialog } from './ui/ConfirmDialog';
 import {
   Dialog,
   DialogContent,
@@ -622,37 +623,21 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ selectedRoundTableId }) => {
       )}
     </div>
 
-    <Dialog
+    <ConfirmDialog
       open={deleteAgentTarget !== null}
       onOpenChange={(open) => {
         if (!open) setDeleteAgentTarget(null);
       }}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>删除智能体</DialogTitle>
-          <DialogDescription>
-            确定要删除「{deleteAgentTarget?.name || deleteAgentTarget?.title}」吗？此操作不可恢复。
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter className="mt-4">
-          <Button variant="secondary" onClick={() => setDeleteAgentTarget(null)}>
-            取消
-          </Button>
-          <Button
-            variant="destructive"
-            onClick={async () => {
-              if (!deleteAgentTarget) return;
-              const id = deleteAgentTarget.session_id;
-              setDeleteAgentTarget(null);
-              await performDeleteAgent(id);
-            }}
-          >
-            删除
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      title="删除智能体"
+      description={`确定要删除「${deleteAgentTarget?.name || deleteAgentTarget?.title}」吗？此操作不可恢复。`}
+      variant="destructive"
+      onConfirm={async () => {
+        if (!deleteAgentTarget) return;
+        const id = deleteAgentTarget.session_id;
+        setDeleteAgentTarget(null);
+        await performDeleteAgent(id);
+      }}
+    />
 
     <Dialog
       open={deleteRoundTableTarget !== null}

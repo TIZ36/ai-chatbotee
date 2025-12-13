@@ -24,6 +24,10 @@ import CrawlerModuleSelector from './CrawlerModuleSelector';
 import CrawlerBatchItemSelector from './CrawlerBatchItemSelector';
 import ComponentThumbnails from './ComponentThumbnails';
 import { Button } from './ui/Button';
+import { IconButton, IconButtonWithText } from './ui/IconButton';
+import { ConfirmDialog } from './ui/ConfirmDialog';
+import { InputField, TextareaField, FormFieldGroup } from './ui/FormField';
+import { DataListItem } from './ui/DataListItem';
 import {
   Dialog,
   DialogContent,
@@ -35,6 +39,7 @@ import {
 import { toast } from './ui/use-toast';
 import { emitSessionsChanged, SESSIONS_CHANGED_EVENT } from '../utils/sessionEvents';
 import RoleGeneratorPage from './RoleGeneratorPage';
+import { getDimensionOptions, saveDimensionOption } from '../services/roleDimensionApi';
 
 interface Message {
   id: string;
@@ -75,6 +80,116 @@ interface Message {
 }
 
 // 会话列表项组件
+// 默认功能职业列表
+const DEFAULT_CAREER_PROFESSIONS = [
+  '产品经理', '工程师', '设计师', '作家', '分析师', '教师', '医生',
+  '咨询师', '创业者', '研究员', '营销专家', '财务顾问'
+];
+
+// 默认游戏职业列表
+const DEFAULT_GAME_PROFESSIONS = [
+  '战士', '法师', '盗贼', '牧师', '游侠', '术士', '圣骑士', '德鲁伊', '野蛮人', '吟游诗人'
+];
+
+// 从名称或人设中提取职业（需要传入职业列表）
+const extractProfession = (
+  name: string | null | undefined, 
+  systemPrompt: string | null | undefined,
+  professionList: string[]
+): string | null => {
+  // 先从名称中提取
+  if (name) {
+    for (const keyword of professionList) {
+      if (name.includes(keyword)) {
+        return keyword;
+      }
+    }
+  }
+  // 再从人设中提取
+  if (systemPrompt) {
+    // 先尝试匹配 "职业：xxx" 格式
+    const professionMatch = systemPrompt.match(/职业[：:]\s*([^\n,，。]+)/);
+    if (professionMatch) {
+      const matched = professionMatch[1].trim();
+      if (professionList.includes(matched)) {
+        return matched;
+      }
+    }
+    // 再尝试关键词匹配
+    for (const keyword of professionList) {
+      if (systemPrompt.includes(keyword)) {
+        return keyword;
+      }
+    }
+  }
+  return null;
+};
+
+// 更新名称或人设以反映职业（需要传入职业列表）
+const applyProfessionToNameOrPrompt = (
+  profession: string | null,
+  currentName: string,
+  currentSystemPrompt: string,
+  professionList: string[]
+): { name: string; systemPrompt: string } => {
+  let newName = currentName;
+  let newSystemPrompt = currentSystemPrompt;
+
+  if (!profession) {
+    // 如果选择"无"，移除名称中的职业关键词
+    for (const keyword of professionList) {
+      if (newName.includes(keyword)) {
+        newName = newName.replace(keyword, '').trim();
+        break;
+      }
+    }
+    // 移除人设中的职业标记
+    newSystemPrompt = newSystemPrompt.replace(/职业[：:]\s*[^\n,，。]+/g, '').trim();
+    return { name: newName, systemPrompt: newSystemPrompt };
+  }
+
+  // 检查名称中是否已有职业关键词
+  let nameHasProfession = false;
+  for (const keyword of professionList) {
+    if (newName.includes(keyword)) {
+      nameHasProfession = true;
+      // 替换为新的职业
+      newName = newName.replace(keyword, profession).trim();
+      break;
+    }
+  }
+
+  // 如果名称中没有职业，添加到名称中
+  if (!nameHasProfession && newName) {
+    newName = `${profession} ${newName}`.trim();
+  }
+
+  // 更新人设中的职业标记
+  if (newSystemPrompt.match(/职业[：:]\s*[^\n,，。]+/)) {
+    newSystemPrompt = newSystemPrompt.replace(/职业[：:]\s*[^\n,，。]+/, `职业：${profession}`);
+  } else if (newSystemPrompt) {
+    // 如果人设不为空但没有职业标记，在开头添加
+    newSystemPrompt = `职业：${profession}\n\n${newSystemPrompt}`;
+  } else {
+    newSystemPrompt = `职业：${profession}`;
+  }
+
+  return { name: newName, systemPrompt: newSystemPrompt };
+};
+
+// 判断职业类型（从名称或人设中判断）
+const detectProfessionType = (name: string | null | undefined, systemPrompt: string | null | undefined): 'career' | 'game' => {
+  const allText = `${name || ''} ${systemPrompt || ''}`;
+  // 如果包含游戏职业关键词，判断为游戏职业
+  for (const keyword of DEFAULT_GAME_PROFESSIONS) {
+    if (allText.includes(keyword)) {
+      return 'game';
+    }
+  }
+  // 默认是功能职业
+  return 'career';
+};
+
 interface SessionListItemProps {
   session: Session;
   displayName: string;
@@ -105,6 +220,13 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
   const [editSystemPrompt, setEditSystemPrompt] = useState(session.system_prompt || '');
   const [editMediaOutputPath, setEditMediaOutputPath] = useState(session.media_output_path || '');
   const [editLlmConfigId, setEditLlmConfigId] = useState<string | null>(session.llm_config_id || null);
+  const [editProfession, setEditProfession] = useState<string | null>(null); // 职业选择
+  const [editProfessionType, setEditProfessionType] = useState<'career' | 'game'>('career'); // 职业类型（功能职业或游戏职业）
+  const [careerProfessions, setCareerProfessions] = useState<string[]>(DEFAULT_CAREER_PROFESSIONS); // 功能职业列表
+  const [gameProfessions, setGameProfessions] = useState<string[]>(DEFAULT_GAME_PROFESSIONS); // 游戏职业列表
+  const [isLoadingProfessions, setIsLoadingProfessions] = useState(false); // 加载职业列表状态
+  const [showAddProfessionDialog, setShowAddProfessionDialog] = useState(false); // 添加职业对话框
+  const [newProfessionValue, setNewProfessionValue] = useState(''); // 新职业名称
   const fileInputRef = useRef<HTMLInputElement>(null);
   const configFileInputRef = useRef<HTMLInputElement>(null); // 配置对话框的文件输入
   const [isSaving, setIsSaving] = useState(false);
@@ -135,6 +257,49 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
     }
   };
 
+  // 加载职业列表（包括自定义职业）
+  const loadProfessions = async () => {
+    setIsLoadingProfessions(true);
+    try {
+      const [careerOptions, gameOptions] = await Promise.all([
+        getDimensionOptions('profession', 'career'),
+        getDimensionOptions('profession', 'game'),
+      ]);
+      setCareerProfessions([...DEFAULT_CAREER_PROFESSIONS, ...careerOptions]);
+      setGameProfessions([...DEFAULT_GAME_PROFESSIONS, ...gameOptions]);
+    } catch (error) {
+      console.error('[SessionListItem] Failed to load professions:', error);
+    } finally {
+      setIsLoadingProfessions(false);
+    }
+  };
+
+  // 保存自定义职业
+  const handleSaveCustomProfession = async () => {
+    if (!newProfessionValue.trim()) {
+      toast({ title: '请输入职业名称', variant: 'destructive' });
+      return;
+    }
+
+    try {
+      const result = await saveDimensionOption('profession', editProfessionType, newProfessionValue.trim());
+      if (result.success) {
+        toast({ title: '职业已添加', variant: 'success' });
+        // 重新加载职业列表
+        await loadProfessions();
+        // 自动选择新添加的职业
+        setEditProfession(newProfessionValue.trim());
+        setShowAddProfessionDialog(false);
+        setNewProfessionValue('');
+      } else {
+        toast({ title: '添加失败', description: result.error, variant: 'destructive' });
+      }
+    } catch (error) {
+      console.error('[SessionListItem] Failed to save custom profession:', error);
+      toast({ title: '添加失败', description: error instanceof Error ? error.message : String(error), variant: 'destructive' });
+    }
+  };
+
   // 点击头像弹出完整配置对话框
   const handleAvatarClick = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -152,8 +317,15 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
     setEditAvatar(currentSession.avatar || null);
     setEditSystemPrompt(currentSession.system_prompt || '');
     setEditMediaOutputPath(currentSession.media_output_path || '');
+    // 判断职业类型并提取当前职业
+    const professionType = detectProfessionType(currentSession.name, currentSession.system_prompt);
+    setEditProfessionType(professionType);
+    const allProfessions = professionType === 'career' ? careerProfessions : gameProfessions;
+    const currentProfession = extractProfession(currentSession.name, currentSession.system_prompt, allProfessions);
+    setEditProfession(currentProfession);
     setActiveConfigTab('basic');
     loadSkillPacks();
+    loadProfessions(); // 加载职业列表
     setShowConfigDialog(true);
   };
 
@@ -214,8 +386,14 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
       setEditSystemPrompt(session.system_prompt || '');
       setEditMediaOutputPath(session.media_output_path || '');
       setEditLlmConfigId(session.llm_config_id || null);
+      // 判断职业类型并提取当前职业
+      const professionType = detectProfessionType(session.name, session.system_prompt);
+      setEditProfessionType(professionType);
+      const allProfessions = professionType === 'career' ? careerProfessions : gameProfessions;
+      const currentProfession = extractProfession(session.name, session.system_prompt, allProfessions);
+      setEditProfession(currentProfession);
     }
-  }, [session.name, session.avatar, session.system_prompt, session.media_output_path, session.llm_config_id, showConfigDialog]);
+  }, [session.name, session.avatar, session.system_prompt, session.media_output_path, session.llm_config_id, showConfigDialog, careerProfessions, gameProfessions]);
 
   // 打开完整编辑对话框（通过其他方式触发，如右键菜单等）
   const handleOpenFullEditDialog = (e?: React.MouseEvent) => {
@@ -721,6 +899,86 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                     />
                   </div>
 
+                  {/* 职业选择（仅对 agent 显示） */}
+                  {session.session_type === 'agent' && (
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff]">
+                          职业
+                        </label>
+                        <button
+                          onClick={() => setShowAddProfessionDialog(true)}
+                          className="flex items-center gap-1 px-2 py-1 text-xs text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-colors"
+                          title="添加自定义职业"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>添加</span>
+                        </button>
+                      </div>
+                      
+                      {/* 职业类型切换 */}
+                      <div className="flex gap-2 mb-2">
+                        <button
+                          onClick={() => {
+                            setEditProfessionType('career');
+                            setEditProfession(null); // 切换类型时清空选择
+                          }}
+                          className={`flex-1 px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                            editProfessionType === 'career'
+                              ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                              : 'bg-gray-100 dark:bg-[#363636] text-gray-600 dark:text-[#b0b0b0] hover:bg-gray-200 dark:hover:bg-[#404040]'
+                          }`}
+                        >
+                          功能职业
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEditProfessionType('game');
+                            setEditProfession(null); // 切换类型时清空选择
+                          }}
+                          className={`flex-1 px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                            editProfessionType === 'game'
+                              ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                              : 'bg-gray-100 dark:bg-[#363636] text-gray-600 dark:text-[#b0b0b0] hover:bg-gray-200 dark:hover:bg-[#404040]'
+                          }`}
+                        >
+                          游戏职业
+                        </button>
+                      </div>
+                      
+                      {/* 职业选择下拉框 */}
+                      <select
+                        value={editProfession || ''}
+                        onChange={(e) => {
+                          const selectedProfession = e.target.value || null;
+                          setEditProfession(selectedProfession);
+                          // 自动更新名称和人设以反映职业变化
+                          const currentProfessionList = editProfessionType === 'career' ? careerProfessions : gameProfessions;
+                          const { name, systemPrompt } = applyProfessionToNameOrPrompt(
+                            selectedProfession,
+                            editName,
+                            editSystemPrompt,
+                            currentProfessionList
+                          );
+                          setEditName(name);
+                          setEditSystemPrompt(systemPrompt);
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600"
+                        disabled={isLoadingProfessions}
+                      >
+                        <option value="">无（自定义）</option>
+                        {(editProfessionType === 'career' ? careerProfessions : gameProfessions).map(profession => (
+                          <option key={profession} value={profession}>
+                            {profession}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-1">
+                        选择职业后，会自动更新名称和人设中的职业信息
+                      </p>
+                    </div>
+                  )}
+
                   {/* 人设配置 */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
@@ -866,19 +1124,37 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                 onClick={async () => {
                   setIsSavingConfig(true);
                   try {
+                    // 如果职业发生变化，应用职业到名称和人设
+                    let finalName = editName.trim();
+                    let finalSystemPrompt = editSystemPrompt.trim();
+                    
+                    const currentProfessionList = editProfessionType === 'career' ? careerProfessions : gameProfessions;
+                    const currentProfession = extractProfession(session.name, session.system_prompt, currentProfessionList);
+                    if (editProfession !== currentProfession) {
+                      // 职业发生变化，应用职业更新
+                      const applied = applyProfessionToNameOrPrompt(
+                        editProfession,
+                        finalName,
+                        finalSystemPrompt,
+                        currentProfessionList
+                      );
+                      finalName = applied.name;
+                      finalSystemPrompt = applied.systemPrompt;
+                    }
+                    
                     // 保存所有配置
                     const promises: Promise<void>[] = [];
                     
-                    if (editName !== (session.name || '')) {
-                      promises.push(onUpdateName(editName.trim()));
+                    if (finalName !== (session.name || '')) {
+                      promises.push(onUpdateName(finalName));
                     }
                     
                     if (editAvatar !== avatarUrl) {
                       promises.push(onUpdateAvatar(editAvatar || ''));
                     }
                     
-                    if (editSystemPrompt !== (session.system_prompt || '')) {
-                      promises.push(updateSessionSystemPrompt(session.session_id, editSystemPrompt.trim() || null));
+                    if (finalSystemPrompt !== (session.system_prompt || '')) {
+                      promises.push(updateSessionSystemPrompt(session.session_id, finalSystemPrompt || null));
                     }
                     
                     if (editMediaOutputPath !== (session.media_output_path || '')) {
@@ -887,10 +1163,6 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
                     
                     if (editLlmConfigId !== (session.llm_config_id || null)) {
                       promises.push(updateSessionLLMConfig(session.session_id, editLlmConfigId));
-                      // 如果设置了默认模型，同时更新当前选中的模型
-                      if (editLlmConfigId) {
-                        setSelectedLLMConfigId(editLlmConfigId);
-                      }
                     }
                     
                     await Promise.all(promises);
@@ -923,6 +1195,92 @@ const SessionListItem: React.FC<SessionListItemProps> = ({
           </div>
         </div>,
         document.body
+      )}
+
+      {/* 添加自定义职业对话框 */}
+      {showAddProfessionDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[10000]" onClick={() => setShowAddProfessionDialog(false)}>
+          <div className="bg-white dark:bg-[#2d2d2d] rounded-lg shadow-xl p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-[#ffffff]">
+                添加自定义职业
+              </h3>
+              <button
+                onClick={() => setShowAddProfessionDialog(false)}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
+                  职业类型
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setEditProfessionType('career')}
+                    className={`flex-1 px-3 py-2 text-sm rounded-lg transition-colors ${
+                      editProfessionType === 'career'
+                        ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                        : 'bg-gray-100 dark:bg-[#363636] text-gray-600 dark:text-[#b0b0b0] hover:bg-gray-200 dark:hover:bg-[#404040]'
+                    }`}
+                  >
+                    功能职业
+                  </button>
+                  <button
+                    onClick={() => setEditProfessionType('game')}
+                    className={`flex-1 px-3 py-2 text-sm rounded-lg transition-colors ${
+                      editProfessionType === 'game'
+                        ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                        : 'bg-gray-100 dark:bg-[#363636] text-gray-600 dark:text-[#b0b0b0] hover:bg-gray-200 dark:hover:bg-[#404040]'
+                    }`}
+                  >
+                    游戏职业
+                  </button>
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
+                  职业名称
+                </label>
+                <input
+                  type="text"
+                  value={newProfessionValue}
+                  onChange={(e) => setNewProfessionValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleSaveCustomProfession();
+                    }
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600"
+                  placeholder="输入职业名称..."
+                  autoFocus
+                />
+              </div>
+            </div>
+            
+            <div className="flex items-center justify-end space-x-3 mt-6">
+              <button
+                onClick={() => {
+                  setShowAddProfessionDialog(false);
+                  setNewProfessionValue('');
+                }}
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-[#ffffff] bg-gray-100 dark:bg-[#363636] hover:bg-gray-200 dark:hover:bg-[#4a4a4a] rounded-lg transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleSaveCustomProfession}
+                className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors"
+              >
+                添加
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );
@@ -999,6 +1357,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   const [avatarConfigDraft, setAvatarConfigDraft] = useState<string | null>(null); // 头像配置草稿
   const avatarConfigFileInputRef = useRef<HTMLInputElement>(null); // 头像配置对话框的文件输入
   
+
   // 头部配置对话框状态（用于从聊天头部点击头像时打开）
   const [showHeaderConfigDialog, setShowHeaderConfigDialog] = useState(false);
   const [headerConfigEditName, setHeaderConfigEditName] = useState('');
@@ -1006,6 +1365,13 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   const [headerConfigEditSystemPrompt, setHeaderConfigEditSystemPrompt] = useState('');
   const [headerConfigEditMediaOutputPath, setHeaderConfigEditMediaOutputPath] = useState('');
   const [headerConfigEditLlmConfigId, setHeaderConfigEditLlmConfigId] = useState<string | null>(null);
+  const [headerConfigEditProfession, setHeaderConfigEditProfession] = useState<string | null>(null); // 职业选择
+  const [headerConfigEditProfessionType, setHeaderConfigEditProfessionType] = useState<'career' | 'game'>('career'); // 职业类型
+  const [headerConfigCareerProfessions, setHeaderConfigCareerProfessions] = useState<string[]>(DEFAULT_CAREER_PROFESSIONS); // 功能职业列表
+  const [headerConfigGameProfessions, setHeaderConfigGameProfessions] = useState<string[]>(DEFAULT_GAME_PROFESSIONS); // 游戏职业列表
+  const [isLoadingHeaderProfessions, setIsLoadingHeaderProfessions] = useState(false); // 加载职业列表状态
+  const [showHeaderAddProfessionDialog, setShowHeaderAddProfessionDialog] = useState(false); // 添加职业对话框
+  const [headerNewProfessionValue, setHeaderNewProfessionValue] = useState(''); // 新职业名称
   const [headerConfigActiveTab, setHeaderConfigActiveTab] = useState<'basic' | 'skillpacks'>('basic');
   const headerConfigFileInputRef = useRef<HTMLInputElement>(null);
   const [isSavingHeaderAsRole, setIsSavingHeaderAsRole] = useState(false);
@@ -1204,7 +1570,8 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   };
 
   // 从URL参数中获取会话ID（用于从智能体页面跳转过来）
-  const [searchParams] = useSearchParams();
+  // 注意：必须使用 setSearchParams 来清理参数，避免 window.history.replaceState 导致 react-router 的 searchParams 不同步
+  const [searchParams, setSearchParams] = useSearchParams();
   
   // 加载LLM配置和MCP服务器列表
   useEffect(() => {
@@ -1263,10 +1630,12 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
       const session = sessions.find(s => s.session_id === sessionIdFromUrl);
       if (session && session.session_type === 'agent') {
         handleSelectSession(sessionIdFromUrl);
-        // 清除URL参数
-        const newSearchParams = new URLSearchParams(searchParams);
-        newSearchParams.delete('session');
-        window.history.replaceState({}, '', window.location.pathname + (newSearchParams.toString() ? '?' + newSearchParams.toString() : ''));
+        // 清除URL参数（使用 react-router，避免 URL 已变更但 searchParams hook 不同步）
+        setSearchParams((prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete('session');
+          return next;
+        }, { replace: true });
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1295,7 +1664,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
     const configSessionId = searchParams.get('config');
     if (configSessionId && configSessionId === currentSessionId && currentSessionId) {
       // 延迟打开对话框，确保会话数据已加载
-      setTimeout(() => {
+      const timer = window.setTimeout(() => {
         const currentSession =
           sessions.find(s => s.session_id === currentSessionId) ||
           (currentSessionMeta?.session_id === currentSessionId ? currentSessionMeta : null);
@@ -1305,17 +1674,70 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
           setHeaderConfigEditSystemPrompt(currentSession.system_prompt || '');
           setHeaderConfigEditMediaOutputPath(currentSession.media_output_path || '');
           setHeaderConfigEditLlmConfigId(currentSession.llm_config_id || null);
+          // 判断职业类型并提取当前职业
+          const professionType = detectProfessionType(currentSession.name, currentSession.system_prompt);
+          setHeaderConfigEditProfessionType(professionType);
+          // 加载职业列表
+          (async () => {
+            try {
+              setIsLoadingHeaderProfessions(true);
+              const [careerOptions, gameOptions] = await Promise.all([
+                getDimensionOptions('profession', 'career'),
+                getDimensionOptions('profession', 'game'),
+              ]);
+              setHeaderConfigCareerProfessions([...DEFAULT_CAREER_PROFESSIONS, ...careerOptions]);
+              setHeaderConfigGameProfessions([...DEFAULT_GAME_PROFESSIONS, ...gameOptions]);
+              // 提取当前职业
+              const allProfessions = professionType === 'career' 
+                ? [...DEFAULT_CAREER_PROFESSIONS, ...careerOptions]
+                : [...DEFAULT_GAME_PROFESSIONS, ...gameOptions];
+              const currentProfession = extractProfession(currentSession.name, currentSession.system_prompt, allProfessions);
+              setHeaderConfigEditProfession(currentProfession);
+            } catch (error) {
+              console.error('[Workflow] Failed to load professions:', error);
+              // 使用默认职业列表
+              const allProfessions = professionType === 'career' ? DEFAULT_CAREER_PROFESSIONS : DEFAULT_GAME_PROFESSIONS;
+              const currentProfession = extractProfession(currentSession.name, currentSession.system_prompt, allProfessions);
+              setHeaderConfigEditProfession(currentProfession);
+            } finally {
+              setIsLoadingHeaderProfessions(false);
+            }
+          })();
           setHeaderConfigActiveTab('basic');
           setShowHeaderConfigDialog(true);
         }
-        // 清除URL参数
-        const newSearchParams = new URLSearchParams(searchParams);
-        newSearchParams.delete('config');
-        window.history.replaceState({}, '', `${window.location.pathname}${newSearchParams.toString() ? '?' + newSearchParams.toString() : ''}`);
+        // 清除URL参数（使用 react-router，避免 URL 已变更但 searchParams hook 不同步）
+        setSearchParams((prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete('config');
+          return next;
+        }, { replace: true });
       }, 100);
+      return () => window.clearTimeout(timer);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSessionId, searchParams]);
+
+  // 当头部配置对话框打开时，加载职业列表
+  useEffect(() => {
+    if (showHeaderConfigDialog) {
+      (async () => {
+        try {
+          setIsLoadingHeaderProfessions(true);
+          const [careerOptions, gameOptions] = await Promise.all([
+            getDimensionOptions('profession', 'career'),
+            getDimensionOptions('profession', 'game'),
+          ]);
+          setHeaderConfigCareerProfessions([...DEFAULT_CAREER_PROFESSIONS, ...careerOptions]);
+          setHeaderConfigGameProfessions([...DEFAULT_GAME_PROFESSIONS, ...gameOptions]);
+        } catch (error) {
+          console.error('[Workflow] Failed to load professions:', error);
+        } finally {
+          setIsLoadingHeaderProfessions(false);
+        }
+      })();
+    }
+  }, [showHeaderConfigDialog]);
   
   // 当选择会话时，加载历史消息、头像和人设
   useEffect(() => {
@@ -1866,6 +2288,18 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   
   // 选择会话
   const handleSelectSession = async (session_id: string) => {
+    // 切换会话时，关闭升级对话框和配置对话框
+    setShowUpgradeToAgentDialog(false);
+    setShowHeaderConfigDialog(false);
+    
+    // 清除URL中的config参数，避免切换会话时自动弹出配置对话框
+    const currentSearchParams = new URLSearchParams(window.location.search);
+    if (currentSearchParams.has('config')) {
+      currentSearchParams.delete('config');
+      const newUrl = `${window.location.pathname}${currentSearchParams.toString() ? '?' + currentSearchParams.toString() : ''}`;
+      window.history.replaceState({}, '', newUrl);
+    }
+    
     if (session_id === temporarySessionId) {
       // 切换到临时会话
       setIsTemporarySession(true);
@@ -5878,6 +6312,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                       setOpenAgentTabs(newTabs);
                       
                       // 激活新创建的会话（直接设置状态，不调用 handleSelectSession 避免覆盖 tabs）
+                      setShowUpgradeToAgentDialog(false); // 关闭升级对话框
                       setActiveAgentTab(newSession.session_id);
                       setCurrentSessionId(newSession.session_id);
                       setCurrentSessionMeta(newSession);
@@ -6535,30 +6970,28 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
               
               {/* 创建技能包按钮 */}
               {currentSessionId && messages.filter(m => m.role !== 'system').length > 0 && (
-                <button
+                <Button
                   onClick={() => {
                     setSkillPackSelectionMode(!skillPackSelectionMode);
                     if (skillPackSelectionMode) {
                       setSelectedMessageIds(new Set());
                     }
                   }}
-                  className={`flex items-center space-x-1 px-2.5 py-1 text-xs rounded transition-all ${
-                    skillPackSelectionMode 
-                      ? 'bg-primary-500 text-white' 
-                      : 'btn-secondary text-xs'
-                  }`}
+                  variant={skillPackSelectionMode ? 'primary' : 'secondary'}
+                  size="sm"
                   title="创建技能包"
                 >
                   <Package className="w-3.5 h-3.5" />
                   <span>{skillPackSelectionMode ? '取消' : '技能包'}</span>
-                </button>
+                </Button>
               )}
               {/* Summarize 按钮 */}
               {currentSessionId && messages.filter(m => m.role !== 'system').length > 0 && (
-                <button
+                <Button
                   onClick={handleManualSummarize}
                   disabled={isSummarizing}
-                  className="btn-primary flex items-center space-x-1 px-2.5 py-1 text-xs disabled:opacity-50"
+                  variant="primary"
+                  size="sm"
                   title="总结当前会话内容"
                 >
                   {isSummarizing ? (
@@ -6567,7 +7000,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                     <Sparkles className="w-3.5 h-3.5" />
                   )}
                   <span>总结</span>
-                </button>
+                </Button>
               )}
             </div>
           </div>
@@ -7950,74 +8383,75 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                       <Sparkles className="w-5 h-5 text-primary-500" />
                       <span>升级为智能体</span>
                     </h3>
-                    <button 
+                    <IconButton
+                      icon={X}
                       onClick={() => setShowUpgradeToAgentDialog(false)}
-                      className="text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
+                      variant="ghost"
+                      label="关闭"
+                    />
                   </div>
                   <div className="p-5 space-y-4">
                     <p className="text-sm text-gray-600 dark:text-[#b0b0b0]">
                       智能体必须设置头像、名字和人设。升级后，该会话将拥有固定的身份和角色。
                     </p>
 
-                    {/* 智能体名称 */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-1">
-                        智能体名称 <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={agentName}
-                        onChange={(e) => setAgentName(e.target.value)}
-                        className="input-field"
-                        placeholder="例如：AI助手、产品经理等"
+                    <FormFieldGroup spacing="default">
+                      {/* 智能体名称 */}
+                      <InputField
+                        label="智能体名称"
+                        required
+                        inputProps={{
+                          id: "agent-name",
+                          type: "text",
+                          value: agentName,
+                          onChange: (e) => setAgentName(e.target.value),
+                          placeholder: "例如：AI助手、产品经理等",
+                        }}
                       />
-          </div>
 
-                    {/* 智能体头像 */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-1">
-                        智能体头像 <span className="text-red-500">*</span>
-                      </label>
-                      <div className="flex items-center space-x-3">
-                        <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-gray-200 dark:border-[#404040] flex items-center justify-center bg-gray-100 dark:bg-[#363636]">
-                          {agentAvatar ? (
-                            <img src={agentAvatar} alt="Avatar" className="w-full h-full object-cover" />
-                          ) : (
-                            <Bot className="w-8 h-8 text-gray-400" />
-                          )}
+                      {/* 智能体头像 */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-1">
+                          智能体头像 <span className="text-red-500">*</span>
+                        </label>
+                        <div className="flex items-center space-x-3">
+                          <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-gray-200 dark:border-[#404040] flex items-center justify-center bg-gray-100 dark:bg-[#363636]">
+                            {agentAvatar ? (
+                              <img src={agentAvatar} alt="Avatar" className="w-full h-full object-cover" />
+                            ) : (
+                              <Bot className="w-8 h-8 text-gray-400" />
+                            )}
+                          </div>
+                          <Button
+                            onClick={() => agentAvatarFileInputRef.current?.click()}
+                            variant="secondary"
+                            size="sm"
+                          >
+                            选择头像
+                          </Button>
+                          <input
+                            ref={agentAvatarFileInputRef}
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={handleAvatarUpload}
+                          />
                         </div>
-                        <button
-                          onClick={() => agentAvatarFileInputRef.current?.click()}
-                          className="btn-secondary text-sm"
-                        >
-                          选择头像
-                        </button>
-                        <input
-                          ref={agentAvatarFileInputRef}
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={handleAvatarUpload}
-                        />
                       </div>
-                    </div>
 
-                    {/* 智能体人设 */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-1">
-                        智能体人设 <span className="text-red-500">*</span>
-                      </label>
-                      <textarea
-                        value={agentSystemPrompt}
-                        onChange={(e) => setAgentSystemPrompt(e.target.value)}
-                        placeholder="例如：你是一个专业的产品经理，擅长分析用户需求和产品设计..."
-                        className="input-field"
-                        rows={4}
+                      {/* 智能体人设 */}
+                      <TextareaField
+                        label="智能体人设"
+                        required
+                        textareaProps={{
+                          id: "agent-system-prompt",
+                          value: agentSystemPrompt,
+                          onChange: (e) => setAgentSystemPrompt(e.target.value),
+                          placeholder: "例如：你是一个专业的产品经理，擅长分析用户需求和产品设计...",
+                          rows: 4,
+                        }}
                       />
-                    </div>
+                    </FormFieldGroup>
 
                     {/* 关联LLM模型 */}
                     <div>
@@ -8044,19 +8478,21 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                     </div>
                   </div>
                   <div className="px-5 py-4 bg-gray-50 dark:bg-[#363636] flex items-center justify-between">
-                    <button
+                    <Button
                       onClick={() => setShowUpgradeToAgentDialog(false)}
-                      className="text-sm text-gray-600 dark:text-[#b0b0b0] hover:text-gray-900 dark:hover:text-[#cccccc]"
+                      variant="ghost"
+                      size="sm"
                     >
                       取消
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       onClick={handleUpgrade}
                       disabled={isUpgrading || !agentName.trim() || !agentAvatar || !agentSystemPrompt.trim() || !agentLLMConfigId}
-                      className="btn-primary text-sm disabled:opacity-50"
+                      variant="primary"
+                      size="sm"
                     >
                       {isUpgrading ? '升级中...' : '确认升级'}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -8089,19 +8525,22 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                       )}
                     </div>
                     <div className="flex items-center space-x-3">
-                      <button
+                      <Button
                         onClick={() => avatarConfigFileInputRef.current?.click()}
-                        className="btn-secondary text-sm"
+                        variant="secondary"
+                        size="sm"
                       >
                         选择图片
-                      </button>
+                      </Button>
                       {avatarConfigDraft && (
-                        <button
+                        <Button
                           onClick={() => setAvatarConfigDraft(null)}
-                          className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
+                          variant="ghost"
+                          size="sm"
+                          className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
                         >
                           清除头像
-                        </button>
+                        </Button>
                       )}
                     </div>
                     <input
@@ -8133,13 +8572,14 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   </p>
                 </div>
                 <div className="px-5 py-4 bg-gray-50 dark:bg-[#363636] flex items-center justify-end space-x-3">
-                  <button
+                  <Button
                     onClick={() => setShowAvatarConfigDialog(false)}
-                    className="text-sm text-gray-600 dark:text-[#b0b0b0] hover:text-gray-900 dark:hover:text-[#cccccc]"
+                    variant="ghost"
+                    size="sm"
                   >
                     取消
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     onClick={async () => {
                       try {
                         await updateSessionAvatar(currentSessionId, avatarConfigDraft || '');
@@ -8156,10 +8596,11 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                         alert('保存头像失败，请重试');
                       }
                     }}
-                    className="btn-primary text-sm"
+                    variant="primary"
+                    size="sm"
                   >
                     保存
-                  </button>
+                  </Button>
                 </div>
               </div>
             </div>
@@ -8507,6 +8948,94 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
               </div>
             </div>
             
+            {/* 职业选择（仅对 agent 显示） */}
+            {(() => {
+              const currentSession = sessions.find(s => s.session_id === currentSessionId);
+              const isAgent = currentSession?.session_type === 'agent';
+              if (!isAgent) return null;
+              
+              return (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff]">
+                      职业
+                    </label>
+                    <button
+                      onClick={() => setShowHeaderAddProfessionDialog(true)}
+                      className="flex items-center gap-1 px-2 py-1 text-xs text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-colors"
+                      title="添加自定义职业"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>添加</span>
+                    </button>
+                  </div>
+                  
+                  {/* 职业类型切换 */}
+                  <div className="flex gap-2 mb-2">
+                    <button
+                      onClick={() => {
+                        setHeaderConfigEditProfessionType('career');
+                        setHeaderConfigEditProfession(null); // 切换类型时清空选择
+                      }}
+                      className={`flex-1 px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                        headerConfigEditProfessionType === 'career'
+                          ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                          : 'bg-gray-100 dark:bg-[#363636] text-gray-600 dark:text-[#b0b0b0] hover:bg-gray-200 dark:hover:bg-[#404040]'
+                      }`}
+                    >
+                      功能职业
+                    </button>
+                    <button
+                      onClick={() => {
+                        setHeaderConfigEditProfessionType('game');
+                        setHeaderConfigEditProfession(null); // 切换类型时清空选择
+                      }}
+                      className={`flex-1 px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                        headerConfigEditProfessionType === 'game'
+                          ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                          : 'bg-gray-100 dark:bg-[#363636] text-gray-600 dark:text-[#b0b0b0] hover:bg-gray-200 dark:hover:bg-[#404040]'
+                      }`}
+                    >
+                      游戏职业
+                    </button>
+                  </div>
+                  
+                  {/* 职业选择下拉框 */}
+                  <select
+                    value={headerConfigEditProfession || ''}
+                    onChange={(e) => {
+                      const selectedProfession = e.target.value || null;
+                      setHeaderConfigEditProfession(selectedProfession);
+                      // 自动更新名称和人设以反映职业变化
+                      const currentProfessionList = headerConfigEditProfessionType === 'career' 
+                        ? headerConfigCareerProfessions 
+                        : headerConfigGameProfessions;
+                      const { name, systemPrompt } = applyProfessionToNameOrPrompt(
+                        selectedProfession,
+                        headerConfigEditName,
+                        headerConfigEditSystemPrompt,
+                        currentProfessionList
+                      );
+                      setHeaderConfigEditName(name);
+                      setHeaderConfigEditSystemPrompt(systemPrompt);
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600"
+                    disabled={isLoadingHeaderProfessions}
+                  >
+                    <option value="">无（自定义）</option>
+                    {(headerConfigEditProfessionType === 'career' ? headerConfigCareerProfessions : headerConfigGameProfessions).map(profession => (
+                      <option key={profession} value={profession}>
+                        {profession}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-1">
+                    选择职业后，会自动更新名称和人设中的职业信息
+                  </p>
+                </div>
+              );
+            })()}
+            
             {/* 默认模型选择 */}
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
@@ -8649,22 +9178,43 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 </button>
               );
             })()}
-            <button
+            <Button
               onClick={() => setShowHeaderConfigDialog(false)}
-              className="text-sm text-gray-600 dark:text-[#b0b0b0] hover:text-gray-900 dark:hover:text-[#cccccc]"
+              variant="ghost"
+              size="sm"
             >
               取消
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={async () => {
                 try {
                   const promises: Promise<void>[] = [];
                   const currentSession = sessions.find(s => s.session_id === currentSessionId);
                   if (!currentSession || !currentSessionId) return;
                   
+                  // 如果职业发生变化，应用职业到名称和人设
+                  let finalName = headerConfigEditName.trim();
+                  let finalSystemPrompt = headerConfigEditSystemPrompt.trim();
+                  
+                  const currentProfessionList = headerConfigEditProfessionType === 'career' 
+                    ? headerConfigCareerProfessions 
+                    : headerConfigGameProfessions;
+                  const currentProfession = extractProfession(currentSession.name, currentSession.system_prompt, currentProfessionList);
+                  if (headerConfigEditProfession !== currentProfession) {
+                    // 职业发生变化，应用职业更新
+                    const applied = applyProfessionToNameOrPrompt(
+                      headerConfigEditProfession,
+                      finalName,
+                      finalSystemPrompt,
+                      currentProfessionList
+                    );
+                    finalName = applied.name;
+                    finalSystemPrompt = applied.systemPrompt;
+                  }
+                  
                   // 更新名称
-                  if (headerConfigEditName.trim() !== (currentSession.name || '')) {
-                    promises.push(updateSessionName(currentSessionId, headerConfigEditName.trim()));
+                  if (finalName !== (currentSession.name || '')) {
+                    promises.push(updateSessionName(currentSessionId, finalName));
                   }
                   
                   // 更新头像
@@ -8674,9 +9224,9 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   }
                   
                   // 更新人设
-                  if (headerConfigEditSystemPrompt !== (currentSession.system_prompt || '')) {
-                    promises.push(updateSessionSystemPrompt(currentSessionId, headerConfigEditSystemPrompt.trim() || null));
-                    setCurrentSystemPrompt(headerConfigEditSystemPrompt.trim() || null);
+                  if (finalSystemPrompt !== (currentSession.system_prompt || '')) {
+                    promises.push(updateSessionSystemPrompt(currentSessionId, finalSystemPrompt || null));
+                    setCurrentSystemPrompt(finalSystemPrompt || null);
                   }
                   
                   // 更新多媒体保存路径
@@ -8706,81 +9256,183 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   alert('保存失败，请重试');
                 }
               }}
-              className="px-4 py-2 text-sm font-medium text-white bg-primary-500 hover:bg-primary-600 rounded-lg transition-colors"
+              variant="primary"
+              size="sm"
             >
               保存
-            </button>
+            </Button>
           </div>
         </div>
       </div>,
       document.body
     )}
 
-    <Dialog
+    {/* 头部配置对话框 - 添加自定义职业对话框 */}
+    {showHeaderAddProfessionDialog && (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[10001]" onClick={() => setShowHeaderAddProfessionDialog(false)}>
+        <div className="bg-white dark:bg-[#2d2d2d] rounded-lg shadow-xl p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-[#ffffff]">
+              添加自定义职业
+            </h3>
+            <button
+              onClick={() => setShowHeaderAddProfessionDialog(false)}
+              className="text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
+                职业类型
+              </label>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setHeaderConfigEditProfessionType('career')}
+                  className={`flex-1 px-3 py-2 text-sm rounded-lg transition-colors ${
+                    headerConfigEditProfessionType === 'career'
+                      ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                      : 'bg-gray-100 dark:bg-[#363636] text-gray-600 dark:text-[#b0b0b0] hover:bg-gray-200 dark:hover:bg-[#404040]'
+                  }`}
+                >
+                  功能职业
+                </button>
+                <button
+                  onClick={() => setHeaderConfigEditProfessionType('game')}
+                  className={`flex-1 px-3 py-2 text-sm rounded-lg transition-colors ${
+                    headerConfigEditProfessionType === 'game'
+                      ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
+                      : 'bg-gray-100 dark:bg-[#363636] text-gray-600 dark:text-[#b0b0b0] hover:bg-gray-200 dark:hover:bg-[#404040]'
+                  }`}
+                >
+                  游戏职业
+                </button>
+              </div>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
+                职业名称
+              </label>
+              <input
+                type="text"
+                value={headerNewProfessionValue}
+                onChange={(e) => setHeaderNewProfessionValue(e.target.value)}
+                onKeyDown={async (e) => {
+                  if (e.key === 'Enter') {
+                    if (!headerNewProfessionValue.trim()) {
+                      toast({ title: '请输入职业名称', variant: 'destructive' });
+                      return;
+                    }
+                    try {
+                      const result = await saveDimensionOption('profession', headerConfigEditProfessionType, headerNewProfessionValue.trim());
+                      if (result.success) {
+                        toast({ title: '职业已添加', variant: 'success' });
+                        // 重新加载职业列表
+                        const options = await getDimensionOptions('profession', headerConfigEditProfessionType);
+                        if (headerConfigEditProfessionType === 'career') {
+                          setHeaderConfigCareerProfessions([...DEFAULT_CAREER_PROFESSIONS, ...options]);
+                        } else {
+                          setHeaderConfigGameProfessions([...DEFAULT_GAME_PROFESSIONS, ...options]);
+                        }
+                        // 自动选择新添加的职业
+                        setHeaderConfigEditProfession(headerNewProfessionValue.trim());
+                        setShowHeaderAddProfessionDialog(false);
+                        setHeaderNewProfessionValue('');
+                      } else {
+                        toast({ title: '添加失败', description: result.error, variant: 'destructive' });
+                      }
+                    } catch (error) {
+                      console.error('[Workflow] Failed to save custom profession:', error);
+                      toast({ title: '添加失败', description: error instanceof Error ? error.message : String(error), variant: 'destructive' });
+                    }
+                  }
+                }}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600"
+                placeholder="输入职业名称..."
+                autoFocus
+              />
+            </div>
+          </div>
+          
+          <div className="flex items-center justify-end space-x-3 mt-6">
+            <button
+              onClick={() => {
+                setShowHeaderAddProfessionDialog(false);
+                setHeaderNewProfessionValue('');
+              }}
+              className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-[#ffffff] bg-gray-100 dark:bg-[#363636] hover:bg-gray-200 dark:hover:bg-[#4a4a4a] rounded-lg transition-colors"
+            >
+              取消
+            </button>
+            <button
+              onClick={async () => {
+                if (!headerNewProfessionValue.trim()) {
+                  toast({ title: '请输入职业名称', variant: 'destructive' });
+                  return;
+                }
+                try {
+                  const result = await saveDimensionOption('profession', headerConfigEditProfessionType, headerNewProfessionValue.trim());
+                  if (result.success) {
+                    toast({ title: '职业已添加', variant: 'success' });
+                    // 重新加载职业列表
+                    const options = await getDimensionOptions('profession', headerConfigEditProfessionType);
+                    if (headerConfigEditProfessionType === 'career') {
+                      setHeaderConfigCareerProfessions([...DEFAULT_CAREER_PROFESSIONS, ...options]);
+                    } else {
+                      setHeaderConfigGameProfessions([...DEFAULT_GAME_PROFESSIONS, ...options]);
+                    }
+                    // 自动选择新添加的职业
+                    setHeaderConfigEditProfession(headerNewProfessionValue.trim());
+                    setShowHeaderAddProfessionDialog(false);
+                    setHeaderNewProfessionValue('');
+                  } else {
+                    toast({ title: '添加失败', description: result.error, variant: 'destructive' });
+                  }
+                } catch (error) {
+                  console.error('[Workflow] Failed to save custom profession:', error);
+                  toast({ title: '添加失败', description: error instanceof Error ? error.message : String(error), variant: 'destructive' });
+                }
+              }}
+              className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors"
+            >
+              添加
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    <ConfirmDialog
       open={deleteSessionTarget !== null}
       onOpenChange={(open) => {
         if (!open) setDeleteSessionTarget(null);
       }}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>删除会话</DialogTitle>
-          <DialogDescription>
-            确定要删除「{deleteSessionTarget?.name}」吗？此操作不可恢复。
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter className="mt-4">
-          <Button
-            variant="secondary"
-            onClick={() => setDeleteSessionTarget(null)}
-          >
-            取消
-          </Button>
-          <Button
-            variant="destructive"
-            onClick={async () => {
-              if (!deleteSessionTarget) return;
-              const id = deleteSessionTarget.id;
-              setDeleteSessionTarget(null);
-              await performDeleteSession(id);
-            }}
-          >
-            删除
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      title="删除会话"
+      description={`确定要删除「${deleteSessionTarget?.name}」吗？此操作不可恢复。`}
+      variant="destructive"
+      onConfirm={async () => {
+        if (!deleteSessionTarget) return;
+        const id = deleteSessionTarget.id;
+        setDeleteSessionTarget(null);
+        await performDeleteSession(id);
+      }}
+    />
 
     {/* 删除 Agent Tab 确认对话框 */}
-    <Dialog
+    <ConfirmDialog
       open={deleteAgentTabTarget !== null}
       onOpenChange={(open) => {
         if (!open) cancelDeleteAgentTab();
       }}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>删除对话记录</DialogTitle>
-          <DialogDescription>
-            确定要永久删除「{deleteAgentTabTarget?.name}」吗？此操作不可恢复，所有对话内容将被删除。
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter className="mt-4">
-          <Button
-            variant="secondary"
-            onClick={cancelDeleteAgentTab}
-          >
-            取消
-          </Button>
-          <Button
-            variant="destructive"
-            onClick={confirmDeleteAgentTab}
-          >
-            永久删除
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      title="删除对话记录"
+      description={`确定要永久删除「${deleteAgentTabTarget?.name}」吗？此操作不可恢复，所有对话内容将被删除。`}
+      variant="destructive"
+      confirmText="永久删除"
+      onConfirm={confirmDeleteAgentTab}
+    />
     </>
   );
 };

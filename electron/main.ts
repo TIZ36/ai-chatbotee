@@ -279,6 +279,20 @@ function createWindow() {
   
   const isDarwin = process.platform === 'darwin';
   const isWin = process.platform === 'win32';
+  
+  // 设置应用图标路径
+  // 在开发环境中，__dirname 指向 electron/dist，需要向上两级到项目根目录
+  // 在生产环境中，图标应该在应用资源目录中
+  let iconPath: string | undefined;
+  const devIconPath = path.join(__dirname, '../../assets/app_logo_dark.png');
+  const prodIconPath = path.join(process.resourcesPath || __dirname, 'assets/app_logo_dark.png');
+  
+  if (fs.existsSync(devIconPath)) {
+    iconPath = devIconPath;
+  } else if (fs.existsSync(prodIconPath)) {
+    iconPath = prodIconPath;
+  }
+  
   mainWindow = new BrowserWindow({
     width: windowWidth,
     height: windowHeight,
@@ -286,6 +300,7 @@ function createWindow() {
     y: y,
     minWidth: 1200,
     minHeight: 800,
+    icon: iconPath, // 设置窗口图标
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,

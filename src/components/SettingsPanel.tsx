@@ -242,7 +242,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         {/* 关于 */}
         <Card title="关于">
           <div className="space-y-2 text-sm text-gray-600 dark:text-[#b0b0b0]">
-            <p className="font-medium text-gray-900 dark:text-white">AI-Chatbotee v0.1.0</p>
+            <p className="font-medium text-gray-900 dark:text-white">chatee v0.1.0</p>
             <p>一个帮助你管理 LLM 和 MCP 工作流的工具</p>
             <p className="mt-2">功能包括：</p>
             <ul className="list-disc list-inside space-y-1 ml-2 text-xs">

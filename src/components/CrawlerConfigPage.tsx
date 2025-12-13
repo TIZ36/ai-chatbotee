@@ -7,6 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { Globe, Package, Database, Plus, Trash2, Edit2, RefreshCw, X, ChevronRight, ChevronDown, Loader, AlertCircle, Copy } from 'lucide-react';
 import CrawlerTestPage from './CrawlerTestPage';
 import PageLayout, { Card, EmptyState, Badge } from './ui/PageLayout';
+import { Button } from './ui/Button';
 import { 
   getModules, 
   getBatches, 
@@ -175,13 +176,13 @@ const CrawlerConfigPage: React.FC = () => {
   }
 
   const headerActions = (
-    <button
+    <Button
       onClick={() => setShowTestPage(true)}
-      className="gnome-btn gnome-btn-primary"
+      variant="primary"
     >
-      <Plus className="w-4 h-4" />
+      <Plus className="w-4 h-4 mr-2" />
       <span>新建爬虫模块</span>
-    </button>
+    </Button>
   );
 
   return (
@@ -204,13 +205,13 @@ const CrawlerConfigPage: React.FC = () => {
             title="还没有爬虫模块"
             description="点击右上角的「新建爬虫模块」按钮开始创建"
             action={
-              <button
+              <Button
                 onClick={() => setShowTestPage(true)}
-                className="gnome-btn gnome-btn-primary"
+                variant="primary"
               >
-                <Plus className="w-4 h-4" />
+                <Plus className="w-4 h-4 mr-2" />
                 <span>创建第一个模块</span>
-              </button>
+              </Button>
             }
           />
         ) : (

@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Button } from './ui/Button';
 import { DataVisualizer } from './visualization/DataVisualizer';
 import { getLLMConfigs, LLMConfigFromDB, getLLMConfigApiKey } from '../services/llmApi';
 import { getMCPServers, MCPServerConfig } from '../services/mcpApi';
@@ -2851,37 +2852,40 @@ const WorkflowEditor: React.FC = () => {
           </div>
         
           <div className="flex items-center space-x-2">
-            <button
+            <Button
               onClick={handleExecuteWorkflow}
               disabled={isExecuting}
-              className="btn-primary flex items-center space-x-1 px-2 py-1 text-xs disabled:opacity-50"
+              variant="primary"
+              size="sm"
             >
               {isExecuting ? (
                 <>
-                  <Loader className="w-3 h-3 animate-spin" />
+                  <Loader className="w-3 h-3 mr-1 animate-spin" />
                   <span>执行中...</span>
                 </>
               ) : (
                 <>
-                  <Play className="w-3 h-3" />
+                  <Play className="w-3 h-3 mr-1" />
                   <span>执行</span>
                 </>
               )}
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={handleSaveWorkflow}
-              className="btn-primary flex items-center space-x-1 px-2 py-1 text-xs"
+              variant="primary"
+              size="sm"
             >
-              <Save className="w-3 h-3" />
+              <Save className="w-3 h-3 mr-1" />
               <span>保存</span>
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={handleNewWorkflow}
-              className="btn-secondary flex items-center space-x-1 px-2 py-1 text-xs"
+              variant="secondary"
+              size="sm"
             >
-              <Plus className="w-3 h-3" />
+              <Plus className="w-3 h-3 mr-1" />
               <span>新建</span>
-            </button>
+            </Button>
           </div>
         </div>
       
@@ -3771,12 +3775,13 @@ const WorkflowEditor: React.FC = () => {
               )}
             
               <div className="mt-4 flex justify-end">
-                <button
+                <Button
                   onClick={() => setConfiguringNode(null)}
-                  className="btn-secondary px-3 py-1 text-sm"
+                  variant="secondary"
+                  size="sm"
                 >
                   关闭
-                </button>
+                </Button>
               </div>
             </div>
           </div>
@@ -3853,18 +3858,20 @@ const WorkflowEditor: React.FC = () => {
                 </div>
               
                 <div className="mt-5 flex justify-end space-x-2">
-                  <button
+                  <Button
                     onClick={() => setEditingInputNode(null)}
-                    className="btn-secondary px-4 py-2 text-sm"
+                    variant="secondary"
+                    size="sm"
                   >
                     取消
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     onClick={() => handleSaveInputNode(editingInputNode)}
-                    className="btn-primary px-4 py-2 text-sm"
+                    variant="primary"
+                    size="sm"
                   >
                     保存
-                  </button>
+                  </Button>
                 </div>
               </div>
             </div>
