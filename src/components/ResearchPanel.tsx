@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { BookOpen, ChevronLeft, ChevronRight, Download, FileText, FolderOpen, Hand, Info, Link as LinkIcon, PanelLeftClose, PanelLeftOpen, Play, Plus, Search, Upload, Settings, X, Image as ImageIcon } from 'lucide-react';
-import { createSession, getAgents, getSession, getSessionMessages, saveMessage, updateSessionAvatar, updateSessionLLMConfig, updateSessionSystemPrompt, type Session } from '../services/sessionApi';
+import { createSession, getAgents, getSession, getSessionMessages, saveMessage, updateSessionAvatar, updateSessionLLMConfig, updateSessionSystemPrompt, updateSessionName, type Session } from '../services/sessionApi';
 import { getLLMConfig, getLLMConfigApiKey, getLLMConfigs, type LLMConfigFromDB } from '../services/llmApi';
 import { LLMClient } from '../services/llmClient';
 import { parseMentions } from '../services/roundTableApi';
@@ -201,6 +201,28 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
   const [windows, setWindows] = useState<ResearchWindow[]>([]);
   const [activeWindowId, setActiveWindowId] = useState<string | null>(null);
   
+  // 研究课题Tab标签（支持多个研究课题）- 持久化到 localStorage
+  const [openResearchTabs, setOpenResearchTabs] = useState<Array<{ sessionId: string; name: string }>>(() => {
+    try {
+      const saved = localStorage.getItem('open_research_tabs');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('[Research] Failed to restore research tabs:', e);
+    }
+    return [];
+  });
+  const [activeResearchTab, setActiveResearchTab] = useState<string | null>(() => {
+    return localStorage.getItem('active_research_tab') || null;
+  });
+  const [editingResearchTabId, setEditingResearchTabId] = useState<string | null>(null); // 正在编辑的research tab
+  const [editingResearchTabName, setEditingResearchTabName] = useState<string>(''); // 编辑中的名称
+  const editingResearchTabInputRef = useRef<HTMLInputElement>(null); // 编辑输入框引用
+  
   // TODO 分配弹窗
   const [assignTask, setAssignTask] = useState<string | null>(null);
   const [assignToAgentId, setAssignToAgentId] = useState<string | null>(null);
@@ -329,9 +351,102 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
     })();
   }, []);
 
+  // 保存 openResearchTabs 到 localStorage
+  useEffect(() => {
+    localStorage.setItem('open_research_tabs', JSON.stringify(openResearchTabs));
+  }, [openResearchTabs]);
+
+  // 保存 activeResearchTab 到 localStorage
+  useEffect(() => {
+    if (activeResearchTab) {
+      localStorage.setItem('active_research_tab', activeResearchTab);
+    } else {
+      localStorage.removeItem('active_research_tab');
+    }
+  }, [activeResearchTab]);
+
+  // 应用加载时恢复 active research tab 并按创建时间排序
+  useEffect(() => {
+    (async () => {
+      if (openResearchTabs.length > 0) {
+        // 获取所有 tabs 对应的 session 信息，按创建时间排序
+        try {
+          const sessionsData = await Promise.all(
+            openResearchTabs.map(async (tab) => {
+              try {
+                const session = await getSession(tab.sessionId);
+                return { ...tab, created_at: session?.created_at };
+              } catch {
+                return { ...tab, created_at: null };
+              }
+            })
+          );
+          
+          // 过滤有效的会话并按创建时间排序
+          const validTabs = sessionsData.filter(t => t.created_at !== null);
+          const sortedTabs = validTabs.sort((a, b) => {
+            const timeA = new Date(a.created_at || 0).getTime();
+            const timeB = new Date(b.created_at || 0).getTime();
+            return timeA - timeB;
+          });
+          
+          // 更新排序后的 tabs
+          if (sortedTabs.length > 0) {
+            setOpenResearchTabs(sortedTabs.map(t => ({ sessionId: t.sessionId, name: t.name })));
+          }
+        } catch (e) {
+          console.warn('[Research] Failed to sort tabs by creation time:', e);
+        }
+      }
+      
+      // 如果有持久化的 activeResearchTab 但没有当前 researchSessionId，恢复它
+      if (activeResearchTab && !researchSessionId && openResearchTabs.length > 0) {
+        const tabExists = openResearchTabs.some(t => t.sessionId === activeResearchTab);
+        if (tabExists) {
+          onResearchSessionChange(activeResearchTab);
+        } else if (openResearchTabs.length > 0) {
+          // 如果 activeResearchTab 不存在了，切换到第一个 tab
+          const firstTab = openResearchTabs[0];
+          setActiveResearchTab(firstTab.sessionId);
+          onResearchSessionChange(firstTab.sessionId);
+        }
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // 只在组件挂载时运行一次
+
   // 进入 research：为当前 chatSession 创建/复用 researchSession
   useEffect(() => {
-    if (researchSessionId) return;
+    if (researchSessionId) {
+      // 如果已有researchSessionId，添加到tabs
+      (async () => {
+        try {
+          const session = await getSession(researchSessionId);
+          const sessionName = session?.name || `研究课题 ${researchSessionId.substring(0, 8)}`;
+          setOpenResearchTabs(prev => {
+            if (prev.some(tab => tab.sessionId === researchSessionId)) {
+              // 更新名称
+              return prev.map(tab => 
+                tab.sessionId === researchSessionId ? { ...tab, name: sessionName } : tab
+              );
+            }
+            return [...prev, { sessionId: researchSessionId, name: sessionName }];
+          });
+          setActiveResearchTab(researchSessionId);
+        } catch (e) {
+          console.warn('[Research] Failed to get session:', e);
+          const sessionName = `研究课题 ${researchSessionId.substring(0, 8)}`;
+          setOpenResearchTabs(prev => {
+            if (prev.some(tab => tab.sessionId === researchSessionId)) {
+              return prev;
+            }
+            return [...prev, { sessionId: researchSessionId, name: sessionName }];
+          });
+          setActiveResearchTab(researchSessionId);
+        }
+      })();
+      return;
+    }
 
     (async () => {
       const chatId = chatSessionId || 'temporary-session';
@@ -352,16 +467,113 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
       }
     })();
   }, [chatSessionId, onResearchSessionChange, researchSessionId]);
+  
+  // 关闭研究课题tab
+  const handleCloseResearchTab = (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setOpenResearchTabs(prev => prev.filter(tab => tab.sessionId !== sessionId));
+    
+    // 如果关闭的是当前激活的tab，切换到其他tab
+    if (activeResearchTab === sessionId) {
+      const remainingTabs = openResearchTabs.filter(tab => tab.sessionId !== sessionId);
+      if (remainingTabs.length > 0) {
+        const lastTab = remainingTabs[remainingTabs.length - 1];
+        onResearchSessionChange(lastTab.sessionId);
+      } else {
+        // 没有其他tab了，退出Research模式
+        onExit();
+      }
+    }
+  };
+  
+  // 创建新的研究课题
+  const handleCreateNewResearch = async () => {
+    try {
+      const chatId = chatSessionId || 'temporary-session';
+      const sessionName = `研究课题 ${Date.now().toString().slice(-6)}`;
+      const s = await createSession(undefined, sessionName, 'research');
+      
+      // 直接添加到 tabs 并激活
+      setOpenResearchTabs(prev => [...prev, { sessionId: s.session_id, name: s.name || sessionName }]);
+      setActiveResearchTab(s.session_id);
+      onResearchSessionChange(s.session_id);
+      
+      console.log('[Research] Created new research session:', s.session_id);
+    } catch (e) {
+      console.error('[Research] Failed to create research session:', e);
+    }
+  };
 
-  // 加载 research 历史消息
+  // 开始编辑research tab名称
+  const handleStartEditResearchTab = (sessionId: string) => {
+    const tab = openResearchTabs.find(t => t.sessionId === sessionId);
+    if (tab) {
+      setEditingResearchTabId(sessionId);
+      setEditingResearchTabName(tab.name);
+    }
+  };
+  
+  // 保存research tab名称编辑
+  const handleSaveResearchTabEdit = async () => {
+    if (!editingResearchTabId) return;
+    
+    try {
+      await updateSessionName(editingResearchTabId, editingResearchTabName.trim() || undefined);
+      
+      // 更新tabs中的名称
+      setOpenResearchTabs(prev => prev.map(tab => 
+        tab.sessionId === editingResearchTabId 
+          ? { ...tab, name: editingResearchTabName.trim() || tab.name }
+          : tab
+      ));
+    } catch (error) {
+      console.error('[Research] Failed to update session name:', error);
+      alert('保存失败，请重试');
+    } finally {
+      setEditingResearchTabId(null);
+      setEditingResearchTabName('');
+    }
+  };
+  
+  // 取消编辑research tab名称
+  const handleCancelResearchTabEdit = () => {
+    setEditingResearchTabId(null);
+    setEditingResearchTabName('');
+  };
+  
+  // research tab编辑输入框键盘事件
+  const handleResearchTabEditKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSaveResearchTabEdit();
+    } else if (e.key === 'Escape') {
+      handleCancelResearchTabEdit();
+    }
+  };
+  
+  // 当editingResearchTabId变化时，聚焦输入框
+  useEffect(() => {
+    if (editingResearchTabId && editingResearchTabInputRef.current) {
+      editingResearchTabInputRef.current.focus();
+      editingResearchTabInputRef.current.select();
+    }
+  }, [editingResearchTabId]);
+  
+  // 加载 research 历史消息（加载所有消息）
   useEffect(() => {
     if (!researchSessionId) return;
     (async () => {
       try {
-        const res = await getSessionMessages(researchSessionId, 1, 200);
-        const asc = (res.messages || []).slice().reverse();
-        const list = asc.map(m => ({ role: m.role, content: m.content, created_at: m.created_at }));
-        setMessages(list);
+        // 先获取总数，然后加载所有消息
+        const firstPage = await getSessionMessages(researchSessionId, 1, 1);
+        const total = firstPage.total || 0;
+        if (total > 0) {
+          const res = await getSessionMessages(researchSessionId, 1, total);
+          const asc = (res.messages || []).slice().reverse();
+          const list = asc.map(m => ({ role: m.role, content: m.content, created_at: m.created_at }));
+          setMessages(list);
+        } else {
+          setMessages([]);
+        }
       } catch (e) {
         console.warn('[Research] Failed to load research messages:', e);
         setMessages([]);
@@ -1034,6 +1246,85 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
 
   return (
     <div className="h-full flex flex-col min-h-0">
+      {/* 研究课题Tab标签栏 - 参考RoundTableChat样式 */}
+      {openResearchTabs.length > 0 && (
+        <div className="flex-shrink-0 bg-gray-100 dark:bg-[#1a1a1a] border-b border-gray-200 dark:border-[#404040]">
+          <div className="flex items-center">
+            {/* Tab 容器 */}
+            <div className="flex-1 flex items-end overflow-x-auto scrollbar-hide px-2 pt-2 gap-0.5">
+              {openResearchTabs.map((tab) => {
+                const isActive = activeResearchTab === tab.sessionId;
+                const isEditing = editingResearchTabId === tab.sessionId;
+                return (
+                  <div
+                    key={tab.sessionId}
+                    className={`
+                      group relative flex items-center min-w-0 max-w-[200px]
+                      ${isActive 
+                        ? 'bg-white dark:bg-[#2d2d2d] border-t border-l border-r border-gray-200 dark:border-[#404040] rounded-t-lg -mb-px z-10' 
+                        : 'bg-gray-50 dark:bg-[#252525] border border-transparent hover:bg-gray-100 dark:hover:bg-[#333333] rounded-t-lg'
+                      }
+                    `}
+                    onClick={() => !isEditing && (() => {
+                      onResearchSessionChange(tab.sessionId);
+                      setActiveResearchTab(tab.sessionId);
+                    })()}
+                    onDoubleClick={() => handleStartEditResearchTab(tab.sessionId)}
+                  >
+                    <div className={`
+                      flex items-center gap-2 px-3 py-2 cursor-pointer w-full min-w-0
+                      ${isActive ? 'text-gray-900 dark:text-white' : 'text-gray-600 dark:text-gray-400'}
+                    `}>
+                      {/* 图标 */}
+                      <BookOpen className="w-4 h-4 flex-shrink-0 text-[#7c3aed]" />
+                      
+                      {/* 名称或编辑输入框 */}
+                      {isEditing ? (
+                        <input
+                          ref={editingResearchTabInputRef}
+                          type="text"
+                          value={editingResearchTabName}
+                          onChange={(e) => setEditingResearchTabName(e.target.value)}
+                          onKeyDown={handleResearchTabEditKeyDown}
+                          onBlur={handleSaveResearchTabEdit}
+                          onClick={(e) => e.stopPropagation()}
+                          className="flex-1 min-w-0 px-1 py-0.5 text-sm bg-white dark:bg-[#363636] border border-primary-500 rounded outline-none text-gray-900 dark:text-white"
+                          placeholder="输入研究课题名称"
+                        />
+                      ) : (
+                        <span className="text-sm truncate flex-1 min-w-0">
+                          {tab.name}
+                        </span>
+                      )}
+                      
+                      {/* 关闭按钮 - 仅在hover时显示且不在编辑状态 */}
+                      {!isEditing && (
+                        <button
+                          onClick={(e) => handleCloseResearchTab(tab.sessionId, e)}
+                          className="flex-shrink-0 w-4 h-4 rounded-sm flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all"
+                          title="关闭"
+                        >
+                          <X className="w-3 h-3 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              
+              {/* 新建 Tab 按钮 */}
+              <button
+                onClick={handleCreateNewResearch}
+                className="flex-shrink-0 w-8 h-8 flex items-center justify-center text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-[#333333] rounded-lg transition-colors mb-1"
+                title="新建研究课题"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
       {/* 顶部栏 */}
       <div className="flex-shrink-0 px-3 py-2 border-b border-transparent bg-white/70 dark:bg-[#262626]/70 backdrop-blur">
         <div className="flex items-center justify-between">

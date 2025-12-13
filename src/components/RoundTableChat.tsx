@@ -62,7 +62,13 @@ const RoundTableChat: React.FC<RoundTableChatProps> = ({
     try {
       setIsLoading(true);
       const tables = await getRoundTables();
-      setRoundTables(tables || []);
+      // 按创建时间排序（旧的在前，新的在后）
+      const sortedTables = [...(tables || [])].sort((a, b) => {
+        const timeA = new Date(a.created_at || 0).getTime();
+        const timeB = new Date(b.created_at || 0).getTime();
+        return timeA - timeB;
+      });
+      setRoundTables(sortedTables);
       
       // 如果有传入的roundTableId，自动选中
       if (roundTableId) {
@@ -256,6 +262,7 @@ const RoundTableChat: React.FC<RoundTableChatProps> = ({
                       }
                     `}
                     onClick={() => !isEditing && handleSelectRoundTable(table.round_table_id)}
+                    onDoubleClick={() => handleStartEdit(table.round_table_id)}
                     onContextMenu={(e) => handleContextMenu(e, table.round_table_id)}
                   >
                     <div className={`

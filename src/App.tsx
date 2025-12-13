@@ -77,7 +77,11 @@ const App: React.FC = () => {
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
   const [, setTerminalState] = useState({ isMinimized: false, isMaximized: false });
   const terminalExecuteCommandRef = React.useRef<((command: string) => void) | null>(null);
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>('temporary-session');
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(() => {
+    // 从 localStorage 恢复上次选择的会话
+    const saved = localStorage.getItem('selected_session_id');
+    return saved || 'temporary-session';
+  });
   const [selectedRoundTableId, setSelectedRoundTableId] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(() => {
     const saved = localStorage.getItem('settings');
@@ -95,6 +99,13 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('settings', JSON.stringify(settings));
   }, [settings]);
+
+  // 保存选中的会话ID
+  useEffect(() => {
+    if (selectedSessionId) {
+      localStorage.setItem('selected_session_id', selectedSessionId);
+    }
+  }, [selectedSessionId]);
 
   // 应用主题
   useEffect(() => {
@@ -135,6 +146,14 @@ const App: React.FC = () => {
 
   const handleNewSession = () => {
     // 新会话创建后的回调
+  };
+
+  const handleNewRole = () => {
+    // 打开角色生成器界面
+    setSelectedSessionId('role-generator');
+    if (location.pathname !== '/') {
+      navigate('/');
+    }
   };
 
   const handleSelectRoundTable = (roundTableId: string) => {
@@ -304,12 +323,6 @@ const App: React.FC = () => {
             isActive={location.pathname === '/workflow-editor'}
           />
 
-          <NavItem
-            to="/role-generator"
-            icon={<Sparkles className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-            title="角色生成器"
-            isActive={location.pathname === '/role-generator'}
-          />
         </div>
         
         <div className="flex-1 app-drag" />
@@ -436,6 +449,7 @@ const App: React.FC = () => {
                   isRoundTableMode={isRoundTableMode}
                   onAddToRoundTable={handleAddToRoundTable}
                   onConfigSession={handleConfigSession}
+                  onNewRole={handleNewRole}
                 />
               </Panel>
 
@@ -510,8 +524,6 @@ const App: React.FC = () => {
                     {/* 工作流编辑器 */}
                     <Route path="/workflow-editor" element={<WorkflowEditor />} />
 
-                    {/* 角色生成器 */}
-                    <Route path="/role-generator" element={<RoleGeneratorPage />} />
 
                     {/* LLM配置页面 */}
                     <Route path="/llm-config" element={<LLMConfigPanel />} />

@@ -14,7 +14,7 @@ import { getLLMConfigs, getLLMConfig, getLLMConfigApiKey, LLMConfigFromDB } from
 import { mcpManager, MCPServer, MCPTool } from '../services/mcpClient';
 import { getMCPServers, MCPServerConfig } from '../services/mcpApi';
 import { getSessions, getSession, createSession, getSessionMessages, saveMessage, summarizeSession, getSessionSummaries, deleteSession, clearSummarizeCache, deleteMessage, executeMessageComponent, updateSessionAvatar, updateSessionName, updateSessionSystemPrompt, updateSessionMediaOutputPath, updateSessionLLMConfig, upgradeToAgent, Session, Summary } from '../services/sessionApi';
-import { applyRoleToSession, createRole, updateRoleProfile } from '../services/roleApi';
+import { applyRoleToSession, createRole, updateRoleProfile, createSessionFromRole } from '../services/roleApi';
 import { createSkillPack, saveSkillPack, optimizeSkillPackSummary, getSkillPacks, getSessionSkillPacks, assignSkillPack, unassignSkillPack, SkillPack, SessionSkillPack, SkillPackCreationResult, SkillPackProcessInfo } from '../services/skillPackApi';
 import { estimate_messages_tokens, get_model_max_tokens, estimate_tokens } from '../services/tokenCounter';
 import { getWorkflows, getWorkflow, Workflow as WorkflowType, WorkflowNode, WorkflowConnection } from '../services/workflowApi';
@@ -34,6 +34,7 @@ import {
 } from './ui/Dialog';
 import { toast } from './ui/use-toast';
 import { emitSessionsChanged, SESSIONS_CHANGED_EVENT } from '../utils/sessionEvents';
+import RoleGeneratorPage from './RoleGeneratorPage';
 
 interface Message {
   id: string;
@@ -1014,6 +1015,16 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   const [showSessionTypeDialog, setShowSessionTypeDialog] = useState(false); // 是否显示会话类型选择对话框
   const [showUpgradeToAgentDialog, setShowUpgradeToAgentDialog] = useState(false); // 是否显示升级为智能体对话框
   const [isTemporarySession, setIsTemporarySession] = useState(true); // 当前是否为临时会话（默认是临时会话）
+  const [openAgentTabs, setOpenAgentTabs] = useState<Array<{ sessionId: string; name: string }>>([]); // 当前agent的会话tabs（动态生成，不持久化）
+  const [activeAgentTab, setActiveAgentTab] = useState<string | null>(() => {
+    // 从 localStorage 恢复激活的 agent tab
+    return localStorage.getItem('active_agent_tab') || null;
+  }); // 当前激活的agent tab
+  const [editingAgentTabId, setEditingAgentTabId] = useState<string | null>(null); // 正在编辑的agent tab
+  const [editingAgentTabName, setEditingAgentTabName] = useState<string>(''); // 编辑中的名称
+  const editingAgentTabInputRef = useRef<HTMLInputElement>(null); // 编辑输入框引用
+  const [deleteAgentTabTarget, setDeleteAgentTabTarget] = useState<{ sessionId: string; name: string } | null>(null); // 待删除的agent tab
+  const [currentAgentRoleId, setCurrentAgentRoleId] = useState<string | null>(null); // 当前选中的agent的role_id
   const [agentName, setAgentName] = useState(''); // 升级为智能体时的名称
   const [agentAvatar, setAgentAvatar] = useState<string | null>(null); // 升级为智能体时的头像
   const [agentSystemPrompt, setAgentSystemPrompt] = useState(''); // 升级为智能体时的人设
@@ -1162,6 +1173,24 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
     }
   }, [messages]);
 
+  // 保存 currentAgentRoleId 到 localStorage（用于恢复当前选中的agent）
+  useEffect(() => {
+    if (currentAgentRoleId) {
+      localStorage.setItem('current_agent_role_id', currentAgentRoleId);
+    } else {
+      localStorage.removeItem('current_agent_role_id');
+    }
+  }, [currentAgentRoleId]);
+
+  // 保存 activeAgentTab 到 localStorage
+  useEffect(() => {
+    if (activeAgentTab) {
+      localStorage.setItem('active_agent_tab', activeAgentTab);
+    } else {
+      localStorage.removeItem('active_agent_tab');
+    }
+  }, [activeAgentTab]);
+
   // 加载会话列表
   const loadSessions = async () => {
     try {
@@ -1205,8 +1234,18 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   }, []);
 
   // 监听外部传入的sessionId（从左侧会话列表选择）
+  // 需要等待 sessions 加载完成，或者手动从后端获取会话
   useEffect(() => {
+    if (externalSessionId === 'role-generator') {
+      // 角色生成器模式，不需要切换会话
+      return;
+    }
     if (externalSessionId && externalSessionId !== currentSessionId) {
+      // 如果 sessions 还没加载完成，延迟处理
+      if (sessions.length === 0 && externalSessionId !== 'temporary-session') {
+        // 等待 sessions 加载完成后再处理，由下面的 sessions 依赖 useEffect 处理
+        return;
+      }
       handleSelectSession(externalSessionId);
     } else if (externalSessionId === null || externalSessionId === 'temporary-session') {
       // 如果外部sessionId为null或者是临时会话，切换到临时会话
@@ -1215,7 +1254,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [externalSessionId]);
+  }, [externalSessionId, sessions.length]);
 
   // 从URL参数中加载会话
   useEffect(() => {
@@ -1232,6 +1271,24 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, sessions]);
+
+  // 应用加载时恢复 agent tabs（当 sessions 加载完成后）
+  useEffect(() => {
+    if (sessions.length === 0) return; // 等待会话加载完成
+    
+    // 如果当前 externalSessionId 是一个 agent 会话，加载该 agent 的会话到 tabs
+    if (externalSessionId && externalSessionId !== 'temporary-session' && externalSessionId !== 'role-generator') {
+      const session = sessions.find(s => s.session_id === externalSessionId);
+      if (session && (session.session_type === 'agent' || session.role_id)) {
+        // 检查是否已经加载了对应的 tabs
+        if (openAgentTabs.length === 0 || !openAgentTabs.some(t => t.sessionId === externalSessionId)) {
+          // 触发 handleSelectSession 来加载该 agent 的所有会话
+          handleSelectSession(externalSessionId);
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessions]);
 
   // 监听配置会话请求（通过URL参数）
   useEffect(() => {
@@ -1278,10 +1335,15 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
         setCurrentSystemPrompt(null);
       } else {
         // 记忆体或智能体：正常加载
-      loadSessionMessages(currentSessionId);
-      loadSessionSummaries(currentSessionId);
-      // 加载会话头像和人设
-      const session = sessions.find(s => s.session_id === currentSessionId);
+        // 先获取会话信息，判断是否是agent会话
+        const session = sessions.find(s => s.session_id === currentSessionId);
+        const isAgentSession = session ? (session.session_type === 'agent' || session.role_id) : false;
+        
+        // 如果是agent会话，加载所有历史消息；否则分页加载
+        loadSessionMessages(currentSessionId, 1, isAgentSession);
+        loadSessionSummaries(currentSessionId);
+        
+        // 加载会话头像和人设
       if (session) {
         setCurrentSessionMeta(session);
         setCurrentSessionAvatar(session.avatar || null);
@@ -1301,6 +1363,13 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
             setCurrentSessionMeta(fresh);
             setCurrentSessionAvatar(fresh.avatar || null);
             setCurrentSystemPrompt(fresh.system_prompt || null);
+            
+            // 如果是agent会话，重新加载所有消息
+            const freshIsAgentSession = fresh.session_type === 'agent' || fresh.role_id;
+            if (freshIsAgentSession) {
+              loadSessionMessages(currentSessionId, 1, true);
+            }
+            
             if (fresh.llm_config_id) {
               const llmId = fresh.llm_config_id;
               const configExists = llmConfigs.some(c => c.config_id === llmId);
@@ -1436,7 +1505,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   }, [showModuleSelector]);
   
   // 加载会话消息
-  const loadSessionMessages = async (session_id: string, page: number = 1) => {
+  const loadSessionMessages = async (session_id: string, page: number = 1, loadAll: boolean = false) => {
     try {
       setIsLoadingMessages(true);
       
@@ -1490,8 +1559,21 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
         }
       }
       
-      // 默认只加载20条消息，加快初始加载速度
-      const data = await getSessionMessages(session_id, page, 20);
+      // 如果loadAll为true，加载所有消息；否则分页加载
+      let data;
+      if (loadAll) {
+        // 加载所有消息：先获取总数，然后一次性加载
+        const firstPage = await getSessionMessages(session_id, 1, 1);
+        const total = firstPage.total || 0;
+        if (total > 0) {
+          data = await getSessionMessages(session_id, 1, total);
+        } else {
+          data = { messages: [], total: 0 };
+        }
+      } else {
+        // 默认只加载20条消息，加快初始加载速度
+        data = await getSessionMessages(session_id, page, 20);
+      }
       
       // 先加载总结列表，用于关联总结消息和提示信息
       const summaryList = await getSessionSummaries(session_id);
@@ -1800,11 +1882,13 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
       setSummaries([]);
       setCurrentSystemPrompt(null);
       setCurrentSessionAvatar(null);
+      // 临时会话不在tabs中
+      setActiveAgentTab(null);
     } else {
       // 选择记忆体或智能体
       setIsTemporarySession(false);
-    setCurrentSessionId(session_id);
-    setMessagePage(1);
+      setCurrentSessionId(session_id);
+      setMessagePage(1);
       // 加载会话信息
       let session = sessions.find(s => s.session_id === session_id);
       if (!session) {
@@ -1819,6 +1903,43 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
         setCurrentSessionMeta(session);
         setCurrentSessionAvatar(session.avatar || null);
         setCurrentSystemPrompt(session.system_prompt || null);
+        
+        // 如果是agent会话，加载该agent的所有会话到tabs
+        const isAgentSession = session.session_type === 'agent' || session.role_id;
+        if (isAgentSession) {
+          // 获取该agent的role_id（可能是自己的session_id，也可能是source_role_id）
+          const agentRoleId = session.role_id || session.session_id;
+          
+          // 设置当前agent的role_id
+          setCurrentAgentRoleId(agentRoleId);
+          
+          // 找出所有属于该agent的会话（包括agent本身和从它创建的会话）
+          const agentSessions = sessions.filter(s => 
+            s.session_id === agentRoleId || // agent本身
+            s.role_id === agentRoleId // 从该agent创建的会话
+          );
+          
+          // 按创建时间排序（旧的在前，新的在后）
+          const sortedAgentSessions = [...agentSessions].sort((a, b) => {
+            const timeA = new Date(a.created_at || 0).getTime();
+            const timeB = new Date(b.created_at || 0).getTime();
+            return timeA - timeB;
+          });
+          
+          // 只显示当前agent的会话到tabs（替换而不是追加）
+          const newTabs = sortedAgentSessions.map(s => ({
+            sessionId: s.session_id,
+            name: s.name || s.title || `会话 ${s.session_id.substring(0, 8)}`
+          }));
+          setOpenAgentTabs(newTabs);
+          setActiveAgentTab(session_id);
+        } else {
+          // 非agent会话不在tabs中
+          setActiveAgentTab(null);
+          setCurrentAgentRoleId(null);
+          setOpenAgentTabs([]);
+        }
+        
         // 会话绑定了 llm_config_id（角色开始/应用角色/手动设置）时，切换到该配置
         if (session.llm_config_id) {
           const llmId = session.llm_config_id;
@@ -1850,6 +1971,156 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
     id: string;
     name: string;
   } | null>(null);
+
+  // 开始编辑agent tab名称（agent本身不能编辑）
+  const handleStartEditAgentTab = (sessionId: string) => {
+    // agent 本身的 tab 不能编辑名称
+    if (sessionId === currentAgentRoleId) {
+      return;
+    }
+    
+    const tab = openAgentTabs.find(t => t.sessionId === sessionId);
+    if (tab) {
+      setEditingAgentTabId(sessionId);
+      setEditingAgentTabName(tab.name);
+    }
+  };
+  
+  // 保存agent tab名称编辑（只修改聊天记录主题，不修改agent名字）
+  const handleSaveAgentTabEdit = async () => {
+    if (!editingAgentTabId) return;
+    
+    // agent 本身的 tab 不能编辑名称，直接返回
+    if (editingAgentTabId === currentAgentRoleId) {
+      setEditingAgentTabId(null);
+      setEditingAgentTabName('');
+      return;
+    }
+    
+    try {
+      await updateSessionName(editingAgentTabId, editingAgentTabName.trim() || undefined);
+      await loadSessions();
+      
+      // 更新tabs中的名称
+      setOpenAgentTabs(prev => prev.map(tab => 
+        tab.sessionId === editingAgentTabId 
+          ? { ...tab, name: editingAgentTabName.trim() || tab.name }
+          : tab
+      ));
+      
+      // 如果编辑的是当前会话，更新会话信息
+      if (currentSessionId === editingAgentTabId) {
+        const session = await getSession(editingAgentTabId);
+        if (session) {
+          setCurrentSessionMeta(session);
+        }
+      }
+    } catch (error) {
+      console.error('[Workflow] Failed to update session name:', error);
+      toast({
+        title: '保存失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
+    } finally {
+      setEditingAgentTabId(null);
+      setEditingAgentTabName('');
+    }
+  };
+  
+  // 取消编辑agent tab名称
+  const handleCancelAgentTabEdit = () => {
+    setEditingAgentTabId(null);
+    setEditingAgentTabName('');
+  };
+  
+  // agent tab编辑输入框键盘事件
+  const handleAgentTabEditKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSaveAgentTabEdit();
+    } else if (e.key === 'Escape') {
+      handleCancelAgentTabEdit();
+    }
+  };
+  
+  // 当editingAgentTabId变化时，聚焦输入框
+  useEffect(() => {
+    if (editingAgentTabId && editingAgentTabInputRef.current) {
+      editingAgentTabInputRef.current.focus();
+      editingAgentTabInputRef.current.select();
+    }
+  }, [editingAgentTabId]);
+
+  // 关闭 agent tab（显示确认对话框）
+  const handleCloseAgentTab = (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const tab = openAgentTabs.find(t => t.sessionId === sessionId);
+    if (tab) {
+      setDeleteAgentTabTarget({ sessionId, name: tab.name });
+    }
+  };
+
+  // 确认删除 agent tab 对应的会话
+  const confirmDeleteAgentTab = async () => {
+    if (!deleteAgentTabTarget) return;
+    
+    const { sessionId } = deleteAgentTabTarget;
+    
+    try {
+      // 永久删除会话
+      await deleteSession(sessionId);
+      
+      // 从 tabs 中移除
+      setOpenAgentTabs(prev => prev.filter(tab => tab.sessionId !== sessionId));
+      
+      // 如果删除的是当前激活的tab，切换到其他tab
+      if (activeAgentTab === sessionId) {
+        const remainingTabs = openAgentTabs.filter(tab => tab.sessionId !== sessionId);
+        if (remainingTabs.length > 0) {
+          const lastTab = remainingTabs[remainingTabs.length - 1];
+          setActiveAgentTab(lastTab.sessionId);
+          handleSelectSession(lastTab.sessionId);
+        } else {
+          setActiveAgentTab(null);
+          setCurrentAgentRoleId(null);
+          // 切换到临时会话
+          handleSelectSession(temporarySessionId);
+        }
+      }
+      
+      // 如果删除的是当前会话，重置状态
+      if (currentSessionId === sessionId) {
+        setCurrentSessionId(null);
+        setMessages([
+          {
+            id: '1',
+            role: 'system',
+            content: '会话已删除。',
+          },
+        ]);
+        setSummaries([]);
+        setCurrentSessionAvatar(null);
+      }
+      
+      // 刷新会话列表
+      await loadSessions();
+      toast({ title: '会话已删除', variant: 'success' });
+    } catch (error) {
+      console.error('[Workflow] Failed to delete agent tab session:', error);
+      toast({
+        title: '删除失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
+    } finally {
+      setDeleteAgentTabTarget(null);
+    }
+  };
+
+  // 取消删除 agent tab
+  const cancelDeleteAgentTab = () => {
+    setDeleteAgentTabTarget(null);
+  };
 
   // 删除会话（执行）
   const performDeleteSession = async (sessionId: string) => {
@@ -5491,9 +5762,153 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   // 统计可用工具数量
   const totalTools = Array.from(mcpTools.values()).flat().length;
 
+  // 如果是角色生成器模式，直接显示角色生成器
+  if (externalSessionId === 'role-generator') {
+    return <RoleGeneratorPage />;
+  }
+
   return (
     <>
     <div className="h-full flex flex-col bg-gray-50 dark:bg-[#1a1a1a]">
+      {/* Agent会话Tab标签栏 - 参考RoundTableChat样式 */}
+      {openAgentTabs.length > 0 && (
+        <div className="flex-shrink-0 bg-gray-100 dark:bg-[#1a1a1a] border-b border-gray-200 dark:border-[#404040]">
+          <div className="flex items-center">
+            {/* Tab 容器 */}
+            <div className="flex-1 flex items-end overflow-x-auto scrollbar-hide px-2 pt-2 gap-0.5">
+              {openAgentTabs.map((tab) => {
+                const isActive = activeAgentTab === tab.sessionId;
+                const isEditing = editingAgentTabId === tab.sessionId;
+                const session = sessions.find(s => s.session_id === tab.sessionId);
+                const avatar = session?.avatar || null;
+                return (
+                  <div
+                    key={tab.sessionId}
+                    className={`
+                      group relative flex items-center min-w-0 max-w-[200px]
+                      ${isActive 
+                        ? 'bg-white dark:bg-[#2d2d2d] border-t border-l border-r border-gray-200 dark:border-[#404040] rounded-t-lg -mb-px z-10' 
+                        : 'bg-gray-50 dark:bg-[#252525] border border-transparent hover:bg-gray-100 dark:hover:bg-[#333333] rounded-t-lg'
+                      }
+                    `}
+                    onClick={() => !isEditing && handleSelectSession(tab.sessionId)}
+                    onDoubleClick={() => handleStartEditAgentTab(tab.sessionId)}
+                  >
+                    <div className={`
+                      flex items-center gap-2 px-3 py-2 cursor-pointer w-full min-w-0
+                      ${isActive ? 'text-gray-900 dark:text-white' : 'text-gray-600 dark:text-gray-400'}
+                    `}>
+                      {/* 头像 */}
+                      {avatar ? (
+                        <img
+                          src={avatar}
+                          alt={tab.name}
+                          className="w-4 h-4 rounded-full flex-shrink-0 object-cover"
+                        />
+                      ) : (
+                        <div className="w-4 h-4 rounded-full bg-[#7c3aed] flex items-center justify-center text-white text-[10px] flex-shrink-0">
+                          {(tab.name || 'A').charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                      
+                      {/* 名称或编辑输入框 */}
+                      {isEditing ? (
+                        <input
+                          ref={editingAgentTabInputRef}
+                          type="text"
+                          value={editingAgentTabName}
+                          onChange={(e) => setEditingAgentTabName(e.target.value)}
+                          onKeyDown={handleAgentTabEditKeyDown}
+                          onBlur={handleSaveAgentTabEdit}
+                          onClick={(e) => e.stopPropagation()}
+                          className="flex-1 min-w-0 px-1 py-0.5 text-sm bg-white dark:bg-[#363636] border border-primary-500 rounded outline-none text-gray-900 dark:text-white"
+                          placeholder="输入会话名称"
+                        />
+                      ) : (
+                        <span className="text-sm truncate flex-1 min-w-0">
+                          {tab.name}
+                        </span>
+                      )}
+                      
+                      {/* 关闭按钮 - 仅在hover时显示且不在编辑状态，agent本身的tab不能删除 */}
+                      {!isEditing && tab.sessionId !== currentAgentRoleId && (
+                        <button
+                          onClick={(e) => handleCloseAgentTab(tab.sessionId, e)}
+                          className="flex-shrink-0 w-4 h-4 rounded-sm flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all"
+                          title="删除对话"
+                        >
+                          <X className="w-3 h-3 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              
+              {/* 新建 Tab 按钮 */}
+              <button
+                onClick={async () => {
+                  // 从当前agent创建新会话
+                  if (currentAgentRoleId) {
+                    try {
+                      // 找到agent会话获取版本信息
+                      const agentSession = sessions.find(s => s.session_id === currentAgentRoleId);
+                      const newSession = await createSessionFromRole({
+                        role_id: currentAgentRoleId,
+                        role_version_id: agentSession?.current_role_version_id || undefined,
+                      });
+                      
+                      // 重新加载会话列表
+                      const updatedSessions = await getSessions();
+                      setSessions(updatedSessions);
+                      
+                      // 重新加载当前agent的所有会话到tabs（按创建时间排序）
+                      const agentSessions = updatedSessions.filter(s => 
+                        s.session_id === currentAgentRoleId || s.role_id === currentAgentRoleId
+                      );
+                      const sortedAgentSessions = [...agentSessions].sort((a, b) => {
+                        const timeA = new Date(a.created_at || 0).getTime();
+                        const timeB = new Date(b.created_at || 0).getTime();
+                        return timeA - timeB;
+                      });
+                      const newTabs = sortedAgentSessions.map(s => ({
+                        sessionId: s.session_id,
+                        name: s.name || s.title || `会话 ${s.session_id.substring(0, 8)}`
+                      }));
+                      setOpenAgentTabs(newTabs);
+                      
+                      // 激活新创建的会话（直接设置状态，不调用 handleSelectSession 避免覆盖 tabs）
+                      setActiveAgentTab(newSession.session_id);
+                      setCurrentSessionId(newSession.session_id);
+                      setCurrentSessionMeta(newSession);
+                      setCurrentSessionAvatar(newSession.avatar || null);
+                      setCurrentSystemPrompt(newSession.system_prompt || null);
+                      setMessages([{
+                        id: '1',
+                        role: 'system',
+                        content: '新会话已创建，开始对话吧！',
+                      }]);
+                      setSummaries([]);
+                      
+                      toast({ title: '已创建新会话', variant: 'success' });
+                    } catch (error) {
+                      toast({
+                        title: '创建会话失败',
+                        description: error instanceof Error ? error.message : String(error),
+                        variant: 'destructive',
+                      });
+                    }
+                  }
+                }}
+                className="flex-shrink-0 w-8 h-8 flex items-center justify-center text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-[#333333] rounded-lg transition-colors mb-1"
+                title="新建会话"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 主要内容区域：聊天界面 - GNOME 风格布局 */}
       <div className="flex-1 flex min-h-0 p-2 gap-2">
@@ -8331,6 +8746,37 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
             }}
           >
             删除
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    {/* 删除 Agent Tab 确认对话框 */}
+    <Dialog
+      open={deleteAgentTabTarget !== null}
+      onOpenChange={(open) => {
+        if (!open) cancelDeleteAgentTab();
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>删除对话记录</DialogTitle>
+          <DialogDescription>
+            确定要永久删除「{deleteAgentTabTarget?.name}」吗？此操作不可恢复，所有对话内容将被删除。
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="mt-4">
+          <Button
+            variant="secondary"
+            onClick={cancelDeleteAgentTab}
+          >
+            取消
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={confirmDeleteAgentTab}
+          >
+            永久删除
           </Button>
         </DialogFooter>
       </DialogContent>

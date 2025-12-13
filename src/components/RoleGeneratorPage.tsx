@@ -5,7 +5,7 @@
  */
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Sparkles, Wand2, Settings, Image as ImageIcon, Check, X, Loader, RefreshCw, Download, Save, ChevronDown, ChevronUp, Bot, Plus, Users } from 'lucide-react';
+import { Sparkles, Wand2, Settings, Image as ImageIcon, Check, X, Loader, RefreshCw, Download, Save, ChevronDown, ChevronUp, Bot, Plus, Users, Upload, FileJson } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { Textarea } from './ui/Textarea';
@@ -22,7 +22,20 @@ import { emitSessionsChanged } from '../utils/sessionEvents';
 import { getAgents, getSession, type Session } from '../services/sessionApi';
 import { getDimensionOptions, saveDimensionOption } from '../services/roleDimensionApi';
 
-type Mode = 'random' | 'manual';
+type Mode = 'random' | 'manual' | 'import';
+
+// 导出角色的 JSON 格式
+export type RoleExportData = {
+  version: string; // 格式版本号
+  exportedAt: string; // 导出时间
+  role: {
+    name: string;
+    system_prompt: string;
+    avatar?: string;
+    profession?: string; // 职业分类
+    metadata?: Record<string, unknown>; // 额外元数据
+  };
+};
 
 type RoleDraft = {
   name: string;
@@ -466,12 +479,13 @@ const RoleGeneratorPage: React.FC = () => {
     roleType: 'career',
     currentValue: '',
   });
+  
+  // 导入角色相关状态
+  const [importJsonText, setImportJsonText] = useState('');
+  const [importError, setImportError] = useState<string | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const importFileInputRef = useRef<HTMLInputElement>(null);
 
-  // 已有角色列表
-  const [existingRoles, setExistingRoles] = useState<Session[]>([]);
-  const [rolesByProfession, setRolesByProfession] = useState<Record<string, Session[]>>({});
-  const [expandedProfessions, setExpandedProfessions] = useState<Set<string>>(new Set());
-  const [isRolesDrawerOpen, setIsRolesDrawerOpen] = useState(true); // 抽屉默认展开
 
   // 加载 LLM 配置
   useEffect(() => {
@@ -540,180 +554,7 @@ const RoleGeneratorPage: React.FC = () => {
     };
   }, [selectedAvatarAgentId]);
 
-  // 加载已有角色列表并按职业分类
-  useEffect(() => {
-    let canceled = false;
-    (async () => {
-      try {
-        const agents = await getAgents();
-        if (canceled) return;
-        setExistingRoles(agents);
-        
-        // 按职业分类
-        const byProfession: Record<string, Session[]> = {};
-        const other: Session[] = [];
-        
-        // 职业关键词列表（按优先级排序，更具体的在前）
-        const professionKeywords = [
-          '产品经理', '工程师', '设计师', '作家', '分析师', '教师', '医生',
-          '咨询师', '创业者', '研究员', '营销专家', '财务顾问',
-          '战士', '法师', '盗贼', '牧师', '游侠', '术士', '圣骑士', '德鲁伊', '野蛮人', '吟游诗人'
-        ];
-        
-        for (const agent of agents) {
-          let profession: string | null = null;
-          
-          // 优先从name中提取（更准确）
-          if (agent.name) {
-            for (const keyword of professionKeywords) {
-              if (agent.name.includes(keyword)) {
-                profession = keyword;
-                break;
-              }
-            }
-          }
-          
-          // 如果name中没有，再从system_prompt中提取
-          if (!profession && agent.system_prompt) {
-            for (const keyword of professionKeywords) {
-              if (agent.system_prompt.includes(keyword)) {
-                profession = keyword;
-                break;
-              }
-            }
-          }
-          
-          if (profession) {
-            if (!byProfession[profession]) {
-              byProfession[profession] = [];
-            }
-            byProfession[profession].push(agent);
-          } else {
-            other.push(agent);
-          }
-        }
-        
-        if (other.length > 0) {
-          byProfession['其他'] = other;
-        }
-        
-        if (!canceled) {
-          setRolesByProfession(byProfession);
-          // 默认展开所有职业
-          setExpandedProfessions(new Set(Object.keys(byProfession)));
-        }
-      } catch (error) {
-        console.error('[RoleGenerator] Failed to load existing roles:', error);
-        if (!canceled) {
-          setExistingRoles([]);
-          setRolesByProfession({});
-        }
-      }
-    })();
-    return () => {
-      canceled = true;
-    };
-  }, []);
 
-  // 监听会话变更事件，刷新角色列表
-  useEffect(() => {
-    const handler = () => {
-      // 重新加载角色列表
-      (async () => {
-        try {
-          const agents = await getAgents();
-          setExistingRoles(agents);
-          
-          const byProfession: Record<string, Session[]> = {};
-          const other: Session[] = [];
-          
-          const professionKeywords = [
-            '产品经理', '工程师', '设计师', '作家', '分析师', '教师', '医生',
-            '咨询师', '创业者', '研究员', '营销专家', '财务顾问',
-            '战士', '法师', '盗贼', '牧师', '游侠', '术士', '圣骑士', '德鲁伊', '野蛮人', '吟游诗人'
-          ];
-          
-          for (const agent of agents) {
-            let profession: string | null = null;
-            
-            if (agent.name) {
-              for (const keyword of professionKeywords) {
-                if (agent.name.includes(keyword)) {
-                  profession = keyword;
-                  break;
-                }
-              }
-            }
-            
-            if (!profession && agent.system_prompt) {
-              for (const keyword of professionKeywords) {
-                if (agent.system_prompt.includes(keyword)) {
-                  profession = keyword;
-                  break;
-                }
-              }
-            }
-            
-            if (profession) {
-              if (!byProfession[profession]) {
-                byProfession[profession] = [];
-              }
-              byProfession[profession].push(agent);
-            } else {
-              other.push(agent);
-            }
-          }
-          
-          if (other.length > 0) {
-            byProfession['其他'] = other;
-          }
-          
-          setRolesByProfession(byProfession);
-        } catch (error) {
-          console.error('[RoleGenerator] Failed to reload roles:', error);
-        }
-      })();
-    };
-    window.addEventListener('sessions-changed', handler);
-    return () => window.removeEventListener('sessions-changed', handler);
-  }, []);
-
-  // 加载已有角色到预览区域
-  const loadExistingRole = async (role: Session) => {
-    try {
-      const fullSession = await getSession(role.session_id);
-      if (fullSession) {
-        setDraft({
-          name: fullSession.name || fullSession.title || '',
-          system_prompt: fullSession.system_prompt || '',
-          avatar: fullSession.avatar || makeDefaultAvatar(fullSession.name || fullSession.title || ''),
-          llm_config_id: fullSession.llm_config_id || '',
-        });
-        setSavedRoleId(fullSession.session_id);
-        toast({ title: '已加载角色', variant: 'success' });
-      }
-    } catch (error) {
-      console.error('[RoleGenerator] Failed to load role:', error);
-      toast({
-        title: '加载角色失败',
-        description: error instanceof Error ? error.message : String(error),
-        variant: 'destructive',
-      });
-    }
-  };
-
-  // 切换职业折叠状态
-  const toggleProfession = (profession: string) => {
-    setExpandedProfessions(prev => {
-      const next = new Set(prev);
-      if (next.has(profession)) {
-        next.delete(profession);
-      } else {
-        next.add(profession);
-      }
-      return next;
-    });
-  };
 
   // 加载自定义维度选项
   useEffect(() => {
@@ -1213,6 +1054,98 @@ const RoleGeneratorPage: React.FC = () => {
     }
   };
 
+  // 解析导入的 JSON
+  const parseImportJson = (jsonText: string): RoleExportData | null => {
+    try {
+      const data = JSON.parse(jsonText);
+      // 验证必要字段
+      if (!data.role || !data.role.name || !data.role.system_prompt) {
+        setImportError('JSON 格式不正确：缺少必要字段 (role.name, role.system_prompt)');
+        return null;
+      }
+      setImportError(null);
+      return data as RoleExportData;
+    } catch (e) {
+      setImportError('JSON 解析失败：' + (e instanceof Error ? e.message : String(e)));
+      return null;
+    }
+  };
+
+  // 从文件导入
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      setImportJsonText(content);
+      parseImportJson(content);
+    };
+    reader.onerror = () => {
+      setImportError('文件读取失败');
+    };
+    reader.readAsText(file);
+    
+    // 清空 input 以便再次选择同一文件
+    e.target.value = '';
+  };
+
+  // 执行导入
+  const handleImportRole = async () => {
+    const data = parseImportJson(importJsonText);
+    if (!data) return;
+    
+    setIsImporting(true);
+    try {
+      // 创建角色
+      const roleData: Record<string, unknown> = {
+        name: data.role.name,
+        system_prompt: data.role.system_prompt,
+        session_type: 'agent',
+      };
+      
+      if (data.role.avatar) {
+        roleData.avatar = data.role.avatar;
+      }
+      
+      const newRole = await createRole(roleData);
+      
+      emitSessionsChanged();
+      toast({ title: '角色导入成功', description: `已创建角色「${data.role.name}」`, variant: 'success' });
+      
+      // 重置导入状态
+      setImportJsonText('');
+      setImportError(null);
+      
+      // 更新预览
+      setDraft({
+        name: data.role.name,
+        system_prompt: data.role.system_prompt,
+        avatar: data.role.avatar || '',
+        llm_config_id: selectedGeneratorLlmConfigId,
+      });
+      setSavedRoleId(newRole.session_id);
+    } catch (error) {
+      console.error('[RoleGenerator] Failed to import role:', error);
+      toast({
+        title: '导入失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  // 预览导入的角色
+  const importPreview = useMemo(() => {
+    if (!importJsonText.trim()) return null;
+    const data = parseImportJson(importJsonText);
+    if (!data) return null;
+    return data.role;
+  }, [importJsonText]);
+
   return (
     <div className="h-full flex flex-col bg-gray-50 dark:bg-[#1a1a1a]">
       {/* 顶部标题栏 */}
@@ -1258,31 +1191,136 @@ const RoleGeneratorPage: React.FC = () => {
             <div className="flex gap-2">
               <button
                 onClick={() => setMode('random')}
-                className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
                   mode === 'random'
                     ? 'bg-[#7c3aed] text-white'
                     : 'bg-gray-100 dark:bg-[#363636] text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-[#404040]'
                 }`}
               >
-                <Wand2 className="w-4 h-4 inline mr-2" />
+                <Wand2 className="w-4 h-4 inline mr-1.5" />
                 随机抽卡
               </button>
               <button
                 onClick={() => setMode('manual')}
-                className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
                   mode === 'manual'
                     ? 'bg-[#7c3aed] text-white'
                     : 'bg-gray-100 dark:bg-[#363636] text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-[#404040]'
                 }`}
               >
-                <Settings className="w-4 h-4 inline mr-2" />
+                <Settings className="w-4 h-4 inline mr-1.5" />
                 手动配置
+              </button>
+              <button
+                onClick={() => setMode('import')}
+                className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                  mode === 'import'
+                    ? 'bg-[#7c3aed] text-white'
+                    : 'bg-gray-100 dark:bg-[#363636] text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-[#404040]'
+                }`}
+              >
+                <Upload className="w-4 h-4 inline mr-1.5" />
+                导入角色
               </button>
             </div>
           </div>
 
           {/* 配置内容 */}
           <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
+            {/* 导入角色模式 */}
+            {mode === 'import' ? (
+              <div className="space-y-4">
+                <div className="text-sm font-medium text-gray-900 dark:text-white">导入角色</div>
+                
+                {/* 文件上传按钮 */}
+                <div>
+                  <input
+                    ref={importFileInputRef}
+                    type="file"
+                    accept=".json"
+                    onChange={handleImportFile}
+                    className="hidden"
+                  />
+                  <Button
+                    variant="secondary"
+                    onClick={() => importFileInputRef.current?.click()}
+                    className="w-full"
+                  >
+                    <FileJson className="w-4 h-4 mr-2" />
+                    选择 JSON 文件
+                  </Button>
+                </div>
+                
+                {/* JSON 文本框 */}
+                <div>
+                  <Label className="text-xs text-gray-600 dark:text-gray-400 mb-1.5 block">
+                    或粘贴 JSON 内容
+                  </Label>
+                  <Textarea
+                    value={importJsonText}
+                    onChange={(e) => {
+                      setImportJsonText(e.target.value);
+                      if (e.target.value.trim()) {
+                        parseImportJson(e.target.value);
+                      } else {
+                        setImportError(null);
+                      }
+                    }}
+                    placeholder={`粘贴角色 JSON 数据，格式示例：
+{
+  "version": "1.0",
+  "exportedAt": "2024-01-01T00:00:00Z",
+  "role": {
+    "name": "角色名称",
+    "system_prompt": "角色人设描述",
+    "avatar": "data:image/png;base64,..."
+  }
+}`}
+                    className="font-mono text-xs h-64"
+                  />
+                </div>
+                
+                {/* 错误提示 */}
+                {importError && (
+                  <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                    <p className="text-sm text-red-600 dark:text-red-400">{importError}</p>
+                  </div>
+                )}
+                
+                {/* 预览信息 */}
+                {importPreview && !importError && (
+                  <div className="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg space-y-2">
+                    <p className="text-sm font-medium text-green-700 dark:text-green-400">✓ JSON 格式正确</p>
+                    <div className="text-xs text-green-600 dark:text-green-500">
+                      <p>角色名称: {importPreview.name}</p>
+                      <p>人设长度: {importPreview.system_prompt.length} 字符</p>
+                      <p>头像: {importPreview.avatar ? '已包含' : '无'}</p>
+                    </div>
+                  </div>
+                )}
+                
+                {/* 导入按钮 */}
+                <Button
+                  variant="primary"
+                  onClick={handleImportRole}
+                  disabled={!importPreview || !!importError || isImporting}
+                  className="w-full"
+                >
+                  {isImporting ? (
+                    <>
+                      <Loader className="w-4 h-4 mr-2 animate-spin" />
+                      导入中...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-4 h-4 mr-2" />
+                      导入角色
+                    </>
+                  )}
+                </Button>
+              </div>
+            ) : (
+            <>
             {/* 模型选择 */}
             <div className="space-y-3">
               <div className="text-sm font-medium text-gray-900 dark:text-white">模型配置</div>
@@ -2134,33 +2172,78 @@ const RoleGeneratorPage: React.FC = () => {
               <div className="space-y-3">
                 <div className="text-sm font-medium text-gray-900 dark:text-white">手动配置</div>
                 
-                {/* 一句话生成 */}
-                <div>
+                {/* 角色描述/人设输入 */}
+                <div className="flex-1 flex flex-col min-h-0">
                   <Label className="text-xs text-gray-600 dark:text-gray-400 mb-1.5 block">
-                    角色描述
+                    角色描述 / 系统提示词（System Prompt）
                   </Label>
-                  <div className="flex gap-2">
-                    <Input
-                      value={manualInput}
-                      onChange={(e) => setManualInput(e.target.value)}
-                      placeholder="例如：一个擅长把 PRD 转成可执行任务列表的产品经理..."
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          generateRole();
-                        }
-                      }}
-                    />
+                  <Textarea
+                    value={manualInput}
+                    onChange={(e) => setManualInput(e.target.value)}
+                    placeholder={`可直接粘贴完整的人设/系统提示词，点击"确认使用"即可创建角色
+
+也可以输入简短描述，点击"AI扩写"让模型帮你生成完整人设
+
+示例：
+你是一位资深产品经理，具有10年互联网产品经验。
+
+## 核心能力
+- 需求分析与拆解
+- 任务优先级排序
+- 跨团队协作沟通
+
+## 工作风格
+- 逻辑清晰，结构化思维
+- 注重可执行性
+- 善于追问澄清需求`}
+                    className="flex-1 min-h-[500px] text-sm font-mono resize-y"
+                  />
+                  <div className="flex gap-2 mt-3">
                     <Button
                       variant="primary"
+                      onClick={() => {
+                        if (!manualInput.trim()) {
+                          toast({ title: '请输入角色描述', variant: 'destructive' });
+                          return;
+                        }
+                        // 直接使用输入内容作为人设，不进行模型扩写
+                        // 尝试从第一行提取角色名称
+                        const firstLine = manualInput.split('\n')[0];
+                        let name = '自定义角色';
+                        // 尝试匹配常见的角色描述格式
+                        const nameMatch = firstLine.match(/你是(?:一[位个名])?(.{1,15}?)(?:[，,。\.：:]|$)/);
+                        if (nameMatch) {
+                          name = nameMatch[1].trim();
+                        } else if (firstLine.length <= 20) {
+                          name = firstLine.replace(/^[#\s*]+/, '').trim() || name;
+                        }
+                        
+                        setDraft({
+                          name: name,
+                          system_prompt: manualInput.trim(),
+                          avatar: makeDefaultAvatar(name),
+                          llm_config_id: selectedGeneratorLlmConfigId || enabledConfigs[0]?.config_id || '',
+                        });
+                        toast({ title: '已应用人设', description: '可在右侧预览，点击顶部"保存角色"完成创建', variant: 'success' });
+                      }}
+                      disabled={!manualInput.trim()}
+                      className="flex-1"
+                    >
+                      <Check className="w-4 h-4 mr-1.5" />
+                      确认使用
+                    </Button>
+                    <Button
+                      variant="secondary"
                       onClick={() => generateRole()}
                       disabled={!selectedGeneratorLlmConfigId || !manualInput.trim() || isGenerating}
+                      className="flex-1"
                     >
                       {isGenerating ? (
-                        <Loader className="w-4 h-4 animate-spin" />
+                        <Loader className="w-4 h-4 mr-1.5 animate-spin" />
                       ) : (
-                        '生成'
+                        <Wand2 className="w-4 h-4 mr-1.5" />
                       )}
+                      AI扩写
                     </Button>
                   </div>
                 </div>
@@ -2257,13 +2340,13 @@ const RoleGeneratorPage: React.FC = () => {
                 </Button>
               </div>
             )}
+            </>
+            )}
           </div>
         </div>
 
         {/* 右侧预览区域 */}
-        <div className={`flex-1 min-h-0 overflow-y-auto p-6 bg-gray-50 dark:bg-[#1a1a1a] transition-all duration-300 ${
-          isRolesDrawerOpen ? 'mr-80' : ''
-        }`}>
+        <div className="flex-1 min-h-0 overflow-y-auto p-6 bg-gray-50 dark:bg-[#1a1a1a]">
           <div className="max-w-2xl mx-auto space-y-6">
             {/* 角色预览卡片 */}
             {draft.name ? (
@@ -2386,103 +2469,6 @@ const RoleGeneratorPage: React.FC = () => {
           </div>
         </div>
 
-        {/* 右侧抽屉 - 已有角色列表 */}
-        <div
-          className={`absolute right-0 top-0 bottom-0 w-80 bg-white dark:bg-[#2d2d2d] border-l border-gray-200 dark:border-[#404040] shadow-lg transition-transform duration-300 ease-in-out z-10 ${
-            isRolesDrawerOpen ? 'translate-x-0' : 'translate-x-full'
-          }`}
-        >
-          <div className="h-full flex flex-col">
-            {/* 抽屉头部 */}
-            <div className="flex-shrink-0 p-4 border-b border-gray-200 dark:border-[#404040]">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">已有角色</h3>
-                  <span className="text-xs text-gray-500 dark:text-gray-400">
-                    {existingRoles.length} 个角色
-                  </span>
-                </div>
-                <button
-                  onClick={() => setIsRolesDrawerOpen(!isRolesDrawerOpen)}
-                  className="p-1.5 hover:bg-gray-100 dark:hover:bg-[#363636] rounded-lg transition-colors"
-                  title={isRolesDrawerOpen ? '收起' : '展开'}
-                >
-                  <ChevronDown className={`w-4 h-4 text-gray-600 dark:text-gray-400 transition-transform ${isRolesDrawerOpen ? 'rotate-90' : '-rotate-90'}`} />
-                </button>
-              </div>
-            </div>
-
-            {/* 抽屉内容 */}
-            <ScrollArea className="flex-1">
-              <div className="p-2 space-y-1">
-                {Object.keys(rolesByProfession).length > 0 ? (
-                  Object.entries(rolesByProfession).map(([profession, roles]) => (
-                    <div key={profession} className="space-y-1">
-                      <button
-                        onClick={() => toggleProfession(profession)}
-                        className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[#363636] rounded-lg transition-colors"
-                      >
-                        <span>{profession}</span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-gray-500 dark:text-gray-400">
-                            {roles.length}
-                          </span>
-                          {expandedProfessions.has(profession) ? (
-                            <ChevronUp className="w-4 h-4" />
-                          ) : (
-                            <ChevronDown className="w-4 h-4" />
-                          )}
-                        </div>
-                      </button>
-                      {expandedProfessions.has(profession) && (
-                        <div className="pl-2 space-y-1">
-                          {roles.map((role) => (
-                            <button
-                              key={role.session_id}
-                              onClick={() => loadExistingRole(role)}
-                              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-[#363636] rounded-lg transition-colors"
-                            >
-                              {role.avatar ? (
-                                <img
-                                  src={role.avatar}
-                                  alt={role.name || role.title || ''}
-                                  className="w-6 h-6 rounded-full object-cover"
-                                />
-                              ) : (
-                                <div className="w-6 h-6 rounded-full bg-[#7c3aed] flex items-center justify-center text-white text-xs">
-                                  {(role.name || role.title || 'R').charAt(0).toUpperCase()}
-                                </div>
-                              )}
-                              <span className="flex-1 text-left truncate">
-                                {role.name || role.title || role.session_id}
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))
-                ) : (
-                  <div className="p-4 text-center text-xs text-gray-500 dark:text-gray-400">
-                    暂无已有角色
-                  </div>
-                )}
-              </div>
-            </ScrollArea>
-          </div>
-        </div>
-
-        {/* 抽屉切换按钮（当抽屉收起时显示） */}
-        {!isRolesDrawerOpen && (
-          <button
-            onClick={() => setIsRolesDrawerOpen(true)}
-            className="absolute right-0 top-1/2 -translate-y-1/2 z-20 p-2 bg-white dark:bg-[#2d2d2d] border border-l-0 border-gray-200 dark:border-[#404040] rounded-l-lg shadow-lg hover:bg-gray-50 dark:hover:bg-[#363636] transition-colors flex items-center gap-1"
-            title="展开已有角色列表"
-          >
-            <Users className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-            <ChevronDown className="w-3 h-3 text-gray-600 dark:text-gray-400 -rotate-90" />
-          </button>
-        )}
       </div>
 
       {/* 添加自定义选项对话框 */}

@@ -5,8 +5,8 @@
  * - 角色库：可复用的角色（agent），支持版本与“从角色开始新会话”
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { MessageCircle, Sparkles, Plus, Trash2, Search, ArrowUp, Upload, History, ChevronLeft } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { MessageCircle, Sparkles, Plus, Trash2, Search, History, ChevronDown, ChevronUp, Download } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { ScrollArea } from './ui/ScrollArea';
@@ -30,7 +30,7 @@ import {
   importAgent,
   getSessionMessages
 } from '../services/sessionApi';
-import { activateRoleVersion, applyRoleToSession, createSessionFromRole, listRoleVersions, updateRoleProfile, type RoleVersion } from '../services/roleApi';
+import { activateRoleVersion, applyRoleToSession, listRoleVersions, updateRoleProfile, type RoleVersion } from '../services/roleApi';
 import { emitSessionsChanged, SESSIONS_CHANGED_EVENT } from '../utils/sessionEvents';
 
 interface SessionSidebarProps {
@@ -40,6 +40,7 @@ interface SessionSidebarProps {
   isRoundTableMode?: boolean; // 是否为圆桌模式
   onAddToRoundTable?: (sessionId: string) => void; // 添加到圆桌会议的回调
   onConfigSession?: (sessionId: string) => void; // 配置会话的回调（打开配置对话框）
+  onNewRole?: () => void; // 新增角色的回调（打开角色生成器）
 }
 
 const SessionSidebar: React.FC<SessionSidebarProps> = ({
@@ -49,22 +50,19 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
   isRoundTableMode = false,
   onAddToRoundTable,
   onConfigSession,
+  onNewRole,
 }) => {
-  const [memorySessions, setMemorySessions] = useState<Session[]>([]);
   const [agentSessions, setAgentSessions] = useState<Session[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [showCreateMenu, setShowCreateMenu] = useState(false);
-  const [isImporting, setIsImporting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
   const [upgradeTarget, setUpgradeTarget] = useState<Session | null>(null);
-  const [activeTab, setActiveTab] = useState<'chats' | 'roles'>(() => (isRoundTableMode ? 'roles' : 'chats'));
   const [roleVersionsTarget, setRoleVersionsTarget] = useState<Session | null>(null);
   const [roleVersions, setRoleVersions] = useState<RoleVersion[]>([]);
   const [isLoadingRoleVersions, setIsLoadingRoleVersions] = useState(false);
   const [activatingVersionId, setActivatingVersionId] = useState<string | null>(null);
-  const [roleScope, setRoleScope] = useState<Session | null>(null);
-  const [showAllChats, setShowAllChats] = useState(false);
+  const [rolesByProfession, setRolesByProfession] = useState<Record<string, Session[]>>({});
+  const [expandedProfessions, setExpandedProfessions] = useState<Set<string>>(new Set());
   const createMenuRef = React.useRef<HTMLDivElement>(null);
   const missingNameLoggedRef = React.useRef<Set<string>>(new Set());
   const selectedSessionIdRef = React.useRef<string | null>(selectedSessionId);
@@ -84,12 +82,7 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
     selectedSessionIdRef.current = selectedSessionId;
   }, [selectedSessionId]);
 
-  useEffect(() => {
-    if (activeTab === 'chats' && roleScope) {
-      setRoleScope(null);
-    }
-  }, [activeTab, roleScope]);
-
+  // 保留用于未来扩展
   const fetchPreviewForSession = async (sessionId: string) => {
     const pageSize = 50;
     // 先拉取一条获取总数
@@ -128,73 +121,60 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
       const sessionsList = Array.isArray(sessionsData) ? sessionsData : ((sessionsData as any).sessions || []);
       const agentsList = Array.isArray(agentsData) ? agentsData : ((agentsData as any).sessions || (agentsData as any).agents || []);
       
-      // 记忆体/普通会话：仅展示有内容的，避免空会话占位
-      const hasMessages = (s: Session) => (s.message_count || 0) > 0 || Boolean(s.last_message_at);
-      const selectedId = selectedSessionIdRef.current;
-      const memories = sessionsList.filter(s => {
-        if (!(s.session_type === 'memory' || !s.session_type)) return false;
-        if (hasMessages(s)) return true;
-        // 允许展示当前选中的“空会话”（例如：从角色开始的新对话）
-        return Boolean(selectedId) && s.session_id === selectedId;
-      });
-      const agents = agentsList.filter(s => s.session_type === 'agent');
+      const agents = agentsList.filter((s: Session) => s.session_type === 'agent');
 
-      // 为缺少名称和预览的会话补充一段文本，方便识别
-      const needPreview = memories.filter(
-        s => {
-          const titlePlaceholder = isPlaceholderTitle(s.title);
-          const hasUsefulTitle = !titlePlaceholder;
-          const hasName = Boolean(normalizeText(s.name));
-          const hasPreview = Boolean(normalizeText(s.preview_text));
-          return !(hasName || hasUsefulTitle || hasPreview) && (s.message_count || 0) > 0;
-        }
-      );
-      const previewMap: Record<string, string> = {};
-      const previewCandidates = needPreview.slice(0, 30); // 适当扩大补充范围
-      if (previewCandidates.length > 0) {
-        const results = await Promise.allSettled(
-          previewCandidates.map(async (session) => {
-            const preview = await fetchPreviewForSession(session.session_id);
-            if (preview) {
-              previewMap[session.session_id] = preview;
-            }
-          })
-        );
-        results.forEach((r, idx) => {
-          if (r.status === 'rejected') {
-            console.warn('[SessionSidebar] Failed to load preview', previewCandidates[idx]?.session_id, r.reason);
-          }
-        });
-      }
-
-      const sessionsWithPreview = memories.map(session => {
-        const filledPreview = normalizeText(session.preview_text) || previewMap[session.session_id];
-        const titleNormalized = normalizeText(session.title);
-        return {
-          ...session,
-          title: isPlaceholderTitle(session.title) ? '' : titleNormalized,
-          preview_text: filledPreview || undefined,
-        };
-      });
-      
-      // 打印仍缺少标题的会话，便于排查
-      const stillMissing = sessionsWithPreview.filter(
-        s => !(s.name || s.title || s.preview_text)
-      );
-      if (stillMissing.length > 0) {
-        console.warn('[SessionSidebar] 仍有未补全标题的会话', stillMissing.map(s => ({
-          id: s.session_id,
-          message_count: s.message_count,
-          last_message_at: s.last_message_at,
-        })));
-      }
-
-      setMemorySessions(sessionsWithPreview);
       setAgentSessions(agents);
+      
+      // 按职业分类
+      const byProfession: Record<string, Session[]> = {};
+      const other: Session[] = [];
+      const professionKeywords = [
+        '产品经理', '工程师', '设计师', '作家', '分析师', '教师', '医生',
+        '咨询师', '创业者', '研究员', '营销专家', '财务顾问',
+        '战士', '法师', '盗贼', '牧师', '游侠', '术士', '圣骑士', '德鲁伊', '野蛮人', '吟游诗人'
+      ];
+      
+      for (const agent of agents) {
+        let profession: string | null = null;
+        
+        if (agent.name) {
+          for (const keyword of professionKeywords) {
+            if (agent.name.includes(keyword)) {
+              profession = keyword;
+              break;
+            }
+          }
+        }
+        
+        if (!profession && agent.system_prompt) {
+          for (const keyword of professionKeywords) {
+            if (agent.system_prompt.includes(keyword)) {
+              profession = keyword;
+              break;
+            }
+          }
+        }
+        
+        if (profession) {
+          if (!byProfession[profession]) {
+            byProfession[profession] = [];
+          }
+          byProfession[profession].push(agent);
+        } else {
+          other.push(agent);
+        }
+      }
+      
+      if (other.length > 0) {
+        byProfession['其他'] = other;
+      }
+      
+      setRolesByProfession(byProfession);
+      setExpandedProfessions(new Set(Object.keys(byProfession)));
     } catch (error) {
       console.error('Failed to load sessions:', error);
-      setMemorySessions([]);
       setAgentSessions([]);
+      setRolesByProfession({});
     } finally {
       setIsLoading(false);
     }
@@ -205,7 +185,7 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
     loadAllSessions();
   }, [loadAllSessions]);
 
-  // 外部触发：会话/角色数据变更时刷新（例如从聊天配置弹窗“保存为角色”）
+  // 外部触发：会话/角色数据变更时刷新（例如从聊天配置弹窗"保存为角色"）
   useEffect(() => {
     const handler = () => {
       loadAllSessions();
@@ -214,74 +194,26 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
     return () => window.removeEventListener(SESSIONS_CHANGED_EVENT, handler);
   }, [loadAllSessions]);
 
-  useEffect(() => {
-    if (isRoundTableMode) {
-      setActiveTab('roles');
-    }
-  }, [isRoundTableMode]);
-
-  // 默认选中临时会话（如果当前没有选中任何会话）
+  // 默认选中临时会话
   useEffect(() => {
     if (!selectedSessionId && !isLoading) {
       onSelectSession('temporary-session');
     }
   }, [selectedSessionId, isLoading, onSelectSession]);
 
-  // 创建新会话（记忆体）
-  const handleCreateMemory = async () => {
-    try {
-      setShowCreateMenu(false);
-      const newSession = await createSession(undefined, undefined, 'memory');
-      selectedSessionIdRef.current = newSession.session_id;
-      await loadAllSessions();
-      onSelectSession(newSession.session_id);
-      onNewSession();
-    } catch (error) {
-      console.error('Failed to create memory:', error);
-    }
-  };
-
-  // 创建新智能体（默认，不包含头像人设等配置）
-  const handleCreateAgent = async () => {
-    try {
-      setShowCreateMenu(false);
-      const newSession = await createSession(undefined, undefined, 'agent');
-      await loadAllSessions();
-      setActiveTab('roles');
-      if (onConfigSession) {
-        onConfigSession(newSession.session_id);
+  // 切换职业折叠状态
+  const toggleProfession = (profession: string) => {
+    setExpandedProfessions(prev => {
+      const next = new Set(prev);
+      if (next.has(profession)) {
+        next.delete(profession);
       } else {
-        onSelectSession(newSession.session_id);
-        onNewSession();
+        next.add(profession);
       }
-    } catch (error) {
-      console.error('Failed to create agent:', error);
-    }
+      return next;
+    });
   };
 
-
-  // 创建临时会话
-  const handleCreateTemporary = () => {
-    setShowCreateMenu(false);
-    onSelectSession(temporarySessionId);
-    onNewSession();
-  };
-
-  // 点击外部关闭菜单
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (createMenuRef.current && !createMenuRef.current.contains(event.target as Node)) {
-        setShowCreateMenu(false);
-      }
-    };
-
-    if (showCreateMenu) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => {
-        document.removeEventListener('mousedown', handleClickOutside);
-      };
-    }
-  }, [showCreateMenu]);
 
   // 删除会话（执行）
   const performDeleteSession = async (sessionId: string) => {
@@ -305,8 +237,7 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
   // 删除会话（确认）
   const handleDeleteSession = (e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation();
-    const target =
-      [...memorySessions, ...agentSessions].find((s) => s.session_id === sessionId) || null;
+    const target = agentSessions.find((s) => s.session_id === sessionId) || null;
     setDeleteTarget(target);
   };
 
@@ -326,7 +257,50 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
     }
   };
 
-  // 升级为智能体（执行）
+  // 导出角色为 JSON
+  const handleExportRole = (e: React.MouseEvent, session: Session) => {
+    e.stopPropagation();
+    
+    // 从 system_prompt 中提取职业信息
+    const extractProfession = (prompt: string): string | undefined => {
+      const professionMatch = prompt.match(/职业[：:]\s*([^\n,，。]+)/);
+      if (professionMatch) return professionMatch[1].trim();
+      const roleMatch = prompt.match(/你是一[位个名]([^\n,，。]{1,10})/);
+      if (roleMatch) return roleMatch[1].trim();
+      return undefined;
+    };
+    
+    const exportData = {
+      version: '1.0',
+      exportedAt: new Date().toISOString(),
+      role: {
+        name: session.name || getDisplayName(session),
+        system_prompt: session.system_prompt || '',
+        avatar: session.avatar || undefined,
+        profession: extractProfession(session.system_prompt || ''),
+        metadata: {
+          llm_config_id: session.llm_config_id,
+          media_output_path: session.media_output_path,
+        },
+      },
+    };
+    
+    const jsonStr = JSON.stringify(exportData, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `role-${exportData.role.name}-${Date.now()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    
+    toast({ title: '角色已导出', description: `已保存为 ${link.download}`, variant: 'success' });
+  };
+
+  // 升级为智能体（执行）- 保留用于未来扩展
   const performUpgradeToAgent = async (session: Session) => {
     try {
       const name = session.name || getDisplayName(session);
@@ -451,107 +425,10 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
     return displayName;
   };
 
-  // 导入智能体配置
-  const handleImportAgent = async () => {
-    try {
-      setIsImporting(true);
-      // 从文件选择器获取配置数据
-      const data = await importAgentFromFile();
-      
-      // 导入智能体
-      const result = await importAgent(data, 'use_existing');
-      
-      // 刷新列表并选中新导入的智能体
-      await loadAllSessions();
-      setActiveTab('roles');
-      if (onConfigSession) {
-        onConfigSession(result.session_id);
-      } else {
-        onSelectSession(result.session_id);
-      }
-      
-      alert(`智能体 "${result.name}" 导入成功！`);
-    } catch (error) {
-      console.error('Failed to import agent:', error);
-      if (error instanceof Error && error.message !== 'No file selected') {
-        alert('导入失败：' + error.message);
-      }
-    } finally {
-      setIsImporting(false);
-    }
-  };
 
-  // 获取显示列表（包含临时会话、记忆体、智能体）
-  const getDisplayList = (): Session[] => {
-    let list: Session[] = [];
-
-    if (activeTab === 'roles') {
-      if (roleScope) {
-        list = memorySessions.filter(
-          (s) => (s.session_type === 'memory' || !s.session_type) && s.role_id === roleScope.session_id,
-        );
-      } else {
-        list = [...agentSessions];
-      }
-    } else {
-      const selectedId = selectedSessionIdRef.current;
-      list = memorySessions.filter((s) => {
-        const isMemory = s.session_type === 'memory' || !s.session_type;
-        if (!isMemory) return false;
-        if (showAllChats) return true;
-        if (!s.role_id) return true;
-        return Boolean(selectedId) && s.session_id === selectedId;
-      });
-    }
-
-    // 搜索过滤
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      list = list.filter((session) => {
-        const name = getDisplayName(session).toLowerCase();
-        const title = (session.title || '').toLowerCase();
-        const preview = (session.preview_text || '').toLowerCase();
-        return name.includes(query) || title.includes(query) || preview.includes(query);
-      });
-    }
-
-    return list;
-  };
-
-  const displayList = getDisplayList();
   const isTemporarySelected = selectedSessionId === temporarySessionId;
 
-  const getConversationTitle = (session: Session) => {
-    const title = normalizeText(session.title);
-    if (title && !isPlaceholderTitle(title)) return title;
-    const preview = normalizeText(session.preview_text);
-    if (preview) return preview;
-    return '新对话';
-  };
 
-  const handleStartChatFromRole = async (e: React.MouseEvent | null, role: Session) => {
-    e?.stopPropagation();
-    try {
-      const session = await createSessionFromRole({
-        role_id: role.session_id,
-        role_version_id: role.current_role_version_id || undefined,
-      });
-      selectedSessionIdRef.current = session.session_id;
-      emitSessionsChanged();
-      await loadAllSessions();
-      onSelectSession(session.session_id);
-      onNewSession();
-      setActiveTab('roles');
-      setRoleScope(role);
-      toast({ title: '已从角色创建会话', variant: 'success' });
-    } catch (error) {
-      toast({
-        title: '创建会话失败',
-        description: error instanceof Error ? error.message : String(error),
-        variant: 'destructive',
-      });
-    }
-  };
 
   const openRoleVersions = (e: React.MouseEvent, role: Session) => {
     e.stopPropagation();
@@ -600,327 +477,209 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
     }
   };
 
+  // 过滤角色（根据搜索）
+  const filteredRolesByProfession = useMemo(() => {
+    if (!searchQuery.trim()) {
+      return rolesByProfession;
+    }
+    const query = searchQuery.toLowerCase();
+    const filtered: Record<string, Session[]> = {};
+    for (const [profession, roles] of Object.entries(rolesByProfession)) {
+      const matching = roles.filter(session => {
+        const name = getDisplayName(session).toLowerCase();
+        return name.includes(query);
+      });
+      if (matching.length > 0) {
+        filtered[profession] = matching;
+      }
+    }
+    return filtered;
+  }, [rolesByProfession, searchQuery]);
+
   return (
     <div className="w-full min-w-0 flex flex-col h-full">
-      {/* 搜索框和新建按钮 */}
+      {/* 搜索框 */}
       <div className="p-2.5 border-b border-gray-200 dark:border-[#404040] bg-gray-50/50 dark:bg-[#363636]/30">
-        {/* tabs */}
-        <div className="flex items-center gap-1.5 mb-2">
-          <button
-            className={`flex-1 h-8 rounded-lg text-xs font-medium border transition-colors ${
-              activeTab === 'chats'
-                ? 'bg-[var(--color-accent)] text-white border-[var(--color-accent)]'
-                : 'bg-white dark:bg-[#363636] text-gray-700 dark:text-[#e0e0e0] border-gray-200 dark:border-[#404040] hover:bg-gray-100 dark:hover:bg-[#404040]'
-            }`}
-            onClick={() => setActiveTab('chats')}
-          >
-            对话
-          </button>
-          <button
-            className={`flex-1 h-8 rounded-lg text-xs font-medium border transition-colors ${
-              activeTab === 'roles'
-                ? 'bg-[var(--color-accent)] text-white border-[var(--color-accent)]'
-                : 'bg-white dark:bg-[#363636] text-gray-700 dark:text-[#e0e0e0] border-gray-200 dark:border-[#404040] hover:bg-gray-100 dark:hover:bg-[#404040]'
-            }`}
-            onClick={() => setActiveTab('roles')}
-          >
-            角色库
-          </button>
-        </div>
-
-        {activeTab === 'roles' && roleScope && (
-          <div className="flex items-center gap-2 mb-2">
-            <button
-              className="h-8 px-2 rounded-lg text-xs font-medium border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#363636] text-gray-700 dark:text-[#e0e0e0] hover:bg-gray-100 dark:hover:bg-[#404040] flex items-center gap-1"
-              onClick={() => setRoleScope(null)}
-              title="返回角色库"
-            >
-              <ChevronLeft className="w-4 h-4" />
-              返回
-            </button>
-            <div className="flex-1 min-w-0 text-xs text-gray-600 dark:text-[#b0b0b0] truncate">
-              {getDisplayName(roleScope)}
-            </div>
-            <Button
-              size="sm"
-              variant="primary"
-              onClick={() => handleStartChatFromRole(null, roleScope)}
-              title="用该角色新建对话"
-            >
-              <MessageCircle className="w-4 h-4" />
-              新对话
-            </Button>
-          </div>
-        )}
-
         <div className="flex gap-1.5">
           <div className="flex-1 relative">
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-[#808080]" />
             <Input
               type="text"
-              placeholder="搜索..."
+              placeholder="搜索角色..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-7 pr-2 py-1.5 text-sm"
             />
           </div>
-          {activeTab === 'chats' && (
-            <button
-              className={`h-9 px-2 rounded-md text-xs font-medium border transition-colors ${
-                showAllChats
-                  ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent)] border-[var(--color-accent)]/30'
-                  : 'bg-white dark:bg-[#363636] text-gray-700 dark:text-[#e0e0e0] border-gray-200 dark:border-[#404040] hover:bg-gray-100 dark:hover:bg-[#404040]'
-              }`}
-              onClick={() => setShowAllChats((v) => !v)}
-              title={showAllChats ? '当前显示全部对话（含角色对话）' : '当前仅显示独立对话'}
-            >
-              {showAllChats ? '全部' : '独立'}
-            </button>
-          )}
-          <div className="relative" ref={createMenuRef}>
-            <Button
-              onClick={() => setShowCreateMenu((v) => !v)}
-              variant="primary"
-              size="icon"
-              title="新建"
-            >
-              <Plus className="w-4 h-4" />
-            </Button>
-            {showCreateMenu && (
-              <div className="absolute right-0 top-full mt-1 w-36 bg-white dark:bg-[#363636] border border-gray-200 dark:border-[#404040] rounded-lg shadow-lg dark:shadow-[0_4px_16px_rgba(0,0,0,0.3)] z-50 overflow-hidden">
-                {activeTab === 'chats' ? (
-                  <>
-                    <button
-                      onClick={handleCreateTemporary}
-                      className="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-[#e0e0e0] hover:bg-gray-100 dark:hover:bg-[#404040] flex items-center gap-2 transition-colors"
-                    >
-                      <MessageCircle className="w-4 h-4" />
-                      <span>临时会话</span>
-                    </button>
-                    <button
-                      onClick={handleCreateMemory}
-                      className="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-[#e0e0e0] hover:bg-gray-100 dark:hover:bg-[#404040] flex items-center gap-2 transition-colors border-t border-gray-100 dark:border-[#404040]"
-                    >
-                      <Sparkles className="w-4 h-4" />
-                      <span>记忆体</span>
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    {roleScope ? (
-                      <button
-                        onClick={() => handleStartChatFromRole(null, roleScope)}
-                        className="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-[#e0e0e0] hover:bg-gray-100 dark:hover:bg-[#404040] flex items-center gap-2 transition-colors"
-                      >
-                        <MessageCircle className="w-4 h-4" />
-                        <span>新建对话</span>
-                      </button>
-                    ) : (
-                      <>
-                        <button
-                          onClick={handleCreateAgent}
-                          className="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-[#e0e0e0] hover:bg-gray-100 dark:hover:bg-[#404040] flex items-center gap-2 transition-colors"
-                        >
-                          <Plus className="w-4 h-4" />
-                          <span>空白角色</span>
-                        </button>
-                        <button
-                          onClick={handleImportAgent}
-                          disabled={isImporting}
-                          className="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-[#e0e0e0] hover:bg-gray-100 dark:hover:bg-[#404040] flex items-center gap-2 transition-colors border-t border-gray-100 dark:border-[#404040] disabled:opacity-60"
-                        >
-                          {isImporting ? (
-                            <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                          ) : (
-                            <Upload className="w-4 h-4" />
-                          )}
-                          <span>{isImporting ? '导入中...' : '导入角色'}</span>
-                        </button>
-                      </>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-          </div>
         </div>
       </div>
 
       {/* 列表内容 */}
-      <ScrollArea className="flex-1">
-        {isLoading ? (
-          <div className="flex items-center justify-center h-32">
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[var(--color-accent)]"></div>
-          </div>
-        ) : (
-          <div className="p-1.5 pr-3 space-y-1.5">
-            {/* 临时会话选项 - 仅对话tab显示 */}
-            {activeTab === 'chats' && (
-              <div
-                onClick={() => onSelectSession(temporarySessionId)}
-                className={`
-                  group relative px-2.5 py-2 rounded-lg cursor-pointer transition-all duration-150
-                  ${isTemporarySelected
-                    ? "bg-[var(--color-selected-bg)] border border-[var(--color-selected-border)] before:content-[''] before:absolute before:left-0 before:top-1 before:bottom-1 before:w-0.5 before:rounded-r before:bg-[var(--color-accent)]"
-                    : 'hover:bg-[var(--color-hover-bg)]'
-                  }
-                `}
+      <div className="flex-1 flex flex-col min-h-0">
+        <ScrollArea className="flex-1">
+          {isLoading ? (
+            <div className="flex items-center justify-center h-32">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[var(--color-accent)]"></div>
+            </div>
+          ) : (
+            <div className="p-1.5 pr-3 space-y-1.5">
+              {/* 新增角色按钮 */}
+              <button
+                onClick={() => onNewRole?.()}
+                className="w-full px-2.5 py-3 rounded-lg border-2 border-dashed border-gray-300 dark:border-[#505050] hover:border-[var(--color-accent)] dark:hover:border-[var(--color-accent)] bg-gray-50/50 dark:bg-[#2d2d2d]/50 hover:bg-[var(--color-accent-bg)]/20 transition-all duration-150 flex items-center justify-center gap-2 group"
               >
-                <div className="flex items-center gap-2.5">
-                  <div className="w-7 h-7 rounded-lg bg-amber-100 dark:bg-amber-900/50 flex items-center justify-center flex-shrink-0">
-                    <MessageCircle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-sm text-gray-900 dark:text-white truncate">
-                      临时会话
+                <Plus className="w-4 h-4 text-gray-400 dark:text-[#808080] group-hover:text-[var(--color-accent)] transition-colors" />
+                <span className="text-sm text-gray-500 dark:text-[#b0b0b0] group-hover:text-[var(--color-accent)] transition-colors">
+                  新增角色
+                </span>
+              </button>
+
+              {/* 按职业分类的角色列表 */}
+              {Object.keys(filteredRolesByProfession).length === 0 ? (
+                <div className="p-4 text-center text-gray-500 dark:text-[#808080]">
+                  <Sparkles className="w-10 h-10 mx-auto mb-2 opacity-40" />
+                  <p className="text-xs">暂无角色</p>
+                </div>
+              ) : (
+                Object.entries(filteredRolesByProfession).map(([profession, roles]) => {
+                  const isExpanded = expandedProfessions.has(profession);
+                  return (
+                    <div key={profession} className="space-y-1">
+                      {/* 职业标题 */}
+                      <button
+                        onClick={() => toggleProfession(profession)}
+                        className="w-full px-2.5 py-1.5 flex items-center justify-between rounded-lg hover:bg-gray-100 dark:hover:bg-[#404040] transition-colors"
+                      >
+                        <span className="text-xs font-medium text-gray-700 dark:text-[#e0e0e0]">
+                          {profession} ({roles.length})
+                        </span>
+                        {isExpanded ? (
+                          <ChevronDown className="w-4 h-4 text-gray-500 dark:text-[#808080]" />
+                        ) : (
+                          <ChevronUp className="w-4 h-4 text-gray-500 dark:text-[#808080]" />
+                        )}
+                      </button>
+                      
+                      {/* 角色列表 */}
+                      {isExpanded && roles.map((session) => {
+                        const isSelected = selectedSessionId === session.session_id;
+                        const displayName = getDisplayName(session);
+                        
+                        return (
+                          <div
+                            key={session.session_id}
+                            onClick={() => onSelectSession(session.session_id)}
+                            className={`
+                              group relative px-2.5 py-2 rounded-lg cursor-pointer transition-all duration-150
+                              ${isSelected
+                                ? 'bg-[var(--color-selected-bg)] border border-[var(--color-selected-border)]'
+                                : 'hover:bg-[var(--color-hover-bg)]'
+                              }
+                            `}
+                          >
+                            <div className="grid grid-cols-[auto,1fr,auto] items-center gap-2.5">
+                              {/* 头像 */}
+                              {session.avatar ? (
+                                <img
+                                  src={session.avatar}
+                                  alt={displayName}
+                                  onClick={(e) => handleAvatarClick(e, session)}
+                                  className="w-7 h-7 rounded-lg flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-[var(--color-accent)]/50 transition-all"
+                                  title="点击配置"
+                                />
+                              ) : (
+                                <div 
+                                  onClick={(e) => handleAvatarClick(e, session)}
+                                  className="w-7 h-7 rounded-lg bg-[var(--color-accent-bg)] flex items-center justify-center flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-[var(--color-accent)]/50 transition-all"
+                                  title="点击配置"
+                                >
+                                  <Sparkles className="w-4 h-4 text-[var(--color-accent)]" />
+                                </div>
+                              )}
+                              
+                              {/* 内容 */}
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1">
+                                  <div className="font-medium text-sm text-gray-900 dark:text-white truncate">
+                                    {displayName}
+                                  </div>
+                                  <Sparkles className="w-3 h-3 text-[var(--color-accent)] flex-shrink-0" />
+                                </div>
+                              </div>
+
+                            {/* 操作按钮 */}
+                            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity justify-self-end pointer-events-none group-hover:pointer-events-auto">
+                              <button
+                                onClick={(e) => handleExportRole(e, session)}
+                                className="p-1 hover:bg-[var(--color-accent-bg)] rounded transition-colors"
+                                title="导出角色"
+                              >
+                                <Download className="w-4 h-4 text-[var(--color-accent)]" />
+                              </button>
+                              <button
+                                onClick={(e) => openRoleVersions(e, session)}
+                                className="p-1 hover:bg-[var(--color-accent-bg)] rounded transition-colors"
+                                title="角色版本历史"
+                              >
+                                <History className="w-4 h-4 text-[var(--color-accent)]" />
+                              </button>
+                              {isRoundTableMode && (
+                                <button
+                                  onClick={(e) => handleAddToRoundTable(e, session.session_id)}
+                                  className="p-1 hover:bg-[var(--color-accent-bg)] rounded transition-colors"
+                                  title="添加到圆桌会议"
+                                >
+                                  <Plus className="w-4 h-4 text-[var(--color-accent)]" />
+                                </button>
+                              )}
+                              <button
+                                onClick={(e) => handleDeleteSession(e, session.session_id)}
+                                className="p-1 hover:bg-red-500/10 rounded transition-colors"
+                                title="删除"
+                              >
+                                <Trash2 className="w-4 h-4 text-red-500" />
+                              </button>
+                            </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                    <div className="text-[10px] text-gray-500 dark:text-[#808080]">
-                      (不保存历史)
-                    </div>
-                  </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+        </ScrollArea>
+
+        {/* 临时会话 - 固定在底部 */}
+        <div className="flex-shrink-0 border-t border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] p-1.5">
+          <div
+            onClick={() => onSelectSession(temporarySessionId)}
+            className={`
+              group relative px-2.5 py-2 rounded-lg cursor-pointer transition-all duration-150
+              ${isTemporarySelected
+                ? "bg-[var(--color-selected-bg)] border border-[var(--color-selected-border)] before:content-[''] before:absolute before:left-0 before:top-1 before:bottom-1 before:w-0.5 before:rounded-r before:bg-[var(--color-accent)]"
+                : 'hover:bg-[var(--color-hover-bg)]'
+              }
+            `}
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-lg bg-amber-100 dark:bg-amber-900/50 flex items-center justify-center flex-shrink-0">
+                <MessageCircle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-medium text-sm text-gray-900 dark:text-white truncate">
+                  临时会话
+                </div>
+                <div className="text-[10px] text-gray-500 dark:text-[#808080]">
+                  (不保存历史)
                 </div>
               </div>
-            )}
-
-            {displayList.length === 0 ? (
-              <div className="p-4 text-center text-gray-500 dark:text-[#808080]">
-                <MessageCircle className="w-10 h-10 mx-auto mb-2 opacity-40" />
-                <p className="text-xs">
-                  {activeTab === 'roles' ? (roleScope ? '暂无对话' : '暂无角色') : '暂无会话'}
-                </p>
-              </div>
-            ) : (
-              displayList.map((session) => {
-                const isSelected = selectedSessionId === session.session_id;
-                const isRoleRoot = activeTab === 'roles' && !roleScope;
-                const isRoleConversationList = activeTab === 'roles' && Boolean(roleScope);
-                const displayName = isRoleConversationList ? getConversationTitle(session) : getDisplayName(session);
-                const onRowClick = () => {
-                  if (isRoleRoot && session.session_type === 'agent') {
-                    setRoleScope(session);
-                    return;
-                  }
-                  onSelectSession(session.session_id);
-                };
-
-                return (
-                  <div
-                    key={session.session_id}
-                    onClick={onRowClick}
-                    className={`
-                      group relative px-2.5 py-2 rounded-lg cursor-pointer transition-all duration-150
-                      ${isSelected
-                        ? 'bg-[var(--color-selected-bg)] border border-[var(--color-selected-border)]'
-                        : 'hover:bg-[var(--color-hover-bg)]'
-                      }
-                    `}
-                  >
-                    <div className="grid grid-cols-[auto,1fr,auto] items-center gap-2.5">
-                    {/* 头像 - 可点击打开配置 */}
-                    {session.avatar ? (
-                      <img
-                        src={session.avatar}
-                        alt={displayName}
-                        onClick={(e) => handleAvatarClick(e, session)}
-                        className="w-7 h-7 rounded-lg flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-[var(--color-accent)]/50 transition-all"
-                        title="点击配置"
-                      />
-                    ) : (
-                      <div 
-                        onClick={(e) => handleAvatarClick(e, session)}
-                        className="w-7 h-7 rounded-lg bg-[var(--color-accent-bg)] flex items-center justify-center flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-[var(--color-accent)]/50 transition-all"
-                        title="点击配置"
-                      >
-                        <MessageCircle className="w-4 h-4 text-[var(--color-accent)]" />
-                      </div>
-                    )}
-                    
-                    {/* 内容 */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1">
-                        <div className="font-medium text-sm text-gray-900 dark:text-white truncate">
-                          {displayName}
-                        </div>
-                        {/* 智能体图标标记 */}
-                        {activeTab === 'roles' && !roleScope && session.session_type === 'agent' && (
-                          <Sparkles className="w-3 h-3 text-[var(--color-accent)] flex-shrink-0" title="智能体" />
-                        )}
-                      </div>
-                      {isRoleConversationList && session.last_message_at && (
-                        <div className="text-[11px] text-gray-500 dark:text-[#b0b0b0] truncate">
-                          {new Date(session.last_message_at).toLocaleString()}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* 操作按钮 */}
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity justify-self-end pointer-events-none group-hover:pointer-events-auto">
-                      {activeTab === 'roles' && !roleScope && (
-                        <button
-                          onClick={(e) => handleStartChatFromRole(e, session)}
-                          className="p-1 hover:bg-[var(--color-accent-bg)] rounded transition-colors"
-                          title="从该角色开始新对话"
-                        >
-                          <MessageCircle className="w-4 h-4 text-[var(--color-accent)]" />
-                        </button>
-                      )}
-                      {activeTab === 'roles' && !roleScope && (
-                        <button
-                          onClick={(e) => openRoleVersions(e, session)}
-                          className="p-1 hover:bg-[var(--color-accent-bg)] rounded transition-colors"
-                          title="角色版本历史"
-                        >
-                          <History className="w-4 h-4 text-[var(--color-accent)]" />
-                        </button>
-                      )}
-                      {activeTab === 'roles' && roleScope && (
-                        <button
-                          onClick={(e) => handleUpgradeToAgent(e, session)}
-                          className="p-1 hover:bg-[var(--color-accent-bg)] rounded transition-colors"
-                          title="沉淀为该角色的新版本"
-                        >
-                          <History className="w-4 h-4 text-[var(--color-accent)]" />
-                        </button>
-                      )}
-                      {isRoundTableMode && activeTab === 'roles' && session.session_type === 'agent' && (
-                        <button
-                          onClick={(e) => handleAddToRoundTable(e, session.session_id)}
-                          className="p-1 hover:bg-[var(--color-accent-bg)] rounded transition-colors"
-                          title="添加到圆桌会议"
-                        >
-                          <Plus className="w-4 h-4 text-[var(--color-accent)]" />
-                        </button>
-                      )}
-                      {/* 升级为智能体按钮（仅记忆体显示） */}
-                    {activeTab === 'chats' && session.session_type === 'memory' && (
-                      <button
-                        onClick={(e) => handleUpgradeToAgent(e, session)}
-                        className="p-1 hover:bg-[var(--color-accent-bg)] rounded transition-colors"
-                        title={session.role_id ? '沉淀为来源角色的新版本' : '升级为智能体'}
-                      >
-                        {session.role_id ? (
-                          <History className="w-4 h-4 text-[var(--color-accent)]" />
-                        ) : (
-                          <ArrowUp className="w-4 h-4 text-[var(--color-accent)]" />
-                        )}
-                      </button>
-                    )}
-                      <button
-                        onClick={(e) => handleDeleteSession(e, session.session_id)}
-                        className="p-1 hover:bg-red-500/10 rounded transition-colors"
-                        title="删除"
-                      >
-                        <Trash2 className="w-4 h-4 text-red-500" />
-                      </button>
-                    </div>
-                    </div>
-                  </div>
-                );
-              })
-            )}
+            </div>
           </div>
-        )}
-      </ScrollArea>
+        </div>
+      </div>
 
       <Dialog
         open={deleteTarget !== null}

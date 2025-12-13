@@ -6,11 +6,10 @@ import { cn } from '@/utils/cn';
 
 const toastVariants = cva(
   [
-    'group pointer-events-auto relative flex w-full items-start gap-3 rounded-md border border-borderToken bg-card p-3 text-foreground',
+    'group pointer-events-auto relative flex items-start gap-3 rounded-lg border border-borderToken bg-card px-4 py-3 text-foreground shadow-lg',
     'data-[state=open]:animate-in data-[state=closed]:animate-out',
     'data-[state=closed]:fade-out-80 data-[state=open]:fade-in-0',
-    'data-[state=closed]:slide-out-to-right-full data-[state=open]:slide-in-from-top-full',
-    'sm:data-[state=open]:slide-in-from-bottom-full',
+    'data-[state=closed]:slide-out-to-top-full data-[state=open]:slide-in-from-top-full',
   ].join(' '),
   {
     variants: {
@@ -36,9 +35,10 @@ const ToastViewport = React.forwardRef<
   <ToastPrimitives.Viewport
     ref={ref}
     className={cn(
-      'fixed top-3 right-3 z-50 flex max-h-screen w-full flex-col gap-2 sm:max-w-[360px]',
+      'fixed left-1/2 -translate-x-1/2 z-[100] flex flex-col items-center gap-2',
       className,
     )}
+    style={{ top: '2px' }}
     {...props}
   />
 ));
