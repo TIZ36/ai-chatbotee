@@ -40,8 +40,8 @@ const NavItem: React.FC<NavItemProps> = ({ to, icon, title, isActive }) => {
           transition-all duration-200 ease-out relative
           flex-shrink-0
           ${isActive 
-            ? 'bg-[var(--color-accent)] text-white' 
-            : 'text-[#b0b0b0] hover:bg-[#202022] hover:text-white'
+            ? 'bg-[var(--color-accent)] text-white shadow-sm' 
+            : 'text-gray-600 dark:text-[#e0e0e0] hover:bg-[var(--color-hover-bg)] hover:text-gray-900 dark:hover:text-white'
           }
         `}
         onMouseEnter={() => setShowTooltip(true)}
@@ -157,23 +157,8 @@ const App: React.FC = () => {
   const [isResearchMode, setIsResearchMode] = useState(false);
   const [currentResearchSessionId, setCurrentResearchSessionId] = useState<string | null>(null);
   const leftPanelRef = React.useRef<ImperativePanelHandle>(null);
-  const autoCollapsedRef = React.useRef(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-
-  useEffect(() => {
-    const shouldCollapse = isResearchMode || isRoundTableMode;
-    if (shouldCollapse && !autoCollapsedRef.current) {
-      leftPanelRef.current?.collapse();
-      autoCollapsedRef.current = true;
-      setIsSidebarCollapsed(true);
-      return;
-    }
-    if (!shouldCollapse && autoCollapsedRef.current) {
-      leftPanelRef.current?.expand();
-      autoCollapsedRef.current = false;
-      setIsSidebarCollapsed(false);
-    }
-  }, [isResearchMode, isRoundTableMode]);
+  const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 
   const handleToggleRoundTable = async () => {
     if (!isRoundTableMode) {
@@ -230,18 +215,70 @@ const App: React.FC = () => {
 
   return (
     <div className="h-screen bg-gray-50 dark:bg-[#1a1a1a] flex flex-col transition-colors duration-200 overflow-hidden">
-      {/* 顶部拖拽区域 - 支持三指拖动与双击最大化 */}
+      {/* 顶部标题栏区域（可拖拽）- macOS 红黄绿 + 顶部模式切换 */}
       <div
-        className="w-full h-7 flex-shrink-0 app-drag bg-transparent"
+        className="w-full h-10 flex-shrink-0 app-drag bg-white/70 dark:bg-[#18181b]/80 backdrop-blur border-b border-gray-200 dark:border-[#27272a]"
         title="拖动窗口 / 双击最大化"
         onDoubleClick={() => {
           window.electronAPI?.toggleMaximize?.();
         }}
-      />
+      >
+        <div className="h-full flex items-center px-3 gap-3">
+          {/* macOS 红黄绿按钮占位（避免内容压到按钮上） */}
+          <div className={isMac ? 'w-[72px]' : 'w-2'} />
+
+          <div className="flex-1" />
+
+          {/* 会话/会议/Research 顶部切换（右对齐，仅聊天页） */}
+          {isChatPage && (
+            <div className="app-no-drag flex items-center gap-1.5 rounded-xl border border-gray-200 dark:border-[#27272a] bg-gray-50 dark:bg-[#202022] p-1">
+              <button
+                onClick={() => {
+                  setIsRoundTableMode(false);
+                  setIsResearchMode(false);
+                }}
+                className={`px-3 h-8 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-1.5 ${
+                  !isRoundTableMode && !isResearchMode
+                    ? 'bg-[var(--color-accent)] text-white shadow-sm'
+                    : 'text-gray-700 dark:text-[#e0e0e0] hover:bg-white/70 dark:hover:bg-[#2b2b2e]'
+                }`}
+              >
+                <Bot className="w-4 h-4" strokeWidth={1.7} />
+                会话
+              </button>
+              <button
+                onClick={handleToggleRoundTable}
+                className={`px-3 h-8 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-1.5 ${
+                  isRoundTableMode
+                    ? 'bg-[var(--color-accent)] text-white shadow-sm'
+                    : 'text-gray-700 dark:text-[#e0e0e0] hover:bg-white/70 dark:hover:bg-[#2b2b2e]'
+                }`}
+              >
+                <Users className="w-4 h-4" strokeWidth={1.7} />
+                会议
+              </button>
+              <button
+                onClick={handleToggleResearch}
+                className={`px-3 h-8 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-1.5 ${
+                  isResearchMode
+                    ? 'bg-[var(--color-accent)] text-white shadow-sm'
+                    : 'text-gray-700 dark:text-[#e0e0e0] hover:bg-white/70 dark:hover:bg-[#2b2b2e]'
+                }`}
+              >
+                <BookOpen className="w-4 h-4" strokeWidth={1.7} />
+                Research
+              </button>
+            </div>
+          )}
+
+          {/* 右侧留白（保留可拖拽空间） */}
+          <div className="w-3" />
+        </div>
+      </div>
       
       <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* 中间导航栏 - GNOME 风格 */}
-      <nav className="w-[52px] bg-white dark:bg-[#2d2d2d] border-r border-gray-200 dark:border-[#404040] flex flex-col items-center flex-shrink-0 z-50 pt-3">
+        <nav className="w-[52px] bg-white dark:bg-[#2d2d2d] border-r border-gray-200 dark:border-[#404040] flex flex-col items-center flex-shrink-0 z-50 pt-3">
 
         {/* 上方导航：聊天、MCP、Workflow */}
         <div className="flex flex-col items-center space-y-1.5 w-full px-1.5 app-no-drag">
@@ -409,71 +446,46 @@ const App: React.FC = () => {
                     : 'rounded-xl rounded-l-none border-l-0'
                 }`}
               >
-                {/* 浮动 Dock：模式 + 侧栏折叠 */}
-                <div className="absolute left-2 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-10">
-                  <button
-                    onClick={() => {
-                      autoCollapsedRef.current = false;
-                      if (isSidebarCollapsed) {
-                        leftPanelRef.current?.expand();
-                        setIsSidebarCollapsed(false);
-                      } else {
-                        leftPanelRef.current?.collapse();
-                        setIsSidebarCollapsed(true);
-                      }
-                    }}
-                    className="w-7 h-7 rounded-lg border border-gray-200 dark:border-[#27272a] bg-white dark:bg-[#202022] text-gray-500 dark:text-[#b0b0b0] hover:bg-[var(--color-hover-bg)]"
-                    title={isSidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'}
-                  >
+                {/* 会话列表折叠按钮：位于会话列表右侧边缘，垂直居中（会话/会议/Research 都可用） */}
+                <button
+                  onClick={() => {
+                    if (isSidebarCollapsed) {
+                      leftPanelRef.current?.expand();
+                      setIsSidebarCollapsed(false);
+                    } else {
+                      leftPanelRef.current?.collapse();
+                      setIsSidebarCollapsed(true);
+                    }
+                  }}
+                  className="app-no-drag absolute left-0 top-1/2 -translate-y-1/2 z-20 h-12 w-6 rounded-r-lg border border-gray-200 dark:border-[#27272a] border-l-0 bg-white/90 dark:bg-[#202022]/90 text-gray-600 dark:text-[#e0e0e0] hover:bg-[var(--color-hover-bg)] transition-all duration-200 flex items-center justify-center shadow-sm"
+                  title={isSidebarCollapsed ? '展开会话列表' : '折叠会话列表'}
+                >
+                  <span className="text-base leading-none">
                     {isSidebarCollapsed ? '›' : '‹'}
-                  </button>
-                  <button
-                    onClick={handleToggleRoundTable}
-                    className={`
-                      w-7 h-14 rounded-lg transition-all
-                      border border-gray-200 dark:border-[#27272a]
-                      ${isRoundTableMode
-                        ? 'bg-[var(--color-accent)] text-white'
-                        : 'bg-white dark:bg-[#202022] text-gray-500 dark:text-[#b0b0b0] hover:bg-[var(--color-accent-bg)] hover:text-[var(--color-accent)]'
-                      }
-                    `}
-                    title={isRoundTableMode ? '退出圆桌会议' : '进入圆桌会议'}
-                  >
-                    <Users className="w-4 h-4 mx-auto" />
-                  </button>
+                  </span>
+                </button>
 
-                  <button
-                    onClick={handleToggleResearch}
-                    className={`
-                      w-7 h-14 rounded-lg transition-all
-                      border border-gray-200 dark:border-[#27272a]
-                      ${isResearchMode
-                        ? 'bg-[var(--color-accent)] text-white'
-                        : 'bg-white dark:bg-[#202022] text-gray-500 dark:text-[#b0b0b0] hover:bg-[var(--color-accent-bg)] hover:text-[var(--color-accent)]'
-                      }
-                    `}
-                    title={isResearchMode ? '退出 Research' : '进入 Research'}
-                  >
-                    <BookOpen className="w-4 h-4 mx-auto" />
-                  </button>
+                <div
+                  key={`${isResearchMode ? 'research' : isRoundTableMode ? 'roundtable' : 'chat'}-${selectedSessionId}-${participantRefreshKey}`}
+                  className="h-full fade-in"
+                >
+                  {isResearchMode ? (
+                    <ResearchPanel
+                      chatSessionId={selectedSessionId}
+                      researchSessionId={currentResearchSessionId}
+                      onResearchSessionChange={setCurrentResearchSessionId}
+                      onExit={() => setIsResearchMode(false)}
+                    />
+                  ) : isRoundTableMode ? (
+                    <RoundTableChat
+                      roundTableId={currentRoundTableId}
+                      onRoundTableChange={setCurrentRoundTableId}
+                      refreshKey={participantRefreshKey}
+                    />
+                  ) : (
+                    <Workflow sessionId={selectedSessionId} />
+                  )}
                 </div>
-
-                {isResearchMode ? (
-                  <ResearchPanel
-                    chatSessionId={selectedSessionId}
-                    researchSessionId={currentResearchSessionId}
-                    onResearchSessionChange={setCurrentResearchSessionId}
-                    onExit={() => setIsResearchMode(false)}
-                  />
-                ) : isRoundTableMode ? (
-                  <RoundTableChat
-                    roundTableId={currentRoundTableId}
-                    onRoundTableChange={setCurrentRoundTableId}
-                    refreshKey={participantRefreshKey}
-                  />
-                ) : (
-                  <Workflow sessionId={selectedSessionId} />
-                )}
               </Panel>
             </PanelGroup>
           </div>

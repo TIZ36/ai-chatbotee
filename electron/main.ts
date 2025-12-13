@@ -278,6 +278,7 @@ function createWindow() {
   const y = Math.floor((screenHeight - windowHeight) / 2);
   
   const isDarwin = process.platform === 'darwin';
+  const isWin = process.platform === 'win32';
   mainWindow = new BrowserWindow({
     width: windowWidth,
     height: windowHeight,
@@ -291,15 +292,20 @@ function createWindow() {
       contextIsolation: true,
       webSecurity: true,
     },
-    titleBarStyle: isDarwin ? 'hidden' : 'default',
-    titleBarOverlay: isDarwin
+    // macOS：使用系统红黄绿按钮，并将 Web 内容延伸到标题栏（方便自定义顶部工具条）
+    titleBarStyle: isDarwin ? 'hiddenInset' : 'default',
+    // macOS：微调红黄绿按钮位置，让顶部工具条对齐更舒服
+    trafficLightPosition: isDarwin ? { x: 12, y: 10 } : undefined,
+    // Windows：使用 titleBarOverlay 让自绘顶部栏更自然
+    titleBarOverlay: isWin
       ? {
           color: '#18181b',
           symbolColor: '#b0b0b0',
-          height: 28,
+          height: 36,
         }
       : undefined,
-    frame: !isDarwin,
+    // 统一使用系统 frame（macOS 需要红黄绿按钮）
+    frame: true,
     show: true, // 立即显示窗口
   });
 

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { BookOpen, ChevronLeft, ChevronRight, Download, FileText, FolderOpen, Hand, Info, Link as LinkIcon, PanelLeftClose, PanelLeftOpen, Play, Plus, Search, Upload, Settings, X } from 'lucide-react';
@@ -72,30 +73,6 @@ function replaceTextRange(text: string, start: number, end: number, replacement:
   return text.slice(0, start) + replacement + text.slice(end);
 }
 
-function extractMarkdownHeadings(md: string): Array<{ index: number; level: number; text: string }> {
-  const lines = String(md || '').split('\n');
-  const headings: Array<{ index: number; level: number; text: string }> = [];
-  let inFence = false;
-  let idx = 0;
-  for (const raw of lines) {
-    const line = raw || '';
-    const trimmed = line.trim();
-    if (trimmed.startsWith('```')) {
-      inFence = !inFence;
-      continue;
-    }
-    if (inFence) continue;
-    const m = /^(#{1,6})\s+(.+)$/.exec(trimmed);
-    if (!m) continue;
-    const level = m[1].length;
-    let text = m[2].trim();
-    // drop trailing # markers
-    text = text.replace(/\s+#+\s*$/, '').trim();
-    if (!text) continue;
-    headings.push({ index: idx++, level, text });
-  }
-  return headings;
-}
 
 function getTriggerContext(text: string, caret: number): { trigger: '@' | '$'; start: number; query: string } | null {
   // Look backwards from caret to find nearest '@' or '$' that isn't preceded by a non-space char sequence breaker.
@@ -163,36 +140,6 @@ const MarkdownArticle: React.FC<{ content: string; onSplitTask?: (task: string) 
   );
 };
 
-const ORGANIZER_MARKER = '<!-- organizer_status -->';
-const LS_RESEARCH_PROGRESS_WIDTH = 'research_progress_width_v1';
-const LS_RESEARCH_PROGRESS_FONT_PX = 'research_progress_font_px_v1';
-
-const ProgressMarkdown: React.FC<{ content: string }> = ({ content }) => {
-  let headingIndex = 0;
-  const makeHeading =
-    (Tag: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6') =>
-    // eslint-disable-next-line react/display-name
-    ({ node, ...props }: any) => {
-      const idx = headingIndex++;
-      return React.createElement(Tag, { ...props, 'data-heading-index': idx });
-    };
-
-  return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      components={{
-        h1: makeHeading('h1'),
-        h2: makeHeading('h2'),
-        h3: makeHeading('h3'),
-        h4: makeHeading('h4'),
-        h5: makeHeading('h5'),
-        h6: makeHeading('h6'),
-      }}
-    >
-      {content || ''}
-    </ReactMarkdown>
-  );
-};
 
 const ResearchPanel: React.FC<ResearchPanelProps> = ({
   chatSessionId,
@@ -262,32 +209,6 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
   const [acStart, setAcStart] = useState<number>(0);
   const [acIndex, setAcIndex] = useState(0);
   
-  // 课题进展（由研究员/组织者自动更新）：显示在输入框下方
-  const [organizerMarkdown, setOrganizerMarkdown] = useState<string>('');
-  const [organizerUpdatedAt, setOrganizerUpdatedAt] = useState<number | null>(null);
-  const [organizerRunning, setOrganizerRunning] = useState(false);
-  const [progressCollapsed, setProgressCollapsed] = useState(false);
-  const [progressWidth, setProgressWidth] = useState<number>(() => {
-    const raw = localStorage.getItem(LS_RESEARCH_PROGRESS_WIDTH);
-    const n = raw ? Number(raw) : NaN;
-    return Number.isFinite(n) && n > 200 ? n : 420;
-  });
-  const [progressFontPx, setProgressFontPx] = useState<number>(() => {
-    const raw = localStorage.getItem(LS_RESEARCH_PROGRESS_FONT_PX);
-    const n = raw ? Number(raw) : NaN;
-    return Number.isFinite(n) && n >= 11 && n <= 20 ? n : 13;
-  });
-  const progressScrollRef = useRef<HTMLDivElement>(null);
-
-  const progressHeadings = useMemo(() => extractMarkdownHeadings(organizerMarkdown), [organizerMarkdown]);
-
-  useEffect(() => {
-    localStorage.setItem(LS_RESEARCH_PROGRESS_WIDTH, String(progressWidth));
-  }, [progressWidth]);
-  
-  useEffect(() => {
-    localStorage.setItem(LS_RESEARCH_PROGRESS_FONT_PX, String(progressFontPx));
-  }, [progressFontPx]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -390,15 +311,6 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
         const asc = (res.messages || []).slice().reverse();
         const list = asc.map(m => ({ role: m.role, content: m.content, created_at: m.created_at }));
         setMessages(list);
-        // 从历史中恢复最近一次组织者状态
-        const lastOrg = [...list].reverse().find((m: any) => m?.role === 'assistant' && typeof m.content === 'string' && m.content.includes(ORGANIZER_MARKER));
-        if (lastOrg?.content) {
-          const md = String(lastOrg.content).replace(ORGANIZER_MARKER, '').trim();
-          if (md) {
-            setOrganizerMarkdown(md);
-            setOrganizerUpdatedAt(Date.now());
-          }
-        }
       } catch (e) {
         console.warn('[Research] Failed to load research messages:', e);
         setMessages([]);
@@ -459,8 +371,6 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
       if (m.role === 'user') {
         parts.push(`## 问题\n\n${m.content}\n`);
       } else if (m.role === 'assistant') {
-        // 组织者状态不渲染到正文（改为右侧面板）
-        if (typeof m.content === 'string' && m.content.includes(ORGANIZER_MARKER)) continue;
         parts.push(`${m.content}\n`);
       }
     }
@@ -592,8 +502,6 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
     const history: Array<{ role: 'user' | 'assistant'; content: string }> = [];
     for (const m of messages) {
       if (m.role === 'user' || m.role === 'assistant') {
-        // 不把组织者状态写入对话历史（避免污染上下文）
-        if (m.role === 'assistant' && typeof m.content === 'string' && m.content.includes(ORGANIZER_MARKER)) continue;
         history.push({ role: m.role, content: m.content });
       }
     }
@@ -601,101 +509,6 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
     return history.slice(-30);
   };
 
-  const runOrganizer = async (latestUserQuestion: string, latestAssistant: string) => {
-    // 研究员承担组织者职责
-    if (!researchSessionId) return;
-    if (!researcherAgentId) return;
-    try {
-      setOrganizerRunning(true);
-      const researcherSession = await getSession(researcherAgentId);
-      const cfgId = researcherSession.llm_config_id || localStorage.getItem('current_llm_config_id') || '';
-      if (!cfgId) return;
-      const cfg = await getLLMConfig(cfgId);
-      const apiKey = await getLLMConfigApiKey(cfgId);
-      if (cfg.provider !== 'ollama' && !apiKey) return;
-
-      const llm = new LLMClient({
-        id: cfg.config_id,
-        provider: cfg.provider,
-        name: cfg.name,
-        apiKey,
-        apiUrl: cfg.api_url,
-        model: cfg.model,
-        enabled: cfg.enabled,
-        metadata: cfg.metadata,
-      });
-
-      const basePrompt = (researcherSession.system_prompt || '你是研究员。') + '\n\n要求：中文Markdown，结构化，简洁，不要寒暄。';
-      const organizerSystem = [
-        basePrompt,
-        '',
-        '当前任务：你是“课题进展”组织者，需要把分散的信息收敛为可快速预览的进展卡片内容。',
-        '',
-        '写作要求：',
-        '- 简略、概括、信息密度高（避免长篇解释）。',
-        '- 强模块意识：用小标题表达“模块/子系统/工作流”，不要堆叠流水账。',
-        '- 善用 Mermaid：当涉及流程/分工/依赖时，优先给出 1 个 mermaid 流程图（flowchart/sequence 均可）。',
-        '- 把前后相关内容汇总到同一个部分：只保留一个「进展概览」段落（不要出现多个总结）。',
-        '',
-        '输出模板（尽量遵循）：',
-        '## 进展概览',
-        '- ...（3-6条要点）',
-        '',
-        '## 模块进展',
-        '- 模块A：...',
-        '- 模块B：...',
-        '',
-        '## 下一步（可并发）',
-        '- [ ] ...',
-        '',
-        '## 风险与依赖',
-        '- ...',
-        '',
-        '## 工作流（Mermaid）',
-        '```mermaid',
-        'flowchart TD',
-        '  A[输入] --> B[分析]',
-        '```',
-      ].join('\n');
-      const organizerInput = [
-        `【最新问题】\n${latestUserQuestion}`,
-        `【最新回答】\n${latestAssistant}`,
-        `【当前课题进展】\n${organizerMarkdown || '(暂无)'}`,
-        `【当前文章】\n${documentMarkdown}`,
-      ].join('\n\n');
-
-      // stream：实时更新课题进展卡片
-      let acc = '';
-      setOrganizerMarkdown('');
-      const resp = await llm.handleUserRequestWithThinking(
-        organizerInput,
-        organizerSystem,
-        undefined,
-        true,
-        (chunk) => {
-          if (!chunk) return;
-          acc += chunk;
-          setOrganizerMarkdown(acc);
-        },
-        buildLLMMessageHistory()
-      );
-
-      const md = String(resp.content || acc || '').trim();
-      if (!md) return;
-      setOrganizerMarkdown(md);
-      setOrganizerUpdatedAt(Date.now());
-
-      // 仍然保存到消息历史，但用 marker 标记；正文渲染时会过滤
-      const content = `${ORGANIZER_MARKER}\n${md}\n`;
-      const message_id = `org-${Date.now()}`;
-      setMessages(prev => [...prev, { role: 'assistant', content }]);
-      await saveMessage(researchSessionId, { message_id, role: 'assistant', content, model: cfg.model || 'unknown' });
-    } catch (e) {
-      console.warn('[Research] Organizer failed:', e);
-    } finally {
-      setOrganizerRunning(false);
-    }
-  };
 
   const handleSend = async () => {
     if (!researchSessionId) return;
@@ -796,9 +609,6 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
           prev.map(m => (m.local_id === local_id ? { ...m, content: finalContent } : m))
         );
         await saveMessage(researchSessionId, { message_id: assistantMessageId, role: 'assistant', content: finalContent, model: cfg.model || 'unknown' });
-
-        // 自动运行 Organizer
-        await runOrganizer(finalUserContent, finalContent);
         return;
       }
 
@@ -855,7 +665,6 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
         setMessages(prev => [...prev, { role: 'assistant', content: merged }]);
         await saveMessage(researchSessionId, { message_id: assistantMessageId, role: 'assistant', content: merged, model: 'agents' });
 
-      await runOrganizer(finalUserContent, merged);
     } catch (e) {
       const err = e instanceof Error ? e.message : String(e);
       const content = `> ❌ Research 生成失败：${err}\n`;
@@ -1123,23 +932,6 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
     setTimeout(() => runWindowResearch(id), 50);
   }, [runWindowResearch]);
   
-  const triggerOrganizerRefresh = useCallback(async () => {
-    // 从当前消息里找最新的 user / assistant（排除 organizer marker）作为输入
-    let latestUser = '';
-    let latestAssistant = '';
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i] as any;
-      if (!latestAssistant && m?.role === 'assistant' && typeof m.content === 'string' && !m.content.includes(ORGANIZER_MARKER)) {
-        latestAssistant = m.content;
-      }
-      if (!latestUser && m?.role === 'user' && typeof m.content === 'string') {
-        latestUser = m.content;
-      }
-      if (latestUser && latestAssistant) break;
-    }
-    if (!latestUser && !latestAssistant) return;
-    await runOrganizer(latestUser || '(无最新问题)', latestAssistant || '(无最新回答)');
-  }, [messages, runOrganizer]);
 
   return (
     <div className="h-full flex flex-col min-h-0">
@@ -1196,8 +988,12 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
       </div>
       
       {/* Help 弹窗（Info） */}
-      {showHelp && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      {showHelp && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 p-4" onClick={(e) => {
+          if (e.target === e.currentTarget) {
+            setShowHelp(false);
+          }
+        }}>
           <div className="w-full max-w-2xl rounded-xl bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] shadow-lg overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-200 dark:border-[#404040] flex items-center justify-between">
               <div className="text-sm font-semibold text-gray-900 dark:text-white">Research 用法</div>
@@ -1214,11 +1010,15 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
       
       {/* 研究员设置弹窗（研究员是课题组指定成员） */}
-      {showResearcherSettings && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      {showResearcherSettings && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 p-4" onClick={(e) => {
+          if (e.target === e.currentTarget) {
+            setShowResearcherSettings(false);
+          }
+        }}>
           <div className="w-full max-w-2xl rounded-xl bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] shadow-lg overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-200 dark:border-[#404040] flex items-center justify-between">
               <div className="text-sm font-semibold text-gray-900 dark:text-white">研究员设置（头像 / 人设 / 模型）</div>
@@ -1375,8 +1175,12 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
       )}
 
       {/* TODO 分配弹窗：点击文章中的 TODO 项可分配给成员异步研究 */}
-      {assignTask && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      {assignTask && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 p-4" onClick={(e) => {
+          if (e.target === e.currentTarget) {
+            setAssignTask(null);
+          }
+        }}>
           <div className="w-full max-w-lg rounded-xl bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] shadow-lg overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-200 dark:border-[#404040] flex items-center justify-between">
               <div className="text-sm font-semibold text-gray-900 dark:text-white">分配 TODO 异步分析</div>
@@ -1434,9 +1238,9 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
 
-      {/* 主体：三列布局 - Sources | 文章+输入 | 课题进展 */}
+      {/* 主体：两列布局 - Sources | 文章+输入 */}
       <div className="flex-1 min-h-0 flex">
         {/* 左侧 Sources */}
         {!sourcesCollapsed && (
@@ -1782,9 +1586,7 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
                 </div>
               )}
               <div className="space-y-2">
-                {messages
-                  .filter(m => !(m.role === 'assistant' && typeof m.content === 'string' && m.content.includes(ORGANIZER_MARKER)))
-                  .map((m, idx) => {
+                {messages.map((m, idx) => {
                     const key = m.local_id || `${m.role}-${idx}`;
                     if (m.role === 'user') {
                       return (
@@ -2004,39 +1806,40 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
           </div>
 
           {/* 并发研究：边缘 Tab + 研究窗口面板 */}
-          {windows.length > 0 && (
-            <div className="absolute right-1 top-14 flex flex-col gap-1 z-40">
-              {windows.slice(0, 8).map((w) => {
-                const isActive = w.id === activeWindowId && !w.collapsed;
-                const statusColor =
-                  w.status === 'done' ? 'bg-green-500' : w.status === 'running' ? 'bg-blue-500' : 'bg-gray-400';
-                return (
-                  <button
-                    key={w.id}
-                    onClick={() => {
-                      setActiveWindowId(w.id);
-                      updateWindow(w.id, { collapsed: false });
-                    }}
-                    className={`group w-8 h-12 rounded-lg border border-gray-200 dark:border-[#404040] shadow-sm flex flex-col items-center justify-center gap-1 transition-colors ${
-                      isActive ? 'bg-[#7c3aed] text-white' : 'bg-white dark:bg-[#363636] text-gray-700 dark:text-[#e0e0e0] hover:bg-gray-50 dark:hover:bg-[#404040]'
-                    }`}
-                    title={w.title}
-                  >
-                    <div className={`w-2 h-2 rounded-full ${statusColor}`} />
-                    {w.status === 'done' ? (
-                      <Hand className="w-3.5 h-3.5" />
-                    ) : (
-                      <span className="text-[10px] font-semibold leading-none">
-                        {w.title.slice(0, 1).toUpperCase()}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          <>
+            {windows.length > 0 && (
+              <div className="absolute right-1 top-14 flex flex-col gap-1 z-40">
+                {windows.slice(0, 8).map((w) => {
+                  const isActive = w.id === activeWindowId && !w.collapsed;
+                  const statusColor =
+                    w.status === 'done' ? 'bg-green-500' : w.status === 'running' ? 'bg-blue-500' : 'bg-gray-400';
+                  return (
+                    <button
+                      key={w.id}
+                      onClick={() => {
+                        setActiveWindowId(w.id);
+                        updateWindow(w.id, { collapsed: false });
+                      }}
+                      className={`group w-8 h-12 rounded-lg border border-gray-200 dark:border-[#404040] shadow-sm flex flex-col items-center justify-center gap-1 transition-colors ${
+                        isActive ? 'bg-[#7c3aed] text-white' : 'bg-white dark:bg-[#363636] text-gray-700 dark:text-[#e0e0e0] hover:bg-gray-50 dark:hover:bg-[#404040]'
+                      }`}
+                      title={w.title}
+                    >
+                      <div className={`w-2 h-2 rounded-full ${statusColor}`} />
+                      {w.status === 'done' ? (
+                        <Hand className="w-3.5 h-3.5" />
+                      ) : (
+                        <span className="text-[10px] font-semibold leading-none">
+                          {w.title.slice(0, 1).toUpperCase()}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
-          {activeWindow && !activeWindow.collapsed && (
+            {activeWindow && !activeWindow.collapsed && (
             <div className="absolute right-0 top-0 bottom-0 w-[380px] z-50 bg-white dark:bg-[#2d2d2d] border-l border-gray-200 dark:border-[#404040] shadow-2xl flex flex-col">
               {/* Header */}
               <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-[#404040] bg-gray-50/50 dark:bg-[#363636]/30">
@@ -2172,103 +1975,13 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
               </div>
             </div>
           )}
-        </div>
+          </>
+          </div>
 
-        {/* 右侧课题进展（独立全高度列） */}
-        <div
-          className="relative flex-shrink-0 bg-[#f5f5f5] dark:bg-[#1f1f1f] transition-all"
-          style={{ width: progressCollapsed ? 28 : progressWidth }}
-        >
-          {!progressCollapsed && (
-            <div
-              className="absolute -left-1 top-0 bottom-0 w-3 cursor-col-resize z-50"
-              title="拖拽调整宽度"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                const startX = e.clientX;
-                const startW = progressWidth;
-                const body = document.body;
-                const prevCursor = body.style.cursor;
-                const prevSelect = body.style.userSelect;
-                body.style.cursor = 'col-resize';
-                body.style.userSelect = 'none';
-                const onMove = (ev: MouseEvent) => {
-                  const dx = startX - ev.clientX;
-                  const next = Math.max(260, Math.min(800, startW + dx));
-                  setProgressWidth(next);
-                };
-                const onUp = () => {
-                  window.removeEventListener('mousemove', onMove);
-                  window.removeEventListener('mouseup', onUp);
-                  body.style.cursor = prevCursor;
-                  body.style.userSelect = prevSelect;
-                };
-                window.addEventListener('mousemove', onMove);
-                window.addEventListener('mouseup', onUp);
-              }}
-            >
-              <div className="w-full h-full hover:bg-[#7c3aed]/20" />
-            </div>
-          )}
-          {progressCollapsed ? (
-            <div className="h-full flex flex-col items-center pt-3">
-              <button onClick={() => setProgressCollapsed(false)} className="p-1 rounded hover:bg-white dark:hover:bg-[#363636] text-gray-500 dark:text-[#808080]" title="展开">
-                <ChevronLeft className="w-3.5 h-3.5" />
-              </button>
-              <div className="mt-2 text-[9px] text-gray-400 dark:text-[#707070] rotate-180 select-none [writing-mode:vertical-rl]">进展</div>
-            </div>
-          ) : (
-            <div className="h-full flex flex-col p-2">
-              <div className="flex items-center justify-between mb-2">
-                <div className="min-w-0">
-                  <div className="text-xs font-semibold text-gray-700 dark:text-[#d0d0d0]">课题进展</div>
-                  <div className="text-[9px] text-gray-400 dark:text-[#707070] truncate">
-                    {organizerRunning ? '更新中…' : organizerUpdatedAt ? new Date(organizerUpdatedAt).toLocaleTimeString() : ''}
-                  </div>
-                </div>
-                <div className="flex items-center gap-0.5">
-                  <select value={progressFontPx} onChange={(e) => setProgressFontPx(Number(e.target.value))} className="text-[9px] px-1 py-0.5 rounded bg-white dark:bg-[#2d2d2d] text-gray-600 dark:text-[#b0b0b0] focus:outline-none" title="字号">
-                    {[11, 12, 13, 14, 16, 18, 20].map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                  <button onClick={triggerOrganizerRefresh} className="p-1 rounded hover:bg-white dark:hover:bg-[#363636] text-gray-500 dark:text-[#808080]" title="刷新"><Play className="w-3 h-3" /></button>
-                  <button onClick={() => setProgressCollapsed(true)} className="p-1 rounded hover:bg-white dark:hover:bg-[#363636] text-gray-500 dark:text-[#808080]" title="折叠"><ChevronRight className="w-3 h-3" /></button>
-                </div>
-              </div>
-              <div className="flex-1 min-h-0 flex rounded-lg bg-white dark:bg-[#262626] shadow-sm overflow-hidden" style={{ fontSize: `${progressFontPx}px` }}>
-                <div className="w-[120px] flex-shrink-0 bg-[#fafafa] dark:bg-[#1f1f1f] p-2 overflow-auto">
-                  <div className="text-[9px] font-semibold text-gray-500 dark:text-[#808080] mb-1 uppercase tracking-wide">提纲</div>
-                  {progressHeadings.length === 0 ? (
-                    <div className="text-[10px] text-gray-400 dark:text-[#606060]">暂无</div>
-                  ) : (
-                    <div className="space-y-0.5">
-                      {progressHeadings.map(h => (
-                        <button
-                          key={h.index}
-                          onClick={() => {
-                            const el = progressScrollRef.current?.querySelector(`[data-heading-index="${h.index}"]`) as HTMLElement | null;
-                            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                          }}
-                          className="w-full text-left px-1.5 py-0.5 rounded hover:bg-white dark:hover:bg-[#2d2d2d] text-[10px] text-gray-600 dark:text-[#c0c0c0] line-clamp-2"
-                          title={h.text}
-                          style={{ paddingLeft: Math.min(10, (h.level - 1) * 5) + 4 }}
-                        >
-                          {h.text}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div ref={progressScrollRef} className="flex-1 min-h-0 overflow-auto p-2">
-                  {organizerMarkdown ? <ProgressMarkdown content={organizerMarkdown} /> : <div className="text-xs text-gray-500 dark:text-[#909090]">发送问题后自动生成进展</div>}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );
+
 };
 
 export default ResearchPanel;
