@@ -75,6 +75,32 @@ export function convertMCPToolToLLMFunction(tool: MCPTool): any {
 }
 
 /**
+ * DeepSeek(OpenAI兼容) 对工具名校验更严格：仅允许 [a-zA-Z0-9_-]
+ * 这里做一个稳定的规范化，以避免 tools[].function.name 400。
+ */
+function normalizeToolNameForOpenAI(name: string): string {
+  const raw = (name || '').trim();
+  let normalized = raw.replace(/[^a-zA-Z0-9_-]/g, '_');
+  normalized = normalized.replace(/_+/g, '_');
+  if (!normalized) normalized = 'tool';
+
+  const maxLen = 64;
+  if (normalized.length > maxLen) {
+    const suffix = Math.abs(hashString(raw)).toString(36).slice(0, 8);
+    normalized = `${normalized.slice(0, maxLen - 9)}_${suffix}`;
+  }
+  return normalized;
+}
+
+function hashString(value: string): number {
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash * 31 + value.charCodeAt(i)) | 0;
+  }
+  return hash;
+}
+
+/**
  * 规范化 OpenAI 兼容的 API URL
  * 统一处理所有兼容OpenAI的模型URL拼接逻辑：
  * - 如果用户只提供了 host（如 https://api-inference.modelscope.cn），则拼接完整的默认 path
@@ -172,6 +198,8 @@ export class LLMClient {
   private allowedTools: MCPTool[] = []; // 允许使用的工具列表
   private allowedToolNames: Set<string> = new Set(); // 允许使用的工具名称集合
   private onToolStream?: (toolName: string, chunk: any) => void; // 工具流式输出回调
+  private toolNameMapLlmToOriginal: Map<string, string> = new Map();
+  private toolNameMapOriginalToLlm: Map<string, string> = new Map();
 
   constructor(config: LLMConfig) {
     this.config = config;
@@ -236,7 +264,7 @@ export class LLMClient {
    */
   private async callOpenAIStream(
     messages: LLMMessage[], 
-    tools?: any[], 
+    tools?: MCPTool[], 
     onChunk?: (chunk: string) => void,
     onThinking?: (thinking: string) => void
   ): Promise<LLMResponse> {
@@ -256,6 +284,7 @@ export class LLMClient {
     const timeoutId = setTimeout(() => controller.abort(), timeoutDuration);
     
     try {
+      const openAiTools = tools ? this.prepareToolsForOpenAI(tools) : undefined;
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
@@ -276,8 +305,8 @@ export class LLMClient {
             if (msg.reasoning_content) message.reasoning_content = msg.reasoning_content;
             return message;
           }),
-          tools: tools ? tools.map(convertMCPToolToLLMFunction) : undefined,
-          tool_choice: tools ? 'auto' : undefined,
+          tools: openAiTools,
+          tool_choice: openAiTools && openAiTools.length > 0 ? 'auto' : undefined,
           stream: true,
         }),
         signal: controller.signal,
@@ -419,7 +448,7 @@ export class LLMClient {
   /**
    * 调用OpenAI API（非流式响应）
    */
-  private async callOpenAI(messages: LLMMessage[], tools?: any[]): Promise<LLMResponse> {
+  private async callOpenAI(messages: LLMMessage[], tools?: MCPTool[]): Promise<LLMResponse> {
     if (!this.config.apiKey) {
       throw new Error('OpenAI API key not configured');
     }
@@ -438,6 +467,7 @@ export class LLMClient {
     const timeoutId = setTimeout(() => controller.abort(), timeoutDuration);
     
     try {
+      const openAiTools = tools ? this.prepareToolsForOpenAI(tools) : undefined;
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
@@ -459,8 +489,8 @@ export class LLMClient {
             if (msg.reasoning_content) message.reasoning_content = msg.reasoning_content;
             return message;
           }),
-          tools: tools ? tools.map(convertMCPToolToLLMFunction) : undefined,
-          tool_choice: tools ? 'auto' : undefined,
+          tools: openAiTools,
+          tool_choice: openAiTools && openAiTools.length > 0 ? 'auto' : undefined,
         }),
         signal: controller.signal,
       });
@@ -1693,7 +1723,9 @@ export class LLMClient {
    * 这样可以避免重复的 listTools 调用和 schema 验证问题
    */
   async executeToolCall(toolCall: LLMToolCall): Promise<any> {
-    const { name, arguments: argsStr } = toolCall.function;
+    const llmName = toolCall.function.name;
+    const name = this.toolNameMapLlmToOriginal.get(llmName) ?? llmName;
+    const { arguments: argsStr } = toolCall.function;
     const args = JSON.parse(argsStr);
 
     console.log(`[LLM] Executing tool call: ${name}`);
@@ -2073,6 +2105,44 @@ ${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
 
     console.warn(`[LLM] handleUserRequestWithThinking 超时，迭代次数=${iteration}`);
     return { content: '处理超时，请重试。' };
+  }
+
+  /**
+   * OpenAI / DeepSeek 等 OpenAI 兼容接口对 tools.function.name 有格式限制。
+   * 将 MCP 工具名做规范化并建立映射，保证：
+   * - 发给模型的是合法 name
+   * - 执行工具时能映射回原始 MCP 工具名
+   */
+  private prepareToolsForOpenAI(tools: MCPTool[]): any[] {
+    this.toolNameMapLlmToOriginal.clear();
+    this.toolNameMapOriginalToLlm.clear();
+
+    const used = new Set<string>();
+    const result: any[] = [];
+
+    for (const tool of tools) {
+      const originalName = tool.name;
+      let llmName = normalizeToolNameForOpenAI(originalName);
+      if (used.has(llmName)) {
+        const suffix = Math.abs(hashString(originalName)).toString(36).slice(0, 6);
+        llmName = `${llmName}_${suffix}`;
+      }
+      used.add(llmName);
+
+      this.toolNameMapLlmToOriginal.set(llmName, originalName);
+      this.toolNameMapOriginalToLlm.set(originalName, llmName);
+
+      result.push({
+        type: 'function',
+        function: {
+          name: llmName,
+          description: tool.description,
+          parameters: tool.inputSchema,
+        },
+      });
+    }
+
+    return result;
   }
 }
 

@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "vite build && tsc -p electron/tsconfig.json",
     "preview": "vite preview",
+    "mcp:phone": "node scripts/phone-mcp-server.mjs",
     "build:electron": "tsc -p electron/tsconfig.json && node -e \"const fs=require('fs');const path=require('path');const distPath=path.join(__dirname,'electron/dist');['main.js','preload.js'].forEach(f=>{const oldPath=path.join(distPath,f);const newPath=path.join(distPath,f.replace('.js','.cjs'));if(fs.existsSync(oldPath)){fs.renameSync(oldPath,newPath);console.log('Renamed',f,'to',f.replace('.js','.cjs'));}});\"",
     "rebuild:electron": "electron-rebuild -f -w node-pty",
     "postinstall": "electron-rebuild -f -w node-pty",

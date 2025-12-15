@@ -1443,6 +1443,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  const wasAtBottomRef = useRef(true);
   const isInitialLoadRef = useRef(true);
   const shouldMaintainScrollRef = useRef(false);
   const isUserScrollingRef = useRef(false);
@@ -1472,6 +1473,20 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
     return scrollHeight - scrollTop - clientHeight < 100;
   };
 
+  const scrollToBottom = (behavior: ScrollBehavior = 'auto') => {
+    if (chatContainerRef.current) {
+      const container = chatContainerRef.current;
+      container.style.scrollBehavior = behavior;
+      container.scrollTop = container.scrollHeight;
+      wasAtBottomRef.current = true;
+      return;
+    }
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior });
+      wasAtBottomRef.current = true;
+    }
+  };
+
   useEffect(() => {
     // 如果需要保持滚动位置（加载更多历史消息），不滚动
     if (shouldMaintainScrollRef.current) {
@@ -1485,18 +1500,15 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
       return;
     }
     
+    const wasAtBottom = wasAtBottomRef.current;
+
     // 如果是初始加载，直接跳到底部（最新消息位置），不使用动画
     if (isInitialLoadRef.current && messages.length > 0) {
       // 使用 setTimeout 确保 DOM 已完全渲染
       setTimeout(() => {
-        if (chatContainerRef.current) {
-          const container = chatContainerRef.current;
-          // 直接设置 scrollTop，不使用动画
-          container.style.scrollBehavior = 'auto';
-          container.scrollTop = container.scrollHeight;
-          isInitialLoadRef.current = false;
-          lastMessageCountRef.current = messages.length;
-        }
+        scrollToBottom('auto');
+        isInitialLoadRef.current = false;
+        lastMessageCountRef.current = messages.length;
       }, 0);
       return;
     }
@@ -1504,29 +1516,29 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
     // 检测是否有新消息（消息数量增加，且是追加到末尾的新消息，不是加载的历史消息）
     // 注意：如果消息数量减少或不变，说明可能是替换消息（如编辑、删除），不处理
     if (messages.length <= lastMessageCountRef.current) {
-      // 消息数量没有增加，可能是替换或删除，更新计数但不滚动
+      // 消息数量没有增加：可能是替换/编辑/流式更新（content 变化但 length 不变）
+      // 对于流式更新，如果用户原本在底部附近，则持续跟随到底部
+      const hasStreamingMessage = messages.some(m => m.isStreaming);
+      if (hasStreamingMessage && wasAtBottom && !isUserScrollingRef.current) {
+        setTimeout(() => scrollToBottom('auto'), 0);
+      }
+      // 更新计数但不走“新消息”逻辑
       lastMessageCountRef.current = messages.length;
       return;
     }
     
-    const hasNewMessages = messages.length > lastMessageCountRef.current;
-    const newMessageCount = hasNewMessages ? messages.length - lastMessageCountRef.current : 0;
+    const prevCount = lastMessageCountRef.current;
+    const hasNewMessages = messages.length > prevCount;
+    const newMessageCount = hasNewMessages ? messages.length - prevCount : 0;
     
     if (hasNewMessages) {
       // 更新 lastMessageCountRef
       lastMessageCountRef.current = messages.length;
       
       // 新消息在底部，如果用户在底部附近，自动滚动到底部（不使用动画）
-      if (shouldAutoScroll() && !isUserScrollingRef.current) {
+      if (wasAtBottom && !isUserScrollingRef.current) {
         setTimeout(() => {
-          if (chatContainerRef.current) {
-            const container = chatContainerRef.current;
-            // 直接设置 scrollTop，不使用动画
-            container.style.scrollBehavior = 'auto';
-            container.scrollTop = container.scrollHeight;
-          } else if (messagesEndRef.current) {
-            messagesEndRef.current.scrollIntoView({ behavior: 'instant' });
-          }
+          scrollToBottom('auto');
         }, 0);
         // 用户已经在底部，隐藏新消息提示
         setShowNewMessagePrompt(false);
@@ -3318,12 +3330,12 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
       const currentTokens = estimate_messages_tokens(conversationMessages, model);
       
       // 将消息历史转换为 LLMMessage 格式（用于传递给 LLMClient）
-      // 临时会话：只发送当前用户消息，不发送历史消息
-      const messagesToSend = isTemporarySession 
-        ? [userMessage]  // 临时会话只发送当前消息
-        : (lastSummaryIndex >= 0 
-        ? messages.slice(lastSummaryIndex)
-          : messages);
+      // 临时会话也需要“本次会话内”的上下文记忆，只是不落库持久化
+      const baseMessagesToSend = lastSummaryIndex >= 0 ? messages.slice(lastSummaryIndex) : messages;
+      const tempSessionHistoryWindow = 24; // 仅用于临时会话，避免上下文无限膨胀
+      const messagesToSend = isTemporarySession
+        ? baseMessagesToSend.slice(-tempSessionHistoryWindow)
+        : baseMessagesToSend;
       
       const messageHistory: LLMMessage[] = [];
       for (const msg of messagesToSend) {
@@ -7001,6 +7013,8 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
             onScroll={(e) => {
               const container = e.currentTarget;
               const scrollTop = container.scrollTop;
+              const atBottom = shouldAutoScroll();
+              wasAtBottomRef.current = atBottom;
               
               // 检测用户是否在滚动（排除程序控制的滚动）
               if (!isLoadingMoreRef.current) {
@@ -7017,7 +7031,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
               }
               
               // 用户滚动到底部时，隐藏新消息提示（最新消息在底部）
-              if (shouldAutoScroll()) {
+              if (atBottom) {
                 setShowNewMessagePrompt(false);
                 setUnreadMessageCount(0);
               }
@@ -7061,14 +7075,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
             <div className="sticky bottom-4 z-10 flex justify-center pointer-events-none">
               <button
                 onClick={() => {
-                  if (chatContainerRef.current) {
-                    const container = chatContainerRef.current;
-                    // 直接跳到底部（最新消息位置），不使用动画
-                    container.style.scrollBehavior = 'auto';
-                    container.scrollTop = container.scrollHeight;
-                  } else if (messagesEndRef.current) {
-                    messagesEndRef.current.scrollIntoView({ behavior: 'instant' });
-                  }
+                  scrollToBottom('auto');
                   setShowNewMessagePrompt(false);
                   setUnreadMessageCount(0);
                 }}
