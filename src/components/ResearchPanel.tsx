@@ -1562,7 +1562,7 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
 
       {/* TODO 分配弹窗：点击文章中的 TODO 项可分配给成员异步研究 */}
       {assignTask && createPortal(
@@ -2017,8 +2017,8 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
             </div>
 
           {/* 输入区（集成课题组/成员/发送） */}
-          <div className="flex-shrink-0 px-3 pb-3">
-            <div className="relative rounded-xl bg-white dark:bg-[#262626] shadow-md overflow-hidden">
+          <div className="flex-shrink-0 px-3 pb-3 relative z-10">
+            <div className="relative rounded-xl bg-white dark:bg-[#262626] shadow-md">
               {/* 附件预览 */}
               {attachedMedia.length > 0 && (
                 <div className="px-3 py-2 border-b border-gray-100 dark:border-[#363636] flex flex-wrap gap-2">
