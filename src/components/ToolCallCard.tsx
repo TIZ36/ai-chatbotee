@@ -7,6 +7,7 @@ import React, { useState } from 'react';
 import { Play, CheckCircle, XCircle, Loader } from 'lucide-react';
 import { Button } from './ui/Button';
 import { MCPTool } from '../services/mcpClient';
+import { truncateBase64Strings } from '../utils/textUtils';
 
 interface ToolCallCardProps {
   serverId: string;
@@ -236,7 +237,7 @@ const ToolCallCard: React.FC<ToolCallCardProps> = ({
             <span className="text-sm font-medium text-gray-700 dark:text-gray-300">调用结果</span>
           </div>
           <pre className="bg-gray-900 text-green-400 p-3 rounded text-xs overflow-auto max-h-64">
-            {JSON.stringify(result, null, 2)}
+            {truncateBase64Strings(JSON.stringify(result, null, 2))}
           </pre>
         </div>
       )}

@@ -34,6 +34,51 @@ export interface Message {
   created_at?: string;
   tool_type?: 'workflow' | 'mcp'; // 感知组件类型（当 role === 'tool' 时使用）
   ext?: MessageExt; // 扩展数据
+  mcpdetail?: MCPDetail; // MCP 执行详情（当 role === 'assistant' 且触发了 MCP 时）
+}
+
+export interface MCPDetail {
+  execution_id: string;
+  component_type: 'mcp' | 'workflow';
+  component_id: string;
+  component_name?: string;
+  status: 'pending' | 'running' | 'completed' | 'error';
+  logs?: string[];
+  raw_result?: any; // 原始结果（包含图片等）
+  error_message?: string;
+  executed_at?: string;
+}
+
+// 过程步骤（用于存储思考和MCP调用的完整历史）
+export interface ProcessStep {
+  /** 步骤类型 */
+  type: 'thinking' | 'mcp_call' | 'workflow';
+  /** 时间戳 */
+  timestamp?: number;
+  /** 思考内容（当 type === 'thinking' 时） */
+  thinking?: string;
+  /** MCP 服务器名称（当 type === 'mcp_call' 时） */
+  mcpServer?: string;
+  /** 工具名称（当 type === 'mcp_call' 时） */
+  toolName?: string;
+  /** 调用参数 */
+  arguments?: any;
+  /** 调用结果 */
+  result?: any;
+  /** 执行状态 */
+  status?: 'pending' | 'running' | 'completed' | 'error';
+  /** 执行时长（毫秒） */
+  duration?: number;
+  /** 错误信息 */
+  error?: string;
+  /** 工作流信息（当 type === 'workflow' 时） */
+  workflowInfo?: {
+    id?: string;
+    name?: string;
+    status?: 'pending' | 'running' | 'completed' | 'error';
+    result?: string;
+    config?: any;
+  };
 }
 
 // 消息扩展数据（用于存储 Gemini 等模型的特殊数据）
@@ -47,10 +92,12 @@ export interface MessageExt {
   toolCallSignatures?: Record<string, string>; // 工具调用的思维签名
   // 多模态相关
   media?: Array<{
-    type: 'image' | 'video';
+    type: 'image' | 'video' | 'audio';
     mimeType: string;
     data: string;
   }>;
+  // 过程步骤（思考和MCP调用的完整历史）
+  processSteps?: ProcessStep[];
 }
 
 export interface Summary {
@@ -72,6 +119,22 @@ export interface MessageExecution {
   llm_config_id?: string;
   input?: string;
   result?: string;
+  // 执行过程日志（后端以 JSON 数组返回；兼容旧数据可能为 string）
+  logs?: any;
+  // 原始结构化结果（用于展示 MCP 多媒体 content[]）
+  raw_result?: any;
+  status: 'pending' | 'running' | 'completed' | 'error';
+  error_message?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface SessionExecutionItem {
+  execution_id: string;
+  message_id: string;
+  component_type: 'mcp' | 'workflow';
+  component_id?: string;
+  component_name?: string;
   status: 'pending' | 'running' | 'completed' | 'error';
   error_message?: string;
   created_at?: string;
@@ -360,6 +423,25 @@ export async function getMessageExecution(message_id: string): Promise<MessageEx
     }
     const error = await response.json();
     throw new Error(error.error || error.message || `Failed to get message execution: ${response.statusText}`);
+  }
+  
+  return await response.json();
+}
+
+/**
+ * 列出会话内所有执行记录（用于时间线视图）
+ */
+export async function listSessionExecutions(session_id: string): Promise<SessionExecutionItem[]> {
+  const response = await fetch(`${API_BASE}/sessions/${session_id}/executions`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || error.message || `Failed to list session executions: ${response.statusText}`);
   }
   
   return await response.json();

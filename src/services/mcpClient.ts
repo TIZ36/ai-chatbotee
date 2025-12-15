@@ -41,7 +41,12 @@ export class MCPClient {
   private toolsCacheTime: number = 0; // 工具列表缓存时间
   private readonly TOOLS_CACHE_TTL = 5 * 60 * 1000; // 工具列表缓存5分钟
   private isInUse: boolean = false; // 连接是否正在使用中（连接池管理）
-  private lastUsedTime: number = 0; // 最后使用时间
+  public lastUsedTime: number = 0; // 最后使用时间（公开以供连接池管理使用）
+  private _isHealthy: boolean = true; // 连接健康状态
+  private consecutiveErrors: number = 0; // 连续错误次数
+  private readonly MAX_CONSECUTIVE_ERRORS = 3; // 最大连续错误次数，超过则认为连接不健康
+  private lastHealthCheckTime: number = 0; // 上次健康检查时间
+  private readonly HEALTH_CHECK_INTERVAL = 30 * 1000; // 健康检查间隔 30 秒
 
   constructor(options: MCPClientOptions) {
     this.server = options.server;
@@ -68,6 +73,238 @@ export class MCPClient {
    */
   isIdle(): boolean {
     return !this.isInUse && this.isInitialized;
+  }
+
+  /**
+   * 获取连接健康状态
+   */
+  get isHealthy(): boolean {
+    return this._isHealthy && this.isConnected;
+  }
+
+  /**
+   * 标记连接为不健康
+   */
+  markAsUnhealthy(): void {
+    this._isHealthy = false;
+    console.warn(`[MCP] Connection to ${this.server.name} marked as unhealthy`);
+  }
+
+  /**
+   * 标记连接为健康
+   */
+  markAsHealthy(): void {
+    this._isHealthy = true;
+    this.consecutiveErrors = 0;
+    console.log(`[MCP] Connection to ${this.server.name} marked as healthy`);
+  }
+
+  /**
+   * 记录错误，累计错误次数
+   * @returns 如果连续错误次数超过阈值，返回 true（表示应该重连）
+   */
+  recordError(error: Error): boolean {
+    this.consecutiveErrors++;
+    console.warn(`[MCP] Error recorded for ${this.server.name} (${this.consecutiveErrors}/${this.MAX_CONSECUTIVE_ERRORS}):`, error.message);
+    
+    // 检测常见的连接断开错误
+    const errorMessage = error.message.toLowerCase();
+    const isConnectionError = 
+      errorMessage.includes('network') ||
+      errorMessage.includes('connection') ||
+      errorMessage.includes('timeout') ||
+      errorMessage.includes('aborted') ||
+      errorMessage.includes('econnrefused') ||
+      errorMessage.includes('econnreset') ||
+      errorMessage.includes('epipe') ||
+      errorMessage.includes('socket') ||
+      errorMessage.includes('fetch failed') ||
+      errorMessage.includes('failed to fetch') ||
+      errorMessage.includes('session') ||
+      errorMessage.includes('not connected') ||
+      errorMessage.includes('transport');
+
+    if (isConnectionError || this.consecutiveErrors >= this.MAX_CONSECUTIVE_ERRORS) {
+      this.markAsUnhealthy();
+      return true; // 需要重连
+    }
+
+    return false;
+  }
+
+  /**
+   * 重置错误计数（成功操作后调用）
+   */
+  resetErrors(): void {
+    if (this.consecutiveErrors > 0) {
+      console.log(`[MCP] Resetting error count for ${this.server.name} (was ${this.consecutiveErrors})`);
+    }
+    this.consecutiveErrors = 0;
+    this._isHealthy = true;
+  }
+
+  /**
+   * 健康检查结果
+   */
+  private _healthCheckSupported: boolean | null = null; // null 表示未知，true 表示支持，false 表示不支持
+  private _lastHealthWarning: number = 0; // 上次健康警告时间
+  private readonly HEALTH_WARNING_INTERVAL = 5 * 60 * 1000; // 健康警告间隔（5分钟）
+
+  /**
+   * 检查 MCP 服务器是否支持健康检查接口
+   */
+  get supportsHealthCheck(): boolean | null {
+    return this._healthCheckSupported;
+  }
+
+  /**
+   * 检查连接健康状态（主动健康检查）
+   * 优先使用标准 /health 接口，如果不支持则回退到 tools/list
+   * @returns true 表示连接健康，false 表示不健康
+   */
+  async checkHealth(): Promise<boolean> {
+    // 如果最近已经检查过，直接返回缓存的状态
+    const now = Date.now();
+    if (now - this.lastHealthCheckTime < this.HEALTH_CHECK_INTERVAL) {
+      return this._isHealthy;
+    }
+    this.lastHealthCheckTime = now;
+
+    // 基本检查：transport 和 client 是否存在
+    if (!this.transport || !this.client || !this.isConnected) {
+      console.warn(`[MCP] Health check failed for ${this.server.name}: not connected`);
+      this.markAsUnhealthy();
+      return false;
+    }
+
+    try {
+      console.log(`[MCP] Performing health check for ${this.server.name}...`);
+      
+      // 首先尝试使用标准 /health 接口
+      const healthResult = await this.callHealthEndpoint();
+      
+      if (healthResult.supported) {
+        this._healthCheckSupported = true;
+        
+        if (healthResult.healthy) {
+          console.log(`[MCP] Health check passed for ${this.server.name} (via /health endpoint)`);
+          this.markAsHealthy();
+          return true;
+        } else {
+          console.warn(`[MCP] Health check failed for ${this.server.name}: server reported unhealthy`);
+          this.markAsUnhealthy();
+          return false;
+        }
+      } else {
+        // /health 接口不支持，输出警告并回退到 tools/list
+        this._healthCheckSupported = false;
+        
+        // 每隔一段时间输出一次警告，避免日志刷屏
+        if (now - this._lastHealthWarning > this.HEALTH_WARNING_INTERVAL) {
+          this._lastHealthWarning = now;
+          console.warn(`[MCP] ⚠️ MCP服务器 "${this.server.name}" 不支持标准健康检查接口 /health`);
+          console.warn(`[MCP] ⚠️ 建议: MCP服务应实现 /health 接口以支持连接健康检查`);
+          console.warn(`[MCP] ⚠️ 规范: GET /health 应返回 {"status": "healthy"} 或 {"status": "unhealthy"}`);
+          console.warn(`[MCP] 回退使用 tools/list 进行健康检查...`);
+        }
+        
+        // 回退：使用 tools/list 作为健康检查
+        await this.listTools(true); // forceRefresh = true
+        
+        console.log(`[MCP] Health check passed for ${this.server.name} (via tools/list fallback)`);
+        this.markAsHealthy();
+        return true;
+      }
+    } catch (error) {
+      console.error(`[MCP] Health check failed for ${this.server.name}:`, error);
+      this.markAsUnhealthy();
+      return false;
+    }
+  }
+
+  /**
+   * 调用 MCP 服务器的 /health 接口
+   * @returns { supported: boolean, healthy: boolean, details?: any }
+   */
+  private async callHealthEndpoint(): Promise<{ supported: boolean; healthy: boolean; details?: any }> {
+    try {
+      // 构建健康检查 URL
+      const baseUrl = this.server.url.replace(/\/mcp\/?$/, ''); // 移除 /mcp 后缀
+      const healthUrl = `${baseUrl}/health`;
+      
+      // 如果是代理模式，需要通过代理访问
+      const targetUrl = this.isElectron() ? this.buildHealthProxyUrl(healthUrl) : healthUrl;
+      
+      console.log(`[MCP] Calling health endpoint: ${targetUrl}`);
+      
+      // 设置较短的超时时间（5秒）
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
+      const response = await fetch(targetUrl, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+        },
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      
+      // 检查响应状态
+      if (response.status === 404 || response.status === 405) {
+        // /health 接口不存在
+        return { supported: false, healthy: false };
+      }
+      
+      if (!response.ok) {
+        // 服务器返回错误状态
+        return { supported: true, healthy: false, details: { status: response.status } };
+      }
+      
+      // 解析响应
+      const data = await response.json();
+      
+      // 检查健康状态
+      // 支持多种格式：
+      // - { "status": "healthy" }
+      // - { "status": "ok" }
+      // - { "healthy": true }
+      // - { "ok": true }
+      const isHealthy = 
+        data.status === 'healthy' || 
+        data.status === 'ok' ||
+        data.healthy === true ||
+        data.ok === true;
+      
+      return { supported: true, healthy: isHealthy, details: data };
+      
+    } catch (error: any) {
+      // 网络错误或超时
+      if (error.name === 'AbortError') {
+        console.warn(`[MCP] Health endpoint timeout for ${this.server.name}`);
+        return { supported: true, healthy: false, details: { error: 'timeout' } };
+      }
+      
+      // 其他错误（如连接拒绝、DNS 解析失败等）可能表示 /health 不支持
+      // 或者服务器本身不可用
+      const errorMessage = error.message?.toLowerCase() || '';
+      if (errorMessage.includes('404') || errorMessage.includes('not found')) {
+        return { supported: false, healthy: false };
+      }
+      
+      // 假设是服务器不可用
+      return { supported: true, healthy: false, details: { error: error.message } };
+    }
+  }
+
+  /**
+   * 构建健康检查代理 URL
+   */
+  private buildHealthProxyUrl(healthUrl: string): string {
+    const backendUrl = this.getBackendUrl();
+    const encodedUrl = encodeURIComponent(healthUrl);
+    return `${backendUrl}/mcp/health?url=${encodedUrl}`;
   }
 
   /**
@@ -407,10 +644,19 @@ export class MCPClient {
         this.cachedTools = tools;
         this.toolsCacheTime = Date.now();
         
+        // 成功操作，重置错误计数
+        this.resetErrors();
+        
         return tools;
 
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
+
+        // 记录错误并检测是否需要重连
+        const needsReconnect = this.recordError(lastError);
+        if (needsReconnect) {
+          console.warn(`[MCP] Connection to ${this.server.name} appears broken, marking for reconnection`);
+        }
 
         if (lastError.message.includes('invalid during session initialization') && attempt < maxRetries) {
           const waitTime = 1000 * attempt; // 减少等待时间：1s, 2s
@@ -533,18 +779,29 @@ export class MCPClient {
         }
 
         console.log(`[MCP] Tool ${name} executed successfully on ${this.server.name}`);
+        // 成功操作，重置错误计数
+        this.resetErrors();
         return jsonResponse.result;
       } catch (parseError) {
         // JSON解析失败，可能是SSE格式但格式不标准（例如：data: {"js"... 被截断）
         if (parseError instanceof SyntaxError && parseError.message.includes('JSON')) {
           console.log(`[MCP] JSON parse failed (${parseError.message}), trying to handle as SSE stream`);
           // 使用原始响应作为流处理
-          return await this.handleStreamingResponse(response, onStream);
+          const result = await this.handleStreamingResponse(response, onStream);
+          // 成功操作，重置错误计数
+          this.resetErrors();
+          return result;
         }
         throw parseError;
       }
 
     } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      // 记录错误并检测是否需要重连
+      const needsReconnect = this.recordError(err);
+      if (needsReconnect) {
+        console.warn(`[MCP] Connection to ${this.server.name} appears broken during tool call, marking for reconnection`);
+      }
       console.error(`[MCP] Failed to call tool ${name} on ${this.server.name}:`, error);
       throw error;
     }
@@ -741,16 +998,19 @@ interface MCPPoolItem {
 }
 
 /**
- * MCP 管理器（带连接池）
+ * MCP 管理器（带连接池和自动重连机制）
  */
 export class MCPManager {
   private clients = new Map<string, MCPClient>(); // 共享连接（向后兼容）
   private connectionPool = new Map<string, MCPPoolItem[]>(); // 连接池：serverId -> MCPClient[]
+  private serverConfigs = new Map<string, MCPServer>(); // 服务器配置缓存（用于重连）
   private readonly MAX_POOL_SIZE = 10; // 每个服务器的最大连接池大小
   private readonly IDLE_TIMEOUT = 5 * 60 * 1000; // 空闲连接超时时间（5分钟）
+  private readonly RECONNECT_DELAY = 1000; // 重连延迟（毫秒）
+  private readonly MAX_RECONNECT_ATTEMPTS = 3; // 最大重连尝试次数
 
   /**
-   * 从连接池获取一个空闲的连接
+   * 从连接池获取一个空闲且健康的连接
    * @param serverId 服务器ID
    * @returns 空闲的MCP客户端，如果没有则返回null
    */
@@ -760,17 +1020,15 @@ export class MCPManager {
       return null;
     }
 
-    // 查找空闲连接，同时清理无效连接
+    // 查找空闲且健康的连接，同时清理无效连接
     for (let i = pool.length - 1; i >= 0; i--) {
       const item = pool[i];
       
-      // 首先检查连接是否仍然有效
-      if (!item.client.isInitialized) {
-        // 连接已失效，从池中移除
-        console.log(`[MCP Pool] Removing invalid connection from pool for ${serverId}`);
-        item.client.disconnect().catch(err => {
-          console.error(`[MCP Pool] Error disconnecting invalid client:`, err);
-        });
+      // 首先检查连接是否仍然有效且健康
+      if (!item.client.isInitialized || !item.client.isHealthy) {
+        // 连接已失效或不健康，从池中移除并销毁
+        console.log(`[MCP Pool] Removing ${!item.client.isInitialized ? 'invalid' : 'unhealthy'} connection from pool for ${serverId}`);
+        this.destroyClient(item.client);
         pool.splice(i, 1);
         continue;
       }
@@ -782,15 +1040,13 @@ export class MCPManager {
         if (idleTime > this.IDLE_TIMEOUT) {
           // 连接已超时，关闭并从池中移除
           console.log(`[MCP Pool] Connection for ${serverId} idle timeout (${idleTime}ms), removing from pool`);
-          item.client.disconnect().catch(err => {
-            console.error(`[MCP Pool] Error disconnecting timeout client:`, err);
-          });
+          this.destroyClient(item.client);
           pool.splice(i, 1);
           continue;
         }
         // 找到有效的空闲连接，标记为使用中并返回
         item.client.markAsInUse();
-        console.log(`[MCP Pool] Reusing connection from pool for ${serverId} (session: ${item.client.getSessionId()})`);
+        console.log(`[MCP Pool] Reusing healthy connection from pool for ${serverId} (session: ${item.client.getSessionId()})`);
         return item.client;
       }
     }
@@ -799,18 +1055,147 @@ export class MCPManager {
   }
 
   /**
+   * 安全地销毁客户端连接
+   * @param client 要销毁的客户端
+   */
+  private destroyClient(client: MCPClient): void {
+    try {
+      client.disconnect().catch(err => {
+        console.error(`[MCP Pool] Error disconnecting client:`, err);
+      });
+    } catch (error) {
+      console.error(`[MCP Pool] Error destroying client:`, error);
+    }
+  }
+
+  /**
+   * 使连接失效并从池中移除
+   * @param client 要失效的客户端
+   * @param serverId 服务器ID
+   */
+  invalidateConnection(client: MCPClient, serverId: string): void {
+    console.log(`[MCP Pool] Invalidating connection for ${serverId}`);
+    
+    // 标记为不健康
+    client.markAsUnhealthy();
+    
+    // 从连接池中移除
+    const pool = this.connectionPool.get(serverId);
+    if (pool) {
+      const index = pool.findIndex(item => item.client === client);
+      if (index !== -1) {
+        pool.splice(index, 1);
+        console.log(`[MCP Pool] Removed invalid connection from pool for ${serverId}`);
+      }
+    }
+    
+    // 从共享连接中移除
+    if (this.clients.get(serverId) === client) {
+      this.clients.delete(serverId);
+      console.log(`[MCP Pool] Removed invalid shared connection for ${serverId}`);
+    }
+    
+    // 销毁连接
+    this.destroyClient(client);
+  }
+
+  /**
+   * 重新建立连接
+   * @param server 服务器配置
+   * @returns 新的MCP客户端
+   */
+  async reconnect(server: MCPServer): Promise<MCPClient> {
+    console.log(`[MCP Pool] Attempting to reconnect to ${server.name}...`);
+    
+    // 缓存服务器配置
+    this.serverConfigs.set(server.id, server);
+    
+    let lastError: Error | null = null;
+    
+    for (let attempt = 1; attempt <= this.MAX_RECONNECT_ATTEMPTS; attempt++) {
+      try {
+        console.log(`[MCP Pool] Reconnection attempt ${attempt}/${this.MAX_RECONNECT_ATTEMPTS} for ${server.name}`);
+        
+        // 创建新连接
+        const newClient = new MCPClient({ server });
+        await newClient.connect();
+        
+        // 验证连接是否成功
+        if (!newClient.isInitialized) {
+          throw new Error(`Connection failed: client not initialized`);
+        }
+        
+        // 标记为健康和使用中
+        newClient.markAsHealthy();
+        newClient.markAsInUse();
+        
+        console.log(`[MCP Pool] Successfully reconnected to ${server.name} (session: ${newClient.getSessionId()})`);
+        return newClient;
+        
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        console.error(`[MCP Pool] Reconnection attempt ${attempt} failed for ${server.name}:`, lastError.message);
+        
+        if (attempt < this.MAX_RECONNECT_ATTEMPTS) {
+          const delay = this.RECONNECT_DELAY * attempt; // 指数退避
+          console.log(`[MCP Pool] Waiting ${delay}ms before next reconnection attempt...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+    
+    throw new Error(`Failed to reconnect to ${server.name} after ${this.MAX_RECONNECT_ATTEMPTS} attempts: ${lastError?.message}`);
+  }
+
+  /**
+   * 获取健康的连接，如果当前连接不健康则自动重连
+   * @param server 服务器配置
+   * @param currentClient 当前客户端（可选，用于检查是否需要重连）
+   * @returns 健康的MCP客户端
+   */
+  async acquireHealthyConnection(server: MCPServer, currentClient?: MCPClient): Promise<MCPClient> {
+    // 缓存服务器配置
+    this.serverConfigs.set(server.id, server);
+    
+    // 如果提供了当前客户端，检查其健康状态
+    if (currentClient) {
+      if (currentClient.isHealthy && currentClient.isInitialized) {
+        console.log(`[MCP Pool] Current connection to ${server.name} is healthy, reusing`);
+        return currentClient;
+      }
+      
+      // 当前连接不健康，先失效它
+      console.log(`[MCP Pool] Current connection to ${server.name} is unhealthy, invalidating and reconnecting`);
+      this.invalidateConnection(currentClient, server.id);
+    }
+    
+    // 尝试从池中获取健康连接
+    const pooledClient = this.getFromPool(server.id);
+    if (pooledClient && pooledClient.isHealthy) {
+      return pooledClient;
+    }
+    
+    // 创建新连接
+    return await this.reconnect(server);
+  }
+
+  /**
    * 将连接归还到连接池
    * @param client MCP客户端
    * @param serverId 服务器ID
    */
   returnToPool(client: MCPClient, serverId: string): void {
-    // 只有已初始化的连接才能放入池中
+    // 只有已初始化且健康的连接才能放入池中
     if (!client.isInitialized) {
       console.log(`[MCP Pool] Connection for ${serverId} is not initialized, not returning to pool`);
-      // 尝试断开连接以清理资源
-      client.disconnect().catch(err => {
-        console.error(`[MCP Pool] Error disconnecting invalid client:`, err);
-      });
+      this.destroyClient(client);
+      return;
+    }
+
+    // 检查连接健康状态
+    if (!client.isHealthy) {
+      console.log(`[MCP Pool] Connection for ${serverId} is unhealthy, destroying instead of returning to pool`);
+      this.destroyClient(client);
       return;
     }
 
@@ -830,11 +1215,11 @@ export class MCPManager {
           createdAt: Date.now(),
         });
         this.connectionPool.set(serverId, pool);
-        console.log(`[MCP Pool] Connection returned to pool for ${serverId} (pool size: ${pool.length}, session: ${client.getSessionId()})`);
+        console.log(`[MCP Pool] Healthy connection returned to pool for ${serverId} (pool size: ${pool.length}, session: ${client.getSessionId()})`);
       } else {
         // 池已满，关闭连接
         console.log(`[MCP Pool] Pool full for ${serverId}, closing connection`);
-        client.disconnect();
+        this.destroyClient(client);
       }
     } else {
       console.log(`[MCP Pool] Connection already in pool for ${serverId}`);
@@ -842,7 +1227,7 @@ export class MCPManager {
   }
 
   /**
-   * 从连接池获取或创建新的MCP连接
+   * 从连接池获取或创建新的MCP连接（带健康检查和自动重连）
    * @param server MCP服务器配置
    * @returns MCP客户端
    * @throws 如果服务器未启用或连接失败
@@ -853,91 +1238,122 @@ export class MCPManager {
       throw new Error(`MCP服务器 ${server.name} 未启用`);
     }
 
-    // 先从连接池获取空闲连接
+    // 缓存服务器配置（用于后续重连）
+    this.serverConfigs.set(server.id, server);
+
+    // 先从连接池获取空闲且健康的连接
     const pooledClient = this.getFromPool(server.id);
     if (pooledClient) {
-      // 验证连接是否仍然有效
-      if (pooledClient.isInitialized) {
+      // 验证连接是否仍然有效且健康
+      if (pooledClient.isInitialized && pooledClient.isHealthy) {
         return pooledClient;
       } else {
-        // 连接已失效，从池中移除
-        console.log(`[MCP Pool] Pooled connection for ${server.name} is invalid, removing from pool`);
-        const pool = this.connectionPool.get(server.id);
-        if (pool) {
-          const index = pool.findIndex(item => item.client === pooledClient);
-          if (index !== -1) {
-            pool.splice(index, 1);
-          }
-        }
+        // 连接已失效或不健康，销毁并移除
+        console.log(`[MCP Pool] Pooled connection for ${server.name} is ${!pooledClient.isInitialized ? 'invalid' : 'unhealthy'}, removing from pool`);
+        this.invalidateConnection(pooledClient, server.id);
         // 继续创建新连接
       }
     }
 
-    // 池中没有空闲连接，创建新连接
-    console.log(`[MCP Pool] No idle connection in pool for ${server.name}, creating new connection`);
-    const newClient = new MCPClient({ server });
+    // 池中没有空闲健康连接，创建新连接（带重试）
+    console.log(`[MCP Pool] No healthy idle connection in pool for ${server.name}, creating new connection`);
     
-    try {
-      // 尝试连接
-      await newClient.connect();
-      
-      // 验证连接是否成功
-      if (!newClient.isInitialized) {
-        throw new Error(`连接失败：客户端未初始化`);
-      }
-    } catch (error) {
-      // 连接失败，清理客户端
+    let lastError: Error | null = null;
+    
+    for (let attempt = 1; attempt <= this.MAX_RECONNECT_ATTEMPTS; attempt++) {
       try {
-        await newClient.disconnect();
-      } catch (disconnectError) {
-        // 忽略断开连接时的错误
+        const newClient = new MCPClient({ server });
+        
+        // 尝试连接
+        await newClient.connect();
+        
+        // 验证连接是否成功
+        if (!newClient.isInitialized) {
+          throw new Error(`连接失败：客户端未初始化`);
+        }
+
+        // 标记为健康和使用中
+        newClient.markAsHealthy();
+        newClient.markAsInUse();
+        
+        console.log(`[MCP Pool] New healthy connection created for ${server.name} (session: ${newClient.getSessionId()})`);
+        return newClient;
+        
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        console.error(`[MCP Pool] Connection attempt ${attempt}/${this.MAX_RECONNECT_ATTEMPTS} failed for ${server.name}:`, lastError.message);
+        
+        if (attempt < this.MAX_RECONNECT_ATTEMPTS) {
+          const delay = this.RECONNECT_DELAY * attempt;
+          console.log(`[MCP Pool] Waiting ${delay}ms before next attempt...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
       }
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      throw new Error(`无法连接到MCP服务器 ${server.name}: ${errorMessage}`);
     }
 
-    // 标记为使用中
-    newClient.markAsInUse();
-    
-    console.log(`[MCP Pool] New connection created for ${server.name} (session: ${newClient.getSessionId()})`);
-    return newClient;
+    throw new Error(`无法连接到MCP服务器 ${server.name}: ${lastError?.message}`);
   }
 
   /**
-   * 添加服务器（向后兼容方法）
-   * 优化：如果客户端已存在且已连接，直接返回，避免重复连接
+   * 添加服务器（向后兼容方法，带健康检查和自动重连）
+   * 优化：如果客户端已存在且健康，直接返回，避免重复连接
    * @param server MCP服务器配置
    * @param createNewConnection 是否创建新连接（已废弃，使用 acquireConnection 代替）
    * @deprecated 使用 acquireConnection 代替
    */
   async addServer(server: MCPServer, createNewConnection: boolean = false): Promise<MCPClient> {
+    // 缓存服务器配置（用于后续重连）
+    this.serverConfigs.set(server.id, server);
+    
     // 如果要求创建新连接，使用连接池机制
     if (createNewConnection) {
       return await this.acquireConnection(server);
     }
     
-    // 原有逻辑：共享连接（向后兼容）
+    // 原有逻辑：共享连接（向后兼容，增加健康检查）
     let client = this.clients.get(server.id);
     if (client) {
       console.log(`[MCP Manager] Server ${server.name} already added.`);
-      // 如果客户端已存在且已连接，直接返回（避免重复连接）
-      if (client.isInitialized) {
-        console.log(`[MCP Manager] Server ${server.name} already connected, reusing connection.`);
+      
+      // 检查连接是否健康
+      if (client.isInitialized && client.isHealthy) {
+        console.log(`[MCP Manager] Server ${server.name} is healthy, reusing connection.`);
         return client;
       }
-      // 如果客户端已存在但未连接，尝试重新连接
-      if (!client.isInitialized) {
-        console.log(`[MCP Manager] Server ${server.name} not connected, reconnecting...`);
-        await client.connect();
+      
+      // 连接不健康或未连接，需要重连
+      if (!client.isInitialized || !client.isHealthy) {
+        console.log(`[MCP Manager] Server ${server.name} is ${!client.isInitialized ? 'not connected' : 'unhealthy'}, reconnecting...`);
+        
+        // 销毁旧连接
+        this.destroyClient(client);
+        this.clients.delete(server.id);
+        
+        // 创建新连接
+        try {
+          client = await this.reconnect(server);
+          this.clients.set(server.id, client);
+          return client;
+        } catch (error) {
+          console.error(`[MCP Manager] Failed to reconnect to ${server.name}:`, error);
+          throw error;
+        }
       }
-      return client;
     }
 
+    // 创建新连接
     client = new MCPClient({ server });
     this.clients.set(server.id, client);
 
     if (server.enabled) {
-      await client.connect(); // 连接并初始化客户端
+      try {
+        await client.connect();
+        client.markAsHealthy();
+      } catch (error) {
+        // 连接失败，从 clients 中移除
+        this.clients.delete(server.id);
+        throw error;
+      }
     }
 
     return client;
@@ -974,10 +1390,93 @@ export class MCPManager {
   removeServer(serverId: string): void {
     const client = this.clients.get(serverId);
     if (client) {
-      client.disconnect(); // 断开连接
+      this.destroyClient(client);
       this.clients.delete(serverId);
       console.log(`[MCP Manager] Server ${serverId} removed.`);
     }
+    
+    // 同时清理连接池中的连接
+    const pool = this.connectionPool.get(serverId);
+    if (pool) {
+      for (const item of pool) {
+        this.destroyClient(item.client);
+      }
+      this.connectionPool.delete(serverId);
+      console.log(`[MCP Manager] Connection pool for ${serverId} cleared.`);
+    }
+    
+    // 移除服务器配置缓存
+    this.serverConfigs.delete(serverId);
+  }
+
+  /**
+   * 获取缓存的服务器配置
+   * @param serverId 服务器ID
+   * @returns 服务器配置，如果没有缓存则返回 undefined
+   */
+  getServerConfig(serverId: string): MCPServer | undefined {
+    return this.serverConfigs.get(serverId);
+  }
+
+  /**
+   * 清理所有不健康的连接
+   * 可以定期调用此方法来清理连接池
+   */
+  cleanupUnhealthyConnections(): void {
+    console.log(`[MCP Manager] Cleaning up unhealthy connections...`);
+    let cleanedCount = 0;
+    
+    // 清理共享连接
+    for (const [serverId, client] of this.clients.entries()) {
+      if (!client.isInitialized || !client.isHealthy) {
+        console.log(`[MCP Manager] Removing unhealthy shared connection for ${serverId}`);
+        this.destroyClient(client);
+        this.clients.delete(serverId);
+        cleanedCount++;
+      }
+    }
+    
+    // 清理连接池
+    for (const [serverId, pool] of this.connectionPool.entries()) {
+      for (let i = pool.length - 1; i >= 0; i--) {
+        const item = pool[i];
+        if (!item.client.isInitialized || !item.client.isHealthy) {
+          console.log(`[MCP Manager] Removing unhealthy pooled connection for ${serverId}`);
+          this.destroyClient(item.client);
+          pool.splice(i, 1);
+          cleanedCount++;
+        }
+      }
+    }
+    
+    console.log(`[MCP Manager] Cleanup completed, removed ${cleanedCount} unhealthy connections`);
+  }
+
+  /**
+   * 获取连接池状态（用于调试）
+   */
+  getPoolStatus(): { serverId: string; poolSize: number; healthyCount: number; sharedHealthy: boolean }[] {
+    const status: { serverId: string; poolSize: number; healthyCount: number; sharedHealthy: boolean }[] = [];
+    
+    // 收集所有已知的服务器ID
+    const serverIds = new Set<string>([
+      ...this.clients.keys(),
+      ...this.connectionPool.keys(),
+    ]);
+    
+    for (const serverId of serverIds) {
+      const sharedClient = this.clients.get(serverId);
+      const pool = this.connectionPool.get(serverId) || [];
+      
+      status.push({
+        serverId,
+        poolSize: pool.length,
+        healthyCount: pool.filter(item => item.client.isInitialized && item.client.isHealthy).length,
+        sharedHealthy: sharedClient ? (sharedClient.isInitialized && sharedClient.isHealthy) : false,
+      });
+    }
+    
+    return status;
   }
 }
 

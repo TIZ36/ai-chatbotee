@@ -475,6 +475,31 @@ def create_tables():
             except Exception as e:
                 print(f"  ⚠️ Warning: Failed to add '{log_name}' column to {table}: {e}")
 
+        # ==================== 消息执行记录扩展（存过程日志与原始结构化结果） ====================
+        # 说明：
+        # - logs: 过程日志数组（JSON 字符串），用于前端“会话扩展面板”回放
+        # - raw_result: 原始结构化结果（JSON 字符串），用于保存 MCP 多媒体 content[]（含 base64 图片）
+        _ensure_column(
+            'message_executions',
+            'logs',
+            """
+                ALTER TABLE `message_executions`
+                ADD COLUMN `logs` LONGTEXT DEFAULT NULL COMMENT '执行过程日志（JSON数组字符串）'
+                AFTER `error_message`
+            """,
+            'logs',
+        )
+        _ensure_column(
+            'message_executions',
+            'raw_result',
+            """
+                ALTER TABLE `message_executions`
+                ADD COLUMN `raw_result` LONGTEXT DEFAULT NULL COMMENT '原始结构化结果（JSON字符串，可能包含多媒体base64）'
+                AFTER `logs`
+            """,
+            'raw_result',
+        )
+
         _ensure_column(
             'sessions',
             'role_id',
@@ -655,6 +680,30 @@ def create_tables():
         except Exception as e:
             print(f"  ⚠ Warning: Could not check/add 'ext' column: {e}")
         
+        # 迁移：为已存在的表添加 mcpdetail 列（如果不存在）- 用于存储 MCP 执行详情
+        try:
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM information_schema.COLUMNS 
+                WHERE TABLE_SCHEMA = DATABASE() 
+                AND TABLE_NAME = 'messages' 
+                AND COLUMN_NAME = 'mcpdetail'
+            """)
+            mcpdetail_column_exists = cursor.fetchone()[0] > 0
+            
+            if not mcpdetail_column_exists:
+                print("  → Adding 'mcpdetail' column to 'messages' table...")
+                cursor.execute("""
+                    ALTER TABLE `messages` 
+                    ADD COLUMN `mcpdetail` LONGTEXT DEFAULT NULL COMMENT 'MCP执行详情（JSON）：包含执行日志、原始结果、图片等' 
+                    AFTER `ext`
+                """)
+                print("  ✓ Column 'mcpdetail' added successfully")
+            else:
+                print("  ✓ Column 'mcpdetail' already exists")
+        except Exception as e:
+            print(f"  ⚠ Warning: Could not check/add 'mcpdetail' column: {e}")
+        
         # 总结表
         create_summaries_table = """
         CREATE TABLE IF NOT EXISTS `summaries` (
@@ -704,6 +753,47 @@ def create_tables():
         
         cursor.execute(create_message_executions_table)
         print("✓ Table 'message_executions' created/verified successfully")
+
+        # ==================== message_executions 新增列（用于存储执行日志和原始结果） ====================
+        # 使用 _ensure_column 助手安全添加新列
+        def _ensure_exec_column(column: str, ddl: str, log_name: str):
+            try:
+                cursor.execute("""
+                    SELECT COUNT(*)
+                    FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = 'message_executions'
+                      AND COLUMN_NAME = %s
+                """, (column,))
+                exists = cursor.fetchone()[0] > 0
+                if exists:
+                    print(f"  ✓ Column '{log_name}' already exists in 'message_executions'")
+                    return
+                print(f"  → Adding '{log_name}' column to 'message_executions' table...")
+                cursor.execute(ddl)
+                conn.commit()
+                print(f"  ✓ Column '{log_name}' added to 'message_executions' table")
+            except Exception as e:
+                print(f"  ⚠️ Warning: Failed to add '{log_name}' column to message_executions: {e}")
+
+        _ensure_exec_column(
+            'logs',
+            """
+                ALTER TABLE `message_executions`
+                ADD COLUMN `logs` LONGTEXT DEFAULT NULL COMMENT '执行过程日志（JSON 数组）'
+                AFTER `error_message`
+            """,
+            'logs',
+        )
+        _ensure_exec_column(
+            'raw_result',
+            """
+                ALTER TABLE `message_executions`
+                ADD COLUMN `raw_result` LONGTEXT DEFAULT NULL COMMENT '原始结构化结果（JSON，用于展示 MCP 多媒体 content[]）'
+                AFTER `logs`
+            """,
+            'raw_result',
+        )
 
         # ==================== Research 相关表 ====================
         # Research Sources：存储网址/文件/图片/目录等来源记录

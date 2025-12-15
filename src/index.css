@@ -914,6 +914,189 @@
     }
   }
 
+  /* 分栏视图消息样式 */
+  .split-view-message {
+    display: flex;
+    gap: 0.75rem;
+  }
+
+  .split-view-left {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .split-view-right {
+    width: 18rem;
+    flex-shrink: 0;
+    animation: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes slideInRight {
+    from {
+      opacity: 0;
+      transform: translateX(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  /* 侧边面板折叠动画 */
+  .side-panel-collapse {
+    animation: collapsePanel 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  @keyframes collapsePanel {
+    from {
+      opacity: 1;
+      width: 18rem;
+    }
+    to {
+      opacity: 0;
+      width: 0;
+    }
+  }
+
+  /* 侧边面板展开动画 */
+  .side-panel-expand {
+    animation: expandPanel 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  @keyframes expandPanel {
+    from {
+      opacity: 0;
+      width: 0;
+    }
+    to {
+      opacity: 1;
+      width: 18rem;
+    }
+  }
+
+  /* 侧边面板卡片展开/折叠动画 */
+  .panel-section-content {
+    overflow: hidden;
+    animation: expandContent 0.2s ease-out;
+  }
+
+  @keyframes expandContent {
+    from {
+      opacity: 0;
+      max-height: 0;
+    }
+    to {
+      opacity: 1;
+      max-height: 500px;
+    }
+  }
+
+  /* 思考过程文本渐变背景 */
+  .thinking-gradient {
+    background: linear-gradient(
+      135deg, 
+      rgba(139, 92, 246, 0.05) 0%, 
+      rgba(168, 85, 247, 0.08) 100%
+    );
+  }
+
+  /* MCP 调用状态指示器 */
+  .mcp-status-running {
+    position: relative;
+  }
+
+  .mcp-status-running::before {
+    content: '';
+    position: absolute;
+    left: -8px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 4px;
+    height: 4px;
+    background: #10b981;
+    border-radius: 50%;
+    animation: statusPulse 1s ease-in-out infinite;
+  }
+
+  @keyframes statusPulse {
+    0%, 100% {
+      opacity: 1;
+      box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
+    }
+    50% {
+      opacity: 0.8;
+      box-shadow: 0 0 0 4px rgba(16, 185, 129, 0);
+    }
+  }
+
+  /* MCP 引用标记样式 */
+  .mcp-citation-inline {
+    display: inline;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .mcp-citation-inline:hover {
+    background: rgba(16, 185, 129, 0.1);
+    border-radius: 2px;
+  }
+
+  .mcp-citation-inline:hover sup {
+    transform: scale(1.1);
+  }
+
+  .mcp-citation-inline sup {
+    transition: transform 0.2s ease;
+  }
+
+  /* MCP 调用块高亮效果 */
+  .mcp-call-block {
+    transition: all 0.3s ease;
+  }
+
+  .mcp-call-block:hover {
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.3);
+  }
+
+  /* MCP 调用块展开动画 */
+  .mcp-call-block .mcp-details {
+    animation: fadeInDown 0.2s ease-out;
+  }
+
+  @keyframes fadeInDown {
+    from {
+      opacity: 0;
+      transform: translateY(-8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* 引用标记徽章样式 */
+  .citation-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 16px;
+    padding: 0 4px;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1;
+    color: #059669;
+    background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+    border-radius: 3px;
+    box-shadow: 0 1px 2px rgba(16, 185, 129, 0.2);
+  }
+
+  .dark .citation-badge {
+    color: #34d399;
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(16, 185, 129, 0.3) 100%);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  }
+
   /* 脉冲动画 */
   .pulse-soft {
     animation: pulseSoft 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;

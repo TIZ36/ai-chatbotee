@@ -3,7 +3,7 @@
  * 整合LLM模型和MCP工具，通过聊天完成任务
  */
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { Send, Loader, Bot, User, Wrench, AlertCircle, CheckCircle, Brain, Plug, RefreshCw, Power, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Plus, History, Sparkles, Workflow as WorkflowIcon, GripVertical, Play, ArrowRight, Trash2, X, Edit2, RotateCw, Database, Paperclip, Type, Image, Video, Music, HelpCircle, Package, CheckSquare, Square, Quote, Lightbulb } from 'lucide-react';
@@ -13,7 +13,7 @@ import { LLMClient, LLMMessage } from '../services/llmClient';
 import { getLLMConfigs, getLLMConfig, getLLMConfigApiKey, LLMConfigFromDB } from '../services/llmApi';
 import { mcpManager, MCPServer, MCPTool } from '../services/mcpClient';
 import { getMCPServers, MCPServerConfig } from '../services/mcpApi';
-import { getSessions, getSession, createSession, getSessionMessages, saveMessage, summarizeSession, getSessionSummaries, deleteSession, clearSummarizeCache, deleteMessage, executeMessageComponent, updateSessionAvatar, updateSessionName, updateSessionSystemPrompt, updateSessionMediaOutputPath, updateSessionLLMConfig, upgradeToAgent, Session, Summary } from '../services/sessionApi';
+import { getSessions, getSession, createSession, getSessionMessages, saveMessage, summarizeSession, getSessionSummaries, deleteSession, clearSummarizeCache, deleteMessage, executeMessageComponent, updateSessionAvatar, updateSessionName, updateSessionSystemPrompt, updateSessionMediaOutputPath, updateSessionLLMConfig, upgradeToAgent, Session, Summary, MessageExt, ProcessStep as SessionProcessStep } from '../services/sessionApi';
 import { applyRoleToSession, createRole, updateRoleProfile, createSessionFromRole } from '../services/roleApi';
 import { createSkillPack, saveSkillPack, optimizeSkillPackSummary, getSkillPacks, getSessionSkillPacks, assignSkillPack, unassignSkillPack, SkillPack, SessionSkillPack, SkillPackCreationResult, SkillPackProcessInfo } from '../services/skillPackApi';
 import { estimate_messages_tokens, get_model_max_tokens, estimate_tokens } from '../services/tokenCounter';
@@ -37,9 +37,49 @@ import {
   DialogFooter,
 } from './ui/Dialog';
 import { toast } from './ui/use-toast';
+import { PluginExecutionPanel } from './PluginExecutionPanel';
+import { MCPExecutionCard } from './MCPExecutionCard';
+import { MCPDetailOverlay } from './MCPDetailOverlay';
 import { emitSessionsChanged, SESSIONS_CHANGED_EVENT } from '../utils/sessionEvents';
 import RoleGeneratorPage from './RoleGeneratorPage';
 import { getDimensionOptions, saveDimensionOption } from '../services/roleDimensionApi';
+import { SplitViewMessage } from './SplitViewMessage';
+import { MediaGallery, MediaItem } from './ui/MediaGallery';
+import { SessionMediaPanel, SessionMediaItem } from './ui/SessionMediaPanel';
+import { truncateBase64Strings } from '../utils/textUtils';
+
+/** 单个过程步骤（用于记录多轮思考和MCP调用） */
+interface ProcessStep {
+  /** 步骤类型 */
+  type: 'thinking' | 'mcp_call' | 'workflow';
+  /** 时间戳 */
+  timestamp?: number;
+  /** 思考内容（当 type === 'thinking' 时） */
+  thinking?: string;
+  /** MCP 服务器名称（当 type === 'mcp_call' 时） */
+  mcpServer?: string;
+  /** 工具名称（当 type === 'mcp_call' 时） */
+  toolName?: string;
+  /** 调用参数 */
+  arguments?: any;
+  /** 调用结果 */
+  result?: any;
+  /** 执行状态 */
+  status?: 'pending' | 'running' | 'completed' | 'error';
+  /** 执行时长（毫秒） */
+  duration?: number;
+  /** 工作流信息（当 type === 'workflow' 时） */
+  workflowInfo?: {
+    id?: string;
+    name?: string;
+    status?: 'pending' | 'running' | 'completed' | 'error';
+    result?: string;
+    config?: {
+      nodes: WorkflowNode[];
+      connections: WorkflowConnection[];
+    };
+  };
+}
 
 interface Message {
   id: string;
@@ -69,7 +109,7 @@ interface Message {
   isSummary?: boolean; // 是否是总结消息（不显示，但用于标记总结点）
   // 多模态内容支持
   media?: Array<{
-    type: 'image' | 'video';
+    type: 'image' | 'video' | 'audio';
     mimeType: string;
     data: string; // base64 编码的数据或 URL
     url?: string; // 如果是 URL
@@ -77,6 +117,10 @@ interface Message {
   // 思维签名（用于 Gemini）
   thoughtSignature?: string;
   toolCallSignatures?: Record<string, string>; // 工具调用的思维签名映射
+  // MCP 执行详情（当 role === 'assistant' 且触发了 MCP 时）
+  mcpdetail?: import('../services/sessionApi').MCPDetail;
+  // 多轮过程步骤（保存完整的思考和MCP调用历史）
+  processSteps?: ProcessStep[];
 }
 
 // 会话列表项组件
@@ -1300,13 +1344,95 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  // 多模态内容（图片、视频）
+  // 多模态内容（图片、视频、音频）
   const [attachedMedia, setAttachedMedia] = useState<Array<{
-    type: 'image' | 'video';
+    type: 'image' | 'video' | 'audio';
     mimeType: string;
     data: string; // base64 编码的数据
     preview?: string; // 预览 URL（用于显示）
   }>>([]);
+  
+  // 会话媒体面板状态
+  const [sessionMediaPanelOpen, setSessionMediaPanelOpen] = useState(false);
+  const [sessionMediaInitialIndex, setSessionMediaInitialIndex] = useState(0);
+  
+  // 收集整个会话的所有媒体
+  const sessionMedia: SessionMediaItem[] = useMemo(() => {
+    console.log('[MCP Debug] sessionMedia useMemo 开始收集，消息数量:', messages.length);
+    const mediaList: SessionMediaItem[] = [];
+    
+    messages.forEach((msg, msgIndex) => {
+      // 消息中的媒体
+      if (msg.media && msg.media.length > 0) {
+        console.log('[MCP Debug] sessionMedia: 消息', msgIndex, '有', msg.media.length, '个媒体');
+        msg.media.forEach(m => {
+          mediaList.push({
+            type: m.type,
+            mimeType: m.mimeType,
+            data: m.data,
+            url: m.url,
+            messageId: msg.id,
+            role: msg.role as 'user' | 'assistant' | 'tool',
+          });
+        });
+      }
+      
+      // MCP 返回内容中的媒体
+      if (msg.content) {
+        // 解析 MCP 内容中的媒体
+        const mcpMediaMatches = msg.content.matchAll(/\[MCP_(IMAGE|VIDEO|AUDIO)\|(.*?)\|(.*?)\]/g);
+        let mcpMediaCount = 0;
+        for (const match of mcpMediaMatches) {
+          mcpMediaCount++;
+          const typeMap: Record<string, 'image' | 'video' | 'audio'> = {
+            'IMAGE': 'image',
+            'VIDEO': 'video',
+            'AUDIO': 'audio',
+          };
+          mediaList.push({
+            type: typeMap[match[1]] || 'image',
+            mimeType: match[2],
+            data: match[3],
+            messageId: msg.id,
+            role: msg.role as 'user' | 'assistant' | 'tool',
+          });
+        }
+        if (mcpMediaCount > 0) {
+          console.log('[MCP Debug] sessionMedia: 消息', msgIndex, '的 content 中有', mcpMediaCount, '个 MCP 媒体标记');
+        }
+      }
+    });
+    
+    console.log('[MCP Debug] sessionMedia useMemo 结果:', mediaList.length, '个媒体');
+    return mediaList;
+  }, [messages]);
+  
+  // 打开会话媒体面板
+  const openSessionMediaPanel = useCallback((index: number) => {
+    setSessionMediaInitialIndex(index);
+    setSessionMediaPanelOpen(true);
+  }, []);
+  
+  // 根据当前消息的媒体找到在会话媒体中的索引
+  const findSessionMediaIndex = useCallback((messageId: string, mediaIndex: number): number => {
+    let count = 0;
+    for (const msg of messages) {
+      if (msg.id === messageId) {
+        return count + mediaIndex;
+      }
+      if (msg.media) {
+        count += msg.media.length;
+      }
+      // 也要计算 MCP 媒体
+      if (msg.content) {
+        const mcpMediaMatches = msg.content.match(/\[MCP_(IMAGE|VIDEO|AUDIO)\|/g);
+        if (mcpMediaMatches) {
+          count += mcpMediaMatches.length;
+        }
+      }
+    }
+    return 0;
+  }, [messages]);
   const [streamEnabled, setStreamEnabled] = useState(true); // 流式响应开关
   const [collapsedThinking, setCollapsedThinking] = useState<Set<string>>(new Set()); // 已折叠的思考过程
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null); // 正在编辑的消息ID
@@ -1315,6 +1441,11 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   const [isInputExpanded, setIsInputExpanded] = useState(false); // 输入框是否扩大
   const [isInputFocused, setIsInputFocused] = useState(false); // 输入框是否聚焦
   const [abortController, setAbortController] = useState<AbortController | null>(null); // 用于中断请求
+  // MCP 原始输出展示控制：图片/视频始终展示，文本可按消息折叠/展开（避免依赖模型转述导致“吞图/吞内容”）
+  const [mcpRawTextExpanded, setMcpRawTextExpanded] = useState<Record<string, boolean>>({});
+  // MCP 详情遮罩层状态
+  const [showMCPDetailOverlay, setShowMCPDetailOverlay] = useState(false);
+  const [selectedMCPDetail, setSelectedMCPDetail] = useState<any>(null);
   
   // @ 符号选择器状态
   const [showAtSelector, setShowAtSelector] = useState(false);
@@ -2025,6 +2156,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
           thinking: msg.thinking,
           toolCalls: msg.tool_calls,
           isSummary: isSummaryMessage, // 标记为总结消息
+          mcpdetail: msg.mcpdetail, // MCP 执行详情
         };
         
         // 恢复多模态内容（从 tool_calls 中读取）
@@ -2033,13 +2165,34 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
           baseMessage.media = (toolCalls as any).media;
         }
         
-        // 恢复思维签名（从 tool_calls 中读取）
+        // 恢复思维签名（从 tool_calls 或 ext 中读取）
         if (toolCalls && typeof toolCalls === 'object') {
           if ((toolCalls as any).thoughtSignature) {
             baseMessage.thoughtSignature = (toolCalls as any).thoughtSignature;
           }
           if ((toolCalls as any).toolCallSignatures) {
             baseMessage.toolCallSignatures = (toolCalls as any).toolCallSignatures;
+          }
+        }
+        
+        // 从 ext 字段恢复扩展数据
+        const ext = msg.ext && typeof msg.ext === 'object' ? msg.ext : null;
+        if (ext) {
+          // 恢复思维签名（优先从 ext 读取）
+          if (ext.thoughtSignature) {
+            baseMessage.thoughtSignature = ext.thoughtSignature;
+          }
+          if (ext.toolCallSignatures) {
+            baseMessage.toolCallSignatures = ext.toolCallSignatures;
+          }
+          // 恢复媒体内容
+          if (ext.media) {
+            baseMessage.media = ext.media;
+          }
+          // 恢复过程步骤（思考和MCP调用历史）
+          if (ext.processSteps && Array.isArray(ext.processSteps)) {
+            baseMessage.processSteps = ext.processSteps;
+            console.log(`[Workflow] Restored ${ext.processSteps.length} process steps for message:`, msg.message_id);
           }
         }
         
@@ -3488,9 +3641,31 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
       let fullResponse = '';
       let fullThinking = '';
       let hasStartedContent = false; // 标记是否开始输出内容
+      let currentProcessSteps: ProcessStep[] = []; // 累积保存过程步骤
+      let lastThinkingLength = 0; // 上一次的思考内容长度
+      let currentMCPToolName = ''; // 当前正在执行的 MCP 工具名
       
-      // 创建临时消息更新函数
+      // 创建临时消息更新函数（包含过程步骤）
       const updateMessage = (content: string, thinking?: string, isThinking?: boolean, isStreaming?: boolean, currentStep?: string) => {
+        // 检测思考内容变化，如果有新的思考内容，添加到过程步骤
+        const thinkingContent = thinking !== undefined ? thinking : '';
+        if (thinkingContent.length > lastThinkingLength && thinkingContent.trim()) {
+          // 查找现有的思考步骤
+          const existingThinkingStep = currentProcessSteps.find(s => s.type === 'thinking' && !s.mcpServer);
+          if (existingThinkingStep) {
+            // 更新现有思考步骤的内容
+            existingThinkingStep.thinking = thinkingContent;
+          } else {
+            // 创建新的思考步骤
+            currentProcessSteps.push({
+              type: 'thinking',
+              timestamp: Date.now(),
+              thinking: thinkingContent,
+            });
+          }
+          lastThinkingLength = thinkingContent.length;
+        }
+        
         setMessages(prev => prev.map(msg => 
           msg.id === assistantMessageId 
             ? { 
@@ -3500,18 +3675,103 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 isThinking: isThinking !== undefined ? isThinking : msg.isThinking,
                 isStreaming: isStreaming !== undefined ? isStreaming : msg.isStreaming,
                 currentStep: currentStep !== undefined ? currentStep : msg.currentStep,
+                processSteps: [...currentProcessSteps],
               }
             : msg
         ));
       };
       
-      // 步骤变化回调
+      // 步骤变化回调（捕获 MCP 调用状态变化）
       const handleStepChange = (step: string) => {
+        // 检测是否是 MCP 工具调用开始
+        const mcpCallMatch = step.match(/正在调用工具:\s*(.+)/);
+        if (mcpCallMatch) {
+          const toolName = mcpCallMatch[1].trim();
+          currentMCPToolName = toolName;
+          
+          // 如果有之前的思考内容，先保存为一个思考步骤
+          if (fullThinking && fullThinking.length > lastThinkingLength) {
+            const existingThinkingStep = currentProcessSteps.find(s => s.type === 'thinking' && !s.mcpServer);
+            if (existingThinkingStep) {
+              existingThinkingStep.thinking = fullThinking;
+            } else {
+              currentProcessSteps.push({
+                type: 'thinking',
+                timestamp: Date.now(),
+                thinking: fullThinking,
+              });
+            }
+            lastThinkingLength = fullThinking.length;
+          }
+        } else if (step === '' && currentMCPToolName) {
+          // 重置思考长度追踪，准备捕获新的思考内容
+          lastThinkingLength = fullThinking.length;
+          currentMCPToolName = '';
+        }
+        
         setMessages(prev => prev.map(msg => 
           msg.id === assistantMessageId 
             ? { 
                 ...msg, 
                 currentStep: step,
+                processSteps: [...currentProcessSteps],
+              }
+            : msg
+        ));
+      };
+
+      // MCP 调用回调（捕获完整的 MCP 调用信息）
+      const handleMCPCall = (info: { 
+        toolName: string; 
+        arguments: any; 
+        result?: any; 
+        status: 'pending' | 'running' | 'completed' | 'error'; 
+        duration?: number; 
+        mcpServer?: string;
+        error?: string;
+      }) => {
+        console.log(`[Workflow] MCP 调用:`, info.toolName, info.status);
+        
+        if (info.status === 'running') {
+          // MCP 调用开始，添加新步骤
+          currentProcessSteps.push({
+            type: 'mcp_call',
+            timestamp: Date.now(),
+            toolName: info.toolName,
+            mcpServer: info.mcpServer,
+            arguments: info.arguments,
+            status: 'running',
+          });
+        } else if (info.status === 'completed' || info.status === 'error') {
+          // MCP 调用完成或失败，更新已有步骤
+          const mcpStep = currentProcessSteps.find(
+            s => s.type === 'mcp_call' && s.toolName === info.toolName && s.status === 'running'
+          );
+          if (mcpStep) {
+            mcpStep.status = info.status;
+            mcpStep.result = info.status === 'error' ? { error: info.error } : info.result;
+            mcpStep.duration = info.duration;
+          } else {
+            // 如果没有找到正在运行的步骤，可能是非流式模式，直接添加完成的步骤
+            currentProcessSteps.push({
+              type: 'mcp_call',
+              timestamp: Date.now(),
+              toolName: info.toolName,
+              mcpServer: info.mcpServer,
+              arguments: info.arguments,
+              result: info.status === 'error' ? { error: info.error } : info.result,
+              status: info.status,
+              duration: info.duration,
+            });
+          }
+        }
+        
+        // 更新消息
+        setMessages(prev => prev.map(msg => 
+          msg.id === assistantMessageId 
+            ? { 
+                ...msg, 
+                processSteps: [...currentProcessSteps],
               }
             : msg
         ));
@@ -3589,7 +3849,8 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
               }
             },
             messageHistoryWithUser, // 传递包含多模态内容的消息历史
-            handleStepChange // 传递步骤变化回调
+            handleStepChange, // 传递步骤变化回调
+            handleMCPCall // 传递 MCP 调用回调
           );
 
           // 确保最终内容已更新（包括思考过程）
@@ -3624,6 +3885,21 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
           if (response.media && response.media.length > 0) {
             console.log(`[Workflow] 收到 Gemini 图片:`, response.media.map(m => `${m.type}(${m.mimeType}, ${Math.round(m.data?.length / 1024)}KB)`).join(', '));
           }
+          
+          // 确保最终的思考内容被保存到过程步骤
+          if (finalThinking && finalThinking.trim()) {
+            const existingThinkingStep = currentProcessSteps.find(s => s.type === 'thinking' && !s.mcpServer);
+            if (existingThinkingStep) {
+              existingThinkingStep.thinking = finalThinking;
+            } else if (currentProcessSteps.length === 0 || currentProcessSteps.every(s => s.type !== 'thinking')) {
+              currentProcessSteps.unshift({
+                type: 'thinking',
+                timestamp: Date.now(),
+                thinking: finalThinking,
+              });
+            }
+          }
+          
           setMessages(prev => prev.map(msg => 
             msg.id === assistantMessageId 
               ? { 
@@ -3635,6 +3911,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   thoughtSignature: response.thoughtSignature, // 保存思维签名
                   toolCallSignatures: response.toolCallSignatures, // 保存工具调用的思维签名
                   media: response.media, // 保存多模态输出（图片等）
+                  processSteps: currentProcessSteps.length > 0 ? [...currentProcessSteps] : undefined,
                 }
               : msg
           ));
@@ -3673,8 +3950,8 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 model: selectedLLMConfig.model || 'gpt-4',
               };
               
-              // 保存思维签名和媒体内容到 tool_calls 中
-              const extData: any = {};
+              // 保存扩展数据到 ext 字段
+              const extData: MessageExt = {};
               if (response.thoughtSignature) {
                 extData.thoughtSignature = response.thoughtSignature;
               }
@@ -3686,9 +3963,14 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 extData.media = response.media;
                 console.log(`[Workflow] 保存 ${response.media.length} 个 AI 生成的媒体文件到数据库`);
               }
+              // 保存过程步骤（思考和MCP调用历史）
+              if (currentProcessSteps.length > 0) {
+                extData.processSteps = currentProcessSteps;
+                console.log(`[Workflow] 保存 ${currentProcessSteps.length} 个过程步骤到数据库`);
+              }
               
               if (Object.keys(extData).length > 0) {
-                messageData.tool_calls = extData;
+                messageData.ext = extData;
               }
               
               await saveMessage(sessionId, messageData);
@@ -3731,8 +4013,29 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
             false, // 禁用流式响应
             undefined, // 非流式模式不需要 onChunk
             messageHistoryWithUser, // 传递包含多模态内容的消息历史
-            handleStepChange // 传递步骤变化回调
+            handleStepChange, // 传递步骤变化回调
+            handleMCPCall // 传递 MCP 调用回调
           );
+          
+          // 构建非流式响应的过程步骤
+          // 首先添加思考过程（如果有且尚未添加）
+          if (response.thinking && response.thinking.trim()) {
+            const hasThinkingStep = currentProcessSteps.some(s => s.type === 'thinking');
+            if (!hasThinkingStep) {
+              currentProcessSteps.unshift({
+                type: 'thinking',
+                timestamp: Date.now(),
+                thinking: response.thinking,
+              });
+            } else {
+              // 更新现有的思考步骤
+              const existingThinkingStep = currentProcessSteps.find(s => s.type === 'thinking');
+              if (existingThinkingStep) {
+                existingThinkingStep.thinking = response.thinking;
+              }
+            }
+          }
+          
           // 更新消息（包含思维签名和多模态输出）
           setMessages(prev => prev.map(msg => 
             msg.id === assistantMessageId 
@@ -3745,6 +4048,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   thoughtSignature: response.thoughtSignature, // 保存思维签名
                   toolCallSignatures: response.toolCallSignatures, // 保存工具调用的思维签名
                   media: response.media, // 保存多模态输出（图片等）
+                  processSteps: currentProcessSteps.length > 0 ? [...currentProcessSteps] : undefined,
                 }
               : msg
           ));
@@ -3765,8 +4069,8 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 model: selectedLLMConfig.model || 'gpt-4',
               };
               
-              // 保存思维签名和媒体内容到 tool_calls 中
-              const extData: any = {};
+              // 保存扩展数据到 ext 字段
+              const extData: MessageExt = {};
               if (response.thoughtSignature) {
                 extData.thoughtSignature = response.thoughtSignature;
               }
@@ -3778,9 +4082,14 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 extData.media = response.media;
                 console.log(`[Workflow] 保存 ${response.media.length} 个 AI 生成的媒体文件到数据库`);
               }
+              // 保存过程步骤（思考和MCP调用历史）
+              if (currentProcessSteps.length > 0) {
+                extData.processSteps = currentProcessSteps;
+                console.log(`[Workflow] 保存 ${currentProcessSteps.length} 个过程步骤到数据库`);
+              }
               
               if (Object.keys(extData).length > 0) {
-                messageData.tool_calls = extData;
+                messageData.ext = extData;
               }
               
               await saveMessage(sessionId, messageData);
@@ -5162,15 +5471,17 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
 
     const files = Array.from(e.dataTransfer.files);
     files.forEach(file => {
-      if (file.type.startsWith('image/')) {
+      // 支持图片、视频、音频
+      if (file.type.startsWith('image/') || file.type.startsWith('video/') || file.type.startsWith('audio/')) {
         const reader = new FileReader();
         reader.onload = (event) => {
           const result = event.target?.result as string;
           const base64Data = result.includes(',') ? result.split(',')[1] : result;
-          const mimeType = file.type || 'image/png';
+          const mimeType = file.type;
+          const type = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : 'audio';
           
           setAttachedMedia(prev => [...prev, {
-            type: 'image',
+            type,
             mimeType,
             data: base64Data,
             preview: result,
@@ -5239,7 +5550,8 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
         // 移除 data URL 前缀，只保留 base64 数据
         const base64Data = result.includes(',') ? result.split(',')[1] : result;
         const mimeType = file.type;
-        const type = mimeType.startsWith('image/') ? 'image' : 'video';
+        // 支持图片、视频、音频
+        const type: 'image' | 'video' | 'audio' = mimeType.startsWith('image/') ? 'image' : mimeType.startsWith('video/') ? 'video' : 'audio';
         
         setAttachedMedia(prev => [...prev, {
           type,
@@ -5512,6 +5824,230 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
     }
   };
 
+  // 解析 MCP 内容格式，提取文本和媒体
+  const parseMCPContent = (content: any): { texts: string[]; media: Array<{ type: 'image' | 'video' | 'audio'; mimeType: string; data: string }> } => {
+    console.log('[MCP Debug] parseMCPContent 输入:', typeof content, content);
+    const texts: string[] = [];
+    const media: Array<{ type: 'image' | 'video' | 'audio'; mimeType: string; data: string }> = [];
+    
+    try {
+      // 如果是字符串，尝试解析为 JSON
+      let contentObj = content;
+      if (typeof content === 'string') {
+        try {
+          contentObj = JSON.parse(content);
+          console.log('[MCP Debug] parseMCPContent JSON解析成功:', contentObj);
+        } catch {
+          // 不是 JSON，返回原始字符串
+          console.log('[MCP Debug] parseMCPContent 不是JSON，返回原始字符串');
+          return { texts: [content], media: [] };
+        }
+      }
+      
+      // 检查是否有 content 数组（MCP 响应格式）
+      const contentArray = contentObj?.result?.content || contentObj?.content || (Array.isArray(contentObj) ? contentObj : null);
+      console.log('[MCP Debug] parseMCPContent contentArray:', contentArray);
+      
+      if (Array.isArray(contentArray)) {
+        console.log('[MCP Debug] parseMCPContent 发现 content 数组，长度:', contentArray.length);
+        for (const item of contentArray) {
+          console.log('[MCP Debug] parseMCPContent 处理项:', item?.type, item);
+          if (item.type === 'text' && item.text) {
+            texts.push(item.text);
+          } else if (item.type === 'image') {
+            const mimeType = item.mimeType || item.mime_type;
+            const data = item.data;
+            console.log('[MCP Debug] parseMCPContent 发现图片:', { mimeType, hasData: !!data, dataLength: data?.length });
+            if (!mimeType || !data) {
+              console.warn('[MCP Debug] parseMCPContent 图片缺少 mimeType 或 data，跳过');
+              continue;
+            }
+            media.push({
+              type: 'image',
+              mimeType,
+              data,
+            });
+          } else if (item.type === 'video') {
+            const mimeType = item.mimeType || item.mime_type;
+            const data = item.data;
+            console.log('[MCP Debug] parseMCPContent 发现视频:', { mimeType, hasData: !!data, dataLength: data?.length });
+            if (!mimeType || !data) {
+              console.warn('[MCP Debug] parseMCPContent 视频缺少 mimeType 或 data，跳过');
+              continue;
+            }
+            media.push({
+              type: 'video',
+              mimeType,
+              data,
+            });
+          }
+        }
+      } else if (contentObj && typeof contentObj === 'object') {
+        // 如果不是数组，返回 JSON 字符串
+        console.log('[MCP Debug] parseMCPContent 不是数组，返回 JSON');
+        texts.push(JSON.stringify(contentObj, null, 2));
+      }
+    } catch (e) {
+      console.error('[MCP Debug] parseMCPContent 解析失败:', e);
+      texts.push(typeof content === 'string' ? content : JSON.stringify(content, null, 2));
+    }
+    
+    console.log('[MCP Debug] parseMCPContent 结果:', { texts: texts.length, media: media.length, mediaTypes: media.map(m => m.type) });
+    return { texts, media };
+  };
+
+  // 解析 MCP 内容为"有序块"（支持同一个结果里多段 text/image/audio 混排；也支持多个 MCP 结果的数组）
+  type MCPContentBlock =
+    | { kind: 'text'; text: string }
+    | { kind: 'image' | 'video' | 'audio'; mimeType: string; data: string };
+
+  const parseMCPContentBlocks = (content: any): MCPContentBlock[] => {
+    const blocks: MCPContentBlock[] = [];
+    console.log('[Workflow] parseMCPContentBlocks input:', typeof content, content?.substring?.(0, 200) || content);
+    
+    try {
+      let contentObj = content;
+      if (typeof content === 'string') {
+        try {
+          contentObj = JSON.parse(content);
+          console.log('[Workflow] Parsed JSON successfully:', Object.keys(contentObj));
+        } catch {
+          // 不是 JSON，就按纯文本处理
+          console.log('[Workflow] Content is not valid JSON, treating as text');
+          return [{ kind: 'text', text: content }];
+        }
+      }
+
+      const sources = Array.isArray(contentObj) ? contentObj : [contentObj];
+      console.log('[Workflow] Processing', sources.length, 'sources');
+
+      for (const src of sources) {
+        // 尝试多种路径查找 content 数组（兼容不同的 MCP 响应格式）
+        const contentArray = src?.result?.content || src?.content || (src?.jsonrpc ? src?.result?.content : null);
+        console.log('[Workflow] Found contentArray:', Array.isArray(contentArray), contentArray?.length);
+        
+        if (Array.isArray(contentArray)) {
+          for (const item of contentArray) {
+            console.log('[Workflow] Processing item:', item?.type, item?.mimeType || item?.mime_type);
+            if (item?.type === 'text' && typeof item.text === 'string') {
+              blocks.push({ kind: 'text', text: item.text });
+              continue;
+            }
+            if (item?.type === 'image' || item?.type === 'video' || item?.type === 'audio') {
+              const mimeType = item.mimeType || item.mime_type;
+              const data = item.data;
+              if (typeof mimeType === 'string' && typeof data === 'string' && data.length > 0) {
+                console.log('[Workflow] Found media:', item.type, mimeType, 'data length:', data.length);
+                blocks.push({ kind: item.type, mimeType, data });
+              } else {
+                console.log('[Workflow] Invalid media item - mimeType:', mimeType, 'data exists:', !!data);
+              }
+              continue;
+            }
+            // 兜底：未知 item 按 JSON 展示
+            if (item !== undefined) {
+              blocks.push({ kind: 'text', text: JSON.stringify(item, null, 2) });
+            }
+          }
+        } else if (src && typeof src === 'object') {
+          // 如果没有找到 content 数组，把整个对象作为文本展示
+          console.log('[Workflow] No content array found, displaying as JSON');
+          blocks.push({ kind: 'text', text: JSON.stringify(src, null, 2) });
+        } else if (typeof src === 'string' && src.trim()) {
+          blocks.push({ kind: 'text', text: src });
+        }
+      }
+    } catch (e) {
+      console.error('[Workflow] Failed to parse MCP content blocks:', e);
+      blocks.push({ kind: 'text', text: typeof content === 'string' ? content : JSON.stringify(content, null, 2) });
+    }
+    
+    console.log('[Workflow] parseMCPContentBlocks result:', blocks.length, 'blocks', blocks.map(b => b.kind));
+    return blocks;
+  };
+
+  const renderMCPBlocks = (blocks: MCPContentBlock[], messageId?: string) => {
+    if (!blocks || blocks.length === 0) return null;
+
+    return (
+      <div className="mt-2 space-y-2">
+        {blocks.map((b, idx) => {
+          if (b.kind === 'text') {
+            // 如果 text 里是 JSON 字符串，尽量美化
+            let displayText = b.text;
+            try {
+              const parsed = JSON.parse(b.text);
+              displayText = JSON.stringify(parsed, null, 2);
+            } catch {
+              // ignore
+            }
+            // 省略 base64 字符串，避免显示过长
+            displayText = truncateBase64Strings(displayText);
+            return (
+              <pre
+                key={`mcp-text-${idx}`}
+                className="bg-white dark:bg-[#2d2d2d] p-2 rounded border text-xs overflow-auto max-h-64 text-gray-800 dark:text-gray-100 whitespace-pre-wrap break-words"
+              >
+                {displayText}
+              </pre>
+            );
+          }
+
+          // image / video / audio
+          return (
+            <div key={`mcp-media-${idx}`}>
+              {renderMCPMedia([{ type: b.kind as 'image' | 'video' | 'audio', mimeType: b.mimeType, data: b.data }], messageId)}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // 渲染 MCP 媒体内容 - 使用缩略图画廊
+  const renderMCPMedia = (media: Array<{ type: 'image' | 'video' | 'audio'; mimeType: string; data: string }>, messageId?: string) => {
+    console.log('[MCP Debug] renderMCPMedia 被调用:', { 
+      mediaCount: media?.length, 
+      messageId,
+      mediaDetails: media?.map(m => ({ 
+        type: m.type, 
+        mimeType: m.mimeType, 
+        dataLength: m.data?.length,
+        dataPreview: m.data?.substring(0, 50) + '...'
+      }))
+    });
+    
+    if (!media || media.length === 0) {
+      console.log('[MCP Debug] renderMCPMedia: 没有媒体可渲染');
+      return null;
+    }
+    
+    // 转换为 MediaGallery 需要的格式
+    const galleryMedia: MediaItem[] = media.map(m => ({
+      type: m.type,
+      mimeType: m.mimeType,
+      data: m.data,
+    }));
+    
+    console.log('[MCP Debug] renderMCPMedia galleryMedia:', galleryMedia.map(m => ({ type: m.type, mimeType: m.mimeType, hasData: !!m.data })));
+    
+    return (
+      <div className="mt-2">
+        <MediaGallery 
+          media={galleryMedia} 
+          thumbnailSize="md"
+          maxVisible={6}
+          showDownload={true}
+          onOpenSessionGallery={(index) => {
+            // 找到在会话媒体中的索引
+            const sessionIndex = messageId ? findSessionMediaIndex(messageId, index) : index;
+            openSessionMediaPanel(sessionIndex);
+          }}
+        />
+      </div>
+    );
+  };
+
   const renderMessageContent = (message: Message) => {
     // 思考/生成中的占位内容（当内容为空且正在处理时）
     if (message.role === 'assistant' && (!message.content || message.content.length === 0) && (message.isThinking || message.isStreaming)) {
@@ -5601,12 +6137,13 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
       );
     }
     
-    // 下载图片功能
-    const downloadImage = (mediaItem: { type: 'image' | 'video'; mimeType: string; data: string; url?: string }, index: number) => {
+    // 下载媒体文件功能（图片、视频、音频）
+    const downloadImage = (mediaItem: { type: 'image' | 'video' | 'audio'; mimeType: string; data: string; url?: string }, index: number) => {
       try {
         // 获取文件扩展名
         const ext = mediaItem.mimeType.split('/')[1] || 'png';
-        const filename = `ai-image-${Date.now()}-${index + 1}.${ext}`;
+        const typePrefix = mediaItem.type === 'image' ? 'ai-image' : mediaItem.type === 'video' ? 'ai-video' : 'ai-audio';
+        const filename = `${typePrefix}-${Date.now()}-${index + 1}.${ext}`;
         
         if (mediaItem.url) {
           // 如果是 URL，使用 fetch 下载
@@ -5645,91 +6182,61 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
       }
     };
     
-    // 多模态内容显示（图片、视频）
+    // 多模态内容显示（图片、视频、音频）- 使用缩略图画廊
     const renderMedia = () => {
       if (!message.media || message.media.length === 0) {
         return null;
       }
       
+      // 转换为 MediaGallery 需要的格式
+      const galleryMedia: MediaItem[] = message.media.map(m => ({
+        type: m.type,
+        mimeType: m.mimeType,
+        data: m.data,
+        url: m.url,
+      }));
+      
       return (
-        <div className="mb-3 space-y-2">
-          {message.media.map((media, index) => (
-            <div key={index} className="relative group">
-              {media.type === 'image' ? (
-                <div className="relative">
-                  <img
-                    src={media.url || `data:${media.mimeType};base64,${media.data}`}
-                    alt={`图片 ${index + 1}`}
-                    className="max-w-full max-h-96 rounded-lg border border-gray-300 dark:border-[#404040] object-contain cursor-pointer hover:opacity-90 transition-opacity"
-                    onClick={() => {
-                      // 点击图片可以放大查看
-                      const imgSrc = media.url || `data:${media.mimeType};base64,${media.data}`;
-                      const newWindow = window.open('', '_blank');
-                      if (newWindow) {
-                        newWindow.document.write(`
-                          <html>
-                            <head><title>图片预览</title></head>
-                            <body style="margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#000">
-                              <img src="${imgSrc}" style="max-width:100%;max-height:100vh;object-fit:contain;" />
-                            </body>
-                          </html>
-                        `);
-                      }
-                    }}
-                  />
-                  {/* 悬浮操作按钮 */}
-                  <div className="absolute bottom-2 right-2 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        downloadImage(media, index);
-                      }}
-                      className="bg-primary-500/90 hover:bg-primary-600 text-white text-xs px-3 py-1.5 rounded-md flex items-center gap-1 shadow-lg transition-colors"
-                      title="下载图片"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                      </svg>
-                      下载
-                    </button>
-                    <span className="bg-black/60 text-white text-xs px-2 py-1 rounded">
-                      点击放大
-                    </span>
-                  </div>
-                </div>
-              ) : (
-                <div className="relative group">
-                  <video
-                    src={media.url || `data:${media.mimeType};base64,${media.data}`}
-                    controls
-                    className="max-w-full max-h-96 rounded-lg border border-gray-300 dark:border-[#404040]"
-                  />
-                  {/* 悬浮操作按钮 */}
-                  <div className="absolute bottom-12 right-2 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        downloadImage(media, index);
-                      }}
-                      className="bg-primary-500/90 hover:bg-primary-600 text-white text-xs px-3 py-1.5 rounded-md flex items-center gap-1 shadow-lg transition-colors"
-                      title="下载视频"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                      </svg>
-                      下载
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
+        <div className="mb-3">
+          <MediaGallery 
+            media={galleryMedia} 
+            thumbnailSize="md"
+            maxVisible={6}
+            showDownload={true}
+            onOpenSessionGallery={(index) => {
+              // 找到在会话媒体中的索引
+              const sessionIndex = findSessionMediaIndex(message.id, index);
+              openSessionMediaPanel(sessionIndex);
+            }}
+          />
         </div>
       );
     };
     
     // 工具消息（感知组件）
     if (message.role === 'tool' && message.toolType) {
+      // MCP 消息使用专门的 MCPExecutionCard 组件
+      if (message.toolType === 'mcp') {
+        // 获取输入文本（从上一条消息）
+        const messageIndex = messages.findIndex(m => m.id === message.id);
+        const prevMessage = messageIndex > 0 ? messages[messageIndex - 1] : null;
+        const inputText = prevMessage?.content || '';
+
+        return (
+          <MCPExecutionCard
+            messageId={message.id}
+            mcpServerName={message.workflowName || 'MCP 服务器'}
+            mcpServerId={message.workflowId || ''}
+            status={message.workflowStatus || 'pending'}
+            content={message.content}
+            inputText={inputText}
+            onExecute={() => handleExecuteWorkflow(message.id)}
+            onDelete={() => handleDeleteWorkflowMessage(message.id)}
+          />
+        );
+      }
+
+      // Workflow 消息继续使用原有的卡片
       const workflowConfig = message.workflowConfig;
       const nodes = workflowConfig?.nodes || [];
       const connections = workflowConfig?.connections || [];
@@ -5745,23 +6252,15 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
           {/* 标题栏和删除按钮 */}
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center space-x-3">
-              <div className={`p-2 rounded-lg ${
-                message.toolType === 'workflow' 
-                  ? 'bg-gray-900 dark:bg-gray-100' 
-                  : 'bg-gray-800 dark:bg-gray-200'
-              }`}>
-                {message.toolType === 'workflow' ? (
-                  <WorkflowIcon className="w-5 h-5 text-white dark:text-[#1e1e1e]" />
-                ) : (
-                  <Plug className="w-5 h-5 text-white dark:text-[#1e1e1e]" />
-                )}
+              <div className="p-2 rounded-lg bg-gray-900 dark:bg-gray-100">
+                <WorkflowIcon className="w-5 h-5 text-white dark:text-[#1e1e1e]" />
               </div>
               <div>
                 <div className="font-semibold text-base text-gray-900 dark:text-[#ffffff]">
-                  {message.workflowName || '感知组件'}
+                  {message.workflowName || '工作流组件'}
                 </div>
                 <div className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-0.5">
-                  {message.toolType === 'workflow' ? '工作流组件' : message.toolType === 'mcp' ? 'MCP服务器' : '感知组件'}
+                  工作流组件
                 </div>
               </div>
             </div>
@@ -5969,35 +6468,72 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
       );
     }
     
+    // 工具消息（不是感知组件）- 检查 content 是否包含 MCP 媒体
+    if (message.role === 'tool' && !message.toolType && message.content && !message.toolCalls) {
+      // 尝试解析 content，看是否包含 MCP 媒体格式
+      const parsed = parseMCPContent(message.content);
+      const hasMedia = parsed.media.length > 0;
+      
+      if (hasMedia) {
+        return (
+          <div>
+            <div className="font-medium text-sm mb-2 flex items-center gap-2">
+              <Wrench className="w-4 h-4 text-green-500" />
+              MCP 工具结果
+            </div>
+            {/* 渲染媒体内容 */}
+            {renderMCPMedia(parsed.media, message.id)}
+            {/* 渲染文本内容 */}
+            {parsed.texts.length > 0 && (
+              <div className="mt-2 text-xs text-gray-600 dark:text-[#b0b0b0]">
+                <pre className="bg-white dark:bg-[#2d2d2d] p-2 rounded border text-xs overflow-auto max-h-64">
+                  {parsed.texts.join('\n')}
+                </pre>
+              </div>
+            )}
+          </div>
+        );
+      }
+    }
+    
     // 普通工具调用消息（不是感知组件）
     if (message.role === 'tool' && message.toolCalls && !message.toolType) {
       return (
         <div>
           <div className="font-medium text-sm mb-2">工具调用:</div>
-          {Array.isArray(message.toolCalls) && message.toolCalls.map((toolCall: any, idx: number) => (
-            <div key={idx} className="mb-3 p-3 bg-gray-50 dark:bg-[#363636] rounded-lg">
-              <div className="flex items-center space-x-2 mb-2">
-                <Wrench className="w-4 h-4 text-primary-500" />
-                <span className="font-medium text-sm">{toolCall.name}</span>
+          {Array.isArray(message.toolCalls) && message.toolCalls.map((toolCall: any, idx: number) => {
+            // 解析工具结果为有序块（支持多条 MCP 返回）
+            const blocks = toolCall.result ? parseMCPContentBlocks(toolCall.result) : [];
+            
+            return (
+              <div key={idx} className="mb-3 p-3 bg-gray-50 dark:bg-[#363636] rounded-lg">
+                <div className="flex items-center space-x-2 mb-2">
+                  <Wrench className="w-4 h-4 text-primary-500" />
+                  <span className="font-medium text-sm">{toolCall.name}</span>
+                </div>
+                {toolCall.arguments && (
+                  <div className="text-xs text-gray-600 dark:text-[#b0b0b0] mb-2">
+                    <span className="font-medium">参数:</span>
+                    <pre className="mt-1 bg-white dark:bg-[#2d2d2d] p-2 rounded border text-xs overflow-auto max-h-32">
+                      {JSON.stringify(toolCall.arguments, null, 2)}
+                    </pre>
+                  </div>
+                )}
+                {toolCall.result && (
+                  <div className="text-xs text-gray-600 dark:text-[#b0b0b0]">
+                    <span className="font-medium">结果:</span>
+                    {blocks.length > 0 ? (
+                      <div className="mt-1">{renderMCPBlocks(blocks, message.id)}</div>
+                    ) : (
+                      <pre className="mt-1 bg-white dark:bg-[#2d2d2d] p-2 rounded border text-xs overflow-auto max-h-64">
+                        {truncateBase64Strings(JSON.stringify(toolCall.result, null, 2))}
+                      </pre>
+                    )}
+                  </div>
+                )}
               </div>
-              {toolCall.arguments && (
-                <div className="text-xs text-gray-600 dark:text-[#b0b0b0] mb-2">
-                  <span className="font-medium">参数:</span>
-                  <pre className="mt-1 bg-white dark:bg-[#2d2d2d] p-2 rounded border text-xs overflow-auto">
-                    {JSON.stringify(toolCall.arguments, null, 2)}
-                  </pre>
-                </div>
-              )}
-              {toolCall.result && (
-                <div className="text-xs text-gray-600 dark:text-[#b0b0b0]">
-                  <span className="font-medium">结果:</span>
-                  <pre className="mt-1 bg-white dark:bg-[#2d2d2d] p-2 rounded border text-xs overflow-auto">
-                    {JSON.stringify(toolCall.result, null, 2)}
-                  </pre>
-                </div>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       );
     }
@@ -6180,12 +6716,12 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 em: ({ children }: any) => <em className="italic">{children}</em>,
               }}
             >
-              {message.content}
+              {truncateBase64Strings(message.content)}
             </ReactMarkdown>
           </div>
         ) : (
           <div className="text-[15px] leading-relaxed whitespace-pre-wrap break-words text-gray-900 dark:text-[#ffffff]">
-            {message.content}
+            {truncateBase64Strings(message.content)}
           </div>
         )}
       </div>
@@ -7008,7 +7544,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
         {/* 消息列表 - 正常顺序显示（老消息在上，新消息在下） - 优化布局 */}
           <div 
             ref={chatContainerRef}
-            className="flex-1 overflow-y-auto px-4 py-3 space-y-4 relative bg-gray-50/50 dark:bg-gray-950/50"
+            className="flex-1 overflow-y-auto px-4 py-3 space-y-6 relative bg-gray-50/50 dark:bg-gray-950/50"
             style={{ scrollBehavior: 'auto' }}
             onScroll={(e) => {
               const container = e.currentTarget;
@@ -7115,6 +7651,61 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
             
             const isSelected = selectedMessageIds.has(message.id);
             
+            // 检查 assistant 消息是否有侧边面板内容（思考过程、MCP详情等）
+            const hasThinkingContent = message.thinking && message.thinking.trim().length > 0;
+            const hasMCPDetail = message.mcpdetail && (message.mcpdetail.tool_calls?.length > 0 || message.mcpdetail.tool_results?.length > 0);
+            const hasToolCallsArray = message.toolCalls && Array.isArray(message.toolCalls) && message.toolCalls.length > 0;
+            const hasProcessSteps = message.processSteps && message.processSteps.length > 0;
+            const shouldUseSplitView = message.role === 'assistant' && (
+              hasThinkingContent || 
+              hasMCPDetail || 
+              hasToolCallsArray ||
+              hasProcessSteps ||
+              message.isThinking ||
+              message.currentStep ||
+              message.thoughtSignature
+            );
+            
+            // 对于 assistant 消息且有侧边面板内容，使用 SplitViewMessage 组件
+            if (shouldUseSplitView) {
+              return (
+                <SplitViewMessage
+                  key={message.id}
+                  id={message.id}
+                  role={message.role}
+                  content={message.content}
+                  thinking={message.thinking}
+                  isThinking={message.isThinking}
+                  isStreaming={message.isStreaming}
+                  currentStep={message.currentStep}
+                  toolType={message.toolType}
+                  workflowId={message.workflowId}
+                  workflowName={message.workflowName}
+                  workflowStatus={message.workflowStatus}
+                  workflowResult={message.workflowResult}
+                  workflowConfig={message.workflowConfig}
+                  toolCalls={Array.isArray(message.toolCalls) ? message.toolCalls : undefined}
+                  mcpDetail={message.mcpdetail}
+                  thoughtSignature={message.thoughtSignature}
+                  media={message.media}
+                  avatarUrl={currentSessionAvatar || undefined}
+                  isSelected={isSelected}
+                  selectionMode={skillPackSelectionMode}
+                  isLoading={isLoading}
+                  llmProvider={selectedLLMConfig?.provider}
+                  renderContent={renderMessageContent}
+                  onToggleSelection={() => toggleMessageSelection(message.id)}
+                  onViewMCPDetail={() => {
+                    setSelectedMCPDetail(message.mcpdetail);
+                    setShowMCPDetailOverlay(true);
+                  }}
+                  onRetry={() => handleRetryMessage(message.id)}
+                  processSteps={message.processSteps}
+                />
+              );
+            }
+            
+            // 其他消息类型使用原有的渲染方式
             return (
             <div
               key={message.id}
@@ -7241,11 +7832,11 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   </div>
                 )}
               </div>
-              <div className="flex-1 group relative">
+              <div className={`flex-1 group relative ${message.role === 'user' ? 'flex justify-end' : ''}`}>
                 <div
-                  className={`rounded-lg p-2.5 transition-all duration-300 ${
+                  className={`rounded-lg p-2.5 transition-all duration-300 max-w-[85%] break-words ${
                     message.role === 'user'
-                      ? 'bg-primary-50 dark:bg-primary-900/20 text-gray-900 dark:text-[#ffffff] shadow-sm hover:shadow-md'
+                      ? 'bg-primary-50 dark:bg-primary-900/20 text-gray-900 dark:text-[#ffffff] shadow-sm hover:shadow-md inline-block'
                       : message.role === 'assistant'
                       ? 'bg-white dark:bg-[#2d2d2d] text-gray-900 dark:text-[#ffffff] border border-gray-200 dark:border-[#404040] shadow-lg hover:shadow-xl' // 更立体的阴影
                       : message.role === 'tool'
@@ -7259,30 +7850,40 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   style={{
                     fontSize: message.role === 'assistant' ? '13px' : '12px', // 减小字体
                     lineHeight: message.role === 'assistant' ? '1.6' : '1.5', // 减小行高
+                    wordBreak: 'break-word', // 长单词自动换行
+                    overflowWrap: 'break-word', // 确保换行
                   }}
                 >
                   {renderMessageContent(message)}
                 </div>
-                {/* 用户消息的编辑、重新发送和引用按钮 */}
+                {/* 会话扩展面板：展示 MCP/Workflow 等外部插件的执行过程与原始返回（含多媒体） */}
+                {message.role === 'tool' && (message.toolType === 'mcp' || message.toolType === 'workflow') && (
+                  <PluginExecutionPanel
+                    messageId={message.id}
+                    sessionId={currentSessionId}
+                    toolType={message.toolType}
+                  />
+                )}
+                {/* 用户消息的编辑、重新发送和引用按钮 - 显示在气泡上方 */}
                 {message.role === 'user' && !isLoading && (
-                  <div className="absolute top-2 right-2 flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="absolute -top-7 right-0 flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-[#2d2d2d] rounded-lg shadow-md border border-gray-200 dark:border-[#404040] px-1 py-0.5">
                     <button
                       onClick={() => setQuotedMessageId(message.id)}
-                      className="p-1.5 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-all"
+                      className="p-1.5 text-gray-500 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-all"
                       title="引用此消息"
                     >
                       <Quote className="w-3.5 h-3.5" />
                     </button>
                     <button
                       onClick={() => handleStartEdit(message.id)}
-                      className="p-1.5 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-all"
+                      className="p-1.5 text-gray-500 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-all"
                       title="编辑消息"
                     >
                       <Edit2 className="w-3.5 h-3.5" />
                     </button>
                     <button
                       onClick={() => handleResendMessage(message.id)}
-                      className="p-1.5 text-gray-400 hover:text-green-600 dark:hover:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 rounded transition-all"
+                      className="p-1.5 text-gray-500 hover:text-green-600 dark:text-gray-400 dark:hover:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 rounded transition-all"
                       title="重新发送"
                     >
                       <RotateCw className="w-3.5 h-3.5" />
@@ -7290,17 +7891,34 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                   </div>
                 )}
                 
-                {/* Assistant错误消息的重试按钮 */}
+                {/* Assistant消息的 MCP 详情按钮 - 显示在气泡上方 */}
+                {message.role === 'assistant' && message.mcpdetail && (
+                  <div className="absolute -top-7 right-0 flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => {
+                        setSelectedMCPDetail(message.mcpdetail);
+                        setShowMCPDetailOverlay(true);
+                      }}
+                      className="px-2 py-1 text-xs font-medium text-emerald-600 dark:text-emerald-400 bg-white dark:bg-[#2d2d2d] hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded-lg transition-all flex items-center space-x-1.5 border border-gray-200 dark:border-[#404040] shadow-md"
+                      title="查看 MCP 详情"
+                    >
+                      <Plug className="w-3.5 h-3.5" />
+                      <span>MCP 详情</span>
+                    </button>
+                  </div>
+                )}
+                
+                {/* Assistant错误消息的重试按钮 - 显示在气泡上方 */}
                 {message.role === 'assistant' && 
                  message.content?.includes('❌ 错误') && 
                  message.toolCalls && 
                  typeof message.toolCalls === 'object' &&
                  (message.toolCalls as any).canRetry === true && (
-                  <div className="absolute top-2 right-2 flex items-center space-x-1">
+                  <div className="absolute -top-8 right-0 flex items-center space-x-1">
                     <button
                       onClick={() => handleRetryMessage(message.id)}
                       disabled={isLoading}
-                      className="px-3 py-1.5 text-sm font-medium text-white bg-primary-500 hover:bg-primary-600 disabled:bg-gray-400 disabled:cursor-not-allowed rounded-lg transition-all flex items-center space-x-1.5 shadow-sm"
+                      className="px-2.5 py-1 text-xs font-medium text-white bg-primary-500 hover:bg-primary-600 disabled:bg-gray-400 disabled:cursor-not-allowed rounded-lg transition-all flex items-center space-x-1.5 shadow-md"
                       title="重试发送"
                     >
                       <RotateCw className="w-3.5 h-3.5" />
@@ -7375,8 +7993,8 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
             {isDraggingOver && (
               <div className="absolute inset-0 flex items-center justify-center bg-primary-100/50 dark:bg-primary-900/30 rounded-lg z-10 pointer-events-none">
                 <div className="flex items-center gap-2 text-primary-600 dark:text-primary-400 font-medium">
-                  <Image className="w-5 h-5" />
-                  <span>松开以添加图片</span>
+                  <Paperclip className="w-5 h-5" />
+                  <span>松开以添加媒体文件</span>
                 </div>
               </div>
             )}
@@ -7549,29 +8167,42 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
           })()}
 
           <div className="flex space-x-2">
-            {/* 附件预览区域 */}
+            {/* 附件预览区域 - 缩略图画廊样式 */}
             {attachedMedia.length > 0 && (
               <div className="mb-2 flex flex-wrap gap-2">
                 {attachedMedia.map((media, index) => (
                   <div key={index} className="relative group">
                     {media.type === 'image' ? (
-                      <img
-                        src={media.preview || `data:${media.mimeType};base64,${media.data}`}
-                        alt={`附件 ${index + 1}`}
-                        className="w-20 h-20 object-cover rounded border border-gray-300 dark:border-[#404040]"
-                      />
-                    ) : (
-                      <video
-                        src={media.preview || `data:${media.mimeType};base64,${media.data}`}
-                        className="w-20 h-20 object-cover rounded border border-gray-300 dark:border-[#404040]"
-                        controls={false}
-                      />
-                    )}
+                      <div className="w-16 h-16 rounded-lg overflow-hidden border border-gray-200 dark:border-[#404040] hover:border-primary-500 dark:hover:border-primary-500 transition-all hover:scale-105">
+                        <img
+                          src={media.preview || `data:${media.mimeType};base64,${media.data}`}
+                          alt={`附件 ${index + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    ) : media.type === 'video' ? (
+                      <div className="w-16 h-16 rounded-lg overflow-hidden border border-gray-200 dark:border-[#404040] hover:border-primary-500 dark:hover:border-primary-500 transition-all hover:scale-105 relative bg-gray-900">
+                        <video
+                          src={media.preview || `data:${media.mimeType};base64,${media.data}`}
+                          className="w-full h-full object-cover"
+                          muted
+                        />
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                          <div className="w-6 h-6 rounded-full bg-white/90 flex items-center justify-center">
+                            <Play className="w-3 h-3 text-gray-800 ml-0.5" />
+                          </div>
+                        </div>
+                      </div>
+                    ) : media.type === 'audio' ? (
+                      <div className="w-16 h-16 flex items-center justify-center rounded-lg border border-gray-200 dark:border-[#404040] hover:border-primary-500 dark:hover:border-primary-500 transition-all hover:scale-105 bg-gradient-to-br from-primary-500 to-primary-700">
+                        <Music className="w-6 h-6 text-white/80" />
+                      </div>
+                    ) : null}
                     <button
                       onClick={() => {
                         setAttachedMedia(prev => prev.filter((_, i) => i !== index));
                       }}
-                      className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
                       title="删除附件"
                     >
                       <X className="w-3 h-3" />
@@ -9415,6 +10046,17 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
       }}
     />
 
+    {/* MCP 详情遮罩层 */}
+    {showMCPDetailOverlay && selectedMCPDetail && (
+      <MCPDetailOverlay
+        mcpDetail={selectedMCPDetail}
+        onClose={() => {
+          setShowMCPDetailOverlay(false);
+          setSelectedMCPDetail(null);
+        }}
+      />
+    )}
+
     {/* 删除 Agent Tab 确认对话框 */}
     <ConfirmDialog
       open={deleteAgentTabTarget !== null}
@@ -9426,6 +10068,14 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
       variant="destructive"
       confirmText="永久删除"
       onConfirm={confirmDeleteAgentTab}
+    />
+    
+    {/* 会话媒体面板 */}
+    <SessionMediaPanel
+      open={sessionMediaPanelOpen}
+      onClose={() => setSessionMediaPanelOpen(false)}
+      media={sessionMedia}
+      initialIndex={sessionMediaInitialIndex}
     />
     </>
   );

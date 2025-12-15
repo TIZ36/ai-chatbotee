@@ -6,6 +6,7 @@
 import { llmConfigManager, LLMConfig } from './llmConfig';
 import { mcpManager, MCPClient, MCPTool } from './mcpClient';
 import { GoogleGenAI, Content, Part } from '@google/genai';
+import { extractMCPMedia, mightContainMedia, ExtractedMedia } from '../utils/mcpMediaExtractor';
 
 export interface LLMMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -1900,6 +1901,18 @@ ${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
   }
 
   /**
+   * MCP 调用信息，用于传递给回调
+   */
+  public static MCPCallInfo = {
+    toolName: '',
+    arguments: null as any,
+    result: null as any,
+    status: 'pending' as 'pending' | 'running' | 'completed' | 'error',
+    duration: 0,
+    mcpServer: '',
+  };
+
+  /**
    * 处理用户请求（返回完整响应，包括思考过程）
    * 用于需要获取思考过程的场景
    */
@@ -1910,8 +1923,9 @@ ${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
     stream: boolean = false,
     onChunk?: (content: string, thinking?: string) => void,
     messageHistory?: LLMMessage[], // 添加消息历史参数
-    onStepChange?: (step: string) => void // 添加步骤变化回调
-  ): Promise<{ content: string; thinking?: string; thoughtSignature?: string; toolCallSignatures?: Record<string, string>; media?: Array<{ type: 'image' | 'video'; mimeType: string; data: string }> }> {
+    onStepChange?: (step: string) => void, // 添加步骤变化回调
+    onMCPCall?: (info: { toolName: string; arguments: any; result?: any; status: 'pending' | 'running' | 'completed' | 'error'; duration?: number; mcpServer?: string; error?: string; extractedMedia?: ExtractedMedia[] }) => void // MCP 调用回调
+  ): Promise<{ content: string; thinking?: string; thoughtSignature?: string; toolCallSignatures?: Record<string, string>; media?: Array<{ type: 'image' | 'video' | 'audio'; mimeType: string; data: string }> }> {
     // 设置允许使用的工具列表
     const allTools: MCPTool[] = tools || [];
     this.setAllowedTools(allTools);
@@ -1957,6 +1971,7 @@ ${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
     const maxDuration = 5 * 60 * 1000;
 
     let accumulatedThinking = ''; // 移到循环外部，确保在多次迭代中保持
+    const accumulatedMedia: ExtractedMedia[] = []; // 累积提取的媒体
     
     while (iteration < maxIterations) {
       if (Date.now() - startTime > maxDuration) {
@@ -2035,21 +2050,72 @@ ${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
 
         const toolResults = await Promise.all(
           response.tool_calls.map(async (toolCall) => {
+            const startTime = Date.now();
+            const toolArgs = toolCall.function.arguments;
+            
+            // 解析参数（可能是字符串或对象）
+            let parsedArgs: any;
+            try {
+              parsedArgs = typeof toolArgs === 'string' ? JSON.parse(toolArgs) : toolArgs;
+            } catch {
+              parsedArgs = toolArgs;
+            }
+            
             try {
               // 更新步骤：正在调用工具
               onStepChange?.(`正在调用工具: ${toolCall.function.name}`);
+              
+              // 通知 MCP 调用开始
+              onMCPCall?.({
+                toolName: toolCall.function.name,
+                arguments: parsedArgs,
+                status: 'running',
+                mcpServer: this.extractMCPServerFromTool(toolCall.function.name),
+              });
+              
               console.log(`[LLM] Executing tool: ${toolCall.function.name}`);
               const result = await this.executeToolCall(toolCall);
               console.log(`[LLM] Tool result:`, result);
+              
+              const duration = Date.now() - startTime;
+              
+              // 提取媒体内容（避免将大量 base64 数据发送给 LLM）
+              let cleanedResult = result;
+              let extractedMedia: ExtractedMedia[] = [];
+              
+              if (mightContainMedia(result)) {
+                console.log(`[LLM] 检测到可能包含媒体，开始提取...`);
+                const extraction = extractMCPMedia(result);
+                cleanedResult = extraction.cleanedContent;
+                extractedMedia = extraction.media;
+                
+                if (extraction.hasMedia) {
+                  console.log(`[LLM] 成功提取 ${extractedMedia.length} 个媒体文件，已从发送给 LLM 的内容中移除 base64 数据`);
+                  // 累积提取的媒体
+                  accumulatedMedia.push(...extractedMedia);
+                }
+              }
+              
               // 工具调用完成，清除步骤提示
               onStepChange?.('');
               
-              // 构建工具响应消息，包含思维签名
+              // 通知 MCP 调用完成（包含原始结果和提取的媒体）
+              onMCPCall?.({
+                toolName: toolCall.function.name,
+                arguments: parsedArgs,
+                result: result, // 原始结果（用于显示）
+                status: 'completed',
+                duration: duration,
+                mcpServer: this.extractMCPServerFromTool(toolCall.function.name),
+                extractedMedia: extractedMedia.length > 0 ? extractedMedia : undefined, // 提取的媒体
+              });
+              
+              // 构建工具响应消息，使用清理后的内容（不含 base64）
               const toolMsg: LLMMessage = {
                 tool_call_id: toolCall.id,
                 role: 'tool' as const,
                 name: toolCall.function.name,
-                content: JSON.stringify(result),
+                content: JSON.stringify(cleanedResult), // 使用清理后的内容
               };
               
               // 如果有工具调用的思维签名，添加到工具消息中
@@ -2060,8 +2126,21 @@ ${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
               return toolMsg;
             } catch (error: any) {
               console.error(`[LLM] Tool execution error:`, error);
+              
+              const duration = Date.now() - startTime;
+              
               // 工具调用失败，清除步骤提示
               onStepChange?.('');
+              
+              // 通知 MCP 调用失败
+              onMCPCall?.({
+                toolName: toolCall.function.name,
+                arguments: parsedArgs,
+                status: 'error',
+                duration: duration,
+                mcpServer: this.extractMCPServerFromTool(toolCall.function.name),
+                error: error.message,
+              });
               
               // 构建错误响应，也包含思维签名（如果有）
               const toolMsg: LLMMessage = {
@@ -2083,12 +2162,18 @@ ${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
         messages.push(...toolResults);
         iteration++;
       } else {
+        // 合并 LLM 返回的媒体和从 MCP 工具中提取的媒体
+        const allMedia = [
+          ...(response.media || []),
+          ...accumulatedMedia,
+        ];
+        
         const result = {
           content: response.content,
           thinking: accumulatedThinking || response.thinking,
           thoughtSignature: response.thoughtSignature, // 返回思维签名
           toolCallSignatures: response.toolCallSignatures, // 返回工具调用的思维签名
-          media: response.media, // 返回多模态输出（图片等）
+          media: allMedia.length > 0 ? allMedia : undefined, // 返回所有媒体（包括从 MCP 提取的）
         };
         
         console.log(`[LLM] handleUserRequestWithThinking 最终返回:`, {
@@ -2096,6 +2181,7 @@ ${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
           contentLength: result.content?.length || 0,
           hasMedia: !!result.media,
           mediaCount: result.media?.length || 0,
+          accumulatedMediaCount: accumulatedMedia.length,
           hasThinking: !!result.thinking,
         });
         
@@ -2105,6 +2191,29 @@ ${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
 
     console.warn(`[LLM] handleUserRequestWithThinking 超时，迭代次数=${iteration}`);
     return { content: '处理超时，请重试。' };
+  }
+
+  /**
+   * 从工具名称中提取 MCP 服务器名称
+   * 工具名称格式通常是: toolName 或 serverName__toolName
+   */
+  private extractMCPServerFromTool(toolName: string): string | undefined {
+    // 检查是否有双下划线分隔符（MCP 工具命名约定）
+    if (toolName.includes('__')) {
+      const parts = toolName.split('__');
+      return parts[0];
+    }
+    
+    // 检查是否有其他常见的分隔符
+    if (toolName.includes('-') && toolName.split('-').length > 1) {
+      // 如果以 mcp- 开头，提取服务器名称
+      const parts = toolName.split('-');
+      if (parts[0].toLowerCase() === 'mcp' && parts.length > 1) {
+        return parts[1];
+      }
+    }
+    
+    return undefined;
   }
 
   /**

@@ -912,6 +912,129 @@ def mcp_proxy_inspector():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/mcp/health', methods=['GET', 'OPTIONS'])
+def mcp_health_proxy():
+    """
+    MCP 服务器健康检查代理端点
+    用于检查 MCP 服务器是否支持标准 /health 接口
+    
+    规范要求：
+    - MCP 服务应实现 GET /health 接口
+    - 返回格式: {"status": "healthy"} 或 {"status": "unhealthy"}
+    - 也支持: {"healthy": true} 或 {"ok": true}
+    """
+    from urllib.parse import unquote
+    
+    # 处理 CORS 预检请求
+    if request.method == 'OPTIONS':
+        response = Response()
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = CORS_ALLOWED_HEADERS_STR
+        return response
+    
+    try:
+        # 获取目标健康检查 URL
+        target_url = request.args.get('url')
+        if not target_url:
+            return jsonify({'error': 'Missing url parameter'}), 400
+        
+        target_url = unquote(target_url)
+        print(f"[MCP Health Proxy] Checking health of: {target_url}")
+        
+        # 设置较短的超时时间（5秒）
+        try:
+            response = requests.get(
+                target_url,
+                headers={
+                    'Accept': 'application/json',
+                },
+                timeout=5
+            )
+            
+            # 构建响应头
+            response_headers = {
+                'Access-Control-Allow-Origin': '*',
+                'Content-Type': 'application/json',
+            }
+            
+            # 检查响应状态
+            if response.status_code == 404 or response.status_code == 405:
+                # /health 接口不存在
+                print(f"[MCP Health Proxy] Health endpoint not found: {response.status_code}")
+                return jsonify({
+                    'supported': False,
+                    'healthy': False,
+                    'message': f'Health endpoint returned {response.status_code}'
+                }), 200
+            
+            if not response.ok:
+                # 服务器返回错误状态
+                print(f"[MCP Health Proxy] Health endpoint error: {response.status_code}")
+                return jsonify({
+                    'supported': True,
+                    'healthy': False,
+                    'status_code': response.status_code,
+                    'message': f'Server returned {response.status_code}'
+                }), 200
+            
+            # 解析响应
+            try:
+                data = response.json()
+                
+                # 检查健康状态
+                is_healthy = (
+                    data.get('status') == 'healthy' or 
+                    data.get('status') == 'ok' or
+                    data.get('healthy') is True or
+                    data.get('ok') is True
+                )
+                
+                print(f"[MCP Health Proxy] Health check result: supported=True, healthy={is_healthy}")
+                return jsonify({
+                    'supported': True,
+                    'healthy': is_healthy,
+                    'details': data
+                }), 200
+                
+            except Exception as e:
+                # JSON 解析失败，但接口存在
+                print(f"[MCP Health Proxy] Failed to parse JSON response: {e}")
+                return jsonify({
+                    'supported': True,
+                    'healthy': False,
+                    'message': f'Invalid JSON response: {str(e)}'
+                }), 200
+                
+        except requests.exceptions.Timeout:
+            print(f"[MCP Health Proxy] Health check timeout")
+            return jsonify({
+                'supported': True,
+                'healthy': False,
+                'message': 'Health check timeout'
+            }), 200
+            
+        except requests.exceptions.ConnectionError as e:
+            # 连接错误，可能是服务器不可用
+            print(f"[MCP Health Proxy] Connection error: {e}")
+            return jsonify({
+                'supported': False,
+                'healthy': False,
+                'message': f'Connection error: {str(e)}'
+            }), 200
+            
+    except Exception as e:
+        print(f"[MCP Health Proxy] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'supported': False,
+            'healthy': False,
+            'error': str(e)
+        }), 500
+
+
 @app.route('/api/mcp/proxy', methods=['POST', 'OPTIONS'])
 def mcp_proxy():
     """
@@ -4004,6 +4127,7 @@ def get_session_messages(session_id):
                     token_count,
                     acc_token,
                     ext,
+                    mcpdetail,
                     created_at
                 FROM messages
                 WHERE session_id = %s
@@ -4034,6 +4158,14 @@ def get_session_messages(session_id):
                     except (json.JSONDecodeError, TypeError):
                         pass
                 
+                # 解析 mcpdetail 字段
+                mcpdetail_data = None
+                if row.get('mcpdetail'):
+                    try:
+                        mcpdetail_data = json.loads(row['mcpdetail']) if isinstance(row['mcpdetail'], str) else row['mcpdetail']
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                
                 message = {
                     'message_id': row['message_id'],
                     'session_id': row['session_id'],
@@ -4043,6 +4175,7 @@ def get_session_messages(session_id):
                     'tool_calls': json.loads(row['tool_calls']) if row['tool_calls'] else None,
                     'token_count': row['token_count'],
                     'ext': ext_data,  # 扩展数据（如 Gemini 的 thoughtSignature）
+                    'mcpdetail': mcpdetail_data,  # MCP 执行详情
                     'created_at': row['created_at'].isoformat() if row['created_at'] else None,
                 }
                 messages.append(message)
@@ -7428,25 +7561,44 @@ def execute_message_component(message_id):
             conn.commit()
             
             # 执行感知组件
+            # result: 存到 message_executions.result / 返回给前端用于聊天摘要展示（避免塞入 base64）
+            # raw_result/logs: 落库用于“会话扩展面板”回放
             result = None
+            raw_result = None
+            exec_logs = None
             error_message = None
             status = 'completed'
             
             try:
                 if component_type == 'workflow':
                     # 执行工作流，使用聊天选择的LLM替换工作流中的LLM节点
-                    result = execute_workflow_with_llm(component_id, input_text, llm_config_id)
+                    workflow_exec = execute_workflow_with_llm(component_id, input_text, llm_config_id)
+                    if isinstance(workflow_exec, dict):
+                        if workflow_exec.get('error'):
+                            status = 'error'
+                            error_message = workflow_exec.get('error')
+                        exec_logs = workflow_exec.get('logs')
+                        raw_result = workflow_exec.get('raw_result')
+                        result = workflow_exec.get('summary') or workflow_exec.get('result')
+                    else:
+                        result = workflow_exec
                 elif component_type == 'mcp':
                     # 执行MCP，使用聊天选择的LLM驱动MCP工具
-                    result = execute_mcp_with_llm(component_id, input_text, llm_config_id)
+                    mcp_exec = execute_mcp_with_llm(component_id, input_text, llm_config_id)
+                    if isinstance(mcp_exec, dict):
+                        if mcp_exec.get('error'):
+                            status = 'error'
+                            error_message = mcp_exec.get('error')
+                        exec_logs = mcp_exec.get('logs')
+                        raw_result = mcp_exec.get('raw_result')
+                        result = mcp_exec.get('summary') or mcp_exec.get('result')
+                    else:
+                        result = mcp_exec
                 else:
                     raise ValueError(f'Unknown component type: {component_type}')
                 
-                if isinstance(result, dict) and result.get('error'):
-                    status = 'error'
-                    error_message = result.get('error')
-                    result = None
-                elif not isinstance(result, str):
+                # 兜底：保证 result 是字符串，避免把 raw_result（含 base64）落到 result 中
+                if result is not None and not isinstance(result, str):
                     result = json.dumps(result, ensure_ascii=False, indent=2)
                     
             except Exception as e:
@@ -7456,15 +7608,68 @@ def execute_message_component(message_id):
                 import traceback
                 traceback.print_exc()
             
+            # logs/raw_result 序列化落库（允许 None）
+            logs_json = None
+            raw_result_json = None
+            try:
+                if exec_logs is not None:
+                    logs_json = json.dumps(exec_logs, ensure_ascii=False)
+            except Exception as e:
+                print(f"[Message Execution] Failed to serialize logs: {e}")
+            try:
+                if raw_result is not None:
+                    raw_result_json = json.dumps(raw_result, ensure_ascii=False)
+            except Exception as e:
+                print(f"[Message Execution] Failed to serialize raw_result: {e}")
+            
             # 更新执行记录
             cursor.execute("""
                 UPDATE message_executions
                 SET status = %s,
                     result = %s,
                     error_message = %s,
+                    logs = %s,
+                    raw_result = %s,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE execution_id = %s
-            """, (status, result, error_message, execution_id))
+            """, (status, result, error_message, logs_json, raw_result_json, execution_id))
+            
+            # 如果是 MCP 执行，将详情保存到对应的 assistant 消息的 mcpdetail 字段
+            # 找到同 session 中，在当前消息之前最近的 assistant 消息
+            if component_type == 'mcp' and raw_result is not None:
+                mcp_detail = {
+                    'execution_id': execution_id,
+                    'component_type': component_type,
+                    'component_id': component_id,
+                    'component_name': component_name,
+                    'status': status,
+                    'logs': exec_logs,
+                    'raw_result': raw_result,
+                    'error_message': error_message,
+                    'executed_at': datetime.now().isoformat(),
+                }
+                mcp_detail_json = json.dumps(mcp_detail, ensure_ascii=False)
+                
+                # 查找对应的 assistant 消息（当前消息之前最近的 assistant 消息）
+                cursor.execute("""
+                    SELECT message_id 
+                    FROM messages 
+                    WHERE session_id = %s 
+                      AND role = 'assistant'
+                      AND created_at <= (SELECT created_at FROM messages WHERE message_id = %s)
+                    ORDER BY created_at DESC 
+                    LIMIT 1
+                """, (message['session_id'], message_id))
+                
+                assistant_message = cursor.fetchone()
+                if assistant_message:
+                    # 更新 assistant 消息的 mcpdetail
+                    cursor.execute("""
+                        UPDATE messages 
+                        SET mcpdetail = %s 
+                        WHERE message_id = %s
+                    """, (mcp_detail_json, assistant_message['message_id']))
+                    print(f"[MCP Detail] Updated mcpdetail for assistant message {assistant_message['message_id']}")
             
             conn.commit()
             
@@ -7558,7 +7763,17 @@ def execute_workflow_with_llm(workflow_id: str, input_text: str, llm_config_id: 
             result_text += "注意：完整的工作流执行逻辑需要在WorkflowEditor中实现\n\n"
             result_text += "执行日志:\n" + "\n".join(logs)
             
-            return result_text
+            return {
+                'summary': f'✅ 工作流 "{workflow["name"]}" 执行完成（详情见插件面板）',
+                'raw_result': {
+                    'workflow_id': workflow_id,
+                    'workflow_name': workflow['name'],
+                    'input': input_text,
+                    'llm_config_id': llm_config_id,
+                    'output_text': result_text,
+                },
+                'logs': logs,
+            }
             
         finally:
             if cursor:
@@ -7571,7 +7786,7 @@ def execute_workflow_with_llm(workflow_id: str, input_text: str, llm_config_id: 
         add_log(f"❌ 执行出错: {error_msg}")
         import traceback
         traceback.print_exc()
-        return {'error': error_msg, 'logs': logs}
+        return {'error': error_msg, 'logs': logs, 'raw_result': None, 'summary': None}
 
 def execute_mcp_with_llm(mcp_server_id: str, input_text: str, llm_config_id: str):
     """执行MCP，使用指定的LLM配置驱动MCP工具"""
@@ -7725,22 +7940,23 @@ def execute_mcp_with_llm(mcp_server_id: str, input_text: str, llm_config_id: str
                         'error': str(e)
                     })
             
-            # 4. 返回结果
-            result_text = f"MCP服务器 \"{mcp_server['name']}\" 执行完成\n\n"
-            result_text += f"输入: {input_text}\n\n"
-            result_text += f"执行了 {len(results)} 个工具调用:\n\n"
+            # 4. 返回结果（结构化原始结果 + 过程日志 + 聊天摘要）
+            tool_names = [r.get('tool') for r in results if r.get('tool')]
+            tool_names_text = ', '.join(tool_names[:8]) + ('...' if len(tool_names) > 8 else '')
+            summary = f'✅ MCP "{mcp_server["name"]}" 执行完成（{len(results)} 个工具调用：{tool_names_text}）——详情见插件面板'
             
-            for result in results:
-                result_text += f"工具: {result['tool']}\n"
-                if 'result' in result:
-                    result_text += f"结果: {json.dumps(result['result'], ensure_ascii=False, indent=2)}\n"
-                elif 'error' in result:
-                    result_text += f"错误: {result['error']}\n"
-                result_text += "\n"
-            
-            result_text += "\n执行日志:\n" + "\n".join(logs)
-            
-            return result_text
+            return {
+                'summary': summary,
+                'raw_result': {
+                    'mcp_server_id': mcp_server_id,
+                    'mcp_server_name': mcp_server['name'],
+                    'mcp_server_url': mcp_server['url'],
+                    'input': input_text,
+                    'tool_calls': tool_calls,
+                    'results': results,  # results[i].result 保留原始 MCP jsonrpc（含 base64 图片）
+                },
+                'logs': logs,
+            }
             
         finally:
             if cursor:
@@ -7753,7 +7969,7 @@ def execute_mcp_with_llm(mcp_server_id: str, input_text: str, llm_config_id: str
         add_log(f"❌ 执行出错: {error_msg}")
         import traceback
         traceback.print_exc()
-        return {'error': error_msg, 'logs': logs}
+        return {'error': error_msg, 'logs': logs, 'raw_result': None, 'summary': None}
 
 def call_llm_api(llm_config: dict, system_prompt: str, user_input: str, add_log=None):
     """调用LLM API"""
@@ -8212,7 +8428,7 @@ def get_message_execution(message_id):
             
             cursor.execute("""
                 SELECT execution_id, message_id, component_type, component_id, component_name,
-                       llm_config_id, input, result, status, error_message,
+                       llm_config_id, input, result, status, error_message, logs, raw_result,
                        created_at, updated_at
                 FROM message_executions
                 WHERE message_id = %s
@@ -8223,6 +8439,20 @@ def get_message_execution(message_id):
             execution = cursor.fetchone()
             if not execution:
                 return jsonify({'error': 'Execution not found'}), 404
+            
+            # 尝试解析 logs/raw_result 为结构化对象
+            parsed_logs = None
+            parsed_raw_result = None
+            try:
+                if execution.get('logs'):
+                    parsed_logs = json.loads(execution['logs'])
+            except Exception:
+                parsed_logs = execution.get('logs')
+            try:
+                if execution.get('raw_result'):
+                    parsed_raw_result = json.loads(execution['raw_result'])
+            except Exception:
+                parsed_raw_result = execution.get('raw_result')
             
             return jsonify({
                 'execution_id': execution['execution_id'],
@@ -8235,6 +8465,8 @@ def get_message_execution(message_id):
                 'result': execution['result'],
                 'status': execution['status'],
                 'error_message': execution['error_message'],
+                'logs': parsed_logs,
+                'raw_result': parsed_raw_result,
                 'created_at': execution['created_at'].isoformat() if execution['created_at'] else None,
                 'updated_at': execution['updated_at'].isoformat() if execution['updated_at'] else None,
             })
@@ -8247,6 +8479,58 @@ def get_message_execution(message_id):
                 
     except Exception as e:
         print(f"[Message Execution API] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/sessions/<session_id>/executions', methods=['GET', 'OPTIONS'])
+def list_session_executions(session_id):
+    """列出会话内所有消息执行记录（用于会话扩展面板的时间线视图）"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT me.execution_id, me.message_id, me.component_type, me.component_id, me.component_name,
+                       me.status, me.error_message, me.created_at, me.updated_at
+                FROM message_executions me
+                INNER JOIN messages m ON m.message_id = me.message_id
+                WHERE m.session_id = %s
+                ORDER BY me.created_at DESC
+            """, (session_id,))
+            
+            rows = cursor.fetchall() or []
+            return jsonify([
+                {
+                    'execution_id': r.get('execution_id'),
+                    'message_id': r.get('message_id'),
+                    'component_type': r.get('component_type'),
+                    'component_id': r.get('component_id'),
+                    'component_name': r.get('component_name'),
+                    'status': r.get('status'),
+                    'error_message': r.get('error_message'),
+                    'created_at': r.get('created_at').isoformat() if r.get('created_at') else None,
+                    'updated_at': r.get('updated_at').isoformat() if r.get('updated_at') else None,
+                }
+                for r in rows
+            ])
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Message Execution API] Error listing session executions: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
