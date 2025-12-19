@@ -163,15 +163,35 @@ fi
 # 安装 Node.js 依赖
 if [ -f "package.json" ]; then
     echo "📦 安装 Node.js 依赖..."
-    npm install
+    
+    # 修复 node-pty 权限问题（如果存在）
+    if [ -d "node_modules/node-pty" ]; then
+        echo "🔧 修复 node-pty 权限问题..."
+        $SUDO chown -R "$USER:$USER" node_modules/node-pty 2>/dev/null || true
+        rm -rf node_modules/node-pty/build 2>/dev/null || true
+    fi
+    
+    npm install || {
+        echo "⚠️  npm install 遇到错误，尝试修复权限后重试..."
+        # 如果安装失败，尝试修复权限
+        if [ -d "node_modules" ]; then
+            $SUDO chown -R "$USER:$USER" node_modules 2>/dev/null || true
+        fi
+        # 重试安装
+        npm install || echo "❌ npm install 失败，请检查错误信息"
+    }
     echo "✅ Node.js 依赖安装完成"
     
     # 编译原生模块（node-pty 需要编译）
     if [ -d "node_modules/node-pty" ]; then
         echo "🔨 编译 node-pty 原生模块..."
+        # 确保权限正确
+        $SUDO chown -R "$USER:$USER" node_modules/node-pty 2>/dev/null || true
+        rm -rf node_modules/node-pty/build 2>/dev/null || true
+        
         npx electron-rebuild -f -w node-pty 2>/dev/null || {
             echo "⚠️  electron-rebuild 失败，尝试 npm rebuild..."
-            npm rebuild node-pty 2>/dev/null || echo "⚠️  原生模块编译跳过"
+            npm rebuild node-pty 2>/dev/null || echo "⚠️  原生模块编译跳过（不影响移动端构建）"
         }
         echo "✅ 原生模块编译完成"
     fi
