@@ -3,7 +3,9 @@
  * 调用后端API管理LLM配置
  */
 
-const API_BASE_URL = 'http://localhost:3002/api/llm';
+import { getBackendUrl } from '../utils/backendUrl';
+
+const API_BASE_URL = `${getBackendUrl()}/api/llm`;
 
 export interface LLMConfigFromDB {
   config_id: string;

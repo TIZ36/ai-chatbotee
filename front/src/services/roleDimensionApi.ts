@@ -2,7 +2,9 @@
  * 角色生成器自定义维度选项 API
  */
 
-const API_BASE = 'http://localhost:3002/api';
+import { getBackendUrl } from '../utils/backendUrl';
+
+const API_BASE = `${getBackendUrl()}/api`;
 
 export interface DimensionOption {
   option_id: string;

@@ -1,0 +1,65 @@
+# Nginx 反向代理配置示例
+# 用于统一前端和后端访问，提升局域网访问性能
+
+server {
+    listen 80;
+    server_name _;  # 可以改为你的域名或IP
+
+    # 增加缓冲区大小，支持大文件上传
+    client_max_body_size 100M;
+    
+    # 启用 gzip 压缩
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css text/xml text/javascript application/json application/javascript application/xml+rss;
+
+    # 前端静态文件（Vite 开发服务器或构建后的文件）
+    location / {
+        proxy_pass http://localhost:5174;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        
+        # WebSocket 支持（如果需要）
+        proxy_set_header Connection "upgrade";
+    }
+
+    # 后端 API
+    location /api/ {
+        proxy_pass http://localhost:3002;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # 增加超时时间，支持长连接
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+        
+        # 支持流式响应
+        proxy_buffering off;
+    }
+
+    # MCP 代理（如果需要）
+    location /mcp {
+        proxy_pass http://localhost:3002;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # 支持流式响应
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+    }
+}
+

@@ -2,12 +2,7 @@
  * 工作流配置 API 服务
  */
 
-const getBackendUrl = (): string => {
-  if (typeof window !== 'undefined' && (window as any).electronAPI) {
-    return 'http://localhost:3002';
-  }
-  return import.meta.env.VITE_BACKEND_URL || 'http://localhost:3002';
-};
+import { getBackendUrl } from '../utils/backendUrl';
 
 export interface WorkflowConfig {
   nodes: WorkflowNode[];

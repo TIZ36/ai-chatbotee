@@ -13,7 +13,8 @@ import { LLMClient, LLMMessage } from '../services/llmClient';
 import { getLLMConfigs, getLLMConfig, getLLMConfigApiKey, LLMConfigFromDB } from '../services/llmApi';
 import { mcpManager, MCPServer, MCPTool } from '../services/mcpClient';
 import { getMCPServers, MCPServerConfig } from '../services/mcpApi';
-import { getSessions, getSession, createSession, getSessionMessages, saveMessage, summarizeSession, getSessionSummaries, deleteSession, clearSummarizeCache, deleteMessage, executeMessageComponent, updateSessionAvatar, updateSessionName, updateSessionSystemPrompt, updateSessionMediaOutputPath, updateSessionLLMConfig, upgradeToAgent, Session, Summary, MessageExt, ProcessStep as SessionProcessStep } from '../services/sessionApi';
+import { getSessions, getSession, createSession, getSessionMessages, getMessage, saveMessage, summarizeSession, getSessionSummaries, deleteSession, clearSummarizeCache, deleteMessage, executeMessageComponent, updateSessionAvatar, updateSessionName, updateSessionSystemPrompt, updateSessionMediaOutputPath, updateSessionLLMConfig, upgradeToAgent, Session, Summary, MessageExt, ProcessStep as SessionProcessStep } from '../services/sessionApi';
+import { getUserAccess, createOrUpdateUserAccess, UserAccess } from '../services/userAccessApi';
 import { applyRoleToSession, createRole, updateRoleProfile, createSessionFromRole } from '../services/roleApi';
 import { createSkillPack, saveSkillPack, optimizeSkillPackSummary, getSkillPacks, getSessionSkillPacks, assignSkillPack, unassignSkillPack, SkillPack, SessionSkillPack, SkillPackCreationResult, SkillPackProcessInfo } from '../services/skillPackApi';
 import { estimate_messages_tokens, get_model_max_tokens, estimate_tokens } from '../services/tokenCounter';
@@ -1536,6 +1537,12 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   const [showNewMessagePrompt, setShowNewMessagePrompt] = useState(false);
   const [unreadMessageCount, setUnreadMessageCount] = useState(0);
   
+  // 首次访问弹窗相关状态
+  const [showNicknameDialog, setShowNicknameDialog] = useState(false);
+  const [nicknameInput, setNicknameInput] = useState('');
+  const [isSubmittingNickname, setIsSubmittingNickname] = useState(false);
+  const [userAccess, setUserAccess] = useState<UserAccess | null>(null);
+  
   // 技能包相关状态
   const [isCreatingSkillPack, setIsCreatingSkillPack] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
@@ -1579,6 +1586,12 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   const shouldMaintainScrollRef = useRef(false);
   const isUserScrollingRef = useRef(false);
   const scrollPositionRef = useRef<{ anchorMessageId: string; anchorOffsetTop: number; scrollTop: number } | null>(null);
+  
+  // 消息缓存：按 session_id 缓存消息，Map<session_id, Map<message_id, Message>>
+  const messageCacheRef = useRef<Map<string, Map<string, Message>>>(new Map());
+  
+  // 正在加载的消息ID集合（避免重复加载）
+  const loadingMessageIdsRef = useRef<Set<string>>(new Set());
   const isLoadingMoreRef = useRef(false);
   const lastMessageCountRef = useRef(0);
   
@@ -1716,6 +1729,57 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   // 注意：必须使用 setSearchParams 来清理参数，避免 window.history.replaceState 导致 react-router 的 searchParams 不同步
   const [searchParams, setSearchParams] = useSearchParams();
   
+  // 检查用户访问信息，首次访问时弹出昵称输入对话框
+  const checkUserAccess = async () => {
+    try {
+      const access = await getUserAccess();
+      setUserAccess(access);
+      
+      // 如果用户不在访问列表中或需要填写昵称，显示对话框
+      if (access.needs_nickname || !access.is_enabled) {
+        setShowNicknameDialog(true);
+      }
+    } catch (error) {
+      console.error('[Workflow] Failed to check user access:', error);
+      // 如果获取失败，也显示对话框（可能是首次访问）
+      setShowNicknameDialog(true);
+    }
+  };
+  
+  // 提交昵称
+  const handleSubmitNickname = async () => {
+    if (!nicknameInput.trim()) {
+      toast({
+        title: '请输入昵称',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
+    try {
+      setIsSubmittingNickname(true);
+      await createOrUpdateUserAccess(nicknameInput.trim());
+      setShowNicknameDialog(false);
+      setNicknameInput('');
+      // 重新检查用户访问信息
+      await checkUserAccess();
+      toast({
+        title: '欢迎！',
+        description: `你好，${nicknameInput.trim()}！`,
+        variant: 'success',
+      });
+    } catch (error: any) {
+      console.error('[Workflow] Failed to submit nickname:', error);
+      toast({
+        title: '保存失败',
+        description: error.message || '请稍后重试',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSubmittingNickname(false);
+    }
+  };
+  
   // 加载LLM配置和MCP服务器列表
   useEffect(() => {
     loadLLMConfigs();
@@ -1723,6 +1787,8 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
     loadSessions();
     loadWorkflows();
     loadSkillPacks();
+    // 检查用户访问信息（首次访问弹窗）
+    checkUserAccess();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1757,8 +1823,9 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
         return;
       }
       handleSelectSession(externalSessionId);
-    } else if (externalSessionId === null || externalSessionId === 'temporary-session') {
-      // 如果外部sessionId为null或者是临时会话，切换到临时会话
+    } else if (externalSessionId === null || externalSessionId === 'temporary-session' || !externalSessionId) {
+      // 如果外部sessionId为null、undefined或者是临时会话，切换到临时会话
+      // 修复bug：确保默认访问临时会话，清除之前可能残留的agent消息
       if (currentSessionId !== temporarySessionId) {
       handleSelectSession(temporarySessionId);
       }
@@ -1785,22 +1852,30 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
   }, [searchParams, sessions]);
 
   // 应用加载时恢复 agent tabs（当 sessions 加载完成后）
+  // 修复bug：只有在明确指定了externalSessionId且不是临时会话时才加载agent
   useEffect(() => {
     if (sessions.length === 0) return; // 等待会话加载完成
     
+    // 如果没有externalSessionId或明确是临时会话，确保使用临时会话
+    if (!externalSessionId || externalSessionId === 'temporary-session' || externalSessionId === 'role-generator') {
+      // 确保当前是临时会话
+      if (currentSessionId !== temporarySessionId) {
+        handleSelectSession(temporarySessionId);
+      }
+      return;
+    }
+    
     // 如果当前 externalSessionId 是一个 agent 会话，加载该 agent 的会话到 tabs
-    if (externalSessionId && externalSessionId !== 'temporary-session' && externalSessionId !== 'role-generator') {
       const session = sessions.find(s => s.session_id === externalSessionId);
       if (session && (session.session_type === 'agent' || session.role_id)) {
         // 检查是否已经加载了对应的 tabs
         if (openAgentTabs.length === 0 || !openAgentTabs.some(t => t.sessionId === externalSessionId)) {
           // 触发 handleSelectSession 来加载该 agent 的所有会话
           handleSelectSession(externalSessionId);
-        }
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessions]);
+  }, [sessions, externalSessionId]);
 
   // 监听配置会话请求（通过URL参数）
   useEffect(() => {
@@ -1887,6 +1962,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
     if (currentSessionId) {
       if (isTemporarySession) {
         // 临时会话：不加载历史消息和总结
+        // 修复bug：确保临时会话的消息被重置，清除之前可能残留的agent消息
         setMessages([
           {
             id: '1',
@@ -1898,6 +1974,10 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
         setCurrentSessionMeta(null);
         setCurrentSessionAvatar(null);
         setCurrentSystemPrompt(null);
+        // 清除消息缓存中的临时会话相关数据（如果有）
+        if (messageCacheRef.current.has(temporarySessionId)) {
+          messageCacheRef.current.delete(temporarySessionId);
+        }
       } else {
         // 记忆体或智能体：正常加载
         // 先获取会话信息，判断是否是agent会话
@@ -1905,7 +1985,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
         const isAgentSession = session ? (session.session_type === 'agent' || session.role_id) : false;
         
         // 统一使用分页加载（懒加载），避免消息过多时性能问题
-        loadSessionMessages(currentSessionId, 1, false);
+        loadSessionMessages(currentSessionId, 1);
       loadSessionSummaries(currentSessionId);
         
       // 加载会话头像和人设
@@ -1918,7 +1998,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
         setCurrentSessionAvatar(null);
         setCurrentSystemPrompt(null);
       }
-      // 如果列表里没有，主动拉取（例如“从角色开始新对话”后立即跳转）
+      // 如果列表里没有，主动拉取（例如"从角色开始新对话"后立即跳转）
       if (!session) {
         let canceled = false;
         (async () => {
@@ -1932,7 +2012,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
             // 如果是agent会话，重新加载消息（使用分页加载）
             const freshIsAgentSession = fresh.session_type === 'agent' || fresh.role_id;
             if (freshIsAgentSession) {
-              loadSessionMessages(currentSessionId, 1, false);
+              loadSessionMessages(currentSessionId, 1);
             }
             
             if (fresh.llm_config_id) {
@@ -2124,8 +2204,17 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
         }
       }
       
-      // 统一使用分页加载（懒加载），每页20条消息
-      const data = await getSessionMessages(session_id, page, 20);
+      // 统一使用分页加载（懒加载）
+      // 第一页只加载 5 条消息，加快初始加载速度（特别是局域网访问时）
+      // 后续页加载 20 条消息，平衡加载速度和用户体验
+      const page_size = page === 1 ? 5 : 20;
+      const data = await getSessionMessages(session_id, page, page_size);
+      
+      // 获取或创建该会话的缓存
+      if (!messageCacheRef.current.has(session_id)) {
+        messageCacheRef.current.set(session_id, new Map());
+      }
+      const sessionCache = messageCacheRef.current.get(session_id)!;
       
       // 先加载总结列表，用于关联总结消息和提示信息
       const summaryList = await getSessionSummaries(session_id);
@@ -2258,6 +2347,13 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
       // 过滤掉null值（无效的感知组件消息）
       const validMessages = formattedMessages.filter((msg): msg is Message => msg !== null);
       
+      // 将所有格式化后的消息存入缓存
+      for (const msg of validMessages) {
+        if (msg && msg.id) {
+          sessionCache.set(msg.id, msg);
+        }
+      }
+      
       // 在总结消息之后插入提示消息
       const messagesWithNotifications: Message[] = [];
       for (let i = 0; i < validMessages.length; i++) {
@@ -2299,7 +2395,8 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
       if (page === 1) {
         // 统一使用懒加载：只取最后几条消息（最新的），直接显示在底部
         // 后端返回的是正序（最旧在前，最新在后），我们只取最后的部分
-        const latestMessages = messagesWithNotifications.slice(-20); // 只取最后20条（最新的）
+        // 优化：初始只加载最后 5 条消息，加快加载速度（特别是局域网访问时）
+        const latestMessages = messagesWithNotifications.slice(-5); // 只取最后5条（最新的）
         setMessages(latestMessages);
         isInitialLoadRef.current = true; // 标记为初始加载，会直接跳到底部（最新消息位置）
         lastMessageCountRef.current = latestMessages.length;
@@ -2457,6 +2554,7 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
       setIsTemporarySession(true);
       setCurrentSessionId(temporarySessionId);
       setCurrentSessionMeta(null);
+      // 修复bug：确保临时会话的消息被重置，清除之前可能残留的agent消息
       setMessages([
         {
           id: '1',
@@ -2470,6 +2568,10 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
       setCurrentSessionAvatar(null);
       // 临时会话不在tabs中
       setActiveAgentTab(null);
+      // 清除消息缓存中的临时会话相关数据（如果有）
+      if (messageCacheRef.current.has(temporarySessionId)) {
+        messageCacheRef.current.delete(temporarySessionId);
+      }
     } else {
       // 选择记忆体或智能体
       setIsTemporarySession(false);
@@ -6714,6 +6816,87 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
                 // 强调样式
                 strong: ({ children }: any) => <strong className="font-semibold">{children}</strong>,
                 em: ({ children }: any) => <em className="italic">{children}</em>,
+                // 图片样式 - 使用独立组件处理状态
+                img: ({ src, alt, ...props }: any) => {
+                  // 如果没有 src，不渲染
+                  if (!src) return null;
+                  
+                  // 处理相对路径
+                  let imageSrc = src;
+                  if (src.startsWith('/') && !src.startsWith('//')) {
+                    // 相对路径，添加后端地址
+                    const backendUrl = (window as any).__cachedBackendUrl || 'http://localhost:3002';
+                    imageSrc = `${backendUrl}${src}`;
+                  }
+                  
+                  // 使用独立组件来管理状态
+                  const MarkdownImage = () => {
+                    const [status, setStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
+                    
+                    return (
+                      <span className="block my-3">
+                        {/* 加载中状态 */}
+                        {status === 'loading' && (
+                          <div className="flex items-center justify-center bg-gray-100 dark:bg-[#2d2d2d] rounded-lg border border-gray-200 dark:border-[#404040] p-4 text-gray-500 dark:text-gray-400 text-sm" style={{ minHeight: '100px' }}>
+                            <div className="text-center">
+                              <div className="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+                              <div>加载中...</div>
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* 加载失败状态 */}
+                        {status === 'error' && (
+                          <div className="flex items-center justify-center bg-gray-100 dark:bg-[#2d2d2d] rounded-lg border border-gray-200 dark:border-[#404040] p-4 text-gray-500 dark:text-gray-400 text-sm" style={{ minHeight: '100px' }}>
+                            <div className="text-center">
+                              <svg className="w-8 h-8 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                              </svg>
+                              <div className="mb-1">图片加载失败</div>
+                              <div className="text-xs text-gray-400 mb-2">{alt || '未知图片'}</div>
+                              <a 
+                                href={imageSrc} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                className="text-xs text-primary-500 hover:underline"
+                              >
+                                查看原链接
+                              </a>
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* 图片 - 隐藏直到加载完成 */}
+                        <img
+                          src={imageSrc}
+                          alt={alt || '图片'}
+                          loading="lazy"
+                          className={`max-w-full h-auto rounded-lg border border-gray-200 dark:border-[#404040] cursor-pointer hover:opacity-90 transition-opacity ${status !== 'loaded' ? 'hidden' : ''}`}
+                          style={{ maxHeight: '400px', objectFit: 'contain' }}
+                          onLoad={() => setStatus('loaded')}
+                          onError={() => setStatus('error')}
+                          onClick={() => {
+                            // 点击图片在新窗口预览
+                            const win = window.open('', '_blank');
+                            if (win) {
+                              win.document.write(`
+                                <html>
+                                  <head><title>${alt || '图片预览'}</title></head>
+                                  <body style="margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#000">
+                                    <img src="${imageSrc}" style="max-width:100%;max-height:100vh;object-fit:contain;" alt="${alt || '图片'}" />
+                                  </body>
+                                </html>
+                              `);
+                            }
+                          }}
+                          {...props}
+                        />
+                      </span>
+                    );
+                  };
+                  
+                  return <MarkdownImage />;
+                },
               }}
             >
               {truncateBase64Strings(message.content)}
@@ -10069,6 +10252,66 @@ const Workflow: React.FC<WorkflowProps> = ({ sessionId: externalSessionId }) => 
       confirmText="永久删除"
       onConfirm={confirmDeleteAgentTab}
     />
+    
+    {/* 首次访问昵称输入对话框 */}
+    <Dialog open={showNicknameDialog} onOpenChange={(open) => {
+      // 如果用户未填写昵称，不允许关闭对话框
+      if (!open && (!userAccess?.nickname || userAccess?.needs_nickname)) {
+        return;
+      }
+      setShowNicknameDialog(open);
+    }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>欢迎使用</DialogTitle>
+          <DialogDescription>
+            {userAccess?.is_enabled === false 
+              ? '您的访问已被禁用，请联系管理员。'
+              : '首次访问，请填写您的昵称以便我们识别您。'}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <InputField
+            label="昵称"
+            required
+            inputProps={{
+              id: 'nickname',
+              value: nicknameInput,
+              onChange: (e) => setNicknameInput(e.target.value),
+              placeholder: '请输入您的昵称',
+              disabled: isSubmittingNickname || userAccess?.is_enabled === false,
+              onKeyDown: (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSubmitNickname();
+                }
+              },
+            }}
+          />
+          {userAccess?.ip_address && (
+            <p className="text-xs text-muted-foreground">
+              您的IP地址: {userAccess.ip_address}
+            </p>
+          )}
+        </div>
+        <DialogFooter>
+          <Button
+            variant="primary"
+            onClick={handleSubmitNickname}
+            disabled={isSubmittingNickname || !nicknameInput.trim() || userAccess?.is_enabled === false}
+          >
+            {isSubmittingNickname ? (
+              <>
+                <Loader className="w-4 h-4 mr-2 animate-spin" />
+                保存中...
+              </>
+            ) : (
+              '保存'
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     
     {/* 会话媒体面板 */}
     <SessionMediaPanel

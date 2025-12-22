@@ -2,6 +2,8 @@
  * 技能包 API 服务
  */
 
+import { getBackendUrl } from '../utils/backendUrl';
+
 export interface SkillPack {
   skill_pack_id: string;
   name: string;
@@ -45,7 +47,7 @@ export interface SessionSkillPack extends SkillPack {
   assigned_at?: string;
 }
 
-const API_BASE = 'http://localhost:3002/api';
+const API_BASE = `${getBackendUrl()}/api`;
 
 /**
  * 获取所有技能包列表

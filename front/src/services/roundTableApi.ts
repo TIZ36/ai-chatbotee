@@ -2,7 +2,9 @@
  * 圆桌会议 API 服务
  */
 
-const API_BASE = 'http://localhost:3002/api';
+import { getBackendUrl } from '../utils/backendUrl';
+
+const API_BASE = `${getBackendUrl()}/api`;
 
 // ==================== 类型定义 ====================
 

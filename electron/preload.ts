@@ -76,6 +76,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Window controls (custom titlebar)
   toggleMaximize: () => ipcRenderer.invoke('window-toggle-maximize'),
+  
+  // 后端地址配置
+  getBackendUrl: () => ipcRenderer.invoke('get-backend-url'),
+  setBackendUrl: (url: string) => ipcRenderer.invoke('set-backend-url', url),
 });
 
 // 类型定义（供TypeScript使用）
@@ -103,6 +107,8 @@ export interface ElectronAPI {
   mcpOAuthOpenExternal: (params: { authorizationUrl: string }) => Promise<{ success: boolean }>;
   notionOAuthAuthorize: (authorizationUrl: string) => Promise<{ code: string; state: string }>;
   toggleMaximize: () => Promise<{ maximized: boolean }>;
+  getBackendUrl: () => Promise<string>;
+  setBackendUrl: (url: string) => Promise<void>;
 }
 
 declare global {

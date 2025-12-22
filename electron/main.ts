@@ -10,6 +10,36 @@ import { spawn, ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 import * as pty from 'node-pty';
 
+// 配置存储路径
+const CONFIG_FILE = path.join(app.getPath('userData'), 'backend-config.json');
+
+// 读取后端地址配置
+function getBackendUrlConfig(): string {
+  try {
+    if (fs.existsSync(CONFIG_FILE)) {
+      const config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
+      return config.backendUrl || 'http://localhost:3002';
+    }
+  } catch (error) {
+    console.error('[Config] Error reading config:', error);
+  }
+  return 'http://localhost:3002';
+}
+
+// 保存后端地址配置
+function setBackendUrlConfig(url: string): void {
+  try {
+    const config = {
+      backendUrl: url || 'http://localhost:3002',
+      updatedAt: new Date().toISOString(),
+    };
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+    console.log('[Config] Backend URL saved:', url);
+  } catch (error) {
+    console.error('[Config] Error saving config:', error);
+  }
+}
+
 // 下载任务管理（已移除，工作流工具不需要）
 /*
 interface DownloadTask {
@@ -707,6 +737,15 @@ ipcMain.handle('kill-terminal', async (_, pid: number) => {
 });
 
 // IPC处理程序 - 开发者工具
+// IPC处理程序 - 后端地址配置
+ipcMain.handle('get-backend-url', async () => {
+  return getBackendUrlConfig();
+});
+
+ipcMain.handle('set-backend-url', async (_, url: string) => {
+  setBackendUrlConfig(url);
+});
+
 ipcMain.handle('toggle-devtools', async () => {
   if (mainWindow) {
     if (mainWindow.webContents.isDevToolsOpened()) {

@@ -1,4 +1,6 @@
-const API_BASE = 'http://localhost:3002/api/research';
+import { getBackendUrl } from '../utils/backendUrl';
+
+const API_BASE = `${getBackendUrl()}/api/research`;
 
 export type ResearchSourceType = 'url' | 'file' | 'image' | 'dir';
 

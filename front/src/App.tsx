@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
-import { Brain, Plug, Workflow as WorkflowIcon, Settings, Code, Terminal, MessageCircle, Globe, Sparkles, Bot, Users, BookOpen } from 'lucide-react';
+import { Brain, Plug, Workflow as WorkflowIcon, Settings, Code, Terminal, MessageCircle, Globe, Sparkles, Bot, Users, BookOpen, Shield } from 'lucide-react';
 import appLogoDark from '../assets/app_logo_dark.png';
 import appLogoLight from '../assets/app_logo_light.png';
 import TerminalPanel from './components/TerminalPanel';
@@ -16,6 +16,7 @@ import SessionSidebar from './components/SessionSidebar';
 import RoundTableChat from './components/RoundTableChat';
 import ResearchPanel from './components/ResearchPanel';
 import RoleGeneratorPage from './components/RoleGeneratorPage';
+import UserAccessPage from './components/UserAccessPage';
 import {
   PanelGroup,
   Panel,
@@ -96,11 +97,44 @@ const App: React.FC = () => {
     }
     return { theme: 'system', autoRefresh: false, refreshInterval: 60, videoColumns: 4 };
   });
+  const [isAdmin, setIsAdmin] = useState(false);
 
   // 保存设置
   useEffect(() => {
     localStorage.setItem('settings', JSON.stringify(settings));
   }, [settings]);
+
+  // 检查用户权限（是否是管理员）
+  useEffect(() => {
+    const checkAdmin = async () => {
+      try {
+        const { getUserAccess } = await import('./services/userAccessApi');
+        const user = await getUserAccess();
+        setIsAdmin(user.is_owner || user.is_admin || false);
+      } catch (error) {
+        console.error('[App] Failed to check admin status:', error);
+        setIsAdmin(false);
+      }
+    };
+    checkAdmin();
+  }, []);
+
+  // Electron 环境：加载后端地址配置
+  useEffect(() => {
+    const loadBackendUrl = async () => {
+      if (window.electronAPI?.getBackendUrl) {
+        try {
+          const backendUrl = await window.electronAPI.getBackendUrl();
+          // 缓存到 window 对象，供 getBackendUrl 使用
+          (window as any).__cachedBackendUrl = backendUrl;
+          console.log('[App] Loaded backend URL from Electron config:', backendUrl);
+        } catch (error) {
+          console.error('[App] Failed to load backend URL from Electron:', error);
+        }
+      }
+    };
+    loadBackendUrl();
+  }, []);
 
   // 保存选中的会话ID
   useEffect(() => {
@@ -309,6 +343,16 @@ const App: React.FC = () => {
             title="爬虫配置"
             isActive={location.pathname === '/crawler-config'}
           />
+
+          {/* 用户访问管理 - 仅管理员可见 */}
+          {isAdmin && (
+            <NavItem
+              to="/user-access"
+              icon={<Shield className="w-[18px] h-[18px]" strokeWidth={1.5} />}
+              title="用户访问管理"
+              isActive={location.pathname === '/user-access'}
+            />
+          )}
           
           {/* 终端按钮 - 点击时独占右侧 */}
           <div className="relative group">
@@ -563,6 +607,9 @@ const App: React.FC = () => {
                         onUpdateSettings={updateSettings}
                       />
                     } />
+
+                    {/* 用户访问管理页面 */}
+                    <Route path="/user-access" element={<UserAccessPage />} />
                   </Routes>
                 </div>
               </div>

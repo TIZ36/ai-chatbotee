@@ -141,7 +141,9 @@ export interface SessionExecutionItem {
   updated_at?: string;
 }
 
-const API_BASE = 'http://localhost:3002/api';
+import { getBackendUrl } from '../utils/backendUrl';
+
+const API_BASE = `${getBackendUrl()}/api`;
 
 /**
  * 获取会话列表
@@ -220,11 +222,13 @@ export async function getSession(session_id: string): Promise<Session> {
 
 /**
  * 获取会话消息（分页）
+ * @param lightweight 轻量级模式：只返回必要字段（role, content, created_at），加快加载速度
  */
 export async function getSessionMessages(
   session_id: string,
   page: number = 1,
-  page_size: number = 20  // 默认只加载20条，加快初始加载速度
+  page_size: number = 20,  // 默认只加载20条，加快初始加载速度
+  lightweight: boolean = false  // 轻量级模式，用于快速加载（如 ResearchPanel）
 ): Promise<{
   messages: Message[];
   total: number;
@@ -233,9 +237,14 @@ export async function getSessionMessages(
   total_pages: number;
 }> {
   try {
-    const response = await fetch(
-      `${API_BASE}/sessions/${session_id}/messages?page=${page}&page_size=${page_size}`
-    );
+    const url = new URL(`${API_BASE}/sessions/${session_id}/messages`);
+    url.searchParams.set('page', page.toString());
+    url.searchParams.set('page_size', page_size.toString());
+    if (lightweight) {
+      url.searchParams.set('lightweight', 'true');
+    }
+    
+    const response = await fetch(url.toString());
     if (!response.ok) {
       console.warn(`Failed to fetch messages: ${response.statusText}`);
       return { messages: [], total: 0, page, page_size, total_pages: 0 };
@@ -244,6 +253,26 @@ export async function getSessionMessages(
   } catch (error) {
     console.warn('Error fetching messages:', error);
     return { messages: [], total: 0, page, page_size, total_pages: 0 };
+  }
+}
+
+/**
+ * 获取单个消息（基于message_id），用于增量加载
+ */
+export async function getMessage(message_id: string): Promise<Message | null> {
+  try {
+    const response = await fetch(`${API_BASE}/messages/${message_id}`);
+    if (!response.ok) {
+      if (response.status === 404) {
+        return null;
+      }
+      console.warn(`Failed to fetch message: ${response.statusText}`);
+      return null;
+    }
+    return await response.json();
+  } catch (error) {
+    console.warn('Error fetching message:', error);
+    return null;
   }
 }
 

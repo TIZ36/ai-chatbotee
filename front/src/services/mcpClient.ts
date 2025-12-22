@@ -6,6 +6,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv-provider.js';
+import { getBackendUrl } from '../utils/backendUrl';
 
 export interface MCPServer {
   id: string;
@@ -325,11 +326,8 @@ export class MCPClient {
    * 获取后端 API 地址
    */
   private getBackendUrl(): string {
-    // 统一使用 3002 端口（后端 Flask 服务器）
-    if (this.isElectron()) {
-      return 'http://localhost:3002';
-    }
-    return import.meta.env.VITE_BACKEND_URL || 'http://localhost:3002';
+    // 使用统一的后端 URL 获取函数
+    return getBackendUrl();
   }
 
   /**

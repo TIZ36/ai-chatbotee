@@ -20,10 +20,7 @@ export interface MCPServerConfig {
   client_name?: string; // Notion 注册的 client_name
 }
 
-// 获取后端API地址
-function getBackendUrl(): string {
-  return import.meta.env.VITE_BACKEND_URL || 'http://localhost:3002';
-}
+import { getBackendUrl } from '../utils/backendUrl';
 
 // 旧的默认服务器配置（用于迁移）
 const LEGACY_DEFAULT_SERVERS: MCPServerConfig[] = [

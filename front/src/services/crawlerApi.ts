@@ -2,7 +2,9 @@
  * 爬虫API服务
  */
 
-const API_BASE = 'http://localhost:3002/api';
+import { getBackendUrl } from '../utils/backendUrl';
+
+const API_BASE = `${getBackendUrl()}/api`;
 
 export interface CrawlerOptions {
   cookies?: string | Record<string, string>;

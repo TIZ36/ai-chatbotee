@@ -1,6 +1,7 @@
 import type { Session } from './sessionApi';
+import { getBackendUrl } from '../utils/backendUrl';
 
-const API_BASE = 'http://localhost:3002/api';
+const API_BASE = `${getBackendUrl()}/api`;
 
 export interface RoleVersion {
   version_id: string;

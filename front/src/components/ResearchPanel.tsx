@@ -558,22 +558,18 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
     }
   }, [editingResearchTabId]);
   
-  // 加载 research 历史消息（加载所有消息）
+  // 加载 research 历史消息（优化：只加载最近的消息，加快加载速度）
   useEffect(() => {
     if (!researchSessionId) return;
     (async () => {
       try {
-        // 先获取总数，然后加载所有消息
-        const firstPage = await getSessionMessages(researchSessionId, 1, 1);
-        const total = firstPage.total || 0;
-        if (total > 0) {
-          const res = await getSessionMessages(researchSessionId, 1, total);
+        // 只加载最近 100 条消息，足够用于显示和生成文档
+        // 如果消息很多，一次性加载所有消息会导致网络传输和渲染都很慢
+        // 使用轻量级模式，只获取必要字段（role, content, created_at），加快加载速度
+        const res = await getSessionMessages(researchSessionId, 1, 100, true);
           const asc = (res.messages || []).slice().reverse();
           const list = asc.map(m => ({ role: m.role, content: m.content, created_at: m.created_at }));
           setMessages(list);
-        } else {
-          setMessages([]);
-        }
       } catch (e) {
         console.warn('[Research] Failed to load research messages:', e);
         setMessages([]);

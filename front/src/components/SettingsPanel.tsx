@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Settings, Trash2, Save, Code } from 'lucide-react';
 import { Settings as SettingsType } from '../services/storage';
 import PageLayout, { Card } from './ui/PageLayout';
@@ -11,6 +11,7 @@ import {
   DialogFooter,
 } from './ui/Dialog';
 import { Button } from './ui/Button';
+import { toast } from './ui/use-toast';
 
 interface SettingsPanelProps {
   settings: SettingsType;
@@ -22,6 +23,54 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onUpdateSettings,
 }) => {
   const [clearDataOpen, setClearDataOpen] = useState(false);
+  const [backendUrl, setBackendUrl] = useState<string>('http://localhost:3002');
+  const [isElectron, setIsElectron] = useState(false);
+  const [isSavingBackendUrl, setIsSavingBackendUrl] = useState(false);
+
+  // 检查是否为 Electron 环境
+  useEffect(() => {
+    const checkElectron = () => {
+      return typeof window !== 'undefined' && (window as any).electronAPI !== undefined;
+    };
+    setIsElectron(checkElectron());
+    
+    // 如果是 Electron 环境，加载后端地址配置
+    if (checkElectron() && (window as any).electronAPI?.getBackendUrl) {
+      (window as any).electronAPI.getBackendUrl().then((url: string) => {
+        setBackendUrl(url || 'http://localhost:3002');
+      }).catch((error: Error) => {
+        console.error('[SettingsPanel] Failed to load backend URL:', error);
+      });
+    }
+  }, []);
+
+  const handleSaveBackendUrl = async () => {
+    if (!isElectron || !(window as any).electronAPI?.setBackendUrl) {
+      return;
+    }
+    
+    setIsSavingBackendUrl(true);
+    try {
+      await (window as any).electronAPI.setBackendUrl(backendUrl);
+      // 更新缓存
+      (window as any).__cachedBackendUrl = backendUrl;
+      // 提示用户
+      toast({
+        title: '保存成功',
+        description: '后端地址已保存，请重启应用以使配置生效',
+        variant: 'success',
+      });
+    } catch (error) {
+      console.error('[SettingsPanel] Failed to save backend URL:', error);
+      toast({
+        title: '保存失败',
+        description: error instanceof Error ? error.message : '请稍后重试',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSavingBackendUrl(false);
+    }
+  };
 
   const handleClearData = () => {
     setClearDataOpen(true);
@@ -132,6 +181,38 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </div>
           </div>
         </Card>
+
+        {/* Electron 后端地址配置 */}
+        {isElectron && (
+          <Card title="后端地址配置">
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-[#e0e0e0] mb-1.5">
+                  后端 API 地址
+                </label>
+                <input
+                  type="text"
+                  value={backendUrl}
+                  onChange={(e) => setBackendUrl(e.target.value)}
+                  placeholder="http://localhost:3002"
+                  className="w-full px-3 py-2 text-sm rounded-lg bg-white dark:bg-[#2d2d2d] border border-gray-300 dark:border-[#505050] text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/50 focus:border-[#7c3aed] transition-all duration-150 font-mono"
+                />
+                <p className="text-xs text-gray-500 dark:text-[#a0a0a0] mt-1">
+                  配置后端服务器的地址，修改后需要重启应用生效
+                </p>
+              </div>
+              <Button
+                onClick={handleSaveBackendUrl}
+                variant="primary"
+                size="sm"
+                disabled={isSavingBackendUrl}
+                className="w-full"
+              >
+                {isSavingBackendUrl ? '保存中...' : '保存配置'}
+              </Button>
+            </div>
+          </Card>
+        )}
 
         {/* API设置 */}
         <Card title="API设置">

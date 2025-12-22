@@ -3,7 +3,12 @@
  * 用于与Golang微服务后端通信
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+import { getBackendUrl } from '../utils/backendUrl';
+
+// 使用统一的后端 URL 获取函数
+// 注意：这个服务原本是用于 Golang 微服务的，但现在应该使用 Flask 后端（3002端口）
+// 如果确实需要不同的后端，可以通过环境变量 VITE_API_URL 覆盖
+const API_BASE_URL = import.meta.env.VITE_API_URL || getBackendUrl();
 
 export interface ApiResponse<T = any> {
   success?: boolean;

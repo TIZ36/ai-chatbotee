@@ -540,6 +540,72 @@ def create_tables():
             """,
             'role_applied_at',
         )
+        _ensure_column(
+            'sessions',
+            'creator_ip',
+            """
+                ALTER TABLE `sessions`
+                ADD COLUMN `creator_ip` VARCHAR(45) DEFAULT NULL COMMENT '创建者IP地址（用于agent过滤）'
+                AFTER `role_applied_at`
+            """,
+            'creator_ip',
+        )
+        
+        # ==================== 用户访问表（User Access） ====================
+        # 用于管理访问用户，拥有者可以管理访问列表
+        try:
+            create_user_access_table = """
+            CREATE TABLE IF NOT EXISTS `user_access` (
+                `id` INT AUTO_INCREMENT PRIMARY KEY,
+                `ip_address` VARCHAR(45) NOT NULL UNIQUE COMMENT '用户IP地址',
+                `nickname` VARCHAR(100) DEFAULT NULL COMMENT '用户昵称',
+                `is_enabled` TINYINT(1) DEFAULT 1 COMMENT '是否启用访问',
+                `first_access_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '首次访问时间',
+                `last_access_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后访问时间',
+                `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                INDEX `idx_ip_address` (`ip_address`),
+                INDEX `idx_is_enabled` (`is_enabled`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户访问表';
+            """
+            cursor.execute(create_user_access_table)
+            print("✓ Table 'user_access' created/verified successfully")
+            
+            # 迁移：添加is_admin字段（如果不存在）
+            _ensure_column(
+                'user_access',
+                'is_admin',
+                """
+                    ALTER TABLE `user_access`
+                    ADD COLUMN `is_admin` TINYINT(1) DEFAULT 0 COMMENT '是否为管理员'
+                    AFTER `is_enabled`
+                """,
+                'is_admin',
+            )
+        except Exception as e:
+            print(f"  ⚠️ Warning: Failed to create 'user_access' table: {e}")
+        
+        # ==================== Agent访问关系表（User Agent Access） ====================
+        # 用于加速agent列表查询，记录用户可以看到哪些agent
+        try:
+            create_user_agent_access_table = """
+            CREATE TABLE IF NOT EXISTS `user_agent_access` (
+                `id` INT AUTO_INCREMENT PRIMARY KEY,
+                `ip_address` VARCHAR(45) NOT NULL COMMENT '用户IP地址',
+                `agent_session_id` VARCHAR(100) NOT NULL COMMENT 'Agent会话ID（对应sessions.session_id）',
+                `access_type` VARCHAR(20) DEFAULT 'creator' COMMENT '访问类型：creator(创建者)/granted(被授权)',
+                `granted_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '授权时间',
+                `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                UNIQUE KEY `uniq_user_agent` (`ip_address`, `agent_session_id`),
+                INDEX `idx_ip_address` (`ip_address`),
+                INDEX `idx_agent_session_id` (`agent_session_id`),
+                INDEX `idx_access_type` (`access_type`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户Agent访问关系表';
+            """
+            cursor.execute(create_user_agent_access_table)
+            print("✓ Table 'user_agent_access' created/verified successfully")
+        except Exception as e:
+            print(f"  ⚠️ Warning: Failed to create 'user_agent_access' table: {e}")
         try:
             cursor.execute("""
                 SELECT COUNT(*)
