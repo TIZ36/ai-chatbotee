@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Download, Play, Music, Copy, Check, ChevronUp, ChevronDown, Image as ImageIcon } from 'lucide-react';
+import { dataUrlToBlob, ensureDataUrlFromMaybeBase64 } from '../../utils/dataUrl';
+import { resolveMediaSrc } from '@/utils/mediaSrc';
 
 export interface SessionMediaItem {
   type: 'image' | 'video' | 'audio';
@@ -97,7 +99,11 @@ export const SessionMediaPanel: React.FC<SessionMediaPanelProps> = ({
   const currentItem = filteredMedia[currentIndex];
 
   const getMediaSrc = (item: SessionMediaItem) => {
-    return item.url || `data:${item.mimeType};base64,${item.data}`;
+    const raw = item.url || item.data || '';
+    if (!raw) return '';
+    // 统一处理：纯 base64 / 后端相对路径 / 本地路径
+    // 注意：resolveMediaSrc 内部会对“纯 base64”补齐 data: 前缀
+    return resolveMediaSrc(raw, item.mimeType || 'application/octet-stream');
   };
 
   const goToPrevious = () => {
@@ -157,28 +163,14 @@ export const SessionMediaPanel: React.FC<SessionMediaPanelProps> = ({
       const ext = item.mimeType.split('/')[1] || 'bin';
       const filename = `session-${item.type}-${Date.now()}-${index + 1}.${ext}`;
 
-      if (item.url) {
-        fetch(item.url)
-          .then(res => res.blob())
-          .then(blob => {
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-          });
-      } else if (item.data) {
-        const byteCharacters = atob(item.data);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], { type: item.mimeType });
-        const url = URL.createObjectURL(blob);
+      const src = getMediaSrc(item);
+      if (!src) return;
+
+      // data URL：直接转 Blob 下载（也覆盖了“url 字段放纯 base64”的历史情况）
+      if (src.startsWith('data:')) {
+        const parsed = dataUrlToBlob(src);
+        if (!parsed) return;
+        const url = URL.createObjectURL(parsed.blob);
         const a = document.createElement('a');
         a.href = url;
         a.download = filename;
@@ -186,7 +178,22 @@ export const SessionMediaPanel: React.FC<SessionMediaPanelProps> = ({
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+        return;
       }
+
+      // 普通 URL：fetch 下载
+      fetch(src)
+        .then(res => res.blob())
+        .then(blob => {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        });
     } catch (error) {
       console.error(`下载${item.type}失败:`, error);
     }

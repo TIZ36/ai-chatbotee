@@ -144,8 +144,21 @@ export interface SessionExecutionItem {
 }
 
 import { getBackendUrl } from '../utils/backendUrl';
+import { ensureDataUrlFromMaybeBase64 } from '../utils/dataUrl';
 
 const API_BASE = `${getBackendUrl()}/api`;
+
+function normalizeSessionAvatar(session: Session): Session {
+  if (!session) return session;
+  const avatar = session.avatar ? ensureDataUrlFromMaybeBase64(session.avatar, 'image/jpeg') : session.avatar;
+  // 避免无意义的新对象创建
+  if (avatar === session.avatar) return session;
+  return { ...session, avatar };
+}
+
+function normalizeSessionList(sessions: Session[]): Session[] {
+  return (sessions || []).map((s) => normalizeSessionAvatar(s));
+}
 
 /**
  * 获取会话列表
@@ -159,7 +172,7 @@ export async function getSessions(): Promise<Session[]> {
       return [];
     }
     const data = await response.json();
-    return data.sessions || [];
+    return normalizeSessionList(data.sessions || []);
   } catch (error) {
     // 网络错误或其他错误，返回空数组
     console.warn('Error fetching sessions:', error);
@@ -178,7 +191,7 @@ export async function getAgents(): Promise<Session[]> {
       return [];
     }
     const data = await response.json();
-    return data.agents || [];
+    return normalizeSessionList(data.agents || []);
   } catch (error) {
     console.warn('Error fetching agents:', error);
     return [];
@@ -208,7 +221,7 @@ export async function createSession(
     throw new Error(`Failed to create session: ${response.statusText}`);
   }
   const data = await response.json();
-  return data;
+  return normalizeSessionAvatar(data as Session);
 }
 
 /**
@@ -219,7 +232,8 @@ export async function getSession(session_id: string): Promise<Session> {
   if (!response.ok) {
     throw new Error(`Failed to fetch session: ${response.statusText}`);
   }
-  return await response.json();
+  const data = await response.json();
+  return normalizeSessionAvatar(data as Session);
 }
 
 /**
@@ -572,7 +586,8 @@ export async function upgradeToAgent(session_id: string, name: string, avatar: s
   if (!response.ok) {
     throw new Error(`Failed to upgrade to agent: ${response.statusText}`);
   }
-  return await response.json();
+  const data = await response.json();
+  return normalizeSessionAvatar(data as Session);
 }
 
 // ==================== 智能体导入导出 ====================

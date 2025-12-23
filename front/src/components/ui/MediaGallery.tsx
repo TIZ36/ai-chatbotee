@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Download, Play, Volume2, Film, Music, ZoomIn, ChevronUp, ChevronDown } from 'lucide-react';
+import { resolveMediaSrc } from '@/utils/mediaSrc';
 
 export interface MediaItem {
   type: 'image' | 'video' | 'audio';
@@ -64,7 +65,8 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
   const hiddenCount = media.length - maxVisible;
 
   const getMediaSrc = (item: MediaItem) => {
-    const src = item.url || `data:${item.mimeType};base64,${item.data}`;
+    const raw = item.url || item.data || '';
+    const src = resolveMediaSrc(raw, item.mimeType);
     console.log('[MediaGallery] getMediaSrc:', { 
       type: item.type, 
       mimeType: item.mimeType, 
