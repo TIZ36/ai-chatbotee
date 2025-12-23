@@ -3538,6 +3538,17 @@ def init_services():
         print(f"Warning: Redis initialization failed: {redis_error}")
         print("Continuing without Redis support...")
     
+    # 注册新架构的 API 路由
+    try:
+        from database import get_mysql_connection
+        from api import register_api_routes
+        register_api_routes(app, get_mysql_connection, config)
+        print("[Services] New API routes registered")
+    except Exception as e:
+        print(f"[Services] Warning: Failed to register new API routes: {e}")
+        import traceback
+        traceback.print_exc()
+    
     print("=" * 60)
     print("Service initialization completed")
     print("=" * 60)
@@ -7038,9 +7049,10 @@ def update_agent_profile(role_id):
 
             role = _get_session_row(cursor, role_id)
             if not role:
-                return jsonify({'error': 'Agent not found'}), 404
-            if role.get('session_type') != 'agent':
-                return jsonify({'error': 'Session is not an agent'}), 400
+                return jsonify({'error': 'Session not found'}), 404
+            
+            # 允许所有会话类型更新配置，但版本控制只对 agent 类型生效
+            is_agent = role.get('session_type') == 'agent'
 
             update_fields = []
             update_values = []
@@ -7077,12 +7089,33 @@ def update_agent_profile(role_id):
                 media_output_path = data.get('media_output_path')
                 if media_output_path != role.get('media_output_path'):
                     add_field('media_output_path', media_output_path, 'media_output_path')
+            
+            # 支持 ext 字段更新（用于 persona 配置等）
+            if 'ext' in data:
+                import json
+                new_ext = data.get('ext')
+                current_ext = role.get('ext')
+                # 如果 current_ext 是字符串，解析为字典
+                if isinstance(current_ext, str):
+                    try:
+                        current_ext = json.loads(current_ext)
+                    except:
+                        current_ext = {}
+                elif current_ext is None:
+                    current_ext = {}
+                # 合并 ext 字段（保留现有字段，更新新字段）
+                merged_ext = {**current_ext, **new_ext} if new_ext else current_ext
+                if merged_ext != current_ext:
+                    add_field('ext', json.dumps(merged_ext), 'ext')
 
             if not update_fields:
-                try:
-                    current_id = _ensure_role_current_version(conn, role_id)
-                except Exception:
-                    current_id = None
+                current_id = None
+                # 版本控制只对 agent 类型会话生效
+                if is_agent:
+                    try:
+                        current_id = _ensure_role_current_version(conn, role_id)
+                    except Exception:
+                        current_id = None
                 return jsonify({'success': True, 'role_id': role_id, 'current_role_version_id': current_id, 'message': 'No fields updated'}), 200
 
             update_fields.append('updated_at = NOW()')
@@ -7096,13 +7129,15 @@ def update_agent_profile(role_id):
             cursor.execute(sql, tuple(update_values))
 
             version_id = None
-            try:
-                reason = (data.get('reason') or 'profile_update').strip()
-                metadata = {'reason': reason, 'fields': updated_keys}
-                version_id = _create_role_version(conn, role_id, metadata)
-            except Exception as e:
-                # 兼容：版本表不可用时，仍允许更新角色档案
-                print(f"[RoleVersion] Failed to create version on profile update: {e}")
+            # 版本控制只对 agent 类型会话生效
+            if is_agent:
+                try:
+                    reason = (data.get('reason') or 'profile_update').strip()
+                    metadata = {'reason': reason, 'fields': updated_keys}
+                    version_id = _create_role_version(conn, role_id, metadata)
+                except Exception as e:
+                    # 兼容：版本表不可用时，仍允许更新角色档案
+                    print(f"[RoleVersion] Failed to create version on profile update: {e}")
 
             return jsonify({'success': True, 'role_id': role_id, 'current_role_version_id': version_id})
         finally:

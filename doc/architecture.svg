@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1200" height="900" viewBox="0 0 1200 900" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="coreGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#4f46e5;stop-opacity:1"/>
+    </linearGradient>
+    <linearGradient id="providerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#22c55e;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#16a34a;stop-opacity:1"/>
+    </linearGradient>
+    <linearGradient id="workflowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f59e0b;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#d97706;stop-opacity:1"/>
+    </linearGradient>
+    <linearGradient id="sessionGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ec4899;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#db2777;stop-opacity:1"/>
+    </linearGradient>
+    <linearGradient id="appsGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3b82f6;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#2563eb;stop-opacity:1"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="2" dy="4" stdDeviation="4" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="900" fill="#f8fafc"/>
+  
+  <!-- Title -->
+  <text x="600" y="45" text-anchor="middle" font-family="system-ui" font-size="28" font-weight="bold" fill="#1e293b">
+    Workflow Manager - Layered Architecture
+  </text>
+  <text x="600" y="70" text-anchor="middle" font-family="system-ui" font-size="14" fill="#64748b">
+    Apps &gt; Session &gt; Workflow &gt; Providers &gt; Core
+  </text>
+
+  <!-- Layer 5: Apps Layer -->
+  <g transform="translate(50, 95)">
+    <rect width="1100" height="120" rx="12" fill="url(#appsGrad)" filter="url(#shadow)"/>
+    <text x="20" y="30" font-family="system-ui" font-size="16" font-weight="bold" fill="white">Apps Layer</text>
+    
+    <!-- RoundTable -->
+    <rect x="20" y="45" width="250" height="60" rx="8" fill="white" fill-opacity="0.9"/>
+    <text x="145" y="70" text-anchor="middle" font-family="system-ui" font-size="13" font-weight="600" fill="#2563eb">RoundTable</text>
+    <text x="145" y="88" text-anchor="middle" font-family="system-ui" font-size="10" fill="#64748b">Orchestrator, TurnManager</text>
+    
+    <!-- Research -->
+    <rect x="290" y="45" width="250" height="60" rx="8" fill="white" fill-opacity="0.9"/>
+    <text x="415" y="70" text-anchor="middle" font-family="system-ui" font-size="13" font-weight="600" fill="#2563eb">Research</text>
+    <text x="415" y="88" text-anchor="middle" font-family="system-ui" font-size="10" fill="#64748b">Orchestrator, DocumentGenerator</text>
+    
+    <!-- Custom Apps -->
+    <rect x="560" y="45" width="250" height="60" rx="8" fill="white" fill-opacity="0.9" stroke="#2563eb" stroke-dasharray="4"/>
+    <text x="685" y="70" text-anchor="middle" font-family="system-ui" font-size="13" font-weight="600" fill="#2563eb">Custom Apps</text>
+    <text x="685" y="88" text-anchor="middle" font-family="system-ui" font-size="10" fill="#64748b">Extensible Application Layer</text>
+  </g>
+
+  <!-- Layer 4: Session Layer -->
+  <g transform="translate(50, 230)">
+    <rect width="1100" height="165" rx="12" fill="url(#sessionGrad)" filter="url(#shadow)"/>
+    <text x="20" y="30" font-family="system-ui" font-size="16" font-weight="bold" fill="white">Session Layer</text>
+    
+    <!-- Agent -->
+    <rect x="20" y="45" width="180" height="105" rx="8" fill="white" fill-opacity="0.9"/>
+    <text x="110" y="65" text-anchor="middle" font-family="system-ui" font-size="13" font-weight="600" fill="#db2777">Agent (Actor)</text>
+    <text x="110" y="82" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">Mailbox Queue</text>
+    <text x="110" y="96" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">Capability Checker</text>
+    <text x="110" y="110" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">Reject Policy</text>
+    <text x="110" y="124" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">Learning (Observer/Absorber)</text>
+    <text x="110" y="138" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">Response Handler</text>
+    
+    <!-- Memory -->
+    <rect x="220" y="45" width="180" height="105" rx="8" fill="white" fill-opacity="0.9"/>
+    <text x="310" y="65" text-anchor="middle" font-family="system-ui" font-size="13" font-weight="600" fill="#db2777">Memory</text>
+    <text x="310" y="85" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">MemoryStore</text>
+    <text x="310" y="102" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">MemoryRetrieval (RAG)</text>
+    <text x="310" y="119" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">MemoryConsolidation</text>
+    <text x="310" y="136" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">Embedding/Similarity</text>
+    
+    <!-- Persona -->
+    <rect x="420" y="45" width="180" height="105" rx="8" fill="white" fill-opacity="0.9"/>
+    <text x="510" y="65" text-anchor="middle" font-family="system-ui" font-size="13" font-weight="600" fill="#db2777">Persona</text>
+    <text x="510" y="85" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">VoicePersona</text>
+    <text x="510" y="102" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">AutonomousThinking</text>
+    <text x="510" y="119" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">MemoryTrigger</text>
+    <text x="510" y="136" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">Behavior Config</text>
+    
+    <!-- Session -->
+    <rect x="620" y="45" width="180" height="105" rx="8" fill="white" fill-opacity="0.9"/>
+    <text x="710" y="65" text-anchor="middle" font-family="system-ui" font-size="13" font-weight="600" fill="#db2777">Session</text>
+    <text x="710" y="85" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">SessionManager</text>
+    <text x="710" y="102" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">Multi-Agent Routing</text>
+    <text x="710" y="119" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">Message History</text>
+    <text x="710" y="136" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">Broadcast/Observe</text>
+  </g>
+
+  <!-- Layer 3: Workflow Layer -->
+  <g transform="translate(50, 410)">
+    <rect width="1100" height="120" rx="12" fill="url(#workflowGrad)" filter="url(#shadow)"/>
+    <text x="20" y="30" font-family="system-ui" font-size="16" font-weight="bold" fill="white">Workflow Layer</text>
+    
+    <!-- Nodes -->
+    <rect x="20" y="45" width="200" height="60" rx="8" fill="white" fill-opacity="0.9"/>
+    <text x="120" y="68" text-anchor="middle" font-family="system-ui" font-size="13" font-weight="600" fill="#d97706">Nodes</text>
+    <text x="120" y="86" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">LLM | MCP | Condition | Custom</text>
+    
+    <!-- Executor -->
+    <rect x="240" y="45" width="200" height="60" rx="8" fill="white" fill-opacity="0.9"/>
+    <text x="340" y="68" text-anchor="middle" font-family="system-ui" font-size="13" font-weight="600" fill="#d97706">WorkflowExecutor</text>
+    <text x="340" y="86" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">DAG Engine | Retry | Cancel</text>
+    
+    <!-- Builder -->
+    <rect x="460" y="45" width="200" height="60" rx="8" fill="white" fill-opacity="0.9"/>
+    <text x="560" y="68" text-anchor="middle" font-family="system-ui" font-size="13" font-weight="600" fill="#d97706">WorkflowBuilder</text>
+    <text x="560" y="86" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">Fluent API | Branch | Parallel</text>
+    
+    <!-- Pool -->
+    <rect x="680" y="45" width="200" height="60" rx="8" fill="white" fill-opacity="0.9"/>
+    <text x="780" y="68" text-anchor="middle" font-family="system-ui" font-size="13" font-weight="600" fill="#d97706">WorkflowPool</text>
+    <text x="780" y="86" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">Registry | Import/Export</text>
+  </g>
+
+  <!-- Layer 2: Provider Layer -->
+  <g transform="translate(50, 545)">
+    <rect width="1100" height="120" rx="12" fill="url(#providerGrad)" filter="url(#shadow)"/>
+    <text x="20" y="30" font-family="system-ui" font-size="16" font-weight="bold" fill="white">Provider Layer</text>
+    
+    <!-- LLM -->
+    <rect x="20" y="45" width="250" height="60" rx="8" fill="white" fill-opacity="0.9"/>
+    <text x="145" y="68" text-anchor="middle" font-family="system-ui" font-size="13" font-weight="600" fill="#16a34a">LLM Providers</text>
+    <text x="145" y="86" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">OpenAI | Anthropic | Gemini | Ollama | DeepSeek</text>
+    
+    <!-- MCP -->
+    <rect x="290" y="45" width="250" height="60" rx="8" fill="white" fill-opacity="0.9"/>
+    <text x="415" y="68" text-anchor="middle" font-family="system-ui" font-size="13" font-weight="600" fill="#16a34a">MCP Providers</text>
+    <text x="415" y="86" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">ConnectionPool | HealthMonitor | AutoReconnect</text>
+    
+    <!-- Voice -->
+    <rect x="560" y="45" width="250" height="60" rx="8" fill="white" fill-opacity="0.9"/>
+    <text x="685" y="68" text-anchor="middle" font-family="system-ui" font-size="13" font-weight="600" fill="#16a34a">Voice Providers</text>
+    <text x="685" y="86" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">TTS (OpenAI/Browser) | STT (Whisper/Browser)</text>
+  </g>
+
+  <!-- Layer 1: Core Layer -->
+  <g transform="translate(50, 680)">
+    <rect width="1100" height="140" rx="12" fill="url(#coreGrad)" filter="url(#shadow)"/>
+    <text x="20" y="30" font-family="system-ui" font-size="16" font-weight="bold" fill="white">Core Layer</text>
+    
+    <!-- Message (SlowDB) -->
+    <rect x="20" y="45" width="160" height="80" rx="8" fill="white" fill-opacity="0.9"/>
+    <text x="100" y="68" text-anchor="middle" font-family="system-ui" font-size="12" font-weight="600" fill="#4f46e5">Message (SlowDB)</text>
+    <text x="100" y="85" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">WriteBuffer</text>
+    <text x="100" y="99" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">AsyncPersist</text>
+    <text x="100" y="113" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">MessageStore</text>
+    
+    <!-- Context -->
+    <rect x="200" y="45" width="160" height="80" rx="8" fill="white" fill-opacity="0.9"/>
+    <text x="280" y="68" text-anchor="middle" font-family="system-ui" font-size="12" font-weight="600" fill="#4f46e5">Context Engine</text>
+    <text x="280" y="85" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">SlidingWindow</text>
+    <text x="280" y="99" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">Summary | RAG</text>
+    <text x="280" y="113" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">MediaContext</text>
+    
+    <!-- Media -->
+    <rect x="380" y="45" width="160" height="80" rx="8" fill="white" fill-opacity="0.9"/>
+    <text x="460" y="68" text-anchor="middle" font-family="system-ui" font-size="12" font-weight="600" fill="#4f46e5">Media</text>
+    <text x="460" y="85" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">ImageHandler</text>
+    <text x="460" y="99" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">Audio | Video</text>
+    <text x="460" y="113" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">MediaRenderer</text>
+    
+    <!-- Scheduler -->
+    <rect x="560" y="45" width="160" height="80" rx="8" fill="white" fill-opacity="0.9"/>
+    <text x="640" y="68" text-anchor="middle" font-family="system-ui" font-size="12" font-weight="600" fill="#4f46e5">Scheduler</text>
+    <text x="640" y="85" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">TaskScheduler</text>
+    <text x="640" y="99" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">Interval | Cron</text>
+    <text x="640" y="113" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">Priority Queue</text>
+    
+    <!-- Shared -->
+    <rect x="740" y="45" width="160" height="80" rx="8" fill="white" fill-opacity="0.9"/>
+    <text x="820" y="68" text-anchor="middle" font-family="system-ui" font-size="12" font-weight="600" fill="#4f46e5">Shared</text>
+    <text x="820" y="85" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">Types | Errors</text>
+    <text x="820" y="99" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">EventBus</text>
+    <text x="820" y="113" text-anchor="middle" font-family="system-ui" font-size="9" fill="#64748b">Utils | Logger</text>
+  </g>
+
+  <!-- Connection arrows -->
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#94a3b8"/>
+    </marker>
+  </defs>
+  
+  <!-- Arrows between layers -->
+  <line x1="600" y1="215" x2="600" y2="225" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <line x1="600" y1="395" x2="600" y2="405" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <line x1="600" y1="530" x2="600" y2="540" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <line x1="600" y1="665" x2="600" y2="675" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- Legend -->
+  <g transform="translate(920, 95)">
+    <rect width="180" height="120" rx="8" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="90" y="25" text-anchor="middle" font-family="system-ui" font-size="12" font-weight="600" fill="#1e293b">Legend</text>
+    <rect x="15" y="40" width="20" height="12" rx="3" fill="url(#appsGrad)"/>
+    <text x="45" y="50" font-family="system-ui" font-size="10" fill="#64748b">Apps Layer</text>
+    <rect x="15" y="58" width="20" height="12" rx="3" fill="url(#sessionGrad)"/>
+    <text x="45" y="68" font-family="system-ui" font-size="10" fill="#64748b">Session Layer</text>
+    <rect x="15" y="76" width="20" height="12" rx="3" fill="url(#workflowGrad)"/>
+    <text x="45" y="86" font-family="system-ui" font-size="10" fill="#64748b">Workflow Layer</text>
+    <rect x="15" y="94" width="20" height="12" rx="3" fill="url(#providerGrad)"/>
+    <text x="45" y="104" font-family="system-ui" font-size="10" fill="#64748b">Provider Layer</text>
+  </g>
+
+  <!-- Footer -->
+  <text x="600" y="850" text-anchor="middle" font-family="system-ui" font-size="11" fill="#94a3b8">
+    front/src/services/ | TypeScript | React | IndexedDB
+  </text>
+  <text x="600" y="870" text-anchor="middle" font-family="system-ui" font-size="10" fill="#94a3b8">
+    Generated: 2025 | Actor Model | SlowDB | Multi-vendor LLM | MCP Connection Pool
+  </text>
+</svg>

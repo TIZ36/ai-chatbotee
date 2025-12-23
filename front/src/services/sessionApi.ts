@@ -16,6 +16,8 @@ export interface Session {
   role_version_id?: string | null;
   // 仅对角色（agent）返回：当前激活的角色版本
   current_role_version_id?: string | null;
+  // 扩展字段（存储 persona 等配置）
+  ext?: Record<string, any>;
   created_at?: string;
   updated_at?: string;
   last_message_at?: string;

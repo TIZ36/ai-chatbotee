@@ -1,6 +1,12 @@
 /**
  * Workflow 池化管理器
  * 实现 @workflow 时的自动初始化，全局共享，使用完后放回池中
+ * 
+ * @deprecated 此文件将在未来版本中废弃
+ * 请使用新的分层架构:
+ * - import { WorkflowPool, WorkflowBuilder, WorkflowExecutor } from './services/workflow'
+ * 
+ * 新架构提供更强大的 DAG 执行引擎、条件分支和并行执行能力
  */
 
 import { Workflow as WorkflowType } from './workflowApi';

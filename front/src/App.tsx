@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
-import { Brain, Plug, Workflow as WorkflowIcon, Settings, Code, Terminal, MessageCircle, Globe, Sparkles, Bot, Users, BookOpen, Shield } from 'lucide-react';
+import { Brain, Plug, Workflow as WorkflowIcon, Settings, Code, Terminal, MessageCircle, Globe, Sparkles, Bot, Users, BookOpen, Shield, Activity } from 'lucide-react';
 import appLogoDark from '../assets/app_logo_dark.png';
 import appLogoLight from '../assets/app_logo_light.png';
 import TerminalPanel from './components/TerminalPanel';
@@ -11,18 +11,11 @@ import MCPConfig from './components/MCPConfig';
 import WorkflowEditor from './components/WorkflowEditor';
 import Workflow from './components/Workflow';
 import CrawlerConfigPage from './components/CrawlerConfigPage';
-import AgentsPage from './components/AgentsPage';
-import SessionSidebar from './components/SessionSidebar';
 import RoundTableChat from './components/RoundTableChat';
 import ResearchPanel from './components/ResearchPanel';
-import RoleGeneratorPage from './components/RoleGeneratorPage';
 import UserAccessPage from './components/UserAccessPage';
-import {
-  PanelGroup,
-  Panel,
-  PanelResizeHandle,
-  type ImperativePanelHandle,
-} from 'react-resizable-panels';
+// 新架构组件
+import SystemStatusPanel from './components/SystemStatusPanel';
 
 // 导航项组件 - 带动画和tooltip
 interface NavItemProps {
@@ -85,7 +78,6 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('selected_session_id');
     return saved || 'temporary-session';
   });
-  const [selectedRoundTableId, setSelectedRoundTableId] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings>(() => {
     const saved = localStorage.getItem('settings');
     if (saved) {
@@ -167,11 +159,28 @@ const App: React.FC = () => {
   };
 
   const handleSelectSession = (sessionId: string) => {
+    // 选中人设（会话）时，回到普通会话模式
+    setIsRoundTableMode(false);
+    setIsResearchMode(false);
     setSelectedSessionId(sessionId);
     // 如果当前不在聊天页面，导航到聊天页面
     if (location.pathname !== '/') {
       navigate('/');
     }
+  };
+
+  const handleSelectMeeting = (roundTableId: string) => {
+    setIsResearchMode(false);
+    setIsRoundTableMode(true);
+    setCurrentRoundTableId(roundTableId);
+    if (location.pathname !== '/') navigate('/');
+  };
+
+  const handleSelectResearch = (researchSessionId: string) => {
+    setIsRoundTableMode(false);
+    setIsResearchMode(true);
+    setCurrentResearchSessionId(researchSessionId);
+    if (location.pathname !== '/') navigate('/');
   };
 
   // 配置会话（打开配置对话框）
@@ -190,20 +199,6 @@ const App: React.FC = () => {
     // 新会话创建后的回调
   };
 
-  const handleNewRole = () => {
-    // 打开角色生成器界面
-    setSelectedSessionId('role-generator');
-    if (location.pathname !== '/') {
-      navigate('/');
-    }
-  };
-
-  const handleSelectRoundTable = (roundTableId: string) => {
-    setSelectedRoundTableId(roundTableId);
-    // 导航到圆桌会议页面（使用agents页面）
-    navigate('/agents');
-  };
-
   // 判断是否显示terminal独占页面
   const isTerminalPage = location.pathname === '/terminal';
   
@@ -218,9 +213,10 @@ const App: React.FC = () => {
   // Research 模式状态
   const [isResearchMode, setIsResearchMode] = useState(false);
   const [currentResearchSessionId, setCurrentResearchSessionId] = useState<string | null>(null);
-  const leftPanelRef = React.useRef<ImperativePanelHandle>(null);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+
+  // 左侧边栏显示状态
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   const handleToggleRoundTable = async () => {
     if (!isRoundTableMode) {
@@ -289,7 +285,11 @@ const App: React.FC = () => {
       
       <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* 左侧导航栏 - GNOME 风格 */}
-        <nav className="w-[52px] bg-white dark:bg-[#2d2d2d] border-r border-gray-200 dark:border-[#404040] flex flex-col items-center flex-shrink-0 z-50 pt-3">
+        <nav 
+          className={`bg-white dark:bg-[#2d2d2d] border-r border-gray-200 dark:border-[#404040] flex flex-col items-center flex-shrink-0 z-50 pt-3 transition-all duration-300 ease-in-out overflow-hidden ${
+            isSidebarCollapsed ? 'w-0 border-r-0' : 'w-[52px]'
+          }`}
+        >
 
         {/* 上方导航：聊天、MCP、Workflow */}
         <div className="flex flex-col items-center space-y-1.5 w-full px-1.5 app-no-drag">
@@ -342,6 +342,23 @@ const App: React.FC = () => {
             icon={<Globe className="w-[18px] h-[18px]" strokeWidth={1.5} />}
             title="爬虫配置"
             isActive={location.pathname === '/crawler-config'}
+          />
+
+          {/* 用户访问管理 - 仅管理员可见 */}
+          {isAdmin && (
+            <NavItem
+              to="/user-access"
+              icon={<Shield className="w-[18px] h-[18px]" strokeWidth={1.5} />}
+              title="用户访问管理"
+              isActive={location.pathname === '/user-access'}
+            />
+          )}
+
+          <NavItem
+            to="/system-status"
+            icon={<Activity className="w-[18px] h-[18px]" strokeWidth={1.5} />}
+            title="系统状态"
+            isActive={location.pathname === '/system-status'}
           />
 
           {/* 用户访问管理 - 仅管理员可见 */}
@@ -406,7 +423,11 @@ const App: React.FC = () => {
           className="h-12 flex-shrink-0 bg-white dark:bg-[#2d2d2d] border-b border-gray-200 dark:border-[#404040] flex items-center justify-between px-4"
         >
           {/* 左侧 Logo */}
-          <div className="flex items-center gap-3">
+          <div
+            className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
+            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+            title="点击隐藏/显示侧边栏"
+          >
             <img
               src={isDarkMode ? appLogoDark : appLogoLight}
               alt="chatee"
@@ -483,93 +504,36 @@ const App: React.FC = () => {
             </div>
           </div>
         ) : isChatPage ? (
-          /* 聊天页面 - 可拖拽分栏布局（IDE 风格） */
+          /* 聊天页面 - 无会话侧栏（人设选择在对话顶部） */
           <div className="relative flex flex-1 min-h-0 min-w-0 p-2">
-            <PanelGroup direction="horizontal" className="flex flex-1 min-h-0 min-w-0">
-              {/* 左侧会话列表（可折叠） */}
-              <Panel
-                ref={leftPanelRef}
-                defaultSize={18}
-                minSize={12}
-                maxSize={28}
-                collapsible
-                collapsedSize={0}
-                onCollapse={() => setIsSidebarCollapsed(true)}
-                onExpand={() => setIsSidebarCollapsed(false)}
-                className={`overflow-hidden border border-gray-200 dark:border-[#27272a] bg-gray-50 dark:bg-[#202022] ${
-                  isSidebarCollapsed
-                    ? 'rounded-xl border-r-0'
-                    : 'rounded-xl rounded-r-none border-r-0'
-                }`}
+            <div className="flex-1 relative overflow-hidden border border-gray-200 dark:border-[#27272a] bg-white dark:bg-[#18181b] rounded-xl">
+              <div
+                key={`${isResearchMode ? 'research' : isRoundTableMode ? 'roundtable' : 'chat'}-${selectedSessionId}-${participantRefreshKey}`}
+                className="h-full fade-in"
               >
-                <SessionSidebar
-                  selectedSessionId={selectedSessionId}
-                  onSelectSession={handleSelectSession}
-                  onNewSession={handleNewSession}
-                  isRoundTableMode={isRoundTableMode}
-                  onAddToRoundTable={handleAddToRoundTable}
-                  onConfigSession={handleConfigSession}
-                  onNewRole={handleNewRole}
-                />
-              </Panel>
-
-              {!isSidebarCollapsed && (
-                <PanelResizeHandle className="flex w-1 items-center justify-center cursor-col-resize">
-                  <div className="h-full w-px bg-gray-200 dark:bg-[#27272a] hover:bg-[var(--color-accent)] transition-colors" />
-                </PanelResizeHandle>
-              )}
-
-              {/* 主面板（Research 或 Chat/RoundTable） */}
-              <Panel
-                minSize={40}
-                className={`relative overflow-hidden border border-gray-200 dark:border-[#27272a] bg-white dark:bg-[#18181b] ${
-                  isSidebarCollapsed
-                    ? 'rounded-xl'
-                    : 'rounded-xl rounded-l-none border-l-0'
-                }`}
-              >
-                {/* 会话列表折叠按钮：位于会话列表右侧边缘，垂直居中（会话/会议/Research 都可用） */}
-                <button
-                  onClick={() => {
-                    if (isSidebarCollapsed) {
-                      leftPanelRef.current?.expand();
-                      setIsSidebarCollapsed(false);
-                    } else {
-                      leftPanelRef.current?.collapse();
-                      setIsSidebarCollapsed(true);
-                    }
-                  }}
-                  className="app-no-drag absolute left-0 top-1/2 -translate-y-1/2 z-20 h-12 w-6 rounded-r-lg border border-gray-200 dark:border-[#27272a] border-l-0 bg-white/90 dark:bg-[#202022]/90 text-gray-600 dark:text-[#e0e0e0] hover:bg-[var(--color-hover-bg)] transition-all duration-200 flex items-center justify-center shadow-sm"
-                  title={isSidebarCollapsed ? '展开会话列表' : '折叠会话列表'}
-                >
-                  <span className="text-base leading-none">
-                    {isSidebarCollapsed ? '›' : '‹'}
-                  </span>
-                </button>
-
-                <div
-                  key={`${isResearchMode ? 'research' : isRoundTableMode ? 'roundtable' : 'chat'}-${selectedSessionId}-${participantRefreshKey}`}
-                  className="h-full fade-in"
-                >
-                  {isResearchMode ? (
-                    <ResearchPanel
-                      chatSessionId={selectedSessionId}
-                      researchSessionId={currentResearchSessionId}
-                      onResearchSessionChange={setCurrentResearchSessionId}
-                      onExit={() => setIsResearchMode(false)}
-                    />
-                  ) : isRoundTableMode ? (
-                    <RoundTableChat
-                      roundTableId={currentRoundTableId}
-                      onRoundTableChange={setCurrentRoundTableId}
-                      refreshKey={participantRefreshKey}
-                    />
-                  ) : (
-                    <Workflow sessionId={selectedSessionId} />
-                  )}
-                </div>
-              </Panel>
-            </PanelGroup>
+                {isResearchMode ? (
+                  <ResearchPanel
+                    chatSessionId={selectedSessionId}
+                    researchSessionId={currentResearchSessionId}
+                    onResearchSessionChange={setCurrentResearchSessionId}
+                    onExit={() => setIsResearchMode(false)}
+                  />
+                ) : isRoundTableMode ? (
+                  <RoundTableChat
+                    roundTableId={currentRoundTableId}
+                    onRoundTableChange={setCurrentRoundTableId}
+                    refreshKey={participantRefreshKey}
+                  />
+                ) : (
+                  <Workflow
+                    sessionId={selectedSessionId}
+                    onSelectSession={handleSelectSession}
+                    onSelectMeeting={handleSelectMeeting}
+                    onSelectResearch={handleSelectResearch}
+                  />
+                )}
+              </div>
+            </div>
           </div>
         ) : (
           <div className="flex flex-1 min-h-0 min-w-0 p-2 gap-2">
@@ -579,7 +543,17 @@ const App: React.FC = () => {
                 <div className={`h-full flex flex-col`}>
                   <Routes>
                     {/* 工作流聊天界面 - 全屏显示 */}
-                    <Route path="/" element={<Workflow sessionId={selectedSessionId} />} />
+                    <Route
+                      path="/"
+                      element={
+                        <Workflow
+                          sessionId={selectedSessionId}
+                          onSelectSession={handleSelectSession}
+                          onSelectMeeting={handleSelectMeeting}
+                          onSelectResearch={handleSelectResearch}
+                        />
+                      }
+                    />
 
                     {/* 工作流编辑器 */}
                     <Route path="/workflow-editor" element={<WorkflowEditor />} />
@@ -594,8 +568,8 @@ const App: React.FC = () => {
                     {/* 爬虫配置页面 */}
                     <Route path="/crawler-config" element={<CrawlerConfigPage />} />
 
-                  {/* 智能体页面 */}
-                  <Route path="/agents" element={<AgentsPage selectedRoundTableId={selectedRoundTableId} />} />
+                    {/* 系统状态页面 */}
+                    <Route path="/system-status" element={<SystemStatusPanel />} />
 
                   {/* Terminal 页面 */}
                   <Route path="/terminal" element={<div />} />

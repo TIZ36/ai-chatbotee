@@ -1,6 +1,13 @@
 /**
  * LLM客户端服务
  * 支持多种LLM提供商，并与MCP工具集成
+ * 
+ * @deprecated 此文件将在未来版本中废弃
+ * 请使用新的分层架构:
+ * - import { createProvider, ILLMProvider } from './services/providers/llm'
+ * - import { LLMMessage, LLMResponse } from './services/providers/llm'
+ * 
+ * 新架构提供更好的模块化、类型安全和扩展性
  */
 
 import { llmConfigManager, LLMConfig } from './llmConfig';

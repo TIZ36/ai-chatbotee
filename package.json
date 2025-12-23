@@ -6,7 +6,7 @@
   "main": "electron.cjs",
   "scripts": {
     "dev": "cd front && vite",
-    "build": "cd front && vite build && tsc -p electron/tsconfig.json",
+    "build": "cd front && vite build && cd .. && tsc -p electron/tsconfig.json",
     "preview": "cd front && vite preview",
     "build:electron": "tsc -p electron/tsconfig.json && node -e \"const fs=require('fs');const path=require('path');const distPath=path.join(__dirname,'electron/dist');['main.js','preload.js'].forEach(f=>{const oldPath=path.join(distPath,f);const newPath=path.join(distPath,f.replace('.js','.cjs'));if(fs.existsSync(oldPath)){fs.renameSync(oldPath,newPath);console.log('Renamed',f,'to',f.replace('.js','.cjs'));}});\"",
     "rebuild:electron": "electron-rebuild -f -w node-pty",

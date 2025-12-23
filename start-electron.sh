@@ -72,6 +72,17 @@ if [ ! -f "./electron/dist/main.cjs" ]; then
 fi
 echo "✅ 编译文件检查通过"
 
+# 显示启动信息
+echo ""
+echo "=========================================="
+echo "  启动 Electron 应用 (新架构)"
+echo "=========================================="
+echo ""
+echo "新增功能界面："
+echo "  - /system-status : 系统状态监控"
+echo "  - /memory        : 记忆体管理"
+echo ""
+
 # 尝试使用 electron:dev 脚本（需要 concurrently 和 wait-on）
 if command -v npx &> /dev/null && (npx -y concurrently --version 2>/dev/null || [ -f "node_modules/.bin/concurrently" ]); then
     echo "使用 electron:dev 模式启动（同时启动 Vite 和 Electron）..."

@@ -531,6 +531,50 @@ ipcMain.handle('list-directory', async (_, dirPath: string) => {
   }
 });
 
+function guessMimeType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  switch (ext) {
+    case '.png':
+      return 'image/png';
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.gif':
+      return 'image/gif';
+    case '.webp':
+      return 'image/webp';
+    case '.svg':
+      return 'image/svg+xml';
+    case '.bmp':
+      return 'image/bmp';
+    case '.ico':
+      return 'image/x-icon';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+// 读取本地文件并返回 data URL（用于在 webSecurity=true 时加载本地图片）
+ipcMain.handle('read-file-as-data-url', async (_, filePath: string) => {
+  const MAX_BYTES = 25 * 1024 * 1024; // 25MB 上限，避免大文件拖垮渲染进程
+  try {
+    const stats = fs.statSync(filePath);
+    if (!stats.isFile()) {
+      throw new Error('Path is not a file');
+    }
+    if (stats.size > MAX_BYTES) {
+      throw new Error(`File too large: ${stats.size} bytes`);
+    }
+    const mime = guessMimeType(filePath);
+    const buf = fs.readFileSync(filePath);
+    const base64 = buf.toString('base64');
+    return `data:${mime};base64,${base64}`;
+  } catch (error: any) {
+    console.error('[File] read-file-as-data-url failed:', filePath, error);
+    throw error;
+  }
+});
+
 // 终端进程管理 - PTY支持
 interface TerminalSession {
   pty: pty.IPty;
@@ -736,8 +780,132 @@ ipcMain.handle('kill-terminal', async (_, pid: number) => {
   }
 });
 
-// IPC处理程序 - 开发者工具
+// ============================================================================
+// 扩展 IPC 处理程序（新架构支持）
+// ============================================================================
+
+// 系统信息
+ipcMain.handle('get-system-info', async () => {
+  const os = require('os');
+  return {
+    platform: process.platform,
+    arch: process.arch,
+    version: app.getVersion(),
+    hostname: os.hostname(),
+    userDataPath: app.getPath('userData'),
+  };
+});
+
+ipcMain.handle('get-app-version', async () => {
+  return app.getVersion();
+});
+
+// 文件对话框
+ipcMain.handle('show-open-dialog', async (_, options: any) => {
+  const { dialog } = require('electron');
+  const result = await dialog.showOpenDialog(mainWindow!, options);
+  return result;
+});
+
+ipcMain.handle('show-save-dialog', async (_, options: any) => {
+  const { dialog } = require('electron');
+  const result = await dialog.showSaveDialog(mainWindow!, options);
+  return result;
+});
+
+// 文件读写
+ipcMain.handle('read-file', async (_, filePath: string, encoding?: string) => {
+  return fs.readFileSync(filePath, encoding as BufferEncoding);
+});
+
+ipcMain.handle('write-file', async (_, filePath: string, data: string | Buffer) => {
+  fs.writeFileSync(filePath, data);
+});
+
+// 媒体文件保存
+ipcMain.handle('save-media-file', async (_, params: { data: string; mimeType: string; defaultPath?: string; filename?: string }) => {
+  const { dialog } = require('electron');
+  
+  try {
+    const { data, mimeType, defaultPath, filename } = params;
+    
+    // 根据 MIME 类型确定扩展名
+    const extMap: Record<string, string> = {
+      'image/png': '.png',
+      'image/jpeg': '.jpg',
+      'image/gif': '.gif',
+      'image/webp': '.webp',
+      'video/mp4': '.mp4',
+      'audio/mp3': '.mp3',
+      'audio/wav': '.wav',
+    };
+    const ext = extMap[mimeType] || '.bin';
+    
+    let savePath: string;
+    if (defaultPath) {
+      // 确保目录存在
+      if (!fs.existsSync(defaultPath)) {
+        fs.mkdirSync(defaultPath, { recursive: true });
+      }
+      savePath = path.join(defaultPath, filename || `media_${Date.now()}${ext}`);
+    } else {
+      // 弹出保存对话框
+      const result = await dialog.showSaveDialog(mainWindow!, {
+        defaultPath: filename || `media_${Date.now()}${ext}`,
+        filters: [{ name: 'Media', extensions: [ext.slice(1)] }],
+      });
+      
+      if (result.canceled || !result.filePath) {
+        return { success: false, error: 'User cancelled' };
+      }
+      savePath = result.filePath;
+    }
+    
+    // 解码 base64 并保存
+    const buffer = Buffer.from(data, 'base64');
+    fs.writeFileSync(savePath, buffer);
+    
+    return { success: true, filePath: savePath };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
+// 剪贴板
+ipcMain.handle('clipboard-read-text', () => {
+  const { clipboard } = require('electron');
+  return clipboard.readText();
+});
+
+ipcMain.handle('clipboard-write-text', (_, text: string) => {
+  const { clipboard } = require('electron');
+  clipboard.writeText(text);
+});
+
+ipcMain.handle('clipboard-read-image', () => {
+  const { clipboard } = require('electron');
+  const image = clipboard.readImage();
+  if (image.isEmpty()) return null;
+  return image.toDataURL();
+});
+
+ipcMain.handle('clipboard-write-image', (_, dataUrl: string) => {
+  const { clipboard, nativeImage } = require('electron');
+  const image = nativeImage.createFromDataURL(dataUrl);
+  clipboard.writeImage(image);
+});
+
+// 通知
+ipcMain.handle('show-notification', async (_, options: { title: string; body: string; icon?: string; silent?: boolean }) => {
+  const { Notification } = require('electron');
+  const notification = new Notification(options);
+  notification.show();
+});
+
+// ============================================================================
 // IPC处理程序 - 后端地址配置
+// ============================================================================
+
 ipcMain.handle('get-backend-url', async () => {
   return getBackendUrlConfig();
 });
@@ -745,6 +913,10 @@ ipcMain.handle('get-backend-url', async () => {
 ipcMain.handle('set-backend-url', async (_, url: string) => {
   setBackendUrlConfig(url);
 });
+
+// ============================================================================
+// IPC处理程序 - 开发者工具
+// ============================================================================
 
 ipcMain.handle('toggle-devtools', async () => {
   if (mainWindow) {

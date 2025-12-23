@@ -1,6 +1,13 @@
 /**
  * MCP (Model Context Protocol) 客户端实现
  * 使用官方 @modelcontextprotocol/sdk
+ * 
+ * @deprecated 此文件将在未来版本中废弃
+ * 请使用新的分层架构:
+ * - import { ConnectionPool, MCPClient, HealthMonitor } from './services/providers/mcp'
+ * - import { MCPServer, MCPTool } from './services/providers/mcp'
+ * 
+ * 新架构提供更好的连接池管理、健康监控和错误处理
  */
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';

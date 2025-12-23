@@ -63,6 +63,7 @@ export async function createRole(params: {
   llm_config_id: string;
   media_output_path?: string;
   title?: string;
+  persona?: any; // Persona 高级配置（语音、自驱思考、记忆触发）
 }): Promise<Session> {
   const resp = await fetch(`${API_BASE}/sessions`, {
     method: 'POST',
@@ -75,6 +76,7 @@ export async function createRole(params: {
       llm_config_id: params.llm_config_id,
       media_output_path: params.media_output_path,
       session_type: 'agent',
+      ext: params.persona ? { persona: params.persona } : undefined,
     }),
   });
   if (!resp.ok) {
@@ -116,12 +118,19 @@ export async function updateRoleProfile(
     media_output_path?: string | null;
     title?: string | null;
     reason?: string;
+    persona?: any; // Persona 高级配置
   },
 ): Promise<{ success: boolean; role_id: string; current_role_version_id?: string; message?: string }> {
+  const bodyData: any = { ...updates };
+  // 将 persona 移到 ext 字段
+  if (updates.persona) {
+    bodyData.ext = { persona: updates.persona };
+    delete bodyData.persona;
+  }
   const resp = await fetch(`${API_BASE}/agents/${encodeURIComponent(roleId)}/profile`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(updates),
+    body: JSON.stringify(bodyData),
   });
   if (!resp.ok) {
     const payload = await resp.json().catch(() => ({}));

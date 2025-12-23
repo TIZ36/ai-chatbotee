@@ -8,7 +8,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Sparkles, Bot, MessageCircle, Trash2, Plus, X, Users, 
-  ChevronDown, ChevronUp, History, Settings, Loader, Download, Upload
+  ChevronDown, ChevronUp, History, Settings, Loader, Download, Upload, Sliders
 } from 'lucide-react';
 import { 
   getAgents, deleteSession, Session, 
@@ -26,6 +26,7 @@ import {
   sendMessage,
 } from '../services/roundTableApi';
 import RoundTablePanel from './RoundTablePanel';
+import AgentPersonaDialog from './AgentPersonaDialog';
 import { Button } from './ui/Button';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import {
@@ -60,6 +61,8 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ selectedRoundTableId }) => {
   const [roundTableRefreshTrigger, setRoundTableRefreshTrigger] = useState(0);
   const [deleteAgentTarget, setDeleteAgentTarget] = useState<Session | null>(null);
   const [deleteRoundTableTarget, setDeleteRoundTableTarget] = useState<RoundTable | null>(null);
+  const [personaEditAgent, setPersonaEditAgent] = useState<Session | null>(null);
+  const [personaDialogInitialTab, setPersonaDialogInitialTab] = useState<'basic' | 'persona'>('basic');
 
   // 加载智能体列表
   const loadAgents = useCallback(async () => {
@@ -475,7 +478,15 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ selectedRoundTableId }) => {
                 >
                   {/* 头像和名称 */}
                   <div className="flex items-center space-x-3 mb-3">
-                    <div className="relative w-12 h-12 rounded-full overflow-hidden border-2 border-purple-200 dark:border-purple-800 flex items-center justify-center bg-purple-100 dark:bg-purple-900/30 flex-shrink-0">
+                    <div 
+                      className="relative w-12 h-12 rounded-full overflow-hidden border-2 border-purple-200 dark:border-purple-800 flex items-center justify-center bg-purple-100 dark:bg-purple-900/30 flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-purple-400 hover:ring-offset-1 transition-all"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPersonaDialogInitialTab('basic');
+                        setPersonaEditAgent(agent);
+                      }}
+                      title="点击配置智能体"
+                    >
                       {avatarUrl ? (
                         <img src={avatarUrl} alt={displayName} className="w-full h-full object-cover" />
                       ) : (
@@ -526,6 +537,19 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ selectedRoundTableId }) => {
                           <Plus className="w-4 h-4" />
                         </button>
                       )}
+                      
+                      {/* Persona 设置按钮 */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPersonaDialogInitialTab('persona');
+                          setPersonaEditAgent(agent);
+                        }}
+                        className="p-1.5 text-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded transition-all"
+                        title="Persona 高级设置"
+                      >
+                        <Sliders className="w-4 h-4" />
+                      </button>
                       
                       {/* 导出按钮 */}
                       <button
@@ -673,6 +697,17 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ selectedRoundTableId }) => {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    {/* Persona 编辑对话框 */}
+    <AgentPersonaDialog
+      agent={personaEditAgent}
+      open={personaEditAgent !== null}
+      onOpenChange={(open) => {
+        if (!open) setPersonaEditAgent(null);
+      }}
+      onSaved={() => loadAgents()}
+      initialTab={personaDialogInitialTab}
+    />
     </>
   );
 };

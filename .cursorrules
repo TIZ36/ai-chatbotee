@@ -1,3 +1,90 @@
+# Chatee 开发规范
+
+## 系统架构概览
+
+> 架构图: [doc/architecture.svg](doc/architecture.svg)
+
+### 五层分层架构
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│              Apps Layer (应用层)                             │
+│   RoundTable (多Agent会议) │ Research (研究助手)              │
+├─────────────────────────────────────────────────────────────┤
+│              Session Layer (会话层)                          │
+│   Session │ Agent (Actor模型: Mailbox + 能力检查 + 知识学习)  │
+│   Persona (音色 + 自驱思考) │ Memory (长期记忆)               │
+├─────────────────────────────────────────────────────────────┤
+│              Workflow Layer (工作流层)                       │
+│   WorkflowBuilder │ WorkflowExecutor │ Nodes                │
+├─────────────────────────────────────────────────────────────┤
+│              Provider Layer (能力层)                         │
+│   LLM Providers │ MCP (Pool+Health) │ Voice │ Tools         │
+├─────────────────────────────────────────────────────────────┤
+│              Core Layer (核心基础设施)                        │
+│   Context (文字/媒体) │ Message (SlowDB) │ Media │ Scheduler │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 核心模块路径
+
+```
+front/src/services/
+├── core/                    # 核心基础设施
+│   ├── shared/              # types, errors, events, utils
+│   ├── context/             # TextContextEngine, MediaContext
+│   ├── message/             # SlowDB (WriteBuffer, AsyncPersist)
+│   ├── media/               # MediaRenderer, handlers
+│   └── scheduler/           # TaskScheduler
+│
+├── providers/               # 能力层（最底层可扩展）
+│   ├── llm/                 # OpenAI, Claude, Gemini, Ollama, DeepSeek
+│   ├── mcp/                 # MCPClient, ConnectionPool, HealthMonitor
+│   ├── voice/               # TTS, STT
+│   └── tools/               # 可扩展工具
+│
+├── workflow/                # 工作流层
+│   ├── nodes/               # LLMNode, MCPNode, ConditionNode
+│   ├── WorkflowExecutor.ts  # DAG 执行引擎
+│   └── WorkflowBuilder.ts   # 可视化编排
+│
+├── session/                 # 会话层
+│   ├── agent/               # Agent Actor 模型
+│   │   ├── mailbox/         # 消息队列（非阻塞）
+│   │   ├── capability/      # 能力检查 + 拒绝策略
+│   │   └── learning/        # 知识学习
+│   ├── persona/             # 拟真（音色、自驱思考、记忆触发）
+│   └── memory/              # 长期记忆
+│
+└── apps/                    # 应用层
+    ├── roundtable/          # 多Agent会议
+    └── research/            # 研究助手
+```
+
+### 关键设计模式
+
+1. **Actor 模型 (Agent)**
+   - Mailbox: 消息队列，非阻塞，引用回复
+   - CapabilityChecker: 基于 persona + tools + workflows 判断能力
+   - RejectPolicy: 无能力时沉默，存储问题等待学习
+   - KnowledgeAbsorber: 从其他 Agent 回答中学习
+
+2. **SlowDB (Message)**
+   - WriteBuffer: 先写内存缓存
+   - AsyncPersist: 异步批量持久化到 IndexedDB
+   - 实现高性能消息存储
+
+3. **Context 分离**
+   - TextContextEngine: 文字上下文（滑动窗口/摘要/RAG/Token预算）
+   - MediaContext: 媒体上下文（可选历史关联，图生图/文生图场景）
+
+4. **Provider 策略模式**
+   - BaseProvider 抽象基类
+   - ProviderFactory 工厂创建
+   - 支持运行时注册新 Provider
+
+---
+
 # 前端组件使用规范与UX风格指南
 
 ## 组件库架构

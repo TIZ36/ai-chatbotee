@@ -24,6 +24,10 @@ import { getDimensionOptions, saveDimensionOption } from '../services/roleDimens
 import CrawlerModuleSelector from './CrawlerModuleSelector';
 import CrawlerBatchItemSelector from './CrawlerBatchItemSelector';
 import { searchModules, getBatch } from '../services/crawlerApi';
+import AgentPersonaConfig, { 
+  defaultPersonaConfig, 
+  type AgentPersonaFullConfig 
+} from './AgentPersonaConfig';
 
 type Mode = 'random' | 'manual' | 'import';
 
@@ -45,6 +49,7 @@ type RoleDraft = {
   system_prompt: string;
   avatar: string;
   llm_config_id: string;
+  persona?: AgentPersonaFullConfig;
 };
 
 // 角色类型
@@ -405,7 +410,12 @@ function buildAvatarGeneratorPrompt(roleName: string, systemPrompt: string, avat
 - 只输出图片，不需要文字说明`;
 }
 
-const RoleGeneratorPage: React.FC = () => {
+interface RoleGeneratorPageProps {
+  /** 是否嵌入到 Dialog 中，影响高度计算和标题显示 */
+  isEmbedded?: boolean;
+}
+
+const RoleGeneratorPage: React.FC<RoleGeneratorPageProps> = ({ isEmbedded = false }) => {
   const [mode, setMode] = useState<Mode>('random');
   const [llmConfigs, setLlmConfigs] = useState<LLMConfigFromDB[]>([]);
   const [isLoadingConfigs, setIsLoadingConfigs] = useState(false);
@@ -459,7 +469,11 @@ const RoleGeneratorPage: React.FC = () => {
     system_prompt: '',
     avatar: '',
     llm_config_id: '',
+    persona: defaultPersonaConfig,
   });
+  
+  // 高级设置展开状态
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   
   // 生成的头像列表
   const [generatedAvatars, setGeneratedAvatars] = useState<Array<{ data: string; mimeType: string }>>([]);
@@ -1313,6 +1327,7 @@ const RoleGeneratorPage: React.FC = () => {
           system_prompt: draft.system_prompt,
           llm_config_id: draft.llm_config_id,
           reason: 'role_generator',
+          persona: draft.persona,
         });
         toast({ title: '角色已更新', variant: 'success' });
       } else {
@@ -1322,6 +1337,7 @@ const RoleGeneratorPage: React.FC = () => {
           avatar,
           system_prompt: draft.system_prompt,
           llm_config_id: draft.llm_config_id,
+          persona: draft.persona,
         });
         setSavedRoleId(role.session_id);
         toast({ title: '角色已创建', variant: 'success' });
@@ -1347,11 +1363,13 @@ const RoleGeneratorPage: React.FC = () => {
       system_prompt: '',
       avatar: '',
       llm_config_id: '',
+      persona: defaultPersonaConfig,
     });
     setChatHistory([]);
     setManualInput('');
     setGeneratedAvatars([]);
     setSelectedAvatarIndex(null);
+    setShowAdvancedSettings(false);
     setSavedRoleId(null);
     setRoleType('career');
     setDimensionSelections({
@@ -1469,17 +1487,12 @@ const RoleGeneratorPage: React.FC = () => {
     setIsImporting(true);
     try {
       // 创建角色
-      const roleData: Record<string, unknown> = {
+      const newRole = await createRole({
         name: data.role.name,
         system_prompt: data.role.system_prompt,
-        session_type: 'agent',
-      };
-      
-      if (data.role.avatar) {
-        roleData.avatar = data.role.avatar;
-      }
-      
-      const newRole = await createRole(roleData);
+        avatar: data.role.avatar || '',
+        llm_config_id: selectedGeneratorLlmConfigId || enabledConfigs[0]?.config_id || '',
+      });
       
       emitSessionsChanged();
       toast({ title: '角色导入成功', description: `已创建角色「${data.role.name}」`, variant: 'success' });
@@ -1517,45 +1530,70 @@ const RoleGeneratorPage: React.FC = () => {
   }, [importJsonText]);
 
   return (
-    <div className="h-full flex flex-col bg-gray-50 dark:bg-[#1a1a1a]">
-      {/* 顶部标题栏 */}
-      <div className="flex-shrink-0 px-6 py-4 border-b border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d]">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-[#7c3aed]/10 dark:bg-[#7c3aed]/20 flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-[#7c3aed]" />
+    <div className={`flex flex-col bg-gray-50 dark:bg-[#1a1a1a] ${isEmbedded ? 'h-full' : 'h-full'}`}>
+      {/* 顶部标题栏 - 嵌入模式下隐藏（由外部 Dialog 提供标题） */}
+      {!isEmbedded && (
+        <div className="flex-shrink-0 px-6 py-4 border-b border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d]">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-[#7c3aed]/10 dark:bg-[#7c3aed]/20 flex items-center justify-center">
+                <Sparkles className="w-5 h-5 text-[#7c3aed]" />
+              </div>
+              <div>
+                <h1 className="text-lg font-semibold text-gray-900 dark:text-white">角色生成器</h1>
+                <p className="text-sm text-gray-500 dark:text-gray-400">生成和配置 AI 角色人设</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-lg font-semibold text-gray-900 dark:text-white">角色生成器</h1>
-              <p className="text-sm text-gray-500 dark:text-gray-400">生成和配置 AI 角色人设</p>
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" onClick={reset} disabled={isGenerating || isGeneratingAvatar}>
+                <RefreshCw className="w-4 h-4 mr-2" />
+                重置
+              </Button>
+              <Button variant="primary" onClick={saveRole} disabled={!draft.name || !draft.system_prompt || isSaving}>
+                {isSaving ? (
+                  <>
+                    <Loader className="w-4 h-4 mr-2 animate-spin" />
+                    保存中...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4 mr-2" />
+                    {savedRoleId ? '更新角色' : '保存角色'}
+                  </>
+                )}
+              </Button>
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="secondary" onClick={reset} disabled={isGenerating || isGeneratingAvatar}>
-              <RefreshCw className="w-4 h-4 mr-2" />
-              重置
-            </Button>
-            <Button variant="primary" onClick={saveRole} disabled={!draft.name || !draft.system_prompt || isSaving}>
-              {isSaving ? (
-                <>
-                  <Loader className="w-4 h-4 mr-2 animate-spin" />
-                  保存中...
-                </>
-              ) : (
-                <>
-                  <Save className="w-4 h-4 mr-2" />
-                  {savedRoleId ? '更新角色' : '保存角色'}
-                </>
-              )}
-            </Button>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* 嵌入模式的操作栏 */}
+      {isEmbedded && (
+        <div className="flex-shrink-0 px-4 py-2 border-b border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] flex items-center justify-end gap-2">
+          <Button variant="secondary" size="sm" onClick={reset} disabled={isGenerating || isGeneratingAvatar}>
+            <RefreshCw className="w-4 h-4 mr-1.5" />
+            重置
+          </Button>
+          <Button variant="primary" size="sm" onClick={saveRole} disabled={!draft.name || !draft.system_prompt || isSaving}>
+            {isSaving ? (
+              <>
+                <Loader className="w-4 h-4 mr-1.5 animate-spin" />
+                保存中...
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4 mr-1.5" />
+                {savedRoleId ? '更新角色' : '保存角色'}
+              </>
+            )}
+          </Button>
+        </div>
+      )}
 
       {/* 主内容区域 - 左右分栏 */}
-      <div className="flex-1 min-h-0 flex relative">
+      <div className="flex-1 min-h-0 flex relative overflow-hidden">
         {/* 左侧配置区域 */}
-        <div className="w-[480px] flex-shrink-0 border-r border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] flex flex-col">
+        <div className="w-[480px] flex-shrink-0 border-r border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] flex flex-col h-full overflow-hidden">
           {/* Tab 切换 */}
           <div className="flex-shrink-0 px-4 py-3 border-b border-gray-200 dark:border-[#404040]">
             <div className="flex gap-2">
@@ -2726,7 +2764,7 @@ const RoleGeneratorPage: React.FC = () => {
 
         {/* 右侧预览区域 */}
         <div className="flex-1 min-h-0 overflow-y-auto p-6 bg-gray-50 dark:bg-[#1a1a1a]">
-          <div className="max-w-2xl mx-auto space-y-6">
+          <div className="max-w-2xl mx-auto space-y-6 pb-8">
             {/* 角色预览卡片 */}
             {draft.name ? (
               <>
@@ -2833,6 +2871,36 @@ const RoleGeneratorPage: React.FC = () => {
                     onChange={(e) => setDraft(prev => ({ ...prev, name: e.target.value }))}
                     placeholder="角色名称"
                   />
+                </div>
+
+                {/* 高级设置 - Persona 配置 */}
+                <div className="bg-white dark:bg-[#2d2d2d] rounded-xl shadow-sm border border-gray-200 dark:border-[#404040] overflow-hidden">
+                  <button
+                    onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
+                    className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-[#363636] transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Settings className="w-4 h-4 text-gray-500" />
+                      <span className="text-sm font-medium text-gray-900 dark:text-white">高级设置</span>
+                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                        (语音、自驱思考、记忆触发)
+                      </span>
+                    </div>
+                    {showAdvancedSettings ? (
+                      <ChevronUp className="w-4 h-4 text-gray-500" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4 text-gray-500" />
+                    )}
+                  </button>
+                  {showAdvancedSettings && (
+                    <div className="border-t border-gray-200 dark:border-[#404040]">
+                      <AgentPersonaConfig
+                        config={draft.persona || defaultPersonaConfig}
+                        onChange={(persona) => setDraft(prev => ({ ...prev, persona }))}
+                        compact
+                      />
+                    </div>
+                  )}
                 </div>
               </>
             ) : (

@@ -513,4 +513,3 @@ export const SessionMediaPanel: React.FC<SessionMediaPanelProps> = ({
 };
 
 export default SessionMediaPanel;
-

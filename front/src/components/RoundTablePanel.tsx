@@ -3,9 +3,7 @@
  * 支持多智能体并行对话、@提及、响应选择、举手机制
  */
 
-import React, { useState, useEffect, useRef, useCallback, useImperativeHandle, forwardRef } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import React, { useState, useEffect, useRef, useCallback, useImperativeHandle, forwardRef, useMemo } from 'react';
 import { 
   Bot, Send, X, Settings, Check, Hand, Users, MessageCircle,
   ChevronDown, ChevronUp, Loader, Plus, Trash2, RotateCw, Info, Square,
@@ -24,6 +22,7 @@ import {
   sendMessage,
   addResponse,
   selectResponse,
+  addParticipant,
   removeParticipant,
   updateParticipant,
   parseMentions,
@@ -58,8 +57,12 @@ import { getMCPServers, MCPServerConfig } from '../services/mcpApi';
 import { mcpManager, MCPTool, MCPServer } from '../services/mcpClient';
 import { getWorkflows, Workflow as WorkflowType } from '../services/workflowApi';
 import { estimate_messages_tokens, get_model_max_tokens } from '../services/tokenCounter';
-import { updateSessionMediaOutputPath } from '../services/sessionApi';
+import { getAgents, type Session as AgentSession, updateSessionMediaOutputPath } from '../services/sessionApi';
 import InputToolTags from './ui/InputToolTags';
+import { MessageRenderer } from './conversation/MessageRenderer';
+import { useConversation } from '../conversation/useConversation';
+import { createRoundTableConversationAdapter } from '../conversation/adapters/roundTableConversation';
+import type { UnifiedMessage } from '../conversation/types';
 
 export interface RoundTablePanelRef {
   refresh: () => Promise<void>;
@@ -80,7 +83,17 @@ const RoundTablePanel = forwardRef<RoundTablePanelRef, RoundTablePanelProps>(({
 }, ref) => {
   // 状态
   const [roundTable, setRoundTable] = useState<RoundTableDetail | null>(null);
-  const [messages, setMessages] = useState<RoundTableMessage[]>([]);
+  const roundTableAdapter = useMemo(() => createRoundTableConversationAdapter(roundTableId), [roundTableId]);
+  const {
+    messages,
+    setMessages,
+    appendMessage,
+    replaceMessage,
+    loadInitial: loadConversationInitial,
+    loadMoreBefore: loadConversationMoreBefore,
+    hasMoreBefore: hasMoreConversationBefore,
+    isLoading: isLoadingConversation,
+  } = useConversation(roundTableAdapter, { pageSize: 50 });
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [removeTarget, setRemoveTarget] = useState<RoundTableParticipant | null>(null);
@@ -93,6 +106,8 @@ const RoundTablePanel = forwardRef<RoundTablePanelRef, RoundTablePanelProps>(({
   const [pendingResponses, setPendingResponses] = useState<Set<string>>(new Set());
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [hoveredParticipant, setHoveredParticipant] = useState<string | null>(null);
+  const [allAgents, setAllAgents] = useState<AgentSession[]>([]);
+  const addParticipantDetailsRef = useRef<HTMLDetailsElement | null>(null);
   
   // MCP 和工作流
   const [mcpServers, setMcpServers] = useState<MCPServerConfig[]>([]);
@@ -112,7 +127,7 @@ const RoundTablePanel = forwardRef<RoundTablePanelRef, RoundTablePanelProps>(({
   const [previewImage, setPreviewImage] = useState<{ url: string; mimeType: string } | null>(null);
   
   // 消息引用
-  const [replyingTo, setReplyingTo] = useState<RoundTableMessage | null>(null);
+  const [replyingTo, setReplyingTo] = useState<UnifiedMessage | null>(null);
   const [summarizingAgents, setSummarizingAgents] = useState<Set<string>>(new Set()); // 正在总结的agent
   
   // 输入框状态
@@ -181,24 +196,51 @@ const RoundTablePanel = forwardRef<RoundTablePanelRef, RoundTablePanelProps>(({
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const toUnifiedRoundTableMessage = useCallback(
+    (m: RoundTableMessage): UnifiedMessage => ({
+      id: m.message_id,
+      role: m.sender_type === 'agent' ? 'assistant' : m.sender_type,
+      content: m.content || '',
+      createdAt: m.created_at || new Date().toISOString(),
+      media: (m.media || []).map(x => ({
+        type: x.type,
+        mimeType: x.mimeType,
+        url: x.preview || (x.mimeType ? `data:${x.mimeType};base64,${x.data}` : x.data),
+      })),
+      meta: {
+        sender_type: m.sender_type,
+        sender_agent_id: m.sender_agent_id,
+        agent_name: m.agent_name,
+        agent_avatar: m.agent_avatar,
+        mentions: m.mentions || [],
+        is_raise_hand: m.is_raise_hand,
+        reply_to_message_id: m.reply_to_message_id,
+        responses: m.responses || [],
+      },
+    }),
+    []
+  );
   
   // 加载圆桌会议数据
   const loadRoundTable = useCallback(async (showLoading = true) => {
     try {
       if (showLoading) setIsLoading(true);
-      const [rtData, msgsData, configsData, serversData, workflowsData] = await Promise.all([
+      const [rtData, configsData, serversData, workflowsData, agentsData] = await Promise.all([
         getRoundTable(roundTableId),
-        getRoundTableMessages(roundTableId),
         getLLMConfigs(),
         getMCPServers(),
         getWorkflows(),
+        getAgents(),
       ]);
       
       setRoundTable(rtData);
-      setMessages(msgsData.messages);
       setLlmConfigs(configsData);
       setMcpServers(serversData);
       setWorkflows(workflowsData);
+      setAllAgents((agentsData || []).filter(a => a.session_type === 'agent'));
+
+      await loadConversationInitial({ force: true });
       
       // 只列出已启用的 MCP 服务器，不立即连接
       const enabledServers = serversData.filter(s => s.enabled);
@@ -209,7 +251,7 @@ const RoundTablePanel = forwardRef<RoundTablePanelRef, RoundTablePanelProps>(({
     } finally {
       if (showLoading) setIsLoading(false);
     }
-  }, [roundTableId]);
+  }, [loadConversationInitial, roundTableId]);
   
   // 按需连接 MCP 服务器并获取工具
   const connectMcpServerOnDemand = useCallback(async (serverId: string): Promise<MCPTool[]> => {
@@ -426,7 +468,8 @@ const RoundTablePanel = forwardRef<RoundTablePanelRef, RoundTablePanelProps>(({
       // 构建要总结的对话内容（取前面的消息，保留最近几条不总结）
       const messagesToSummarize = messages.slice(0, -3); // 保留最近3条不进入总结
       const conversationText = messagesToSummarize.map(m => {
-        const speaker = m.sender_type === 'user' ? '用户' : m.agent_name || '智能体';
+        const senderType = (m.meta?.sender_type as any) as 'user' | 'agent' | 'system' | undefined;
+        const speaker = senderType === 'user' ? '用户' : ((m.meta?.agent_name as string) || '智能体');
         return `${speaker}: ${m.content}`;
       }).join('\n\n');
       
@@ -621,12 +664,13 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
       let estimatedTokens = estimate_messages_tokens(allMessages, model);
       
       for (const m of recentMessages) {
-        const msgContent = m.sender_type === 'agent' 
-          ? `[${m.agent_name}]: ${m.content}`
+        const senderType = (m.meta?.sender_type as any) as 'user' | 'agent' | 'system' | undefined;
+        const msgContent = senderType === 'agent' 
+          ? `[${(m.meta?.agent_name as string) || '智能体'}]: ${m.content}`
           : m.content;
         
         const newMsg: LLMMessage = {
-          role: m.sender_type === 'user' ? 'user' : 'assistant',
+          role: senderType === 'user' ? 'user' : 'assistant',
           content: msgContent,
         };
         
@@ -1142,7 +1186,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
         };
         
         // 更新消息列表
-        setMessages(prev => [...prev, messageWithAgentInfo]);
+        appendMessage(toUnifiedRoundTableMessage(messageWithAgentInfo));
         
         // 如果有 @ 其他人（不包括自己），将消息加入他们的队列
         // 注意：继承当前消息的目标模式，并传递媒体信息
@@ -1262,14 +1306,14 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
         sender_type: 'user',
         mentions,
         media: currentMedia.length > 0 ? currentMedia : undefined,
-        reply_to_message_id: replyingTo?.message_id, // 引用消息ID
+        reply_to_message_id: replyingTo?.id, // 引用消息ID
       });
       
       // 清除引用状态
       setReplyingTo(null);
       
       // 更新消息列表
-      setMessages(prev => [...prev, userMessage]);
+      appendMessage(toUnifiedRoundTableMessage(userMessage));
       
       // 确定需要响应的智能体
       const targetAgentIds = mentions.length > 0
@@ -1329,7 +1373,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
         };
         
         // 更新消息列表
-        setMessages(prev => [...prev, messageWithAgentInfo]);
+        appendMessage(toUnifiedRoundTableMessage(messageWithAgentInfo));
         
         // 将消息加入被 @ 智能体的队列
         broadcastMessageToAgents(
@@ -1349,17 +1393,22 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
     try {
       await selectResponse(roundTableId, responseId);
       
-      setMessages(prev => prev.map(m => 
-        m.message_id === messageId
-          ? { 
-              ...m, 
-              responses: m.responses.map(r => ({
+      setMessages(prev =>
+        prev.map(m => {
+          if (m.id !== messageId) return m;
+          const prevResponses = ((m.meta?.responses || []) as any[]).slice();
+          return {
+            ...m,
+            meta: {
+              ...(m.meta || {}),
+              responses: prevResponses.map(r => ({
                 ...r,
-                is_selected: r.response_id === responseId
-              }))
-            }
-          : m
-      ));
+                is_selected: r.response_id === responseId,
+              })),
+            },
+          };
+        })
+      );
     } catch (error) {
       console.error('[RoundTable] Failed to select response:', error);
     }
@@ -1376,8 +1425,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
         content: `${participant.name} 已离开圆桌会议`,
         sender_type: 'system',
       });
-      const msgsData = await getRoundTableMessages(roundTableId);
-      setMessages(msgsData.messages);
+      await loadConversationInitial({ force: true });
       toast({ title: '已移出圆桌会议', variant: 'success' });
     } catch (error) {
       console.error('[RoundTable] Failed to remove participant:', error);
@@ -1394,6 +1442,38 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
     const participant =
       roundTable?.participants.find(p => p.session_id === sessionId) || null;
     setRemoveTarget(participant);
+  };
+
+  const availableAgentsForPicker = useMemo(() => {
+    const existing = new Set((roundTable?.participants || []).map(p => p.session_id));
+    return allAgents.filter(a => !existing.has(a.session_id));
+  }, [allAgents, roundTable?.participants]);
+
+  const performAddParticipant = async (agent: AgentSession) => {
+    try {
+      await addParticipant(roundTableId, agent.session_id);
+      await loadRoundTable(false);
+      onParticipantChange?.();
+
+      await sendMessage(roundTableId, {
+        content: `${agent.name || agent.title || '智能体'} 已加入圆桌会议`,
+        sender_type: 'system',
+      });
+      await loadConversationInitial({ force: true });
+
+      // 关闭下拉
+      if (addParticipantDetailsRef.current) {
+        addParticipantDetailsRef.current.open = false;
+      }
+      toast({ title: '已添加参会人', variant: 'success' });
+    } catch (error) {
+      console.error('[RoundTable] Failed to add participant:', error);
+      toast({
+        title: '添加参会人失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
+    }
   };
   
   // 打开配置弹框
@@ -1505,7 +1585,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
   
   return (
     <div className="flex flex-col h-full bg-white dark:bg-[#2d2d2d] rounded-lg border border-gray-200 dark:border-[#404040] overflow-hidden">
-      {/* 顶部：标题栏 + 参会者列表 */}
+      {/* 顶部：标题栏 */}
       <div className="flex-shrink-0 border-b border-gray-200 dark:border-[#404040]">
         {/* 标题栏 */}
         <div className="px-3 py-2 flex items-center justify-between border-b border-gray-100 dark:border-[#404040]">
@@ -1533,138 +1613,6 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
             )}
           </div>
         </div>
-        
-        {/* 参会者紧凑列表 */}
-        <div className="px-3 py-2">
-          <div className="flex items-center space-x-1 flex-wrap gap-1">
-            <span className="text-xs text-gray-500 mr-1">
-              <Users className="w-3 h-3 inline mr-1" />
-              {roundTable.participants.length}
-            </span>
-            
-            {roundTable.participants.length === 0 ? (
-              <span className="text-xs text-gray-400">暂无参会者</span>
-            ) : (
-              roundTable.participants.map(participant => {
-                const queueCount = agentMessageQueues.get(participant.session_id)?.length || 0;
-                return (
-                <div
-                  key={participant.session_id}
-                  className="relative group mb-3"
-                  onMouseEnter={() => setHoveredParticipant(participant.session_id)}
-                  onMouseLeave={() => setHoveredParticipant(null)}
-                >
-                  {/* 头像容器 - 包含头像和外部状态指示器 */}
-                  <div className="relative">
-                    {/* 紧凑头像 */}
-                    <div className="w-8 h-8 rounded-full overflow-hidden border-2 border-gray-200 dark:border-[#404040] flex items-center justify-center bg-purple-100 dark:bg-purple-900/30 cursor-pointer hover:border-primary-400 transition-colors">
-                      {participant.avatar ? (
-                        <img 
-                          src={participant.avatar} 
-                          alt={participant.name} 
-                          className="w-full h-full object-cover" 
-                        />
-                      ) : (
-                        <Bot className="w-4 h-4 text-purple-500" />
-                      )}
-                    </div>
-                    
-                    {/* 状态指示器 - 头像右上角外部 */}
-                    {summarizingAgents.has(participant.session_id) ? (
-                      // 正在总结 - 显示大脑发光图标
-                      <div 
-                        className="absolute -top-2 -right-2 w-6 h-6 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center shadow-lg z-10 animate-pulse"
-                        title="正在总结对话..."
-                      >
-                        <Brain className="w-3.5 h-3.5 text-white" />
-                      </div>
-                    ) : pendingResponses.has(participant.session_id) ? (
-                      // 正在响应 - 显示加载动画和取消按钮
-                      <div 
-                        className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center cursor-pointer hover:bg-red-500 transition-colors shadow-md z-10"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          cancelAgentResponse(participant.session_id);
-                        }}
-                        title="点击取消"
-                      >
-                        <Loader className="w-3 h-3 text-white animate-spin" />
-                      </div>
-                    ) : (
-                      // 在线状态 - 绿点在头像外部右上角
-                      <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white dark:border-gray-900 shadow-sm z-10" />
-                    )}
-                    
-                    {/* 消息队列计数 - 左上角 */}
-                    {queueCount > 0 && (
-                      <div className="absolute -top-1 -left-1 w-4 h-4 bg-orange-500 rounded-full flex items-center justify-center text-[9px] text-white font-bold shadow-sm z-10">
-                        {queueCount > 9 ? '9+' : queueCount}
-                      </div>
-                    )}
-                  </div>
-                  
-                  {/* 名称标签 */}
-                  <div className="absolute -bottom-3 left-1/2 transform -translate-x-1/2 px-1 py-0.5 bg-gray-800/80 dark:bg-gray-700/80 rounded text-[9px] text-white whitespace-nowrap max-w-[60px] truncate">
-                    {participant.name}
-                  </div>
-                  
-                  {/* 悬浮详情卡片 */}
-                  {hoveredParticipant === participant.session_id && (
-                    <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 z-50 w-48 bg-white dark:bg-[#2d2d2d] rounded-lg shadow-lg border border-gray-200 dark:border-[#404040] p-3">
-                      <div className="flex items-start space-x-2">
-                        <div className="w-10 h-10 rounded-full overflow-hidden border border-gray-200 dark:border-[#404040] flex items-center justify-center bg-purple-100 dark:bg-purple-900/30 flex-shrink-0">
-                          {participant.avatar ? (
-                            <img src={participant.avatar} alt={participant.name} className="w-full h-full object-cover" />
-                          ) : (
-                            <Bot className="w-5 h-5 text-purple-500" />
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                            {participant.name}
-                          </p>
-                          <p className="text-xs text-gray-500 truncate">
-                            {getLLMConfigName(participant.custom_llm_config_id || participant.llm_config_id)}
-                          </p>
-                        </div>
-                      </div>
-                      
-                      {/* 系统提示预览 */}
-                      {(participant.custom_system_prompt || participant.system_prompt) && (
-                        <div className="mt-2 p-2 bg-gray-50 dark:bg-gray-700/50 rounded text-xs text-gray-600 dark:text-gray-400 line-clamp-2">
-                          {participant.custom_system_prompt || participant.system_prompt}
-                        </div>
-                      )}
-                      
-                      {/* 操作按钮 */}
-                      <div className="mt-2 flex space-x-1">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenConfig(participant);
-                          }}
-                          className="flex-1 px-2 py-1 text-xs bg-primary-500 text-white rounded hover:bg-primary-600 flex items-center justify-center"
-                        >
-                          <Settings className="w-3 h-3 mr-1" />
-                          配置
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleRemoveParticipant(participant.session_id);
-                          }}
-                          className="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 flex items-center justify-center"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );})
-            )}
-          </div>
-        </div>
       </div>
       
       {/* 主内容区：对话 + 工具边栏 */}
@@ -1680,9 +1628,9 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
             ) : (
               messages.map((message, idx) => (
                 <MessageItem
-                  key={message.message_id}
+                  key={message.id}
                   message={message}
-                  onSelectResponse={(responseId, agentId, content) => handleSelectResponseAndBroadcast(message.message_id, responseId, agentId, content)}
+                  onSelectResponse={(responseId, agentId, content) => handleSelectResponseAndBroadcast(message.id, responseId, agentId, content)}
                   streamingResponses={idx === messages.length - 1 ? streamingResponses : undefined}
                   streamingThinking={idx === messages.length - 1 ? streamingThinking : undefined}
                   pendingAgents={idx === messages.length - 1 ? pendingResponses : undefined}
@@ -1707,7 +1655,9 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
                   <div className="flex items-center gap-1 text-xs text-gray-500 mb-0.5">
                     <span>回复</span>
                     <span className="font-medium text-gray-700 dark:text-gray-300">
-                      {replyingTo.sender_type === 'user' ? '用户' : replyingTo.agent_name || '智能体'}
+                      {(replyingTo.meta?.sender_type as any) === 'user'
+                        ? '用户'
+                        : (replyingTo.meta?.agent_name as string) || '智能体'}
                     </span>
                   </div>
                   <p className="text-xs text-gray-600 dark:text-gray-400 truncate">
@@ -1745,20 +1695,132 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
               </div>
             )}
             
-            {/* 统一输入框容器 */}
-            <div className={`border rounded-xl bg-white dark:bg-[#2d2d2d] transition-all ${
-              isInputFocused 
-                ? 'border-[var(--color-accent)] ring-2 ring-[var(--color-accent)]/20' 
-                : 'border-gray-200 dark:border-[#404040]'
-            }`}>
-              <textarea
-                ref={inputRef}
-                value={inputValue}
-                onChange={handleInputChange}
-                onKeyDown={handleKeyDown}
-                onFocus={() => setIsInputFocused(true)}
-                onBlur={() => setIsInputFocused(false)}
-                onPaste={(e) => {
+            {/* 输入区（与 Research 保持一致：成员栏 + 工具Tag + 输入框/发送） */}
+            <div className="relative rounded-xl bg-white dark:bg-[#262626] shadow-md">
+              {/* 参会人栏 + 工具 Tags */}
+              <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-100 dark:border-[#363636]">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-[#7c3aed]/10 text-[#7c3aed] text-[10px] font-medium">
+                    <Users className="w-3 h-3" />
+                    <span>{roundTable.participants.length}</span>
+                  </div>
+
+                  {/* 参会人头像（点击移除） */}
+                  <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-hide">
+                    {roundTable.participants.map((p) => (
+                      <button
+                        key={p.session_id}
+                        onClick={() => handleRemoveParticipant(p.session_id)}
+                        className="group relative w-5 h-5 rounded-full overflow-hidden bg-gray-100 dark:bg-[#363636] flex-shrink-0"
+                        title={`移除：${p.name || p.session_id}`}
+                      >
+                        {p.avatar ? (
+                          <img src={p.avatar} alt={p.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <span className="text-[8px] text-gray-600 dark:text-[#b0b0b0] w-full h-full flex items-center justify-center">A</span>
+                        )}
+                        <span className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[8px]">
+                          ×
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* 分隔符 */}
+                  <div className="w-px h-4 bg-gray-200 dark:bg-[#404040] mx-1" />
+
+                  <InputToolTags
+                    mcpServers={mcpServers.filter(s => s.enabled).map(s => ({
+                      id: s.server_id || s.id,
+                      name: s.name,
+                      display_name: s.display_name,
+                    }))}
+                    workflows={workflows.map(w => ({
+                      workflow_id: w.workflow_id,
+                      name: w.name,
+                      description: w.description,
+                    }))}
+                    enableMCP={enableMCP}
+                    onToggleMCP={setEnableMCP}
+                    enableWorkflow={enableWorkflow}
+                    onToggleWorkflow={setEnableWorkflow}
+                    mcpMode="toggle"
+                    workflowMode="toggle"
+                    showSkillPack={false}
+                    showSources={false}
+                    onAttachFile={(files) => {
+                      Array.from(files).forEach(file => {
+                        if (!file.type.startsWith('image/')) return;
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                          const result = e.target?.result as string;
+                          const base64Data = result.includes(',') ? result.split(',')[1] : result;
+                          setAttachedMedia(prev => [...prev, {
+                            type: 'image',
+                            mimeType: file.type,
+                            data: base64Data,
+                            preview: result,
+                          }]);
+                        };
+                        reader.readAsDataURL(file);
+                      });
+                    }}
+                    attachedMediaCount={attachedMedia.length}
+                  />
+                </div>
+
+                {/* 添加参会人 */}
+                <div className="relative flex-shrink-0">
+                  <details className="group" ref={addParticipantDetailsRef}>
+                    <summary
+                      className="list-none cursor-pointer p-1 rounded hover:bg-gray-100 dark:hover:bg-[#404040] text-gray-500 dark:text-[#808080]"
+                      title="添加参会人"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </summary>
+                    <div className="absolute right-0 bottom-full mb-1 w-56 max-h-52 overflow-auto rounded-lg bg-white dark:bg-[#2d2d2d] shadow-xl z-50">
+                      <div className="px-2 py-1.5 text-[10px] text-gray-500 dark:text-[#909090] border-b border-gray-100 dark:border-[#363636]">
+                        点击添加参会人
+                      </div>
+                      {availableAgentsForPicker.length === 0 ? (
+                        <div className="px-2 py-2 text-xs text-gray-500 dark:text-[#909090]">无更多</div>
+                      ) : (
+                        availableAgentsForPicker.map(a => (
+                          <button
+                            key={a.session_id}
+                            onClick={() => performAddParticipant(a)}
+                            className="w-full px-2 py-1.5 flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-[#363636] text-left"
+                          >
+                            <div className="w-5 h-5 rounded-full overflow-hidden bg-gray-100 dark:bg-[#363636] flex items-center justify-center flex-shrink-0">
+                              {a.avatar ? (
+                                <img src={a.avatar} alt={a.name || a.session_id} className="w-full h-full object-cover" />
+                              ) : (
+                                <span className="text-[8px] text-gray-600 dark:text-[#b0b0b0]">A</span>
+                              )}
+                            </div>
+                            <div className="text-xs text-gray-700 dark:text-[#d0d0d0] truncate">{a.name || a.title || a.session_id}</div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </details>
+                </div>
+              </div>
+
+              {/* 输入框 + 发送按钮 */}
+              <div
+                className={`relative flex items-end gap-2 p-2 transition-all ${
+                  isInputFocused ? 'ring-2 ring-[var(--color-accent)]/20' : ''
+                }`}
+              >
+                <textarea
+                  ref={inputRef}
+                  value={inputValue}
+                  onChange={handleInputChange}
+                  onKeyDown={handleKeyDown}
+                  onFocus={() => setIsInputFocused(true)}
+                  onBlur={() => setIsInputFocused(false)}
+                  onPaste={(e) => {
                   // 检查粘贴板中是否有图片
                   const items = e.clipboardData?.items;
                   if (!items) return;
@@ -1799,11 +1861,10 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
                     });
                   }
                 }}
-                placeholder={isTargetMode ? "🎯 目标式发言：描述你的目标，AI会协作完成..." : "输入消息，使用 @ 提及特定智能体，粘贴图片..."}
-                className="w-full px-3 py-3 bg-transparent border-none focus:outline-none focus:ring-0 dark:text-white resize-none text-sm"
-                style={{ minHeight: '60px', maxHeight: '150px' }}
-                disabled={isSending}
-              />
+                  placeholder={isTargetMode ? "🎯 目标式发言：描述你的目标，AI会协作完成..." : "输入消息，使用 @ 提及特定智能体，粘贴图片..."}
+                  className="flex-1 min-h-[44px] max-h-[150px] resize-y px-3 py-2 text-sm bg-transparent text-gray-800 dark:text-[#e0e0e0] placeholder-gray-400 dark:placeholder-[#606060] focus:outline-none"
+                  disabled={isSending}
+                />
               
               {/* @ 提及下拉菜单 */}
               {showMentionDropdown && roundTable.participants.length > 0 && (
@@ -1841,110 +1902,18 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
                 </div>
               )}
               
-              {/* 底部工具栏 */}
-              <div className="flex items-center justify-between px-3 py-2 border-t border-gray-100 dark:border-[#404040]/50">
-                {/* 左侧：功能开关 */}
-                <div className="flex items-center gap-2 text-xs">
-                  {/* 目标模式开关 */}
-                  <button
-                    onClick={() => setIsTargetMode(!isTargetMode)}
-                    className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] transition-all ${
-                      isTargetMode 
-                        ? 'bg-[var(--color-accent)]/10 text-[var(--color-accent)]' 
-                        : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'
-                    }`}
-                    title={isTargetMode ? '目标式发言（点击切换）' : '普通发言（点击切换为目标式）'}
-                  >
-                    <span>🎯</span>
-                    <span className="hidden sm:inline text-[10px]">{isTargetMode ? '目标式' : '普通'}</span>
-                  </button>
-                  
-                  {/* MCP、工作流、附件 - 统一 Tag 样式 */}
-                  <InputToolTags
-                    mcpServers={mcpServers.filter(s => s.enabled).map(s => ({
-                      id: s.server_id || s.id,
-                      name: s.name,
-                      display_name: s.display_name,
-                    }))}
-                    workflows={workflows.map(w => ({
-                      workflow_id: w.workflow_id,
-                      name: w.name,
-                      description: w.description,
-                    }))}
-                    enableMCP={enableMCP}
-                    onToggleMCP={setEnableMCP}
-                    enableWorkflow={enableWorkflow}
-                    onToggleWorkflow={setEnableWorkflow}
-                    mcpMode="toggle"
-                    workflowMode="toggle"
-                    showSkillPack={false}
-                    showSources={false}
-                    onAttachFile={(files) => {
-                      Array.from(files).forEach(file => {
-                        if (!file.type.startsWith('image/')) return;
-                        const reader = new FileReader();
-                        reader.onload = (e) => {
-                          const result = e.target?.result as string;
-                          const base64Data = result.includes(',') ? result.split(',')[1] : result;
-                          setAttachedMedia(prev => [...prev, {
-                            type: 'image',
-                            mimeType: file.type,
-                            data: base64Data,
-                            preview: result,
-                          }]);
-                        };
-                        reader.readAsDataURL(file);
-                      });
-                    }}
-                    attachedMediaCount={attachedMedia.length}
-                  />
-                  
-                  {/* Token 计数 */}
-                  {currentTokenCount > 0 && (
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] ${
-                      currentTokenCount > 3000 
-                        ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' 
-                        : 'text-gray-400 dark:text-gray-500'
-                    }`}>
-                      ~{currentTokenCount} tokens
-                    </span>
-                  )}
-                  
-                  {/* 总结状态 */}
-                  {roundTableSummary && (
-                    <span 
-                      className="text-[10px] text-green-600 dark:text-green-400 cursor-help px-1.5 py-0.5 bg-green-50 dark:bg-green-900/20 rounded" 
-                      title={roundTableSummary}
-                    >
-                      ✓ 已总结
-                    </span>
-                  )}
-                  
-                  {/* 图片计数 */}
-                  {attachedMedia.length > 0 && (
-                    <span className="flex items-center space-x-1 text-[10px] text-gray-400">
-                      <ImageIcon className="w-3 h-3" />
-                      <span>{attachedMedia.length}</span>
-                    </span>
-                  )}
-                </div>
-                
                 {/* 右侧：发送按钮 */}
                 <button
                   onClick={handleSendMessage}
                   disabled={(!inputValue.trim() && attachedMedia.length === 0) || isSending}
-                  className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                     (!inputValue.trim() && attachedMedia.length === 0) || isSending
                       ? 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
                       : 'bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-white shadow-sm hover:shadow'
                   }`}
+                  title="发送"
                 >
-                  {isSending ? (
-                    <Loader className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Send className="w-4 h-4" />
-                  )}
-                  <span className="hidden sm:inline">发送</span>
+                  {isSending ? '…' : '发送'}
                 </button>
               </div>
             </div>
@@ -2217,122 +2186,9 @@ RoundTablePanel.displayName = 'RoundTablePanel';
 
 // ==================== 子组件 ====================
 
-// Markdown 渲染组件
-const MarkdownContent: React.FC<{ content: string; className?: string }> = ({ content, className = '' }) => {
-  return (
-    <div className={`prose prose-sm dark:prose-invert max-w-none ${className}`}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          // 代码块样式
-          code: ({ node, inline, className: codeClassName, children, ...props }: any) => {
-            const match = /language-(\w+)/.exec(codeClassName || '');
-            const language = match ? match[1] : '';
-            
-            if (!inline && match) {
-              const codeText = String(children).replace(/\n$/, '');
-              const CodeBlock = () => {
-                const [copied, setCopied] = useState(false);
-                
-                return (
-                  <div className="relative group my-2">
-                    {language && (
-                      <div className="absolute top-1 left-2 text-[10px] text-gray-400 font-mono bg-gray-800/50 px-1.5 py-0.5 rounded z-10">
-                        {language}
-                      </div>
-                    )}
-                    <pre className="bg-gray-900 dark:bg-gray-950 text-gray-100 rounded-lg p-3 pt-6 overflow-x-auto border border-gray-700 text-xs">
-                      <code className={codeClassName} {...props}>
-                        {children}
-                      </code>
-                    </pre>
-                    <button
-                      onClick={async () => {
-                        try {
-                          await navigator.clipboard.writeText(codeText);
-                          setCopied(true);
-                          setTimeout(() => setCopied(false), 2000);
-                        } catch (err) {
-                          console.error('Failed to copy:', err);
-                        }
-                      }}
-                      className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white px-1.5 py-0.5 rounded text-[10px] flex items-center space-x-1 z-10"
-                      title="复制代码"
-                    >
-                      {copied ? (
-                        <>
-                          <CheckCircle className="w-3 h-3" />
-                          <span>已复制</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3 h-3" />
-                          <span>复制</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                );
-              };
-              
-              return <CodeBlock />;
-            } else {
-              return (
-                <code className="bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 px-1 py-0.5 rounded text-xs font-mono" {...props}>
-                  {children}
-                </code>
-              );
-            }
-          },
-          // 段落样式
-          p: ({ children }: any) => <p className="mb-2 last:mb-0 leading-relaxed text-sm">{children}</p>,
-          // 标题样式
-          h1: ({ children }: any) => <h1 className="text-lg font-bold mt-3 mb-2 first:mt-0">{children}</h1>,
-          h2: ({ children }: any) => <h2 className="text-base font-bold mt-3 mb-2 first:mt-0">{children}</h2>,
-          h3: ({ children }: any) => <h3 className="text-sm font-bold mt-2 mb-1 first:mt-0">{children}</h3>,
-          // 列表样式
-          ul: ({ children }: any) => <ul className="list-disc list-inside mb-2 space-y-0.5 ml-2 text-sm">{children}</ul>,
-          ol: ({ children }: any) => <ol className="list-decimal list-inside mb-2 space-y-0.5 ml-2 text-sm">{children}</ol>,
-          li: ({ children }: any) => <li className="leading-relaxed">{children}</li>,
-          // 引用样式
-          blockquote: ({ children }: any) => (
-            <blockquote className="border-l-3 border-gray-300 dark:border-gray-600 pl-3 my-2 italic text-gray-600 dark:text-gray-400 text-sm">
-              {children}
-            </blockquote>
-          ),
-          // 表格样式
-          table: ({ children }: any) => (
-            <div className="overflow-x-auto my-2">
-              <table className="min-w-full border-collapse border border-gray-300 dark:border-gray-600 text-xs">
-                {children}
-              </table>
-            </div>
-          ),
-          thead: ({ children }: any) => <thead className="bg-gray-100 dark:bg-[#2d2d2d]">{children}</thead>,
-          th: ({ children }: any) => <th className="border border-gray-300 dark:border-gray-600 px-2 py-1 font-semibold text-left">{children}</th>,
-          td: ({ children }: any) => <td className="border border-gray-300 dark:border-gray-600 px-2 py-1">{children}</td>,
-          // 链接样式
-          a: ({ children, href }: any) => (
-            <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary-500 hover:text-primary-600 underline">
-              {children}
-            </a>
-          ),
-          // 强调样式
-          strong: ({ children }: any) => <strong className="font-semibold">{children}</strong>,
-          em: ({ children }: any) => <em className="italic">{children}</em>,
-          // 分割线
-          hr: () => <hr className="my-3 border-gray-300 dark:border-gray-600" />,
-        }}
-      >
-        {content}
-      </ReactMarkdown>
-    </div>
-  );
-};
-
 // 消息项组件
 interface MessageItemProps {
-  message: RoundTableMessage;
+  message: UnifiedMessage;
   onSelectResponse: (responseId: string, agentId: string, content: string) => void;
   streamingResponses?: Map<string, string>;
   streamingThinking?: Map<string, string>;
@@ -2340,8 +2196,8 @@ interface MessageItemProps {
   onCancelAgent?: (agentId: string) => void;
   participants?: RoundTableParticipant[];
   onPreviewImage?: (url: string, mimeType: string) => void;
-  onReply?: (message: RoundTableMessage) => void;
-  allMessages?: RoundTableMessage[]; // 用于查找引用的消息
+  onReply?: (message: UnifiedMessage) => void;
+  allMessages?: UnifiedMessage[]; // 用于查找引用的消息
 }
 
 const MessageItem: React.FC<MessageItemProps> = ({ 
@@ -2358,10 +2214,13 @@ const MessageItem: React.FC<MessageItemProps> = ({
 }) => {
   const [showAllResponses, setShowAllResponses] = useState(false);
   
-  const isUserMessage = message.sender_type === 'user';
-  const isSystemMessage = message.sender_type === 'system';
-  const hasMultipleResponses = message.responses.length > 1;
-  const selectedResponse = message.responses.find(r => r.is_selected);
+  const senderType = (message.meta?.sender_type as any) as 'user' | 'agent' | 'system' | undefined;
+  const isUserMessage = senderType === 'user';
+  const isSystemMessage = senderType === 'system';
+  const responses = ((message.meta?.responses || []) as any[]) as RoundTableResponse[];
+  const mentions = ((message.meta?.mentions || []) as any[]) as string[];
+  const hasMultipleResponses = responses.length > 1;
+  const selectedResponse = responses.find(r => r.is_selected);
   
   if (isSystemMessage) {
     return (
@@ -2381,18 +2240,18 @@ const MessageItem: React.FC<MessageItemProps> = ({
         {!isUserMessage && (
           <div className="flex items-center space-x-2 mb-1">
             <div className="w-6 h-6 rounded-full overflow-hidden border border-gray-200 dark:border-[#404040] flex items-center justify-center bg-purple-100 dark:bg-purple-900/30">
-              {message.agent_avatar ? (
+              {(message.meta?.agent_avatar as string | undefined) ? (
                 <img 
-                  src={message.agent_avatar} 
-                  alt={message.agent_name} 
+                  src={message.meta?.agent_avatar as string} 
+                  alt={(message.meta?.agent_name as string) || '智能体'} 
                   className="w-full h-full object-cover" 
                 />
               ) : (
                 <Bot className="w-3 h-3 text-purple-500" />
               )}
             </div>
-            <span className="text-xs text-gray-500">{message.agent_name}</span>
-            {message.is_raise_hand && (
+            <span className="text-xs text-gray-500">{(message.meta?.agent_name as string) || '智能体'}</span>
+            {message.meta?.is_raise_hand && (
               <span className="text-xs text-yellow-500 flex items-center">
                 <Hand className="w-3 h-3 mr-0.5" />
                 举手
@@ -2420,9 +2279,11 @@ const MessageItem: React.FC<MessageItemProps> = ({
           }`}
         >
           {/* 引用消息显示 */}
-          {message.reply_to_message_id && (() => {
-            const repliedMessage = allMessages?.find(m => m.message_id === message.reply_to_message_id);
+          {message.meta?.reply_to_message_id && (() => {
+            const repliedId = message.meta?.reply_to_message_id as string;
+            const repliedMessage = allMessages?.find(m => m.id === repliedId);
             if (!repliedMessage) return null;
+            const repliedSenderType = (repliedMessage.meta?.sender_type as any) as 'user' | 'agent' | 'system' | undefined;
             return (
               <div className={`mb-2 p-1.5 rounded text-xs border-l-2 ${
                 isUserMessage 
@@ -2433,7 +2294,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
                   <CornerDownRight className="w-3 h-3 opacity-70" />
                   <span className="opacity-70">回复</span>
                   <span className="font-medium">
-                    {repliedMessage.sender_type === 'user' ? '用户' : repliedMessage.agent_name || '智能体'}
+                    {repliedSenderType === 'user' ? '用户' : ((repliedMessage.meta?.agent_name as string) || '智能体')}
                   </span>
                 </div>
                 <p className="truncate opacity-80">
@@ -2460,9 +2321,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
           {/* 图片显示 */}
           {message.media && message.media.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-2">
-              {message.media.map((m, idx) => {
-                // 生成预览 URL（如果没有 preview 属性）
-                const imageUrl = m.preview || (m.data ? `data:${m.mimeType || 'image/png'};base64,${m.data}` : null);
+              {message.media
+                .filter(m => m.type === 'image')
+                .map((m, idx) => {
+                const imageUrl = m.url || null;
                 if (!imageUrl) return null;
                 
                 const handleDownload = (e: React.MouseEvent) => {
@@ -2521,13 +2383,13 @@ const MessageItem: React.FC<MessageItemProps> = ({
           {isUserMessage ? (
             <p className="text-sm whitespace-pre-wrap">{message.content}</p>
           ) : (
-            <MarkdownContent content={message.content} className="text-gray-900 dark:text-white" />
+            <MessageRenderer content={message.content} variant="compact" />
           )}
           
           {/* 提及标签 */}
-          {message.mentions.length > 0 && (
+          {mentions.length > 0 && (
             <div className="mt-1 flex flex-wrap gap-1">
-              {message.mentions.map((mention, idx) => (
+              {mentions.map((mention, idx) => (
                 <span 
                   key={idx}
                   className={`text-xs px-1.5 py-0.5 rounded ${
@@ -2593,7 +2455,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
                   {/* 流式内容 */}
                   {streamContent && (
                     <div className="text-gray-700 dark:text-gray-300">
-                      <MarkdownContent content={streamContent} />
+                      <MessageRenderer content={streamContent} variant="compact" />
                       <span className="inline-block w-1 h-4 bg-blue-500 animate-pulse ml-0.5" />
                     </div>
                   )}
@@ -2604,7 +2466,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
         )}
         
         {/* 已完成的响应区域 */}
-        {isUserMessage && message.responses.length > 0 && (
+        {isUserMessage && responses.length > 0 && (
           <div className="mt-2 space-y-2">
             {/* 已选中的响应 */}
             {selectedResponse && (
@@ -2630,14 +2492,14 @@ const MessageItem: React.FC<MessageItemProps> = ({
                   ) : (
                     <>
                       <ChevronDown className="w-3 h-3 mr-1" />
-                      查看其他 {message.responses.length - (selectedResponse ? 1 : 0)} 个响应
+                      查看其他 {responses.length - (selectedResponse ? 1 : 0)} 个响应
                     </>
                   )}
                 </button>
                 
                 {showAllResponses && (
                   <div className="mt-2 space-y-2">
-                    {message.responses
+                    {responses
                       .filter(r => !r.is_selected)
                       .map(response => (
                         <ResponseCard
@@ -2653,11 +2515,11 @@ const MessageItem: React.FC<MessageItemProps> = ({
             )}
             
             {/* 单响应未选中 */}
-            {!hasMultipleResponses && !selectedResponse && message.responses.length === 1 && (
+            {!hasMultipleResponses && !selectedResponse && responses.length === 1 && (
               <ResponseCard 
-                response={message.responses[0]} 
+                response={responses[0]} 
                 isSelected={false}
-                onSelect={() => onSelectResponse(message.responses[0].response_id, message.responses[0].agent_id, message.responses[0].content)}
+                onSelect={() => onSelectResponse(responses[0].response_id, responses[0].agent_id, responses[0].content)}
               />
             )}
           </div>
@@ -2722,7 +2584,7 @@ const ResponseCard: React.FC<ResponseCardProps> = ({ response, isSelected, onSel
       
       {/* 内容 */}
       <div className={`text-gray-700 dark:text-gray-300 ${!expanded && 'max-h-24 overflow-hidden'}`}>
-        <MarkdownContent content={response.content} />
+        <MessageRenderer content={response.content} variant="compact" />
       </div>
       
       {response.content.length > 200 && (

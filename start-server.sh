@@ -99,8 +99,28 @@ except Exception as e:
     print('继续启动服务器...')
 " 2>&1
 
+# 验证新架构模块
+echo ""
+echo "验证新架构模块..."
+python -c "
+try:
+    from api import register_api_routes
+    from api.health import health_bp
+    from services.llm_service import get_llm_service
+    from services.mcp_service import get_mcp_service
+    from services.session_service import get_session_service
+    from services.message_service import get_message_service
+    print('✅ 新架构 API 模块加载成功')
+except ImportError as e:
+    print(f'⚠️  新架构模块加载警告: {e}')
+    print('使用原有 API 路由...')
+" 2>&1
+
 # 启动服务器
 echo ""
-echo "启动后端服务器..."
+echo "=========================================="
+echo "  启动后端服务器 (新架构)"
+echo "=========================================="
+echo ""
 python app.py
 

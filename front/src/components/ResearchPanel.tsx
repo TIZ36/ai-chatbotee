@@ -1,7 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { BookOpen, ChevronLeft, ChevronRight, Download, FileText, FolderOpen, Hand, Info, Link as LinkIcon, PanelLeftClose, PanelLeftOpen, Play, Plus, Search, Upload, Settings, X, Image as ImageIcon } from 'lucide-react';
 import { createSession, getAgents, getSession, getSessionMessages, saveMessage, updateSessionAvatar, updateSessionLLMConfig, updateSessionSystemPrompt, updateSessionName, type Session } from '../services/sessionApi';
 import { getLLMConfig, getLLMConfigApiKey, getLLMConfigs, type LLMConfigFromDB } from '../services/llmApi';
@@ -12,6 +10,9 @@ import { getMCPServers, MCPServerConfig } from '../services/mcpApi';
 import { mcpManager, MCPTool } from '../services/mcpClient';
 import { getWorkflows, Workflow as WorkflowType } from '../services/workflowApi';
 import InputToolTags from './ui/InputToolTags';
+import { MessageRenderer } from './conversation/MessageRenderer';
+import { useConversation } from '../conversation/useConversation';
+import { createResearchConversationAdapter } from '../conversation/adapters/researchConversation';
 
 export interface ResearchPanelProps {
   chatSessionId: string | null;
@@ -97,50 +98,48 @@ function getTriggerContext(text: string, caret: number): { trigger: '@' | '$'; s
 
 const MarkdownArticle: React.FC<{ content: string; onSplitTask?: (task: string) => void; onAssignTask?: (task: string) => void }> = ({ content, onSplitTask, onAssignTask }) => {
   return (
-    <div className="prose prose-sm dark:prose-invert max-w-none text-gray-900 dark:text-[#ffffff] markdown-content">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          li: ({ children, ...props }: any) => {
-            const isTask = typeof props.checked === 'boolean' || (props.className || '').includes('task-list-item');
-            const text = extractPlainText(children).trim();
-            return (
-              <li className="group relative pr-16">
-                {children}
-                {isTask && text && onSplitTask && (
-                  <button
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onSplitTask(text);
-                    }}
-                    className="absolute right-0 top-0 opacity-0 group-hover:opacity-100 transition-opacity text-xs px-1.5 py-0.5 rounded bg-gray-200/70 dark:bg-gray-700/60 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200"
-                    title="拆分为并发研究窗口"
-                  >
-                    Split
-                  </button>
-                )}
-                {isTask && text && onAssignTask && (
-                  <button
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onAssignTask(text);
-                    }}
-                    className="absolute right-11 top-0 opacity-0 group-hover:opacity-100 transition-opacity text-xs px-1.5 py-0.5 rounded bg-[#7c3aed]/15 hover:bg-[#7c3aed]/25 text-[#7c3aed]"
-                    title="分配给课题成员异步分析"
-                  >
-                    Assign
-                  </button>
-                )}
-              </li>
-            );
-          },
-        }}
-      >
-        {content || ''}
-      </ReactMarkdown>
-    </div>
+    <MessageRenderer
+      content={content || ''}
+      components={{
+        li: ({ children, ...props }: any) => {
+          const isTask = typeof props.checked === 'boolean' || (props.className || '').includes('task-list-item');
+          const text = extractPlainText(children).trim();
+          return (
+            <li className="group relative pr-16">
+              {children}
+              {isTask && text && onSplitTask && (
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onSplitTask(text);
+                  }}
+                  className="absolute right-0 top-0 opacity-0 group-hover:opacity-100 transition-opacity text-xs px-1.5 py-0.5 rounded bg-gray-200/70 dark:bg-gray-700/60 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200"
+                  title="拆分为并发研究窗口"
+                  type="button"
+                >
+                  Split
+                </button>
+              )}
+              {isTask && text && onAssignTask && (
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onAssignTask(text);
+                  }}
+                  className="absolute right-11 top-0 opacity-0 group-hover:opacity-100 transition-opacity text-xs px-1.5 py-0.5 rounded bg-[#7c3aed]/15 hover:bg-[#7c3aed]/25 text-[#7c3aed]"
+                  title="分配给课题成员异步分析"
+                  type="button"
+                >
+                  Assign
+                </button>
+              )}
+            </li>
+          );
+        },
+      }}
+    />
   );
 };
 
@@ -165,7 +164,28 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
   const [showResearcherSettings, setShowResearcherSettings] = useState(false);
   const [sourcesCollapsed, setSourcesCollapsed] = useState<boolean>(true);
 
-  const [messages, setMessages] = useState<ResearchMessage[]>([]);
+  const researchAdapter = useMemo(
+    () => (researchSessionId ? createResearchConversationAdapter(researchSessionId) : null),
+    [researchSessionId]
+  );
+  const {
+    messages: unifiedMessages,
+    hasMoreBefore: hasMoreMessages,
+    isLoading: isLoadingMessages,
+    loadMoreBefore,
+    appendMessage,
+    replaceMessage,
+    finalizeMessage,
+  } = useConversation(researchAdapter, { pageSize: 100 });
+  const messages: ResearchMessage[] = useMemo(
+    () =>
+      unifiedMessages.map(m => ({
+        role: m.role,
+        content: m.content,
+        created_at: m.createdAt,
+      })),
+    [unifiedMessages]
+  );
   const [input, setInput] = useState('');
   const [isSending, setIsSending] = useState(false);
   
@@ -786,7 +806,7 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
     const finalUserContent = expanded.appended ? `${expanded.text}\n\n${expanded.appended}` : expanded.text;
 
     const userMessageId = `r-user-${Date.now()}`;
-    setMessages(prev => [...prev, { role: 'user', content: finalUserContent }]);
+    appendMessage({ id: userMessageId, role: 'user', content: finalUserContent, createdAt: new Date().toISOString() });
     try {
       await saveMessage(researchSessionId, { message_id: userMessageId, role: 'user', content: finalUserContent, model: 'user' });
     } catch (e) {
@@ -843,9 +863,9 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
         ].join('\n');
 
         // 研究员回答：stream 模式
-        const local_id = `asst-local-${Date.now()}`;
+        const tempId = `asst-local-${Date.now()}`;
         const assistantMessageId = `r-asst-${Date.now()}`;
-        setMessages(prev => [...prev, { role: 'assistant', content: '', local_id }]);
+        appendMessage({ id: tempId, role: 'assistant', content: '', createdAt: new Date().toISOString() });
 
         let acc = '';
         const resp = await llm.handleUserRequestWithThinking(
@@ -856,17 +876,13 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
           (chunk) => {
             if (!chunk) return;
             acc += chunk;
-            setMessages(prev =>
-              prev.map(m => (m.local_id === local_id ? { ...m, content: acc } : m))
-            );
+            replaceMessage(tempId, { content: acc });
           },
           buildLLMMessageHistory()
         );
 
         const finalContent = String(resp.content || acc || '').trim();
-        setMessages(prev =>
-          prev.map(m => (m.local_id === local_id ? { ...m, content: finalContent } : m))
-        );
+        finalizeMessage(tempId, { id: assistantMessageId, role: 'assistant', content: finalContent, createdAt: new Date().toISOString() });
         await saveMessage(researchSessionId, { message_id: assistantMessageId, role: 'assistant', content: finalContent, model: cfg.model || 'unknown' });
         return;
       }
@@ -921,13 +937,14 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
         const merged = outputs.join('\n');
         const assistantMessageId = `r-asst-${Date.now()}`;
         // agents 回答保持非 stream（目前这里是合并后一次性输出）
-        setMessages(prev => [...prev, { role: 'assistant', content: merged }]);
+        appendMessage({ id: assistantMessageId, role: 'assistant', content: merged, createdAt: new Date().toISOString() });
         await saveMessage(researchSessionId, { message_id: assistantMessageId, role: 'assistant', content: merged, model: 'agents' });
 
     } catch (e) {
       const err = e instanceof Error ? e.message : String(e);
       const content = `> ❌ Research 生成失败：${err}\n`;
-      setMessages(prev => [...prev, { role: 'assistant', content }]);
+      const assistantMessageId = `r-asst-${Date.now()}`;
+      appendMessage({ id: assistantMessageId, role: 'assistant', content, createdAt: new Date().toISOString() });
       try {
         await saveMessage(researchSessionId, { role: 'assistant', content, model: 'error' });
       } catch {}
