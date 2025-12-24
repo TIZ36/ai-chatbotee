@@ -47,6 +47,10 @@ export interface MCPDetail {
   status: 'pending' | 'running' | 'completed' | 'error';
   logs?: string[];
   raw_result?: any; // 原始结果（包含图片等）
+  /** 旧结构兼容：OpenAI tool calls */
+  tool_calls?: any[];
+  /** 旧结构兼容：tool results */
+  tool_results?: any[];
   error_message?: string;
   executed_at?: string;
 }

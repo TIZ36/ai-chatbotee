@@ -54,6 +54,8 @@ export interface RoundTableResponse {
   content: string;
   thinking?: string;
   tool_calls?: any;
+  /** 多模态内容（图片等） */
+  media?: Array<{ type: string; mimeType: string; data: string; preview?: string }>;
   is_selected: boolean;
   created_at: string;
 }

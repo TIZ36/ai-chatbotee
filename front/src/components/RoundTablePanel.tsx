@@ -5,20 +5,17 @@
 
 import React, { useState, useEffect, useRef, useCallback, useImperativeHandle, forwardRef, useMemo } from 'react';
 import { 
-  Bot, Send, X, Settings, Check, Hand, Users, MessageCircle,
-  ChevronDown, ChevronUp, Loader, Plus, Trash2, RotateCw, Info, Square,
-  FileText, CheckCircle, Copy, Wrench, Workflow, ChevronLeft, ChevronRight,
-  Zap, Package, Brain, Image as ImageIcon, Plug, Download, ZoomIn, ExternalLink,
+  Bot, X, Check, Hand, Users, MessageCircle,
+  ChevronDown, ChevronUp, Loader, Plus, RotateCw,
+  Download, ZoomIn, ExternalLink,
   Reply, CornerDownRight
 } from 'lucide-react';
 import {
-  RoundTable,
   RoundTableDetail,
   RoundTableParticipant,
   RoundTableMessage,
   RoundTableResponse,
   getRoundTable,
-  getRoundTableMessages,
   sendMessage,
   addResponse,
   selectResponse,
@@ -68,7 +65,6 @@ import {
   MessageAvatar, 
   SystemNotification,
   StreamingResponse,
-  type MessageRole 
 } from './ui/MessageBubble';
 
 export interface RoundTablePanelRef {
@@ -95,11 +91,7 @@ const RoundTablePanel = forwardRef<RoundTablePanelRef, RoundTablePanelProps>(({
     messages,
     setMessages,
     appendMessage,
-    replaceMessage,
     loadInitial: loadConversationInitial,
-    loadMoreBefore: loadConversationMoreBefore,
-    hasMoreBefore: hasMoreConversationBefore,
-    isLoading: isLoadingConversation,
   } = useConversation(roundTableAdapter, { pageSize: 50 });
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -112,7 +104,6 @@ const RoundTablePanel = forwardRef<RoundTablePanelRef, RoundTablePanelProps>(({
   const [mentionSelectedIndex, setMentionSelectedIndex] = useState(0);
   const [pendingResponses, setPendingResponses] = useState<Set<string>>(new Set());
   const [showConfigModal, setShowConfigModal] = useState(false);
-  const [hoveredParticipant, setHoveredParticipant] = useState<string | null>(null);
   const [allAgents, setAllAgents] = useState<AgentSession[]>([]);
   const addParticipantDetailsRef = useRef<HTMLDetailsElement | null>(null);
   
@@ -128,7 +119,6 @@ const RoundTablePanel = forwardRef<RoundTablePanelRef, RoundTablePanelProps>(({
   
   // 上下文和总结
   const [roundTableSummary, setRoundTableSummary] = useState<string | null>(null); // 圆桌会议总结
-  const [currentTokenCount, setCurrentTokenCount] = useState(0); // 当前token数
   
   // 图片预览
   const [previewImage, setPreviewImage] = useState<{ url: string; mimeType: string } | null>(null);
@@ -167,7 +157,8 @@ const RoundTablePanel = forwardRef<RoundTablePanelRef, RoundTablePanelProps>(({
   }>>([]);
   
   // 收敛控制
-  const [isTargetMode, setIsTargetMode] = useState(false); // 是否为目标式发言
+  // 目标式发言：当前不提供显式开关，使用输入前缀触发（🎯...）
+  const isTargetMode = useMemo(() => inputValue.trim().startsWith('🎯'), [inputValue]); // 是否为目标式发言
   const [agentResponseCounts, setAgentResponseCounts] = useState<Map<string, number>>(new Map()); // 每个 agent 的发言次数
   const agentResponseCountsRef = useRef<Map<string, number>>(new Map());
   
@@ -228,11 +219,24 @@ const RoundTablePanel = forwardRef<RoundTablePanelRef, RoundTablePanelProps>(({
       role: m.sender_type === 'agent' ? 'assistant' : m.sender_type,
       content: m.content || '',
       createdAt: m.created_at || new Date().toISOString(),
-      media: (m.media || []).map(x => ({
-        type: x.type,
-        mimeType: x.mimeType,
-        url: x.preview || (x.mimeType ? `data:${x.mimeType};base64,${x.data}` : x.data),
-      })),
+      media: (m.media || []).map(x => {
+        const rawType = (x.type || '').toLowerCase();
+        const inferredType =
+          rawType === 'image' || rawType === 'video' || rawType === 'audio' || rawType === 'file'
+            ? rawType
+            : (x.mimeType || '').startsWith('image/')
+              ? 'image'
+              : (x.mimeType || '').startsWith('video/')
+                ? 'video'
+                : (x.mimeType || '').startsWith('audio/')
+                  ? 'audio'
+                  : 'file';
+        return {
+          type: inferredType as any,
+          mimeType: x.mimeType,
+          url: x.preview || (x.mimeType ? `data:${x.mimeType};base64,${x.data}` : x.data),
+        };
+      }),
       meta: {
         sender_type: m.sender_type,
         sender_agent_id: m.sender_agent_id,
@@ -341,24 +345,6 @@ const RoundTablePanel = forwardRef<RoundTablePanelRef, RoundTablePanelProps>(({
       });
     }
   }, [mcpServers, connectedMcpServerIds, connectingMcpServerIds, mcpTools]);
-  
-  // 获取所有已启用服务器的工具（按需连接）
-  const getAllMcpToolsOnDemand = useCallback(async (): Promise<MCPTool[]> => {
-    const enabledServers = mcpServers.filter(s => s.enabled);
-    const allTools: MCPTool[] = [];
-    
-    // 并行连接所有服务器
-    const promises = enabledServers.map(async (server) => {
-      const serverId = server.server_id || server.id;
-      const tools = await connectMcpServerOnDemand(serverId);
-      return tools;
-    });
-    
-    const results = await Promise.all(promises);
-    results.forEach(tools => allTools.push(...tools));
-    
-    return allTools;
-  }, [mcpServers, connectMcpServerOnDemand]);
   
   // 暴露刷新方法给父组件
   useImperativeHandle(ref, () => ({
@@ -474,9 +460,6 @@ const RoundTablePanel = forwardRef<RoundTablePanelRef, RoundTablePanelProps>(({
       // 标记该 agent 正在总结
       setSummarizingAgents(prev => new Set(prev).add(agentId));
       
-      const mcpServersForSummary = await getMCPServers();
-      const enabledServers = mcpServersForSummary.filter(s => s.enabled);
-      
       const fullConfig = {
         id: llmConfig.config_id,
         provider: llmConfig.provider,
@@ -488,7 +471,7 @@ const RoundTablePanel = forwardRef<RoundTablePanelRef, RoundTablePanelProps>(({
         metadata: llmConfig.metadata,
       };
       
-      const llmClient = new LLMClient(fullConfig, enabledServers);
+      const llmClient = new LLMClient(fullConfig);
       
       // 构建要总结的对话内容（取前面的消息，保留最近几条不总结）
       const messagesToSummarize = messages.slice(0, -3); // 保留最近3条不进入总结
@@ -580,7 +563,6 @@ ${conversationText}
       
       // 获取 MCP 服务器配置
       const mcpServers = await getMCPServers();
-      const enabledServers = mcpServers.filter(s => s.enabled);
       
       // 创建 LLM 客户端（包含 API 密钥）
       const fullLLMConfig = {
@@ -593,7 +575,7 @@ ${conversationText}
         enabled: llmConfig.enabled,
         metadata: llmConfig.metadata,
       };
-      const llmClient = new LLMClient(fullLLMConfig, enabledServers);
+      const llmClient = new LLMClient(fullLLMConfig);
       
       // 获取已启用的 MCP 服务器列表（不立即连接）
       const enabledMcpServers = mcpServers.filter(s => s.enabled);
@@ -714,9 +696,6 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
       // 合并消息历史
       const messageHistory = [...allMessages, ...messagesToInclude];
       
-      // 更新当前 token 计数
-      setCurrentTokenCount(estimatedTokens);
-      
       // 检查是否需要触发总结（当消息数量很多且接近限制时）
       if (messages.length > 10 && estimatedTokens > tokenThreshold * 0.85 && !roundTableSummary && !summarizingAgents.has(agentId)) {
         console.log(`[RoundTable] Context getting full (${estimatedTokens} tokens, ${messages.length} messages), agent ${participant.name} will summarize first...`);
@@ -735,7 +714,6 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
       
       // 流式回调
       let accumulatedContent = '';
-      let accumulatedThinking = '';
       
       const onChunk = (content: string, thinking?: string) => {
         // 检查是否已取消
@@ -748,13 +726,12 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
           setStreamingResponses(prev => new Map(prev).set(agentId, accumulatedContent));
         }
         if (thinking) {
-          accumulatedThinking = thinking;
           setStreamingThinking(prev => new Map(prev).set(agentId, thinking));
         }
       };
       
       // 检查模型是否支持多模态（图片）
-      const supportsVision = llmConfig.provider === 'google' || 
+      const supportsVision = llmConfig.provider === 'gemini' || 
                              llmConfig.provider === 'openai' ||
                              llmConfig.provider === 'anthropic' ||
                              (llmConfig.model?.includes('vision') || 
@@ -855,7 +832,6 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
           setStreamingResponses(prev => new Map(prev).set(agentId, ''));
           setStreamingThinking(prev => new Map(prev).set(agentId, ''));
           accumulatedContent = '';
-          accumulatedThinking = '';
           
           // 构建工具描述
           const toolsListDescription = requestedTools.map(t => `- ${t.name}: ${t.description || '无描述'}`).join('\n');
@@ -1222,6 +1198,15 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
           
           console.log(`[RoundTable] Agent ${participant.name} mentioned ${targetAgents.length} other agents (excluded self), targetMode: ${message.isTargetMode}, hasMedia: ${!!responseMedia}`);
           
+          const responseMediaForMention = responseMedia
+            ?.filter(m => (m.mimeType || '').startsWith('image/'))
+            .map(m => ({
+              type: 'image' as const,
+              mimeType: m.mimeType,
+              data: m.data,
+              preview: m.preview,
+            }));
+
           for (const targetAgent of targetAgents) {
             enqueueMessage(
               targetAgent.session_id,
@@ -1230,7 +1215,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
               'agent',
               participant.name,
               message.isTargetMode, // 继承目标模式
-              responseMedia // 传递媒体信息给被@的agent
+              responseMediaForMention // 仅传递图片，满足 callAgentLLM 的多模态约束
             );
           }
         }
@@ -1501,12 +1486,6 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
     }
   };
   
-  // 打开配置弹框
-  const handleOpenConfig = (participant: RoundTableParticipant) => {
-    setEditingParticipant(participant);
-    setShowConfigModal(true);
-  };
-  
   // 更新参与者配置
   const handleUpdateParticipant = async (
     sessionId: string,
@@ -1582,13 +1561,6 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
       e.preventDefault();
       handleSendMessage();
     }
-  };
-  
-  // 获取 LLM 配置名称
-  const getLLMConfigName = (configId?: string) => {
-    if (!configId) return '未设置';
-    const config = llmConfigs.find(c => c.config_id === configId);
-    return config?.name || '未知模型';
   };
   
   if (isLoading) {

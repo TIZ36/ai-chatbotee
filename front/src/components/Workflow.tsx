@@ -4,19 +4,18 @@
  */
 
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
-import { Send, Loader, Bot, User, Users, BookOpen, Wrench, AlertCircle, CheckCircle, Brain, Plug, RefreshCw, Power, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Plus, History, Sparkles, Workflow as WorkflowIcon, GripVertical, Play, ArrowRight, Trash2, X, Edit2, RotateCw, Database, Paperclip, Type, Image, Video, Music, HelpCircle, Package, CheckSquare, Square, Quote, Lightbulb } from 'lucide-react';
+import { Send, Loader, Bot, Wrench, AlertCircle, CheckCircle, Brain, Plug, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Sparkles, Workflow as WorkflowIcon, Play, ArrowRight, Trash2, X, Edit2, RotateCw, Database, Paperclip, Music, HelpCircle, Package, CheckSquare, Square, Quote, Lightbulb } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { LLMClient, LLMMessage } from '../services/llmClient';
 import { getLLMConfigs, getLLMConfig, getLLMConfigApiKey, LLMConfigFromDB } from '../services/llmApi';
 import { mcpManager, MCPServer, MCPTool } from '../services/mcpClient';
 import { getMCPServers, MCPServerConfig } from '../services/mcpApi';
-import { getSessions, getAgents, getSession, createSession, getSessionMessages, getMessage, saveMessage, summarizeSession, getSessionSummaries, deleteSession, clearSummarizeCache, deleteMessage, executeMessageComponent, updateSessionAvatar, updateSessionName, updateSessionSystemPrompt, updateSessionMediaOutputPath, updateSessionLLMConfig, upgradeToAgent, Session, Summary, MessageExt, ProcessStep as SessionProcessStep } from '../services/sessionApi';
+import { getSessions, getAgents, getSession, createSession, getSessionMessages, saveMessage, summarizeSession, getSessionSummaries, deleteSession, clearSummarizeCache, deleteMessage, executeMessageComponent, updateSessionAvatar, updateSessionName, updateSessionSystemPrompt, updateSessionMediaOutputPath, updateSessionLLMConfig, upgradeToAgent, Session, Summary, MessageExt } from '../services/sessionApi';
 import { getUserAccess, createOrUpdateUserAccess, UserAccess } from '../services/userAccessApi';
-import { applyRoleToSession, createRole, updateRoleProfile, createSessionFromRole } from '../services/roleApi';
-import { createSkillPack, saveSkillPack, optimizeSkillPackSummary, getSkillPacks, getSessionSkillPacks, assignSkillPack, unassignSkillPack, SkillPack, SessionSkillPack, SkillPackCreationResult, SkillPackProcessInfo } from '../services/skillPackApi';
+import { createRole } from '../services/roleApi';
+import { createSkillPack, saveSkillPack, optimizeSkillPackSummary, getSkillPacks, getSessionSkillPacks, SkillPack, SessionSkillPack, SkillPackCreationResult, SkillPackProcessInfo } from '../services/skillPackApi';
 import { estimate_messages_tokens, get_model_max_tokens, estimate_tokens } from '../services/tokenCounter';
 import { getWorkflows, getWorkflow, Workflow as WorkflowType, WorkflowNode, WorkflowConnection } from '../services/workflowApi';
 import { workflowPool } from '../services/workflowPool';
@@ -26,28 +25,13 @@ import CrawlerModuleSelector from './CrawlerModuleSelector';
 import CrawlerBatchItemSelector from './CrawlerBatchItemSelector';
 import ComponentThumbnails from './ComponentThumbnails';
 import { Button } from './ui/Button';
-import { IconButton, IconButtonWithText } from './ui/IconButton';
 import { ConfirmDialog } from './ui/ConfirmDialog';
-import { InputField, TextareaField, FormFieldGroup } from './ui/FormField';
-import { Input } from './ui/Input';
-import { DataListItem } from './ui/DataListItem';
-import { ScrollArea } from './ui/ScrollArea';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from './ui/Dialog';
 import { toast } from './ui/use-toast';
 import { PluginExecutionPanel } from './PluginExecutionPanel';
 import { MCPExecutionCard } from './MCPExecutionCard';
 import { MCPDetailOverlay } from './MCPDetailOverlay';
 import { emitSessionsChanged, SESSIONS_CHANGED_EVENT } from '../utils/sessionEvents';
-import RoleGeneratorPage from './RoleGeneratorPage';
-import AgentPersonaConfig, { defaultPersonaConfig, type AgentPersonaFullConfig } from './AgentPersonaConfig';
-import { getDimensionOptions, saveDimensionOption } from '../services/roleDimensionApi';
+import { getDimensionOptions } from '../services/roleDimensionApi';
 import { SplitViewMessage } from './SplitViewMessage';
 import { MediaGallery, MediaItem } from './ui/MediaGallery';
 import { SessionMediaPanel, SessionMediaItem } from './ui/SessionMediaPanel';
@@ -55,6 +39,29 @@ import { truncateBase64Strings } from '../utils/textUtils';
 import { useConversation } from '../conversation/useConversation';
 import { createSessionConversationAdapter } from '../conversation/adapters/sessionConversation';
 import { MessageAvatar, MessageBubbleContainer, MessageStatusIndicator } from './ui/MessageBubble';
+import {
+  applyProfessionToNameOrPrompt,
+  detectProfessionType,
+  extractProfession,
+} from './workflow/profession';
+import { useFloatingComposerPadding } from './workflow/useFloatingComposerPadding';
+import { parseMCPContentBlocks, renderMCPBlocks, renderMCPMedia } from './workflow/mcpRender';
+import {
+  SessionTypeDialog,
+  UpgradeToAgentDialog,
+  AvatarConfigDialog,
+  SkillPackDialog,
+  NewMeetingDialog,
+  NewResearchDialog,
+  NicknameDialog,
+  PersonaPanel,
+  RoleGeneratorDialog,
+  HeaderConfigDialog,
+  AddProfessionDialog,
+  DEFAULT_CAREER_PROFESSIONS,
+  DEFAULT_GAME_PROFESSIONS,
+  SystemPromptEditDialog,
+} from './workflow/dialogs';
 
 /** 单个过程步骤（用于记录多轮思考和MCP调用） */
 interface ProcessStep {
@@ -131,1262 +138,6 @@ interface Message {
   processSteps?: ProcessStep[];
 }
 
-// 会话列表项组件
-// 默认功能职业列表
-const DEFAULT_CAREER_PROFESSIONS = [
-  '产品经理', '工程师', '设计师', '作家', '分析师', '教师', '医生',
-  '咨询师', '创业者', '研究员', '营销专家', '财务顾问'
-];
-
-// 默认游戏职业列表
-const DEFAULT_GAME_PROFESSIONS = [
-  '战士', '法师', '盗贼', '牧师', '游侠', '术士', '圣骑士', '德鲁伊', '野蛮人', '吟游诗人'
-];
-
-// 从名称或人设中提取职业（需要传入职业列表）
-const extractProfession = (
-  name: string | null | undefined, 
-  systemPrompt: string | null | undefined,
-  professionList: string[]
-): string | null => {
-  // 先从名称中提取
-  if (name) {
-    for (const keyword of professionList) {
-      if (name.includes(keyword)) {
-        return keyword;
-      }
-    }
-  }
-  // 再从人设中提取
-  if (systemPrompt) {
-    // 先尝试匹配 "职业：xxx" 格式
-    const professionMatch = systemPrompt.match(/职业[：:]\s*([^\n,，。]+)/);
-    if (professionMatch) {
-      const matched = professionMatch[1].trim();
-      if (professionList.includes(matched)) {
-        return matched;
-      }
-    }
-    // 再尝试关键词匹配
-    for (const keyword of professionList) {
-      if (systemPrompt.includes(keyword)) {
-        return keyword;
-      }
-    }
-  }
-  return null;
-};
-
-// 更新名称或人设以反映职业（需要传入职业列表）
-const applyProfessionToNameOrPrompt = (
-  profession: string | null,
-  currentName: string,
-  currentSystemPrompt: string,
-  professionList: string[]
-): { name: string; systemPrompt: string } => {
-  let newName = currentName;
-  let newSystemPrompt = currentSystemPrompt;
-
-  if (!profession) {
-    // 如果选择"无"，移除名称中的职业关键词
-    for (const keyword of professionList) {
-      if (newName.includes(keyword)) {
-        newName = newName.replace(keyword, '').trim();
-        break;
-      }
-    }
-    // 移除人设中的职业标记
-    newSystemPrompt = newSystemPrompt.replace(/职业[：:]\s*[^\n,，。]+/g, '').trim();
-    return { name: newName, systemPrompt: newSystemPrompt };
-  }
-
-  // 检查名称中是否已有职业关键词
-  let nameHasProfession = false;
-  for (const keyword of professionList) {
-    if (newName.includes(keyword)) {
-      nameHasProfession = true;
-      // 替换为新的职业
-      newName = newName.replace(keyword, profession).trim();
-      break;
-    }
-  }
-
-  // 如果名称中没有职业，添加到名称中
-  if (!nameHasProfession && newName) {
-    newName = `${profession} ${newName}`.trim();
-  }
-
-  // 更新人设中的职业标记
-  if (newSystemPrompt.match(/职业[：:]\s*[^\n,，。]+/)) {
-    newSystemPrompt = newSystemPrompt.replace(/职业[：:]\s*[^\n,，。]+/, `职业：${profession}`);
-  } else if (newSystemPrompt) {
-    // 如果人设不为空但没有职业标记，在开头添加
-    newSystemPrompt = `职业：${profession}\n\n${newSystemPrompt}`;
-  } else {
-    newSystemPrompt = `职业：${profession}`;
-  }
-
-  return { name: newName, systemPrompt: newSystemPrompt };
-};
-
-// 判断职业类型（从名称或人设中判断）
-const detectProfessionType = (name: string | null | undefined, systemPrompt: string | null | undefined): 'career' | 'game' => {
-  const allText = `${name || ''} ${systemPrompt || ''}`;
-  // 如果包含游戏职业关键词，判断为游戏职业
-  for (const keyword of DEFAULT_GAME_PROFESSIONS) {
-    if (allText.includes(keyword)) {
-      return 'game';
-    }
-  }
-  // 默认是功能职业
-  return 'career';
-};
-
-interface SessionListItemProps {
-  session: Session;
-  displayName: string;
-  avatarUrl: string | null;
-  isSelected: boolean;
-  onSelect: () => void;
-  onDelete: (e: React.MouseEvent) => void;
-  onUpdateName: (name: string) => Promise<void>;
-  onUpdateAvatar: (avatar: string) => Promise<void>;
-  onConfigSaved?: () => Promise<Session | null>; // 配置保存后的回调，用于刷新会话列表，返回更新后的会话数据
-}
-
-const SessionListItem: React.FC<SessionListItemProps> = ({
-  session,
-  displayName,
-  avatarUrl,
-  isSelected,
-  onSelect,
-  onDelete,
-  onUpdateName,
-  onUpdateAvatar,
-  onConfigSaved,
-}) => {
-  const [showEditDialog, setShowEditDialog] = useState(false);
-  const [showConfigDialog, setShowConfigDialog] = useState(false); // 会话配置对话框（包含头像、昵称、人设、技能包、多媒体保存地址）
-  const [editName, setEditName] = useState(session.name || '');
-  const [editAvatar, setEditAvatar] = useState<string | null>(avatarUrl);
-  const [editSystemPrompt, setEditSystemPrompt] = useState(session.system_prompt || '');
-  const [editMediaOutputPath, setEditMediaOutputPath] = useState(session.media_output_path || '');
-  const [editLlmConfigId, setEditLlmConfigId] = useState<string | null>(session.llm_config_id || null);
-  const [editProfession, setEditProfession] = useState<string | null>(null); // 职业选择
-  const [editProfessionType, setEditProfessionType] = useState<'career' | 'game'>('career'); // 职业类型（功能职业或游戏职业）
-  const [careerProfessions, setCareerProfessions] = useState<string[]>(DEFAULT_CAREER_PROFESSIONS); // 功能职业列表
-  const [gameProfessions, setGameProfessions] = useState<string[]>(DEFAULT_GAME_PROFESSIONS); // 游戏职业列表
-  const [isLoadingProfessions, setIsLoadingProfessions] = useState(false); // 加载职业列表状态
-  const [showAddProfessionDialog, setShowAddProfessionDialog] = useState(false); // 添加职业对话框
-  const [newProfessionValue, setNewProfessionValue] = useState(''); // 新职业名称
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const configFileInputRef = useRef<HTMLInputElement>(null); // 配置对话框的文件输入
-  const [isSaving, setIsSaving] = useState(false);
-  const [isSavingConfig, setIsSavingConfig] = useState(false); // 配置保存状态
-  const [isSavingAsRole, setIsSavingAsRole] = useState(false);
-  const [activeConfigTab, setActiveConfigTab] = useState<'basic' | 'skillpack' | 'media' | 'persona'>('basic'); // 配置对话框的标签页
-  
-  // Persona 高级配置状态
-  const [editPersonaConfig, setEditPersonaConfig] = useState<AgentPersonaFullConfig>(defaultPersonaConfig);
-  
-  // 技能包管理状态
-  const [showSkillPackTab, setShowSkillPackTab] = useState(false);
-  const [allSkillPacks, setAllSkillPacks] = useState<SkillPack[]>([]);
-  const [sessionSkillPacks, setSessionSkillPacks] = useState<SessionSkillPack[]>([]);
-  const [isLoadingSkillPacks, setIsLoadingSkillPacks] = useState(false);
-
-  // 加载技能包数据
-  const loadSkillPacks = async () => {
-    setIsLoadingSkillPacks(true);
-    try {
-      const [allPacks, sessionPacks] = await Promise.all([
-        getSkillPacks(),
-        getSessionSkillPacks(session.session_id),
-      ]);
-      setAllSkillPacks(allPacks);
-      setSessionSkillPacks(sessionPacks);
-    } catch (error) {
-      console.error('[SessionListItem] Failed to load skill packs:', error);
-    } finally {
-      setIsLoadingSkillPacks(false);
-    }
-  };
-
-  // 加载职业列表（包括自定义职业）
-  const loadProfessions = async () => {
-    setIsLoadingProfessions(true);
-    try {
-      const [careerOptions, gameOptions] = await Promise.all([
-        getDimensionOptions('profession', 'career'),
-        getDimensionOptions('profession', 'game'),
-      ]);
-      setCareerProfessions([...DEFAULT_CAREER_PROFESSIONS, ...careerOptions]);
-      setGameProfessions([...DEFAULT_GAME_PROFESSIONS, ...gameOptions]);
-    } catch (error) {
-      console.error('[SessionListItem] Failed to load professions:', error);
-    } finally {
-      setIsLoadingProfessions(false);
-    }
-  };
-
-  // 保存自定义职业
-  const handleSaveCustomProfession = async () => {
-    if (!newProfessionValue.trim()) {
-      toast({ title: '请输入职业名称', variant: 'destructive' });
-      return;
-    }
-
-    try {
-      const result = await saveDimensionOption('profession', editProfessionType, newProfessionValue.trim());
-      if (result.success) {
-        toast({ title: '职业已添加', variant: 'success' });
-        // 重新加载职业列表
-        await loadProfessions();
-        // 自动选择新添加的职业
-        setEditProfession(newProfessionValue.trim());
-        setShowAddProfessionDialog(false);
-        setNewProfessionValue('');
-      } else {
-        toast({ title: '添加失败', description: result.error, variant: 'destructive' });
-      }
-    } catch (error) {
-      console.error('[SessionListItem] Failed to save custom profession:', error);
-      toast({ title: '添加失败', description: error instanceof Error ? error.message : String(error), variant: 'destructive' });
-    }
-  };
-
-  // 点击头像弹出完整配置对话框
-  const handleAvatarClick = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    // 如果提供了刷新回调，先刷新会话数据以确保获取最新值（例如从圆桌面板修改的配置）
-    let currentSession = session;
-    if (onConfigSaved) {
-      const updatedSession = await onConfigSaved();
-      // 如果返回了更新后的会话数据，使用它；否则使用当前的 session prop
-      if (updatedSession) {
-        currentSession = updatedSession;
-      }
-    }
-    // 从最新的会话数据加载值
-    setEditName(currentSession.name || '');
-    setEditAvatar(currentSession.avatar || null);
-    setEditSystemPrompt(currentSession.system_prompt || '');
-    setEditMediaOutputPath(currentSession.media_output_path || '');
-    // 判断职业类型并提取当前职业
-    const professionType = detectProfessionType(currentSession.name, currentSession.system_prompt);
-    setEditProfessionType(professionType);
-    const allProfessions = professionType === 'career' ? careerProfessions : gameProfessions;
-    const currentProfession = extractProfession(currentSession.name, currentSession.system_prompt, allProfessions);
-    setEditProfession(currentProfession);
-    setActiveConfigTab('basic');
-    loadSkillPacks();
-    loadProfessions(); // 加载职业列表
-    setShowConfigDialog(true);
-  };
-
-  const handleSaveAsRole = async () => {
-    const name = editName.trim() || displayName;
-    const avatar = (editAvatar || '').trim();
-    const systemPrompt = editSystemPrompt.trim();
-    const llmConfigId = editLlmConfigId;
-    const mediaOutputPath = editMediaOutputPath.trim();
-
-    if (!avatar || !systemPrompt || !llmConfigId) {
-      toast({
-        title: '还差一步',
-        description: '保存为角色需要：头像、人设、默认LLM。',
-        variant: 'destructive',
-      });
-      setActiveConfigTab('basic');
-      return;
-    }
-
-    setIsSavingAsRole(true);
-    try {
-      const role = await createRole({
-        name,
-        avatar,
-        system_prompt: systemPrompt,
-        llm_config_id: llmConfigId,
-        media_output_path: mediaOutputPath || undefined,
-      });
-      if (onConfigSaved) {
-        await onConfigSaved();
-      }
-      emitSessionsChanged();
-      setShowConfigDialog(false);
-      toast({
-        title: '已保存为角色',
-        description: `角色「${role.name || role.title || role.session_id}」已加入角色库`,
-        variant: 'success',
-      });
-    } catch (error) {
-      console.error('Failed to save as role:', error);
-      toast({
-        title: '保存为角色失败',
-        description: error instanceof Error ? error.message : String(error),
-        variant: 'destructive',
-      });
-    } finally {
-      setIsSavingAsRole(false);
-    }
-  };
-
-  // 当 session prop 变化时，同步更新编辑状态（如果对话框已打开）
-  // 这确保当父组件刷新会话列表后，对话框中的值也会更新
-  useEffect(() => {
-    if (showConfigDialog) {
-      setEditName(session.name || '');
-      setEditAvatar(session.avatar || null);
-      setEditSystemPrompt(session.system_prompt || '');
-      setEditMediaOutputPath(session.media_output_path || '');
-      setEditLlmConfigId(session.llm_config_id || null);
-      // 判断职业类型并提取当前职业
-      const professionType = detectProfessionType(session.name, session.system_prompt);
-      setEditProfessionType(professionType);
-      const allProfessions = professionType === 'career' ? careerProfessions : gameProfessions;
-      const currentProfession = extractProfession(session.name, session.system_prompt, allProfessions);
-      setEditProfession(currentProfession);
-      // 加载 Persona 配置
-      const savedPersona = (session.ext as any)?.persona;
-      if (savedPersona) {
-        setEditPersonaConfig({
-          voice: savedPersona.voice || defaultPersonaConfig.voice,
-          thinking: savedPersona.thinking || defaultPersonaConfig.thinking,
-          memoryTriggers: savedPersona.memoryTriggers || [],
-        });
-      } else {
-        setEditPersonaConfig(defaultPersonaConfig);
-      }
-    }
-  }, [session.name, session.avatar, session.system_prompt, session.media_output_path, session.llm_config_id, session.ext, showConfigDialog, careerProfessions, gameProfessions]);
-
-  // 打开完整编辑对话框（通过其他方式触发，如右键菜单等）
-  const handleOpenFullEditDialog = (e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    setShowEditDialog(true);
-    setEditName(session.name || '');
-    setEditAvatar(avatarUrl);
-    setShowSkillPackTab(false);
-    loadSkillPacks();
-  };
-
-  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // 检查文件类型
-    if (!file.type.startsWith('image/')) {
-      alert('请选择图片文件');
-      return;
-    }
-
-    // 检查文件大小（限制为 2MB）
-    if (file.size > 2 * 1024 * 1024) {
-      alert('图片大小不能超过 2MB');
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const base64String = event.target?.result as string;
-      setEditAvatar(base64String);
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleSave = async () => {
-    setIsSaving(true);
-    try {
-      // 更新名称
-      if (editName.trim() !== (session.name || '')) {
-        await onUpdateName(editName.trim());
-      }
-      
-      // 更新头像
-      if (editAvatar !== avatarUrl) {
-        await onUpdateAvatar(editAvatar || '');
-      }
-      
-      setShowEditDialog(false);
-    } catch (error) {
-      console.error('[SessionListItem] Failed to save:', error);
-      alert('保存失败，请重试');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleCancel = () => {
-    setShowEditDialog(false);
-    setEditName(session.name || '');
-    setEditAvatar(avatarUrl);
-    setShowSkillPackTab(false);
-  };
-
-  // 切换技能包分配状态
-  const toggleSkillPackAssignment = async (skillPackId: string, isAssigned: boolean) => {
-    try {
-      if (isAssigned) {
-        await unassignSkillPack(skillPackId, session.session_id);
-      } else {
-        const targetType = session.session_type === 'agent' ? 'agent' : 'memory';
-        await assignSkillPack(skillPackId, session.session_id, targetType);
-      }
-      await loadSkillPacks();
-    } catch (error: any) {
-      console.error('[SessionListItem] Failed to toggle skill pack assignment:', error);
-      alert(`操作失败: ${error.message}`);
-    }
-  };
-
-  // 默认头像 SVG（机器人图标）
-  const DefaultAvatar = () => (
-    <div className="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center flex-shrink-0 cursor-pointer hover:bg-primary-700 transition-colors">
-      <Bot className="w-5 h-5 text-white" />
-    </div>
-  );
-
-  return (
-    <>
-      <div
-        className={`group relative w-full text-left px-2.5 py-2 rounded-lg text-sm transition-colors ${
-          isSelected
-            ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-200 border border-primary-200 dark:border-primary-800'
-            : 'bg-gray-50 dark:bg-[#363636] text-gray-700 dark:text-[#ffffff] hover:bg-gray-100 dark:hover:bg-[#404040] border border-gray-200 dark:border-[#404040]'
-        }`}
-      >
-        <button
-          onClick={onSelect}
-          className="w-full text-left"
-        >
-          <div className="flex items-start space-x-2">
-            {/* 头像 - 可点击 */}
-            <div onClick={handleAvatarClick} className="cursor-pointer hover:opacity-80 transition-opacity">
-              {avatarUrl ? (
-                <img
-                  src={avatarUrl}
-                  alt="Avatar"
-                  className="w-8 h-8 rounded-full flex-shrink-0 object-cover"
-                />
-              ) : (
-                <DefaultAvatar />
-              )}
-            </div>
-            
-            <div className="flex-1 min-w-0">
-              {/* 名称显示 */}
-              <div className="font-medium truncate">
-                {displayName}
-              </div>
-              
-              <div className="flex items-center space-x-2 mt-0.5 text-xs text-gray-500 dark:text-[#b0b0b0]">
-                {session.message_count ? (
-                  <span>{session.message_count} 条消息</span>
-                ) : null}
-                {session.last_message_at && (
-                  <span className="truncate">
-                    {new Date(session.last_message_at).toLocaleDateString('zh-CN', {
-                      month: 'short',
-                      day: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
-        </button>
-        
-        {/* 删除按钮 */}
-        <button
-          onClick={onDelete}
-          className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded"
-          title="删除会话"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
-      </div>
-
-      {/* 编辑对话框 */}
-      {showEditDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={handleCancel}>
-          <div className="bg-white dark:bg-[#2d2d2d] rounded-lg shadow-xl p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-[#ffffff]">
-                编辑会话
-              </h3>
-              <button
-                onClick={handleCancel}
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* 标签页 */}
-            <div className="flex border-b border-gray-200 dark:border-[#404040] mb-4">
-              <button
-                onClick={() => setShowSkillPackTab(false)}
-                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                  !showSkillPackTab
-                    ? 'border-primary-500 dark:border-primary-600 text-primary-600 dark:text-primary-400'
-                    : 'border-transparent text-gray-500 dark:text-[#b0b0b0] hover:text-gray-700 dark:hover:text-[#cccccc]'
-                }`}
-              >
-                基本信息
-              </button>
-              <button
-                onClick={() => {
-                  setShowSkillPackTab(true);
-                  loadSkillPacks();
-                }}
-                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                  showSkillPackTab
-                    ? 'border-primary-500 dark:border-primary-600 text-primary-600 dark:text-primary-400'
-                    : 'border-transparent text-gray-500 dark:text-[#b0b0b0] hover:text-gray-700 dark:hover:text-[#cccccc]'
-                }`}
-              >
-                技能包
-              </button>
-            </div>
-
-            {showSkillPackTab ? (
-              /* 技能包管理 */
-              <div className="space-y-4">
-                {isLoadingSkillPacks ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader className="w-6 h-6 animate-spin text-primary-500" />
-                  </div>
-                ) : (
-                  <>
-                    <div className="text-sm text-gray-600 dark:text-[#b0b0b0] mb-2">
-                      为{session.session_type === 'agent' ? '智能体' : '记忆体'}分配技能包
-                    </div>
-                    {allSkillPacks.length === 0 ? (
-                      <div className="text-center py-8 text-gray-500 dark:text-[#b0b0b0]">
-                        暂无技能包，请在聊天界面创建技能包
-                      </div>
-                    ) : (
-                      <div className="space-y-2 max-h-96 overflow-y-auto">
-                        {allSkillPacks.map((pack) => {
-                          const isAssigned = sessionSkillPacks.some(
-                            sp => sp.skill_pack_id === pack.skill_pack_id
-                          );
-                          return (
-                            <div
-                              key={pack.skill_pack_id}
-                              className={`flex items-start space-x-3 p-3 rounded-lg border ${
-                                isAssigned
-                                  ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-200 dark:border-primary-800'
-                                  : 'bg-gray-50 dark:bg-[#363636] border-gray-200 dark:border-[#404040]'
-                              }`}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={isAssigned}
-                                onChange={() => toggleSkillPackAssignment(pack.skill_pack_id, isAssigned)}
-                                className="mt-1 w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
-                              />
-                              <div className="flex-1 min-w-0">
-                                <div className="font-medium text-sm text-gray-900 dark:text-white">
-                                  {pack.name}
-                                </div>
-                                <div className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-1 line-clamp-2">
-                                  {pack.summary}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            ) : (
-              /* 基本信息编辑 */
-              <div className="space-y-4">
-              {/* 头像编辑 */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
-                  头像
-                </label>
-                <div className="flex items-center space-x-4">
-                  <div className="relative">
-                    {editAvatar ? (
-                      <img
-                        src={editAvatar}
-                        alt="Avatar"
-                        className="w-16 h-16 rounded-full object-cover border-2 border-gray-200 dark:border-[#404040]"
-                      />
-                    ) : (
-                      <div className="w-16 h-16 rounded-full bg-primary-600 flex items-center justify-center border-2 border-gray-200 dark:border-[#404040]">
-                        <Bot className="w-8 h-8 text-white" />
-                      </div>
-                    )}
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/*"
-                      onChange={handleAvatarUpload}
-                      className="hidden"
-                    />
-                  </div>
-                  <div className="flex flex-col space-y-2">
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-[#363636] hover:bg-gray-200 dark:hover:bg-[#4a4a4a] text-gray-700 dark:text-[#ffffff] rounded transition-colors"
-                    >
-                      选择图片
-                    </button>
-                    {editAvatar && (
-                      <button
-                        onClick={() => setEditAvatar(null)}
-                        className="px-3 py-1.5 text-sm bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50 text-red-700 dark:text-red-400 rounded transition-colors"
-                      >
-                        清除头像
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <p className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-2">
-                  支持 JPG、PNG 等图片格式，建议大小不超过 2MB
-                </p>
-              </div>
-
-              {/* 名称编辑 */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
-                  会话名称
-                </label>
-                <input
-                  type="text"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      handleSave();
-                    } else if (e.key === 'Escape') {
-                      handleCancel();
-                    }
-                  }}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600"
-                  placeholder="输入会话名称（留空则使用默认名称）"
-                />
-              </div>
-
-              {/* 人设显示 */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
-                  人设
-                </label>
-                <div className={`px-3 py-2.5 rounded-lg text-sm ${
-                  session.system_prompt 
-                    ? 'bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-700' 
-                    : 'bg-gray-50 dark:bg-[#363636] border border-dashed border-gray-300 dark:border-[#404040]'
-                }`}>
-                  {session.system_prompt ? (
-                    <p className="text-gray-700 dark:text-[#ffffff] line-clamp-3">
-                      {session.system_prompt}
-                    </p>
-                  ) : (
-                    <p className="text-gray-400 dark:text-[#808080] italic">
-                      人设为空
-                    </p>
-                  )}
-                </div>
-                <p className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-1">
-                  人设可在聊天界面底部设置
-                </p>
-              </div>
-              </div>
-            )}
-
-            {/* 操作按钮 */}
-            <div className="flex justify-end space-x-3 mt-6">
-              <button
-                onClick={handleCancel}
-                disabled={isSaving}
-                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-[#ffffff] bg-gray-100 dark:bg-[#363636] hover:bg-gray-200 dark:hover:bg-[#4a4a4a] rounded-lg transition-colors disabled:opacity-50"
-              >
-                关闭
-              </button>
-              {!showSkillPackTab && (
-                <button
-                  onClick={handleSave}
-                  disabled={isSaving}
-                  className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 flex items-center space-x-2"
-                >
-                  {isSaving ? (
-                    <>
-                      <Loader className="w-4 h-4 animate-spin" />
-                      <span>保存中...</span>
-                    </>
-                  ) : (
-                    <span>保存</span>
-                  )}
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 会话配置对话框 - 使用 Portal 渲染到 body 下，确保在主界面中心显示 */}
-      {showConfigDialog && createPortal(
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]" onClick={() => setShowConfigDialog(false)}>
-          <div className="bg-white dark:bg-[#2d2d2d] rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="px-5 py-4 border-b border-gray-200 dark:border-[#404040] flex items-center justify-between flex-shrink-0">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                配置会话
-              </h3>
-              <button
-                onClick={() => setShowConfigDialog(false)}
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* 标签页 */}
-            <div className="flex border-b border-gray-200 dark:border-[#404040] flex-shrink-0">
-              <button
-                onClick={() => setActiveConfigTab('basic')}
-                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                  activeConfigTab === 'basic'
-                    ? 'border-primary-500 dark:border-primary-600 text-primary-600 dark:text-primary-400'
-                    : 'border-transparent text-gray-500 dark:text-[#b0b0b0] hover:text-gray-700 dark:hover:text-[#cccccc]'
-                }`}
-              >
-                基本信息
-              </button>
-              <button
-                onClick={() => {
-                  setActiveConfigTab('skillpack');
-                  loadSkillPacks();
-                }}
-                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                  activeConfigTab === 'skillpack'
-                    ? 'border-primary-500 dark:border-primary-600 text-primary-600 dark:text-primary-400'
-                    : 'border-transparent text-gray-500 dark:text-[#b0b0b0] hover:text-gray-700 dark:hover:text-[#cccccc]'
-                }`}
-              >
-                技能包
-              </button>
-              <button
-                onClick={() => setActiveConfigTab('media')}
-                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                  activeConfigTab === 'media'
-                    ? 'border-primary-500 dark:border-primary-600 text-primary-600 dark:text-primary-400'
-                    : 'border-transparent text-gray-500 dark:text-[#b0b0b0] hover:text-gray-700 dark:hover:text-[#cccccc]'
-                }`}
-              >
-                多媒体设置
-              </button>
-              <button
-                onClick={() => setActiveConfigTab('persona')}
-                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                  activeConfigTab === 'persona'
-                    ? 'border-primary-500 dark:border-primary-600 text-primary-600 dark:text-primary-400'
-                    : 'border-transparent text-gray-500 dark:text-[#b0b0b0] hover:text-gray-700 dark:hover:text-[#cccccc]'
-                }`}
-              >
-                高级设置
-              </button>
-            </div>
-
-            {/* 内容区域 */}
-            <div className="flex-1 overflow-y-auto p-5">
-              {activeConfigTab === 'basic' && (
-                <div className="space-y-4">
-                  {/* 头像配置 */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
-                      头像
-                    </label>
-                    <div className="flex items-center space-x-4">
-                      <div className="relative">
-                        <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-gray-200 dark:border-[#404040] flex items-center justify-center bg-gray-100 dark:bg-[#363636]">
-                          {editAvatar ? (
-                            <img src={editAvatar} alt="Avatar" className="w-full h-full object-cover" />
-                          ) : (
-                            <Bot className="w-10 h-10 text-gray-400" />
-                          )}
-                        </div>
-                        <input
-                          ref={configFileInputRef}
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (!file) return;
-                            if (!file.type.startsWith('image/')) {
-                              alert('请选择图片文件');
-                              return;
-                            }
-                            if (file.size > 2 * 1024 * 1024) {
-                              alert('图片大小不能超过 2MB');
-                              return;
-                            }
-                            const reader = new FileReader();
-                            reader.onload = (event) => {
-                              setEditAvatar(event.target?.result as string);
-                            };
-                            reader.readAsDataURL(file);
-                          }}
-                        />
-                      </div>
-                      <div className="flex flex-col space-y-2">
-                        <button
-                          onClick={() => configFileInputRef.current?.click()}
-                          className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-[#363636] hover:bg-gray-200 dark:hover:bg-[#4a4a4a] text-gray-700 dark:text-[#ffffff] rounded transition-colors"
-                        >
-                          选择图片
-                        </button>
-                        {editAvatar && (
-                          <button
-                            onClick={() => setEditAvatar(null)}
-                            className="px-3 py-1.5 text-sm bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50 text-red-700 dark:text-red-400 rounded transition-colors"
-                          >
-                            清除头像
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    <p className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-2">
-                      支持 JPG、PNG 等格式，建议大小不超过 2MB
-                    </p>
-                  </div>
-
-                  {/* 昵称配置 */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
-                      昵称
-                    </label>
-                    <input
-                      type="text"
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600"
-                      placeholder="输入会话昵称（留空则使用默认名称）"
-                    />
-                  </div>
-
-                  {/* 职业选择（仅对 agent 显示） */}
-                  {session.session_type === 'agent' && (
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff]">
-                          职业
-                        </label>
-                        <button
-                          onClick={() => setShowAddProfessionDialog(true)}
-                          className="flex items-center gap-1 px-2 py-1 text-xs text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-colors"
-                          title="添加自定义职业"
-                        >
-                          <Plus className="w-3 h-3" />
-                          <span>添加</span>
-                        </button>
-                      </div>
-                      
-                      {/* 职业类型切换 */}
-                      <div className="flex gap-2 mb-2">
-                        <button
-                          onClick={() => {
-                            setEditProfessionType('career');
-                            setEditProfession(null); // 切换类型时清空选择
-                          }}
-                          className={`flex-1 px-3 py-1.5 text-sm rounded-lg transition-colors ${
-                            editProfessionType === 'career'
-                              ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-                              : 'bg-gray-100 dark:bg-[#363636] text-gray-600 dark:text-[#b0b0b0] hover:bg-gray-200 dark:hover:bg-[#404040]'
-                          }`}
-                        >
-                          功能职业
-                        </button>
-                        <button
-                          onClick={() => {
-                            setEditProfessionType('game');
-                            setEditProfession(null); // 切换类型时清空选择
-                          }}
-                          className={`flex-1 px-3 py-1.5 text-sm rounded-lg transition-colors ${
-                            editProfessionType === 'game'
-                              ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-                              : 'bg-gray-100 dark:bg-[#363636] text-gray-600 dark:text-[#b0b0b0] hover:bg-gray-200 dark:hover:bg-[#404040]'
-                          }`}
-                        >
-                          游戏职业
-                        </button>
-                      </div>
-                      
-                      {/* 职业选择下拉框 */}
-                      <select
-                        value={editProfession || ''}
-                        onChange={(e) => {
-                          const selectedProfession = e.target.value || null;
-                          setEditProfession(selectedProfession);
-                          // 自动更新名称和人设以反映职业变化
-                          const currentProfessionList = editProfessionType === 'career' ? careerProfessions : gameProfessions;
-                          const { name, systemPrompt } = applyProfessionToNameOrPrompt(
-                            selectedProfession,
-                            editName,
-                            editSystemPrompt,
-                            currentProfessionList
-                          );
-                          setEditName(name);
-                          setEditSystemPrompt(systemPrompt);
-                        }}
-                        className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600"
-                        disabled={isLoadingProfessions}
-                      >
-                        <option value="">无（自定义）</option>
-                        {(editProfessionType === 'career' ? careerProfessions : gameProfessions).map(profession => (
-                          <option key={profession} value={profession}>
-                            {profession}
-                          </option>
-                        ))}
-                      </select>
-                      <p className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-1">
-                        选择职业后，会自动更新名称和人设中的职业信息
-                      </p>
-                    </div>
-                  )}
-
-                  {/* 人设配置 */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
-                      人设
-                    </label>
-                    <textarea
-                      value={editSystemPrompt}
-                      onChange={(e) => setEditSystemPrompt(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600 resize-none"
-                      rows={6}
-                      placeholder="输入系统提示词（人设），用于定义AI的角色和行为..."
-                    />
-                    <p className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-1">
-                      人设定义了AI的角色、风格和行为特征
-                    </p>
-                  </div>
-
-                  {/* 默认模型配置 */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
-                      默认模型
-                    </label>
-                    <select
-                      value={editLlmConfigId || ''}
-                      onChange={(e) => setEditLlmConfigId(e.target.value || null)}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600"
-                    >
-                      <option value="">不设置默认模型</option>
-                      {llmConfigs.filter(c => c.enabled).map(config => (
-                        <option key={config.config_id} value={config.config_id}>
-                          {config.name} ({config.provider})
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-1">
-                      选择该会话默认使用的 LLM 模型，选中后会自动应用到聊天
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {activeConfigTab === 'skillpack' && (
-                <div className="space-y-4">
-                  {isLoadingSkillPacks ? (
-                    <div className="flex items-center justify-center py-8">
-                      <Loader className="w-6 h-6 animate-spin text-primary-500" />
-                    </div>
-                  ) : (
-                    <>
-                      <div className="text-sm text-gray-600 dark:text-[#b0b0b0] mb-2">
-                        为{session.session_type === 'agent' ? '智能体' : '记忆体'}分配技能包
-                      </div>
-                      {allSkillPacks.length === 0 ? (
-                        <div className="text-center py-8 text-gray-500 dark:text-[#b0b0b0]">
-                          暂无技能包，请在聊天界面创建技能包
-                        </div>
-                      ) : (
-                        <div className="space-y-2 max-h-96 overflow-y-auto">
-                          {allSkillPacks.map((pack) => {
-                            const isAssigned = sessionSkillPacks.some(
-                              sp => sp.skill_pack_id === pack.skill_pack_id
-                            );
-                            return (
-                              <div
-                                key={pack.skill_pack_id}
-                                className={`flex items-start space-x-3 p-3 rounded-lg border ${
-                                  isAssigned
-                                    ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-200 dark:border-primary-800'
-                                    : 'bg-gray-50 dark:bg-[#363636] border-gray-200 dark:border-[#404040]'
-                                }`}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={isAssigned}
-                                  onChange={() => toggleSkillPackAssignment(pack.skill_pack_id, isAssigned)}
-                                  className="mt-1 w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
-                                />
-                                <div className="flex-1 min-w-0">
-                                  <div className="font-medium text-sm text-gray-900 dark:text-white">
-                                    {pack.name}
-                                  </div>
-                                  <div className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-1 line-clamp-2">
-                                    {pack.summary}
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-
-              {activeConfigTab === 'media' && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
-                      多媒体保存地址
-                    </label>
-                    <input
-                      type="text"
-                      value={editMediaOutputPath}
-                      onChange={(e) => setEditMediaOutputPath(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600"
-                      placeholder="输入本地路径，例如：/Users/username/Documents/media 或 C:\Users\username\Documents\media"
-                    />
-                    <p className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-1">
-                      设置图片、视频、音频等多媒体文件的保存路径。留空则使用默认路径。
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {activeConfigTab === 'persona' && (
-                <div className="space-y-4">
-                  <div className="text-sm text-gray-600 dark:text-[#b0b0b0] mb-4">
-                    配置语音、自驱思考、记忆触发等高级 Persona 功能
-                  </div>
-                  <AgentPersonaConfig
-                    config={editPersonaConfig}
-                    onChange={setEditPersonaConfig}
-                    compact
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* 底部按钮 */}
-            <div className="px-5 py-4 bg-gray-50 dark:bg-[#1a1a1a] flex items-center justify-end space-x-3 flex-shrink-0">
-              {session.session_type !== 'agent' && (
-                <button
-                  onClick={handleSaveAsRole}
-                  disabled={isSavingConfig || isSavingAsRole}
-                  className="px-4 py-2 text-sm font-medium text-primary-700 dark:text-primary-300 bg-primary-100 dark:bg-primary-900/30 hover:bg-primary-200 dark:hover:bg-primary-900/50 rounded-lg transition-colors disabled:opacity-50 flex items-center space-x-2"
-                  title="复制当前配置为一个可复用角色（不影响当前会话）"
-                >
-                  {isSavingAsRole ? (
-                    <>
-                      <Loader className="w-4 h-4 animate-spin" />
-                      <span>保存为角色中...</span>
-                    </>
-                  ) : (
-                    <span>保存为角色</span>
-                  )}
-                </button>
-              )}
-              <button
-                onClick={() => setShowConfigDialog(false)}
-                className="text-sm text-gray-600 dark:text-[#b0b0b0] hover:text-gray-900 dark:hover:text-[#cccccc]"
-              >
-                取消
-              </button>
-              <button
-                onClick={async () => {
-                  setIsSavingConfig(true);
-                  try {
-                    // 如果职业发生变化，应用职业到名称和人设
-                    let finalName = editName.trim();
-                    let finalSystemPrompt = editSystemPrompt.trim();
-                    
-                    const currentProfessionList = editProfessionType === 'career' ? careerProfessions : gameProfessions;
-                    const currentProfession = extractProfession(session.name, session.system_prompt, currentProfessionList);
-                    if (editProfession !== currentProfession) {
-                      // 职业发生变化，应用职业更新
-                      const applied = applyProfessionToNameOrPrompt(
-                        editProfession,
-                        finalName,
-                        finalSystemPrompt,
-                        currentProfessionList
-                      );
-                      finalName = applied.name;
-                      finalSystemPrompt = applied.systemPrompt;
-                    }
-                    
-                    // 保存所有配置
-                    const promises: Promise<void>[] = [];
-                    
-                    if (finalName !== (session.name || '')) {
-                      promises.push(onUpdateName(finalName));
-                    }
-                    
-                    if (editAvatar !== avatarUrl) {
-                      promises.push(onUpdateAvatar(editAvatar || ''));
-                    }
-                    
-                    if (finalSystemPrompt !== (session.system_prompt || '')) {
-                      promises.push(updateSessionSystemPrompt(session.session_id, finalSystemPrompt || null));
-                    }
-                    
-                    if (editMediaOutputPath !== (session.media_output_path || '')) {
-                      promises.push(updateSessionMediaOutputPath(session.session_id, editMediaOutputPath.trim() || null));
-                    }
-                    
-                    if (editLlmConfigId !== (session.llm_config_id || null)) {
-                      promises.push(updateSessionLLMConfig(session.session_id, editLlmConfigId));
-                    }
-                    
-                    // 保存 Persona 配置
-                    const savedPersona = (session.ext as any)?.persona;
-                    const personaChanged = JSON.stringify(editPersonaConfig) !== JSON.stringify(savedPersona || defaultPersonaConfig);
-                    if (personaChanged) {
-                      promises.push(
-                        updateRoleProfile(session.session_id, {
-                          persona: editPersonaConfig,
-                          reason: 'session_config_dialog',
-                        }).then(() => {})
-                      );
-                    }
-                    
-                    await Promise.all(promises);
-                    // 保存成功后，刷新会话列表以获取最新数据
-                    if (onConfigSaved) {
-                      await onConfigSaved();
-                    }
-                  emitSessionsChanged();
-                    setShowConfigDialog(false);
-                  } catch (error) {
-                    console.error('Failed to save config:', error);
-                    alert('保存配置失败，请重试');
-                  } finally {
-                    setIsSavingConfig(false);
-                  }
-                }}
-                disabled={isSavingConfig || isSavingAsRole}
-                className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 flex items-center space-x-2"
-              >
-                {isSavingConfig ? (
-                  <>
-                    <Loader className="w-4 h-4 animate-spin" />
-                    <span>保存中...</span>
-                  </>
-                ) : (
-                  <span>保存</span>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
-
-      {/* 添加自定义职业对话框 */}
-      {showAddProfessionDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[10000]" onClick={() => setShowAddProfessionDialog(false)}>
-          <div className="bg-white dark:bg-[#2d2d2d] rounded-lg shadow-xl p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-[#ffffff]">
-                添加自定义职业
-              </h3>
-              <button
-                onClick={() => setShowAddProfessionDialog(false)}
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
-                  职业类型
-                </label>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setEditProfessionType('career')}
-                    className={`flex-1 px-3 py-2 text-sm rounded-lg transition-colors ${
-                      editProfessionType === 'career'
-                        ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-                        : 'bg-gray-100 dark:bg-[#363636] text-gray-600 dark:text-[#b0b0b0] hover:bg-gray-200 dark:hover:bg-[#404040]'
-                    }`}
-                  >
-                    功能职业
-                  </button>
-                  <button
-                    onClick={() => setEditProfessionType('game')}
-                    className={`flex-1 px-3 py-2 text-sm rounded-lg transition-colors ${
-                      editProfessionType === 'game'
-                        ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-                        : 'bg-gray-100 dark:bg-[#363636] text-gray-600 dark:text-[#b0b0b0] hover:bg-gray-200 dark:hover:bg-[#404040]'
-                    }`}
-                  >
-                    游戏职业
-                  </button>
-                </div>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
-                  职业名称
-                </label>
-                <input
-                  type="text"
-                  value={newProfessionValue}
-                  onChange={(e) => setNewProfessionValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      handleSaveCustomProfession();
-                    }
-                  }}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600"
-                  placeholder="输入职业名称..."
-                  autoFocus
-                />
-              </div>
-            </div>
-            
-            <div className="flex items-center justify-end space-x-3 mt-6">
-              <button
-                onClick={() => {
-                  setShowAddProfessionDialog(false);
-                  setNewProfessionValue('');
-                }}
-                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-[#ffffff] bg-gray-100 dark:bg-[#363636] hover:bg-gray-200 dark:hover:bg-[#4a4a4a] rounded-lg transition-colors"
-              >
-                取消
-              </button>
-              <button
-                onClick={handleSaveCustomProfession}
-                className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors"
-              >
-                添加
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
-};
-
 interface WorkflowProps {
   sessionId?: string | null;
   onSelectSession?: (sessionId: string) => void;
@@ -1426,8 +177,12 @@ const Workflow: React.FC<WorkflowProps> = ({
   } = useConversation(sessionAdapter, { pageSize: 10 });
 
   // 兼容现有代码：统一通过 messages/setMessages 操作当前“显示中的会话”
-  const messages = (isTemporarySession ? tempMessages : (persistedMessages as any)) as Message[];
-  const setMessages = (isTemporarySession ? setTempMessages : (setPersistedMessages as any)) as any;
+  const messages: Message[] = (isTemporarySession
+    ? tempMessages
+    : (persistedMessages as unknown as Message[]));
+  const setMessages: React.Dispatch<React.SetStateAction<Message[]>> = (isTemporarySession
+    ? setTempMessages
+    : (setPersistedMessages as unknown as React.Dispatch<React.SetStateAction<Message[]>>));
 
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -1528,8 +283,6 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [isInputExpanded, setIsInputExpanded] = useState(false); // 输入框是否扩大
   const [isInputFocused, setIsInputFocused] = useState(false); // 输入框是否聚焦
   const [abortController, setAbortController] = useState<AbortController | null>(null); // 用于中断请求
-  // MCP 原始输出展示控制：图片/视频始终展示，文本可按消息折叠/展开（避免依赖模型转述导致“吞图/吞内容”）
-  const [mcpRawTextExpanded, setMcpRawTextExpanded] = useState<Record<string, boolean>>({});
   // MCP 详情遮罩层状态
   const [showMCPDetailOverlay, setShowMCPDetailOverlay] = useState(false);
   const [selectedMCPDetail, setSelectedMCPDetail] = useState<any>(null);
@@ -1571,7 +324,6 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [currentSystemPrompt, setCurrentSystemPrompt] = useState<string | null>(null); // 当前会话的系统提示词（人设）
   const [showAvatarConfigDialog, setShowAvatarConfigDialog] = useState(false); // 是否显示头像配置对话框
   const [avatarConfigDraft, setAvatarConfigDraft] = useState<string | null>(null); // 头像配置草稿
-  const avatarConfigFileInputRef = useRef<HTMLInputElement>(null); // 头像配置对话框的文件输入
   
 
   // 头部配置对话框状态（用于从聊天头部点击头像时打开）
@@ -1589,7 +341,6 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [showHeaderAddProfessionDialog, setShowHeaderAddProfessionDialog] = useState(false); // 添加职业对话框
   const [headerNewProfessionValue, setHeaderNewProfessionValue] = useState(''); // 新职业名称
   const [headerConfigActiveTab, setHeaderConfigActiveTab] = useState<'basic' | 'skillpacks'>('basic');
-  const headerConfigFileInputRef = useRef<HTMLInputElement>(null);
   const [isSavingHeaderAsRole, setIsSavingHeaderAsRole] = useState(false);
   const [isEditingSystemPrompt, setIsEditingSystemPrompt] = useState(false); // 是否正在编辑人设
   const [systemPromptDraft, setSystemPromptDraft] = useState(''); // 人设编辑草稿
@@ -1616,7 +367,6 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [agentSystemPrompt, setAgentSystemPrompt] = useState(''); // 升级为智能体时的人设
   const [agentLLMConfigId, setAgentLLMConfigId] = useState<string | null>(null); // 升级为智能体时关联的LLM模型
   const [isUpgrading, setIsUpgrading] = useState(false); // 是否正在升级
-  const agentAvatarFileInputRef = useRef<HTMLInputElement>(null); // 升级对话框的头像文件输入
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [messagePage, setMessagePage] = useState(1);
@@ -1650,7 +400,7 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [optimizationPrompt, setOptimizationPrompt] = useState('');
   const [selectedMCPForOptimization, setSelectedMCPForOptimization] = useState<string[]>([]); // 选中的MCP服务器ID列表
   const [currentSessionSkillPacks, setCurrentSessionSkillPacks] = useState<SessionSkillPack[]>([]);
-  const [pendingSkillPackUse, setPendingSkillPackUse] = useState<{ skillPack: SessionSkillPack; messageId: string } | null>(null);
+  const [_pendingSkillPackUse, setPendingSkillPackUse] = useState<{ skillPack: SessionSkillPack; messageId: string } | null>(null);
   
   // LLM配置
   const [llmConfigs, setLlmConfigs] = useState<LLMConfigFromDB[]>([]);
@@ -1676,7 +426,6 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [selectedMcpServerIds, setSelectedMcpServerIds] = useState<Set<string>>(new Set());
   const [mcpTools, setMcpTools] = useState<Map<string, MCPTool[]>>(new Map());
   const [connectingServers, setConnectingServers] = useState<Set<string>>(new Set());
-  const [expandedServerIds, setExpandedServerIds] = useState<Set<string>>(new Set());
   
   // 工作流列表
   const [workflows, setWorkflows] = useState<WorkflowType[]>([]);
@@ -1690,8 +439,7 @@ const Workflow: React.FC<WorkflowProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   // 浮岛输入区：动态计算消息列表底部 padding，避免被浮岛遮挡
-  const floatingComposerRef = useRef<HTMLDivElement>(null);
-  const [floatingComposerPadding, setFloatingComposerPadding] = useState(220);
+  const { ref: floatingComposerRef, padding: floatingComposerPadding } = useFloatingComposerPadding();
   const wasAtBottomRef = useRef(true);
   const isInitialLoadRef = useRef(true);
   const shouldMaintainScrollRef = useRef(false);
@@ -1701,23 +449,6 @@ const Workflow: React.FC<WorkflowProps> = ({
   // 消息缓存：按 session_id 缓存消息，Map<session_id, Map<message_id, Message>>
   const messageCacheRef = useRef<Map<string, Map<string, Message>>>(new Map());
 
-  useEffect(() => {
-    const el = floatingComposerRef.current;
-    if (!el) return;
-    const update = () => {
-      const h = el.getBoundingClientRect().height || 0;
-      setFloatingComposerPadding(Math.max(160, Math.ceil(h + 24)));
-    };
-    update();
-    const RO = (window as any).ResizeObserver as any;
-    if (!RO) return;
-    const ro = new RO(() => update());
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  
-  // 正在加载的消息ID集合（避免重复加载）
-  const loadingMessageIdsRef = useRef<Set<string>>(new Set());
   const isLoadingMoreRef = useRef(false);
   const lastMessageCountRef = useRef(0);
   
@@ -2070,7 +801,7 @@ const Workflow: React.FC<WorkflowProps> = ({
         // 记忆体或智能体：正常加载
         // 先获取会话信息，判断是否是agent会话
         const session = sessions.find(s => s.session_id === currentSessionId);
-        const isAgentSession = session ? (session.session_type === 'agent' || session.role_id) : false;
+        // NOTE: 旧逻辑里区分 agent/memory 的分支已不再依赖该布尔值
         
         // 统一使用分页加载（懒加载），避免消息过多时性能问题
         loadSessionMessages(currentSessionId, 1);
@@ -2334,9 +1065,10 @@ const Workflow: React.FC<WorkflowProps> = ({
       }
       
       // 如果是加载更多历史消息（page > 1），记录当前滚动位置（顶部附近）
-      if (page > 1 && chatContainerRef.current && messages.length > 0) {
+      const containerForAnchor = chatContainerRef.current;
+      if (page > 1 && containerForAnchor && messages.length > 0) {
         isLoadingMoreRef.current = true;
-        const container = chatContainerRef.current;
+        const container = containerForAnchor!;
         const scrollTop = container.scrollTop;
         
         // 找到容器顶部附近的第一条消息作为锚点（历史消息在上方）
@@ -2368,9 +1100,9 @@ const Workflow: React.FC<WorkflowProps> = ({
           }
         }
         
-        if (anchorMessageId) {
+        if (anchorMessageId !== null) {
           scrollPositionRef.current = {
-            anchorMessageId,
+            anchorMessageId: anchorMessageId!,
             anchorOffsetTop,
             scrollTop,
           };
@@ -2551,8 +1283,8 @@ const Workflow: React.FC<WorkflowProps> = ({
             );
             
             if (matchingSummary) {
-              const tokenAfter = matchingSummary.token_count_after || 0;
-              const tokenBefore = matchingSummary.token_count_before || 0;
+              const tokenAfter = matchingSummary?.token_count_after ?? 0;
+              const tokenBefore = matchingSummary?.token_count_before ?? 0;
               const notificationMessage: Message = {
                 id: `notification-${msg.id}`,
                 role: 'system',
@@ -6036,144 +4768,25 @@ const Workflow: React.FC<WorkflowProps> = ({
     return { texts, media };
   };
 
-  // 解析 MCP 内容为"有序块"（支持同一个结果里多段 text/image/audio 混排；也支持多个 MCP 结果的数组）
-  type MCPContentBlock =
-    | { kind: 'text'; text: string }
-    | { kind: 'image' | 'video' | 'audio'; mimeType: string; data: string };
-
-  const parseMCPContentBlocks = (content: any): MCPContentBlock[] => {
-    const blocks: MCPContentBlock[] = [];
-    console.log('[Workflow] parseMCPContentBlocks input:', typeof content, content?.substring?.(0, 200) || content);
-    
-    try {
-      let contentObj = content;
-      if (typeof content === 'string') {
-        try {
-          contentObj = JSON.parse(content);
-          console.log('[Workflow] Parsed JSON successfully:', Object.keys(contentObj));
-        } catch {
-          // 不是 JSON，就按纯文本处理
-          console.log('[Workflow] Content is not valid JSON, treating as text');
-          return [{ kind: 'text', text: content }];
-        }
-      }
-
-      const sources = Array.isArray(contentObj) ? contentObj : [contentObj];
-      console.log('[Workflow] Processing', sources.length, 'sources');
-
-      for (const src of sources) {
-        // 尝试多种路径查找 content 数组（兼容不同的 MCP 响应格式）
-        const contentArray = src?.result?.content || src?.content || (src?.jsonrpc ? src?.result?.content : null);
-        console.log('[Workflow] Found contentArray:', Array.isArray(contentArray), contentArray?.length);
-        
-        if (Array.isArray(contentArray)) {
-          for (const item of contentArray) {
-            console.log('[Workflow] Processing item:', item?.type, item?.mimeType || item?.mime_type);
-            if (item?.type === 'text' && typeof item.text === 'string') {
-              blocks.push({ kind: 'text', text: item.text });
-              continue;
-            }
-            if (item?.type === 'image' || item?.type === 'video' || item?.type === 'audio') {
-              const mimeType = item.mimeType || item.mime_type;
-              const data = item.data;
-              if (typeof mimeType === 'string' && typeof data === 'string' && data.length > 0) {
-                console.log('[Workflow] Found media:', item.type, mimeType, 'data length:', data.length);
-                blocks.push({ kind: item.type, mimeType, data });
-              } else {
-                console.log('[Workflow] Invalid media item - mimeType:', mimeType, 'data exists:', !!data);
-              }
-              continue;
-            }
-            // 兜底：未知 item 按 JSON 展示
-            if (item !== undefined) {
-              blocks.push({ kind: 'text', text: JSON.stringify(item, null, 2) });
-            }
-          }
-        } else if (src && typeof src === 'object') {
-          // 如果没有找到 content 数组，把整个对象作为文本展示
-          console.log('[Workflow] No content array found, displaying as JSON');
-          blocks.push({ kind: 'text', text: JSON.stringify(src, null, 2) });
-        } else if (typeof src === 'string' && src.trim()) {
-          blocks.push({ kind: 'text', text: src });
-        }
-      }
-    } catch (e) {
-      console.error('[Workflow] Failed to parse MCP content blocks:', e);
-      blocks.push({ kind: 'text', text: typeof content === 'string' ? content : JSON.stringify(content, null, 2) });
-    }
-    
-    console.log('[Workflow] parseMCPContentBlocks result:', blocks.length, 'blocks', blocks.map(b => b.kind));
-    return blocks;
+  const renderMCPBlocksForMessage = (blocks: any[], messageId?: string) => {
+    return renderMCPBlocks({
+      blocks,
+      messageId,
+      findSessionMediaIndex,
+      openSessionMediaPanel,
+    });
   };
 
-  const renderMCPBlocks = (blocks: MCPContentBlock[], messageId?: string) => {
-    if (!blocks || blocks.length === 0) return null;
-
-    return (
-      <div className="mt-2 space-y-2">
-        {blocks.map((b, idx) => {
-          if (b.kind === 'text') {
-            // 如果 text 里是 JSON 字符串，尽量美化
-            let displayText = b.text;
-            try {
-              const parsed = JSON.parse(b.text);
-              displayText = JSON.stringify(parsed, null, 2);
-            } catch {
-              // ignore
-            }
-            // 省略 base64 字符串，避免显示过长
-            displayText = truncateBase64Strings(displayText);
-            return (
-              <pre
-                key={`mcp-text-${idx}`}
-                className="bg-white dark:bg-[#2d2d2d] p-2 rounded border text-xs overflow-auto max-h-64 text-gray-800 dark:text-gray-100 whitespace-pre-wrap break-words"
-              >
-                {displayText}
-              </pre>
-            );
-          }
-
-          // image / video / audio
-          return (
-            <div key={`mcp-media-${idx}`}>
-              {renderMCPMedia([{ type: b.kind as 'image' | 'video' | 'audio', mimeType: b.mimeType, data: b.data }], messageId)}
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
-
-  // 渲染 MCP 媒体内容 - 使用缩略图画廊
-  const renderMCPMedia = (media: Array<{ type: 'image' | 'video' | 'audio'; mimeType: string; data: string }>, messageId?: string) => {
-    // NOTE: Debug log removed for UX smoothness
-    
-    if (!media || media.length === 0) return null;
-    
-    // 转换为 MediaGallery 需要的格式
-    const galleryMedia: MediaItem[] = media.map(m => ({
-      type: m.type,
-      mimeType: m.mimeType,
-      data: m.data,
-    }));
-    
-    // NOTE: Debug log removed for UX smoothness
-    
-    return (
-      <div className="mt-2">
-        <MediaGallery 
-          media={galleryMedia} 
-          thumbnailSize="md"
-          maxVisible={6}
-          showDownload={true}
-          onOpenSessionGallery={(index) => {
-            // 找到在会话媒体中的索引
-            const sessionIndex = messageId ? findSessionMediaIndex(messageId, index) : index;
-            openSessionMediaPanel(sessionIndex);
-          }}
-        />
-      </div>
-    );
+  const renderMCPMediaForMessage = (
+    media: Array<{ type: 'image' | 'video' | 'audio'; mimeType: string; data: string }>,
+    messageId?: string
+  ) => {
+    return renderMCPMedia({
+      media,
+      messageId,
+      findSessionMediaIndex,
+      openSessionMediaPanel,
+    });
   };
 
   const renderMessageContent = (message: Message) => {
@@ -6264,51 +4877,6 @@ const Workflow: React.FC<WorkflowProps> = ({
         </div>
       );
     }
-    
-    // 下载媒体文件功能（图片、视频、音频）
-    const downloadImage = (mediaItem: { type: 'image' | 'video' | 'audio'; mimeType: string; data: string; url?: string }, index: number) => {
-      try {
-        // 获取文件扩展名
-        const ext = mediaItem.mimeType.split('/')[1] || 'png';
-        const typePrefix = mediaItem.type === 'image' ? 'ai-image' : mediaItem.type === 'video' ? 'ai-video' : 'ai-audio';
-        const filename = `${typePrefix}-${Date.now()}-${index + 1}.${ext}`;
-        
-        if (mediaItem.url) {
-          // 如果是 URL，使用 fetch 下载
-          fetch(mediaItem.url)
-            .then(res => res.blob())
-            .then(blob => {
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = filename;
-              document.body.appendChild(a);
-              a.click();
-              document.body.removeChild(a);
-              URL.revokeObjectURL(url);
-            });
-        } else if (mediaItem.data) {
-          // 如果是 base64 数据，转换为 blob 下载
-          const byteCharacters = atob(mediaItem.data);
-          const byteNumbers = new Array(byteCharacters.length);
-          for (let i = 0; i < byteCharacters.length; i++) {
-            byteNumbers[i] = byteCharacters.charCodeAt(i);
-          }
-          const byteArray = new Uint8Array(byteNumbers);
-          const blob = new Blob([byteArray], { type: mediaItem.mimeType });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = filename;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-        }
-      } catch (error) {
-        console.error('下载图片失败:', error);
-      }
-    };
     
     // 多模态内容显示（图片、视频、音频）- 使用缩略图画廊
     const renderMedia = () => {
@@ -6610,7 +5178,7 @@ const Workflow: React.FC<WorkflowProps> = ({
               MCP 工具结果
             </div>
             {/* 渲染媒体内容 */}
-            {renderMCPMedia(parsed.media, message.id)}
+            {renderMCPMediaForMessage(parsed.media, message.id)}
             {/* 渲染文本内容 */}
             {parsed.texts.length > 0 && (
               <div className="mt-2 text-xs text-gray-600 dark:text-[#b0b0b0]">
@@ -6651,7 +5219,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                   <div className="text-xs text-gray-600 dark:text-[#b0b0b0]">
                     <span className="font-medium">结果:</span>
                     {blocks.length > 0 ? (
-                      <div className="mt-1">{renderMCPBlocks(blocks, message.id)}</div>
+                      <div className="mt-1">{renderMCPBlocksForMessage(blocks, message.id)}</div>
                     ) : (
                       <pre className="mt-1 bg-white dark:bg-[#2d2d2d] p-2 rounded border text-xs overflow-auto max-h-64">
                         {truncateBase64Strings(JSON.stringify(toolCall.result, null, 2))}
@@ -7084,492 +5652,6 @@ const Workflow: React.FC<WorkflowProps> = ({
       {/* 主要内容区域：聊天界面 - GNOME 风格布局 */}
       <div className="flex-1 flex min-h-0 p-2 gap-2">
         {/* 左侧配置面板 - 已隐藏，功能移至底部工具栏 */}
-        {false && (
-          <div className="w-[340px] flex-shrink-0 flex flex-col gap-4 overflow-y-auto pr-2">
-
-          {/* 会话列表模块 - 已移至左侧边栏，此处隐藏 */}
-          {false && (
-          <div className="card p-3 flex-shrink-0">
-            <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff]">
-                <History className="w-4 h-4 inline mr-1" />
-                会话列表
-            </label>
-              <div className="flex items-center space-x-1">
-                <button
-                  onClick={handleCreateNewSession}
-                  className="flex items-center space-x-1 px-2 py-1 text-xs text-primary-600 dark:text-[#a78bfa] hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-colors"
-                  title="创建新会话"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>新建</span>
-                </button>
-              </div>
-            </div>
-            {/* 会话列表容器：固定高度，显示5个会话项，其他需要滚动 */}
-            <div className="space-y-1.5 max-h-[280px] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
-              {/* 临时会话选项 */}
-              <button
-                onClick={() => handleSelectSession(temporarySessionId)}
-                className={`w-full text-left px-2.5 py-2 rounded-lg text-sm transition-colors ${
-                  isTemporarySession && currentSessionId === temporarySessionId
-                    ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700'
-                    : 'bg-gray-50 dark:bg-[#363636] text-gray-700 dark:text-[#ffffff] hover:bg-gray-100 dark:hover:bg-[#404040] border border-gray-200 dark:border-[#404040]'
-                }`}
-                title="临时会话：不保存历史记录，适合快速询问无关联问题"
-              >
-                <div className="flex items-center space-x-2">
-                  <MessageCircle className="w-4 h-4 flex-shrink-0" />
-                  <span className="font-medium truncate">临时会话</span>
-                  <span className="text-xs text-gray-500 dark:text-[#b0b0b0]">(不保存)</span>
-                </div>
-              </button>
-              
-              {/* 历史会话列表 */}
-              {sessions.length === 0 ? (
-                <div className="text-center py-4 text-xs text-gray-500 dark:text-[#b0b0b0]">
-                  暂无历史会话
-                </div>
-              ) : (
-                sessions.map((session) => {
-                  // 确定显示的名称：优先使用 name，其次 title，最后使用 preview_text 或默认
-                  const displayName = session.name || session.title || session.preview_text || `会话 ${session.session_id.substring(0, 8)}`;
-                  
-                  // 确定头像：session.avatar 已经是 base64 字符串（可能包含 data:image 前缀），直接使用
-                  const avatarUrl = session.avatar || null;
-                  
-                  // 确定会话类型标签
-                  const sessionTypeLabel = session.session_type === 'agent' ? '智能体' : session.session_type === 'memory' ? '记忆体' : '';
-                  
-                  return (
-                    <div key={session.session_id} className="relative group">
-                    <SessionListItem
-                      session={session}
-                      displayName={displayName}
-                      avatarUrl={avatarUrl}
-                      isSelected={currentSessionId === session.session_id}
-                      onSelect={() => handleSelectSession(session.session_id)}
-                      onDelete={(e: React.MouseEvent) => handleDeleteSession(session.session_id, e)}
-                      onUpdateName={async (name: string) => {
-                        await updateSessionName(session.session_id, name);
-                        await loadSessions();
-                      }}
-                      onUpdateAvatar={async (avatar: string) => {
-                        await updateSessionAvatar(session.session_id, avatar);
-                        await loadSessions();
-                        // 如果当前会话，也更新当前会话的头像状态
-                        if (currentSessionId === session.session_id) {
-                          setCurrentSessionAvatar(avatar || null);
-                        }
-                      }}
-                      onConfigSaved={async () => {
-                        // 直接从 API 获取最新数据（包括从圆桌面板修改的配置）
-                        const allSessions = await getSessions();
-                        const updatedSession = allSessions.find(s => s.session_id === session.session_id);
-                        // 更新会话列表状态
-                        setSessions(allSessions);
-                        // 如果当前会话，也更新当前会话的状态
-                        if (currentSessionId === session.session_id && updatedSession) {
-                          setCurrentSessionAvatar(updatedSession.avatar || null);
-                          setCurrentSystemPrompt(updatedSession.system_prompt || null);
-                        }
-                        // 返回更新后的会话数据，供对话框使用
-                        return updatedSession || null;
-                      }}
-                    />
-                      {/* 会话类型标签和升级按钮 */}
-                      {sessionTypeLabel && (
-                        <div className="absolute top-1 right-1 flex items-center space-x-1">
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300">
-                            {sessionTypeLabel}
-                          </span>
-                          {session.session_type === 'memory' && (() => {
-                            const hasSourceRole = Boolean(session.role_id);
-                            const canPromote = Boolean(session.system_prompt) && Boolean(session.llm_config_id) && hasSourceRole;
-                            // 检查是否满足升级条件
-                            const hasName = !!session.name;
-                            const hasAvatar = !!session.avatar;
-                            const hasSystemPrompt = !!session.system_prompt;
-                            const canUpgrade = hasName && hasAvatar && hasSystemPrompt;
-                            
-                            return (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (hasSourceRole) {
-                                    if (!canPromote) {
-                                      toast({
-                                        title: '需要完善信息',
-                                        description: '沉淀到角色需要：人设与默认LLM（可在配置里设置）。',
-                                        variant: 'destructive',
-                                      });
-                                      return;
-                                    }
-                                    void (async () => {
-                                      try {
-                                        const roleId = session.role_id as string;
-                                        const updated = await updateRoleProfile(roleId, {
-                                          system_prompt: session.system_prompt || '',
-                                          llm_config_id: session.llm_config_id || '',
-                                          avatar: session.avatar || null,
-                                          reason: 'promote_from_chat',
-                                        });
-                                        await applyRoleToSession({
-                                          session_id: session.session_id,
-                                          role_id: roleId,
-                                          role_version_id: updated.current_role_version_id || undefined,
-                                          keep_session_llm_config: false,
-                                        });
-                                        emitSessionsChanged();
-                                        await loadSessions();
-                                        toast({ title: '已沉淀到角色版本', variant: 'success' });
-                                      } catch (error) {
-                                        console.error('[Workflow] Failed to promote to role:', error);
-                                        toast({
-                                          title: '沉淀失败',
-                                          description: error instanceof Error ? error.message : String(error),
-                                          variant: 'destructive',
-                                        });
-                                      }
-                                    })();
-                                    return;
-                                  }
-                                  // 初始化升级对话框的数据
-                                  setAgentName(session.name || '');
-                                  setAgentAvatar(session.avatar || null);
-                                  setAgentSystemPrompt(session.system_prompt || '');
-                                  setAgentLLMConfigId(session.llm_config_id || selectedLLMConfigId || null);
-                                  // 临时设置当前会话ID为要升级的会话
-                                  const upgradeSessionId = session.session_id;
-                                  setCurrentSessionId(upgradeSessionId);
-                                  setShowUpgradeToAgentDialog(true);
-                                }}
-                                className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
-                                  hasSourceRole
-                                    ? (canPromote
-                                      ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent)] hover:bg-[var(--color-accent-bg)]/70'
-                                      : 'bg-gray-100 dark:bg-[#2d2d2d] text-gray-500 dark:text-[#b0b0b0] cursor-not-allowed')
-                                    : canUpgrade
-                                    ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 hover:bg-primary-200 dark:hover:bg-primary-900/50'
-                                    : 'bg-gray-100 dark:bg-[#2d2d2d] text-gray-500 dark:text-[#b0b0b0] cursor-not-allowed'
-                                }`}
-                                title={
-                                  hasSourceRole
-                                    ? (canPromote ? '沉淀为来源角色的新版本' : '需要设置人设与默认LLM才能沉淀')
-                                    : (canUpgrade ? '升级为智能体' : '需要设置名称、头像和人设才能升级')
-                                }
-                                disabled={hasSourceRole ? !canPromote : !canUpgrade}
-                              >
-                                {hasSourceRole ? (canPromote ? '沉淀' : '需完善') : (canUpgrade ? '升级' : '需完善')}
-                              </button>
-                            );
-                          })()}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-          )}
-
-          {/* 感知组件列表（MCP + 工作流） */}
-          <div className="card p-3 flex-1 flex flex-col min-h-0">
-            <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
-              <Brain className="w-4 h-4 inline mr-1" />
-              感知组件
-            </label>
-            <div className="flex-1 overflow-y-auto space-y-2 border border-gray-200 dark:border-[#404040] rounded-lg p-2">
-              {mcpServers.length === 0 && workflows.length === 0 ? (
-                <div className="text-xs text-gray-500 dark:text-[#b0b0b0] text-center py-2">
-                  暂无可用的感知组件，请先在配置页面添加
-                </div>
-              ) : (
-                <>
-                  {/* MCP 服务器分组 */}
-                  {mcpServers.length > 0 && (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center space-x-1.5 px-1.5 py-1">
-                        <Plug className="w-3.5 h-3.5 text-primary-500" />
-                        <span className="text-xs font-semibold text-gray-700 dark:text-[#ffffff] uppercase tracking-wide">
-                          MCP 服务器
-                        </span>
-                        <span className="text-xs text-gray-500 dark:text-[#b0b0b0]">
-                          ({mcpServers.length})
-                        </span>
-                      </div>
-                      {mcpServers.map((server) => {
-                  const isConnected = connectedMcpServerIds.has(server.id);
-                  const isSelected = selectedMcpServerIds.has(server.id);
-                  const isConnecting = connectingServers.has(server.id);
-                  const isExpanded = expandedServerIds.has(server.id);
-                  const tools = mcpTools.get(server.id) || [];
-                  
-                  return (
-                    <div
-                      key={server.id}
-                      className="border border-gray-200 dark:border-[#404040] rounded-lg bg-gray-50 dark:bg-[#363636] group"
-                      draggable={isConnected}
-                      onDragStart={(e) => {
-                        if (isConnected) {
-                          setDraggingComponent({ type: 'mcp', id: server.id, name: server.name });
-                          e.dataTransfer.effectAllowed = 'move';
-                        }
-                      }}
-                      onDragEnd={() => {
-                        setDraggingComponent(null);
-                      }}
-                    >
-                      {/* 服务器主要信息行 - 始终显示 */}
-                      <div className="flex items-center space-x-2 p-1.5">
-                        {/* 服务器连接控制 */}
-                        <button
-                          onClick={() => isConnected ? handleDisconnectServer(server.id) : handleConnectServer(server.id)}
-                          disabled={isConnecting}
-                          className={`flex-shrink-0 p-1.5 rounded transition-colors ${
-                            isConnected
-                              ? 'text-green-600 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/20'
-                              : 'text-gray-400 dark:text-[#808080] hover:bg-gray-200 dark:hover:bg-gray-700'
-                          } ${isConnecting ? 'opacity-50 cursor-not-allowed' : ''}`}
-                          title={isConnected ? '断开连接' : '连接'}
-                        >
-                          {isConnecting ? (
-                            <RefreshCw className="w-4 h-4 animate-spin" />
-                          ) : isConnected ? (
-                            <Power className="w-4 h-4" />
-                          ) : (
-                            <XCircle className="w-4 h-4" />
-                          )}
-                        </button>
-
-                        {/* 服务器信息 - 始终显示 */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center space-x-2 flex-wrap">
-                            <Plug className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" />
-                            <span className="text-sm font-medium text-gray-900 dark:text-[#ffffff] truncate">
-                              {server.display_name || server.client_name || server.name}
-                            </span>
-                            {isConnected && (
-                              <span className="text-xs text-green-600 dark:text-green-400 font-medium flex-shrink-0">
-                                已连接
-                              </span>
-                            )}
-                            {isConnected && tools.length > 0 && (
-                              <span className="text-xs text-gray-500 dark:text-[#b0b0b0] flex-shrink-0">
-                                ({tools.length} 工具)
-                              </span>
-                            )}
-                            {/* 服务器类型标签 */}
-                            {server.ext?.server_type && (
-                              <span className="text-xs bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 px-1.5 py-0.5 rounded flex-shrink-0">
-                                {server.ext.server_type}
-                              </span>
-                            )}
-                          </div>
-                          {server.description && (
-                            <div className="text-xs text-gray-500 dark:text-[#b0b0b0] truncate mt-0.5">
-                              {server.description}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* 展开/收起按钮（仅在已连接且有工具时显示） */}
-                        {isConnected && tools.length > 0 && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleToggleServerExpand(server.id);
-                            }}
-                            className="flex-shrink-0 p-1.5 text-gray-500 dark:text-[#b0b0b0] hover:text-gray-700 dark:hover:text-[#cccccc] hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
-                            title={isExpanded ? '收起工具' : '展开工具'}
-                          >
-                            {isExpanded ? (
-                              <ChevronUp className="w-4 h-4" />
-                            ) : (
-                              <ChevronDown className="w-4 h-4" />
-                            )}
-                          </button>
-                        )}
-
-                        {/* 使用开关（仅在已连接时可用） */}
-                        {isConnected && (
-                          <label className="flex items-center space-x-1 cursor-pointer flex-shrink-0">
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={() => handleToggleMcpServerUsage(server.id)}
-                              className="w-4 h-4 text-primary-500 border-gray-300 rounded focus:ring-primary-500 dark:bg-[#363636] dark:border-[#404040]"
-                            />
-                            <span className="text-xs text-gray-600 dark:text-[#b0b0b0]">使用</span>
-                          </label>
-                        )}
-                        
-                        {/* 拖动触点（仅在已连接时显示） */}
-                        {isConnected && (
-                          <div
-                            className="flex-shrink-0 p-1.5 cursor-grab active:cursor-grabbing text-gray-400 dark:text-[#808080] hover:text-gray-600 dark:hover:text-[#cccccc] transition-colors"
-                            title="拖动到对话框接入"
-                            onMouseDown={(e) => e.stopPropagation()}
-                          >
-                            <GripVertical className="w-4 h-4" />
-                          </div>
-                        )}
-                      </div>
-
-                      {/* 工具列表（展开时显示，在服务器信息下方） */}
-                      {isConnected && isExpanded && tools.length > 0 && (
-                        <div className="border-t border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] p-2 space-y-1.5">
-                          <div className="text-xs font-medium text-gray-700 dark:text-[#ffffff] mb-1.5">
-                            可用工具:
-                          </div>
-                          {tools.map((tool, index) => (
-                            <div
-                              key={index}
-                              className="bg-gray-50 dark:bg-[#363636] border border-gray-200 dark:border-[#404040] rounded p-2 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                            >
-                              <div className="flex items-start space-x-2">
-                                <Wrench className="w-3 h-3 text-primary-500 mt-0.5 flex-shrink-0" />
-                                <div className="flex-1 min-w-0">
-                                  <div className="text-xs font-medium text-gray-900 dark:text-[#ffffff]">
-                                    {tool.name}
-                                  </div>
-                                  {tool.description && (
-                                    <div className="text-xs text-gray-600 dark:text-[#b0b0b0] mt-1">
-                                      {tool.description}
-                                    </div>
-                                  )}
-                                  {tool.inputSchema?.properties && (
-                                    <div className="mt-1.5">
-                                      <div className="text-xs text-gray-500 dark:text-[#b0b0b0] mb-1">参数:</div>
-                                      <div className="flex flex-wrap gap-1">
-                                        {Object.keys(tool.inputSchema.properties).map((param) => (
-                                          <span
-                                            key={param}
-                                            className="text-xs bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 px-1.5 py-0.5 rounded"
-                                          >
-                                            {param}
-                                          </span>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                  })}
-                    </div>
-                  )}
-                  
-                  {/* 工作流分组 */}
-                  {workflows.length > 0 && (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center space-x-1.5 px-1.5 py-1">
-                        <WorkflowIcon className="w-3.5 h-3.5 text-primary-500" />
-                        <span className="text-xs font-semibold text-gray-700 dark:text-[#ffffff] uppercase tracking-wide">
-                          工作流
-                        </span>
-                        <span className="text-xs text-gray-500 dark:text-[#b0b0b0]">
-                          ({workflows.length})
-                        </span>
-                      </div>
-                      {workflows.map((workflow) => (
-                    <div
-                      key={workflow.workflow_id}
-                      className="border border-gray-200 dark:border-[#404040] rounded-lg bg-gray-50 dark:bg-[#363636] flex items-center group"
-                      draggable={true}
-                      onDragStart={(e) => {
-                        setDraggingComponent({ type: 'workflow', id: workflow.workflow_id, name: workflow.name });
-                        e.dataTransfer.effectAllowed = 'move';
-                      }}
-                      onDragEnd={() => {
-                        setDraggingComponent(null);
-                      }}
-                    >
-                      <div className="flex items-center space-x-2 p-1.5 flex-1 min-w-0">
-                        <WorkflowIcon className="w-3.5 h-3.5 text-primary-500 flex-shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium text-gray-900 dark:text-[#ffffff] truncate">
-                            {workflow.name}
-                          </div>
-                          {workflow.description && (
-                            <div className="text-xs text-gray-500 dark:text-[#b0b0b0] truncate mt-0.5">
-                              {workflow.description}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      
-                      {/* 拖动触点 */}
-                      <div
-                        className="flex-shrink-0 p-2 cursor-grab active:cursor-grabbing text-gray-400 dark:text-[#808080] hover:text-gray-600 dark:hover:text-[#cccccc] transition-colors"
-                        title="拖动到对话框接入"
-                        onMouseDown={(e) => e.stopPropagation()}
-                      >
-                        <GripVertical className="w-4 h-4" />
-                      </div>
-                    </div>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-            {selectedMcpServerIds.size > 0 && (
-              <div className="mt-2 text-xs text-gray-600 dark:text-[#b0b0b0] pt-2 border-t border-gray-200 dark:border-[#404040]">
-                <span className="font-medium">已选择:</span> {selectedMcpServerIds.size} 个服务器，
-                共 {totalTools} 个工具可用
-              </div>
-            )}
-        </div>
-        
-        {/* 技能包列表 */}
-        <div className="card p-3 flex-shrink-0">
-          <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
-            <Package className="w-4 h-4 inline mr-1" />
-            技能包
-          </label>
-          <div className="space-y-1.5 border border-gray-200 dark:border-[#404040] rounded-lg p-2 max-h-64 overflow-y-auto">
-            {allSkillPacks.length === 0 ? (
-              <div className="text-xs text-gray-500 dark:text-[#b0b0b0] text-center py-2">
-                暂无技能包，请先创建
-              </div>
-            ) : (
-              allSkillPacks.map((skillPack) => (
-                <div
-                  key={skillPack.skill_pack_id}
-                  className="border border-gray-200 dark:border-[#404040] rounded-lg bg-gray-50 dark:bg-[#363636] p-2 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
-                  onClick={() => {
-                    const component = { type: 'skillpack' as const, id: skillPack.skill_pack_id, name: skillPack.name };
-                    handleSelectComponent(component);
-                  }}
-                >
-                  <div className="flex items-center space-x-2">
-                    <Package className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-gray-900 dark:text-[#ffffff] truncate">
-                        {skillPack.name}
-                      </div>
-                      {skillPack.summary && (
-                        <div className="text-xs text-gray-500 dark:text-[#b0b0b0] truncate mt-0.5 line-clamp-2">
-                          {skillPack.summary}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-          </div>
-        </div>
-        )}
-
         {/* 聊天界面 - 全屏布局（主界面无外边框/无外边距） */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-[#2d2d2d] overflow-hidden">
         {/* 状态栏 - 优化样式 */}
@@ -8428,7 +6510,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                 isComposingRef.current = false;
               }}
               
-              onFocus={(e) => {
+              onFocus={() => {
                 setIsInputFocused(true);
                 // 保留原有的focus处理逻辑
                 if (inputRef.current) {
@@ -8691,7 +6773,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                           const isConnecting = connectingServers.has(server.id);
                           const component = { type: 'mcp' as const, id: server.id, name: server.name };
                           const selectableComponents = getSelectableComponents();
-                          const componentIndex = selectableComponents.findIndex((c: { type: 'mcp' | 'workflow'; id: string; name: string }) => c.id === component.id && c.type === component.type);
+                          const componentIndex = selectableComponents.findIndex((c: { type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string }) => c.id === component.id && c.type === component.type);
                           const isSelected = componentIndex === selectedComponentIndex;
                           return (
                             <div
@@ -8874,198 +6956,78 @@ const Workflow: React.FC<WorkflowProps> = ({
           </div>
           
           {/* 人设编辑弹窗 */}
-          {isEditingSystemPrompt && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setIsEditingSystemPrompt(false)}>
-              <div 
-                className="bg-white dark:bg-[#2d2d2d] rounded-xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="px-5 py-4 border-b border-gray-200 dark:border-[#404040] flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center space-x-2">
-                    <FileText className="w-5 h-5 text-indigo-500" />
-                    <span>设置人设</span>
-                  </h3>
-                  <button 
-                    onClick={() => setIsEditingSystemPrompt(false)}
-                    className="text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-                <div className="p-5">
-                  <p className="text-sm text-gray-500 dark:text-[#b0b0b0] mb-3">
-                    人设是 AI 的角色设定，会影响所有对话的回复风格和内容。
-                  </p>
-                  <textarea
-                    value={systemPromptDraft}
-                    onChange={(e) => setSystemPromptDraft(e.target.value)}
-                    placeholder="例如：你是一个专业的产品经理，擅长分析用户需求和产品设计..."
-                    className="w-full h-40 px-3 py-2 text-sm border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
-                    autoFocus
-                  />
-                </div>
-                <div className="px-5 py-4 bg-gray-50 dark:bg-[#363636] flex items-center justify-between">
-                  <button
-                    onClick={async () => {
-                      if (currentSessionId) {
-                        try {
-                          await updateSessionSystemPrompt(currentSessionId, null);
-                          setCurrentSystemPrompt(null);
-                          setIsEditingSystemPrompt(false);
-                          // 更新 sessions 列表中的数据
-                          setSessions(prev => prev.map(s => 
-                            s.session_id === currentSessionId ? { ...s, system_prompt: undefined } : s
-                          ));
-                        } catch (error) {
-                          console.error('Failed to clear system prompt:', error);
-                        }
-                      }
-                    }}
-                    className="text-sm text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
-                  >
-                    清除人设
-                  </button>
-                  <div className="flex space-x-3">
-                    <button
-                      onClick={() => setIsEditingSystemPrompt(false)}
-                      className="px-4 py-2 text-sm text-gray-600 dark:text-[#ffffff] hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
-                    >
-                      取消
-                    </button>
-                    <button
-                      onClick={async () => {
-                        if (currentSessionId) {
-                          try {
-                            await updateSessionSystemPrompt(currentSessionId, systemPromptDraft || null);
-                            setCurrentSystemPrompt(systemPromptDraft || null);
-                            setIsEditingSystemPrompt(false);
-                            // 更新 sessions 列表中的数据
-                            setSessions(prev => prev.map(s => 
-                              s.session_id === currentSessionId ? { ...s, system_prompt: systemPromptDraft || undefined } : s
-                            ));
-                          } catch (error) {
-                            console.error('Failed to update system prompt:', error);
-                          }
-                        }
-                      }}
-                      className="px-4 py-2 text-sm bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg"
-                    >
-                      保存
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+          <SystemPromptEditDialog
+            open={isEditingSystemPrompt}
+            onClose={() => setIsEditingSystemPrompt(false)}
+            draft={systemPromptDraft}
+            setDraft={setSystemPromptDraft}
+            onSave={async () => {
+              if (currentSessionId) {
+                try {
+                  await updateSessionSystemPrompt(currentSessionId, systemPromptDraft || null);
+                  setCurrentSystemPrompt(systemPromptDraft || null);
+                  setIsEditingSystemPrompt(false);
+                  // 更新 sessions 列表中的数据
+                  setSessions(prev => prev.map(s => 
+                    s.session_id === currentSessionId ? { ...s, system_prompt: systemPromptDraft || undefined } : s
+                  ));
+                } catch (error) {
+                  console.error('Failed to update system prompt:', error);
+                }
+              }
+            }}
+            onClear={async () => {
+              if (currentSessionId) {
+                try {
+                  await updateSessionSystemPrompt(currentSessionId, null);
+                  setCurrentSystemPrompt(null);
+                  setIsEditingSystemPrompt(false);
+                  // 更新 sessions 列表中的数据
+                  setSessions(prev => prev.map(s => 
+                    s.session_id === currentSessionId ? { ...s, system_prompt: undefined } : s
+                  ));
+                } catch (error) {
+                  console.error('Failed to clear system prompt:', error);
+                }
+              }
+            }}
+          />
           
           {/* 会话类型选择对话框 */}
-          {showSessionTypeDialog && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowSessionTypeDialog(false)}>
-              <div 
-                className="bg-white dark:bg-[#2d2d2d] rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="px-5 py-4 border-b border-gray-200 dark:border-[#404040] flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">选择会话类型</h3>
-                  <button 
-                    onClick={() => setShowSessionTypeDialog(false)}
-                    className="text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-                <div className="p-5 space-y-4">
-                  {/* 临时会话选项 */}
-                  <button
-                    onClick={handleSwitchToTemporarySession}
-                    className="w-full text-left p-4 border-2 border-gray-200 dark:border-[#404040] rounded-lg hover:border-amber-400 dark:hover:border-amber-600 transition-colors"
-                  >
-                    <div className="flex items-start space-x-3">
-                      <MessageCircle className="w-6 h-6 text-amber-500 flex-shrink-0 mt-0.5" />
-                      <div className="flex-1">
-                        <h4 className="font-semibold text-gray-900 dark:text-white mb-1">临时会话</h4>
-                        <p className="text-sm text-gray-600 dark:text-[#b0b0b0]">
-                          不保存历史记录，不发送历史消息，不进行总结。适合快速询问各种无关联的问题。
-                        </p>
-                      </div>
-                    </div>
-                  </button>
-
-                  {/* 记忆体选项 */}
-                  <button
-                    onClick={handleCreateMemorySession}
-                    className="w-full text-left p-4 border-2 border-gray-200 dark:border-[#404040] rounded-lg hover:border-primary-400 dark:hover:border-primary-600 transition-colors"
-                  >
-                    <div className="flex items-start space-x-3">
-                      <Database className="w-6 h-6 text-primary-500 flex-shrink-0 mt-0.5" />
-                      <div className="flex-1">
-                        <h4 className="font-semibold text-gray-900 dark:text-white mb-1">记忆体</h4>
-                        <p className="text-sm text-gray-600 dark:text-[#b0b0b0]">
-                          保存所有消息记录，支持历史消息和总结功能。可以升级为智能体。
-                        </p>
-                      </div>
-                    </div>
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+          <SessionTypeDialog
+            open={showSessionTypeDialog}
+            onClose={() => setShowSessionTypeDialog(false)}
+            onSelectTemporary={handleSwitchToTemporarySession}
+            onSelectMemory={handleCreateMemorySession}
+          />
 
           {/* 升级为智能体对话框 */}
-          {showUpgradeToAgentDialog && (() => {
-            const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-              const file = e.target.files?.[0];
-              if (!file) return;
-
-              if (!file.type.startsWith('image/')) {
-                alert('请选择图片文件');
-                return;
-              }
-
-              if (file.size > 2 * 1024 * 1024) {
-                alert('图片大小不能超过 2MB');
-                return;
-              }
-
-              const reader = new FileReader();
-              reader.onload = (event) => {
-                const base64String = event.target?.result as string;
-                setAgentAvatar(base64String);
-              };
-              reader.readAsDataURL(file);
-            };
-
-            const handleUpgrade = async () => {
-              if (!agentName.trim()) {
-                alert('请输入智能体名称');
-                return;
-              }
-              if (!agentAvatar) {
-                alert('请上传智能体头像');
-                return;
-              }
-              if (!agentSystemPrompt.trim()) {
-                alert('请设置智能体人设');
-                return;
-              }
-              if (!agentLLMConfigId) {
-                alert('请选择关联的LLM模型');
-                return;
-              }
-
+          <UpgradeToAgentDialog
+            open={showUpgradeToAgentDialog}
+            onClose={() => setShowUpgradeToAgentDialog(false)}
+            agentName={agentName}
+            setAgentName={setAgentName}
+            agentAvatar={agentAvatar}
+            setAgentAvatar={setAgentAvatar}
+            agentSystemPrompt={agentSystemPrompt}
+            setAgentSystemPrompt={setAgentSystemPrompt}
+            agentLLMConfigId={agentLLMConfigId}
+            setAgentLLMConfigId={setAgentLLMConfigId}
+            llmConfigs={llmConfigs}
+            isUpgrading={isUpgrading}
+            onUpgrade={async () => {
               if (!currentSessionId) {
                 alert('会话ID不存在');
                 return;
               }
-
               setIsUpgrading(true);
               try {
                 await upgradeToAgent(
                   currentSessionId,
                   agentName.trim(),
-                  agentAvatar,
+                  agentAvatar!,
                   agentSystemPrompt.trim(),
-                  agentLLMConfigId
+                  agentLLMConfigId!
                 );
                 setCurrentSystemPrompt(agentSystemPrompt.trim());
                 setCurrentSessionAvatar(agentAvatar);
@@ -9078,1040 +7040,222 @@ const Workflow: React.FC<WorkflowProps> = ({
               } finally {
                 setIsUpgrading(false);
               }
-            };
-
-            return (
-              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowUpgradeToAgentDialog(false)}>
-                <div 
-                  className="bg-white dark:bg-[#2d2d2d] rounded-xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <div className="px-5 py-4 border-b border-gray-200 dark:border-[#404040] flex items-center justify-between">
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center space-x-2">
-                      <Sparkles className="w-5 h-5 text-primary-500" />
-                      <span>升级为智能体</span>
-                    </h3>
-                    <IconButton
-                      icon={X}
-                      onClick={() => setShowUpgradeToAgentDialog(false)}
-                      variant="ghost"
-                      label="关闭"
-                    />
-                  </div>
-                  <div className="p-5 space-y-4">
-                    <p className="text-sm text-gray-600 dark:text-[#b0b0b0]">
-                      智能体必须设置头像、名字和人设。升级后，该会话将拥有固定的身份和角色。
-                    </p>
-
-                    <FormFieldGroup spacing="default">
-                    {/* 智能体名称 */}
-                      <InputField
-                        label="智能体名称"
-                        required
-                        inputProps={{
-                          id: "agent-name",
-                          type: "text",
-                          value: agentName,
-                          onChange: (e) => setAgentName(e.target.value),
-                          placeholder: "例如：AI助手、产品经理等",
-                        }}
-                      />
-
-                    {/* 智能体头像 */}
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-1">
-                        智能体头像 <span className="text-red-500">*</span>
-                      </label>
-                      <div className="flex items-center space-x-3">
-                          <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-gray-200 dark:border-[#404040] flex items-center justify-center bg-gray-100 dark:bg-[#363636]">
-                          {agentAvatar ? (
-                            <img src={agentAvatar} alt="Avatar" className="w-full h-full object-cover" />
-                          ) : (
-                            <Bot className="w-8 h-8 text-gray-400" />
-                          )}
-                        </div>
-                          <Button
-                          onClick={() => agentAvatarFileInputRef.current?.click()}
-                            variant="secondary"
-                            size="sm"
-                        >
-                          选择头像
-                          </Button>
-                        <input
-                          ref={agentAvatarFileInputRef}
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={handleAvatarUpload}
-                        />
-                      </div>
-                    </div>
-
-                    {/* 智能体人设 */}
-                      <TextareaField
-                        label="智能体人设"
-                        required
-                        textareaProps={{
-                          id: "agent-system-prompt",
-                          value: agentSystemPrompt,
-                          onChange: (e) => setAgentSystemPrompt(e.target.value),
-                          placeholder: "例如：你是一个专业的产品经理，擅长分析用户需求和产品设计...",
-                          rows: 4,
-                        }}
-                      />
-                    </FormFieldGroup>
-
-                    {/* 关联LLM模型 */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-1">
-                        关联LLM模型 <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        value={agentLLMConfigId || ''}
-                        onChange={(e) => setAgentLLMConfigId(e.target.value || null)}
-                        className="input-field"
-                      >
-                        <option value="">请选择模型</option>
-                        {llmConfigs
-                          .filter(config => config.enabled)
-                          .map(config => (
-                            <option key={config.config_id} value={config.config_id}>
-                              {config.name} ({config.provider})
-                            </option>
-                          ))}
-                      </select>
-                      <p className="mt-1 text-xs text-gray-500 dark:text-[#b0b0b0]">
-                        智能体将固定使用此模型，升级后不可更改
-                      </p>
-                    </div>
-                  </div>
-                  <div className="px-5 py-4 bg-gray-50 dark:bg-[#363636] flex items-center justify-between">
-                    <Button
-                      onClick={() => setShowUpgradeToAgentDialog(false)}
-                      variant="ghost"
-                      size="sm"
-                    >
-                      取消
-                    </Button>
-                    <Button
-                      onClick={handleUpgrade}
-                      disabled={isUpgrading || !agentName.trim() || !agentAvatar || !agentSystemPrompt.trim() || !agentLLMConfigId}
-                      variant="primary"
-                      size="sm"
-                    >
-                      {isUpgrading ? '升级中...' : '确认升级'}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
+            }}
+          />
 
           {/* 头像配置对话框 */}
-          {showAvatarConfigDialog && currentSessionId && !isTemporarySession && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowAvatarConfigDialog(false)}>
-              <div className="bg-white dark:bg-[#2d2d2d] rounded-lg shadow-xl max-w-sm w-full mx-4" onClick={(e) => e.stopPropagation()}>
-                <div className="px-5 py-4 border-b border-gray-200 dark:border-[#404040] flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                    配置会话头像
-                  </h3>
-                  <button
-                    onClick={() => setShowAvatarConfigDialog(false)}
-                    className="text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-                <div className="p-5 space-y-4">
-                  {/* 头像预览和上传 */}
-                  <div className="flex flex-col items-center space-y-4">
-                    <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-gray-200 dark:border-[#404040] flex items-center justify-center bg-gray-100 dark:bg-[#363636]">
-                      {avatarConfigDraft ? (
-                        <img src={avatarConfigDraft} alt="Avatar" className="w-full h-full object-cover" />
-                      ) : (
-                        <Bot className="w-12 h-12 text-gray-400" />
-                      )}
-                    </div>
-                    <div className="flex items-center space-x-3">
-                      <Button
-                        onClick={() => avatarConfigFileInputRef.current?.click()}
-                        variant="secondary"
-                        size="sm"
-                      >
-                        选择图片
-                      </Button>
-                      {avatarConfigDraft && (
-                        <Button
-                          onClick={() => setAvatarConfigDraft(null)}
-                          variant="ghost"
-                          size="sm"
-                          className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
-                        >
-                          清除头像
-                        </Button>
-                      )}
-                    </div>
-                    <input
-                      ref={avatarConfigFileInputRef}
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (!file) return;
-                        if (!file.type.startsWith('image/')) {
-                          alert('请选择图片文件');
-                          return;
-                        }
-                        if (file.size > 2 * 1024 * 1024) {
-                          alert('图片大小不能超过 2MB');
-                          return;
-                        }
-                        const reader = new FileReader();
-                        reader.onload = (event) => {
-                          setAvatarConfigDraft(event.target?.result as string);
-                        };
-                        reader.readAsDataURL(file);
-                      }}
-                    />
-                  </div>
-                  <p className="text-xs text-gray-500 dark:text-[#b0b0b0] text-center">
-                    支持 JPG、PNG 等格式，建议大小不超过 2MB
-                  </p>
-                </div>
-                <div className="px-5 py-4 bg-gray-50 dark:bg-[#363636] flex items-center justify-end space-x-3">
-                  <Button
-                    onClick={() => setShowAvatarConfigDialog(false)}
-                    variant="ghost"
-                    size="sm"
-                  >
-                    取消
-                  </Button>
-                  <Button
-                    onClick={async () => {
-                      try {
-                        await updateSessionAvatar(currentSessionId, avatarConfigDraft || '');
-                        setCurrentSessionAvatar(avatarConfigDraft);
-                        // 更新会话列表中的头像
-                        setSessions(prev => prev.map(s => 
-                          s.session_id === currentSessionId 
-                            ? { ...s, avatar: avatarConfigDraft || undefined }
-                            : s
-                        ));
-                        setShowAvatarConfigDialog(false);
-                      } catch (error) {
-                        console.error('Failed to update avatar:', error);
-                        alert('保存头像失败，请重试');
-                      }
-                    }}
-                    variant="primary"
-                    size="sm"
-                  >
-                    保存
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
+          <AvatarConfigDialog
+            open={showAvatarConfigDialog && !!currentSessionId && !isTemporarySession}
+            onClose={() => setShowAvatarConfigDialog(false)}
+            avatarDraft={avatarConfigDraft}
+            setAvatarDraft={setAvatarConfigDraft}
+            onSave={async () => {
+              if (!currentSessionId) return;
+              try {
+                await updateSessionAvatar(currentSessionId, avatarConfigDraft || '');
+                setCurrentSessionAvatar(avatarConfigDraft);
+                setSessions(prev => prev.map(s => 
+                  s.session_id === currentSessionId 
+                    ? { ...s, avatar: avatarConfigDraft || undefined }
+                    : s
+                ));
+                setShowAvatarConfigDialog(false);
+              } catch (error) {
+                console.error('Failed to update avatar:', error);
+                alert('保存头像失败，请重试');
+              }
+            }}
+          />
           
           {/* 技能包制作过程对话框 */}
-          {showSkillPackDialog && skillPackResult && skillPackProcessInfo && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-              <div className="bg-white dark:bg-[#2d2d2d] rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] flex flex-col">
-                <div className="px-6 py-4 border-b border-gray-200 dark:border-[#404040] flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <Package className="w-6 h-6 text-primary-500" />
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                      技能包制作完成
-                    </h3>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setShowSkillPackDialog(false);
-                      setSkillPackResult(null);
-                      setSkillPackProcessInfo(null);
-                      setSkillPackConversationText('');
-                      setOptimizationPrompt('');
-                      setSelectedMCPForOptimization([]);
-                    }}
-                    className="text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-                
-                <div className="px-6 py-4 flex-1 overflow-y-auto">
-                  {/* 制作过程信息 */}
-                  <div className="mb-6">
-                    <h4 className="text-sm font-semibold text-gray-700 dark:text-[#ffffff] mb-3">
-                      制作过程
-                    </h4>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      <div className="bg-primary-50 dark:bg-primary-900/20 rounded-lg p-3">
-                        <div className="text-xs text-gray-600 dark:text-[#b0b0b0] mb-1">消息数量</div>
-                        <div className="text-lg font-semibold text-primary-600 dark:text-primary-400">
-                          {skillPackProcessInfo.messages_count}
-                        </div>
-                      </div>
-                      <div className="bg-primary-50 dark:bg-primary-900/20 rounded-lg p-3">
-                        <div className="text-xs text-gray-600 dark:text-[#b0b0b0] mb-1">思考过程</div>
-                        <div className="text-lg font-semibold text-primary-600 dark:text-primary-400">
-                          {skillPackProcessInfo.thinking_count}
-                        </div>
-                      </div>
-                      <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-3">
-                        <div className="text-xs text-gray-600 dark:text-[#b0b0b0] mb-1">工具调用</div>
-                        <div className="text-lg font-semibold text-green-600 dark:text-green-400">
-                          {skillPackProcessInfo.tool_calls_count}
-                        </div>
-                      </div>
-                      <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3">
-                        <div className="text-xs text-gray-600 dark:text-[#b0b0b0] mb-1">媒体资源</div>
-                        <div className="text-lg font-semibold text-amber-600 dark:text-amber-400">
-                          {skillPackProcessInfo.media_count}
-                        </div>
-                        {skillPackProcessInfo.media_types.length > 0 && (
-                          <div className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-1">
-                            {skillPackProcessInfo.media_types.join(', ')}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <div className="mt-3 text-xs text-gray-500 dark:text-[#b0b0b0]">
-                      对话记录长度: {skillPackProcessInfo.conversation_length.toLocaleString()} 字符 | 
-                      提示词长度: {skillPackProcessInfo.prompt_length.toLocaleString()} 字符
-                    </div>
-                  </div>
-
-                  {/* 技能包名称 */}
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
-                      技能包名称
-                    </label>
-                    <input
-                      type="text"
-                      value={skillPackResult.name}
-                      onChange={(e) => setSkillPackResult({ ...skillPackResult, name: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    />
-                  </div>
-                  
-                  {/* 技能包总结 */}
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
-                      技能包总结
-                    </label>
-                    <textarea
-                      value={skillPackResult.summary}
-                      onChange={(e) => setSkillPackResult({ ...skillPackResult, summary: e.target.value })}
-                      rows={12}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 font-mono text-sm"
-                    />
-                  </div>
-
-                  {/* 优化总结区域 */}
-                  <div className="mb-4 border-t border-gray-200 dark:border-[#404040] pt-4">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
-                      优化总结（可选）
-                    </label>
-                    
-                    {/* MCP服务器选择 */}
-                    <div className="mb-3">
-                      <label className="block text-xs font-medium text-gray-600 dark:text-[#b0b0b0] mb-2">
-                        连接感知模组（可选）- 用于验证工具名称和参数
-                      </label>
-                      <div className="space-y-2 max-h-32 overflow-y-auto border border-gray-200 dark:border-[#404040] rounded-lg p-2">
-                        {mcpServers.filter(s => s.enabled).length === 0 ? (
-                          <div className="text-xs text-gray-500 dark:text-[#b0b0b0] text-center py-2">
-                            暂无启用的MCP服务器
-                          </div>
-                        ) : (
-                          mcpServers
-                            .filter(s => s.enabled)
-                            .map(server => (
-                              <label
-                                key={server.server_id}
-                                className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 p-2 rounded"
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={selectedMCPForOptimization.includes(server.server_id)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setSelectedMCPForOptimization([...selectedMCPForOptimization, server.server_id]);
-                                    } else {
-                                      setSelectedMCPForOptimization(selectedMCPForOptimization.filter(id => id !== server.server_id));
-                                    }
-                                  }}
-                                  className="w-4 h-4 text-primary-500 border-gray-300 rounded focus:ring-primary-500"
-                                />
-                                <Plug className="w-4 h-4 text-gray-400" />
-                                <span className="text-sm text-gray-700 dark:text-[#ffffff]">{server.name}</span>
-                              </label>
-                            ))
-                        )}
-                      </div>
-                      <div className="mt-1 text-xs text-gray-500 dark:text-[#b0b0b0]">
-                        选择MCP服务器后，优化时将连接这些服务器来验证工具名称和参数，生成更准确的技能包描述
-                      </div>
-                    </div>
-                    
-                    <textarea
-                      value={optimizationPrompt}
-                      onChange={(e) => setOptimizationPrompt(e.target.value)}
-                      placeholder="例如：更详细地描述工具调用的参数，或者强调某个关键步骤..."
-                      rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm"
-                    />
-                    <button
-                      onClick={handleOptimizeSkillPack}
-                      disabled={isOptimizing || !selectedLLMConfigId}
-                      className="mt-2 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center space-x-2"
-                    >
-                      {isOptimizing ? (
-                        <>
-                          <Loader className="w-4 h-4 animate-spin" />
-                          <span>优化中...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="w-4 h-4" />
-                          <span>优化总结</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-                
-                <div className="px-6 py-4 border-t border-gray-200 dark:border-[#404040] flex items-center justify-end space-x-3">
-                  <button
-                    onClick={() => {
-                      setShowSkillPackDialog(false);
-                      setSkillPackResult(null);
-                      setSkillPackProcessInfo(null);
-                      setSkillPackConversationText('');
-                      setOptimizationPrompt('');
-                      setSelectedMCPForOptimization([]);
-                    }}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-[#ffffff] bg-gray-100 dark:bg-[#363636] hover:bg-gray-200 dark:hover:bg-[#4a4a4a] rounded-lg transition-colors"
-                  >
-                    取消
-                  </button>
-                  <button
-                    onClick={handleSaveSkillPack}
-                    className="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 text-sm font-medium"
-                  >
-                    保存技能包
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-          
-          {/* 技能包使用确认弹窗 */}
-          {pendingSkillPackUse && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-              <div className="bg-white dark:bg-[#2d2d2d] rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col">
-                <div className="px-6 py-4 border-b border-gray-200 dark:border-[#404040] flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <Package className="w-6 h-6 text-primary-500" />
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                      确认使用技能包
-                    </h3>
-                  </div>
-                  <button
-                    onClick={() => setPendingSkillPackUse(null)}
-                    className="text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-                
-                <div className="px-6 py-4 flex-1 overflow-y-auto">
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-1">
-                      技能包名称
-                    </label>
-                    <div className="text-lg font-semibold text-gray-900 dark:text-white">
-                      {pendingSkillPackUse.skillPack.name}
-                    </div>
-                  </div>
-                  
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-1">
-                      技能包内容
-                    </label>
-                    <div className="bg-gray-50 dark:bg-[#2d2d2d] rounded-lg p-4 text-sm text-gray-700 dark:text-[#ffffff] whitespace-pre-wrap max-h-96 overflow-y-auto">
-                      {pendingSkillPackUse.skillPack.summary}
-                    </div>
-                  </div>
-                  
-                  <div className="bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-700 rounded-lg p-3 text-sm text-primary-700 dark:text-primary-300">
-                    <strong>提示：</strong>确认后，技能包内容将被注入到对话上下文中，AI将使用该技能包的能力来完成任务。
-                  </div>
-                </div>
-                
-                <div className="px-6 py-4 border-t border-gray-200 dark:border-[#404040] flex items-center justify-end space-x-2">
-                  <button
-                    onClick={() => setPendingSkillPackUse(null)}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-[#ffffff] bg-gray-100 dark:bg-[#363636] hover:bg-gray-200 dark:hover:bg-[#4a4a4a] rounded-lg transition-colors"
-                  >
-                    取消
-                  </button>
-                  <button
-                    onClick={() => {
-                      // 技能包内容已经在系统提示词中，用户确认后只需关闭弹窗
-                      // 如果需要重新发送请求，可以在这里实现
-                      setPendingSkillPackUse(null);
-                    }}
-                    className="px-4 py-2 text-sm font-medium text-white bg-primary-500 hover:bg-primary-600 rounded-lg transition-colors"
-                  >
-                    确认使用
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+          <SkillPackDialog
+            open={showSkillPackDialog && !!skillPackResult && !!skillPackProcessInfo}
+            onClose={() => {
+              setShowSkillPackDialog(false);
+              setSkillPackResult(null);
+              setSkillPackProcessInfo(null);
+              setSkillPackConversationText('');
+              setOptimizationPrompt('');
+              setSelectedMCPForOptimization([]);
+            }}
+            skillPackResult={skillPackResult}
+            setSkillPackResult={setSkillPackResult}
+            skillPackProcessInfo={skillPackProcessInfo}
+            optimizationPrompt={optimizationPrompt}
+            setOptimizationPrompt={setOptimizationPrompt}
+            selectedMCPForOptimization={selectedMCPForOptimization}
+            setSelectedMCPForOptimization={setSelectedMCPForOptimization}
+            mcpServers={mcpServers}
+            isOptimizing={isOptimizing}
+            isSavingSkillPack={isCreatingSkillPack}
+            selectedLLMConfigId={selectedLLMConfigId}
+            onOptimize={handleOptimizeSkillPack}
+            onSave={handleSaveSkillPack}
+          />
           </div>
         </div>
       </div>
     </div>
 
-    {/* 头部配置对话框 - 使用 Portal 渲染到 body 下，确保在主界面中心显示 */}
-    {showHeaderConfigDialog && createPortal(
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]" onClick={() => setShowHeaderConfigDialog(false)}>
-        <div className="bg-white dark:bg-[#2d2d2d] rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-          <div className="px-5 py-4 border-b border-gray-200 dark:border-[#404040] flex items-center justify-between flex-shrink-0">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-[#ffffff]">
-              会话配置
-            </h3>
-            <button
-              onClick={() => setShowHeaderConfigDialog(false)}
-              className="text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-          
-          {/* Tab 切换 */}
-          <div className="px-5 py-2 border-b border-gray-200 dark:border-[#404040] flex space-x-4 flex-shrink-0">
-            <button
-              onClick={() => setHeaderConfigActiveTab('basic')}
-              className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
-                headerConfigActiveTab === 'basic'
-                  ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-                  : 'text-gray-600 dark:text-[#b0b0b0] hover:bg-gray-100 dark:hover:bg-[#363636]'
-              }`}
-            >
-              基本信息
-            </button>
-          </div>
-          
-          <div className="flex-1 overflow-y-auto p-5 space-y-4">
-            {/* 头像和名称 */}
-            <div className="flex items-start space-x-4">
-              {/* 头像 */}
-              <div className="flex flex-col items-center space-y-2">
-                <div 
-                  className="w-16 h-16 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary-400 hover:ring-offset-2 transition-all overflow-hidden"
-                  onClick={() => headerConfigFileInputRef.current?.click()}
-                >
-                  {headerConfigEditAvatar ? (
-                    <img src={headerConfigEditAvatar} alt="Avatar" className="w-full h-full object-cover" />
-                  ) : (
-                    <Bot className="w-8 h-8 text-primary-600 dark:text-primary-400" />
-                  )}
-                </div>
-                <input
-                  ref={headerConfigFileInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      const reader = new FileReader();
-                      reader.onload = (e) => {
-                        setHeaderConfigEditAvatar(e.target?.result as string);
-                      };
-                      reader.readAsDataURL(file);
-                    }
-                  }}
-                />
-                <span className="text-xs text-gray-500 dark:text-[#b0b0b0]">点击更换</span>
-              </div>
-              
-              {/* 名称 */}
-              <div className="flex-1">
-                <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-1">
-                  名称
-                </label>
-                <input
-                  type="text"
-                  value={headerConfigEditName}
-                  onChange={(e) => setHeaderConfigEditName(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600"
-                  placeholder="输入名称..."
-                />
-              </div>
-            </div>
-            
-            {/* 职业选择（仅对 agent 显示） */}
-            {(() => {
-              const currentSession = sessions.find(s => s.session_id === currentSessionId);
-              const isAgent = currentSession?.session_type === 'agent';
-              if (!isAgent) return null;
-              
-              return (
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff]">
-                      职业
-                    </label>
-                    <button
-                      onClick={() => setShowHeaderAddProfessionDialog(true)}
-                      className="flex items-center gap-1 px-2 py-1 text-xs text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-colors"
-                      title="添加自定义职业"
-                    >
-                      <Plus className="w-3 h-3" />
-                      <span>添加</span>
-                    </button>
-                  </div>
-                  
-                  {/* 职业类型切换 */}
-                  <div className="flex gap-2 mb-2">
-                    <button
-                      onClick={() => {
-                        setHeaderConfigEditProfessionType('career');
-                        setHeaderConfigEditProfession(null); // 切换类型时清空选择
-                      }}
-                      className={`flex-1 px-3 py-1.5 text-sm rounded-lg transition-colors ${
-                        headerConfigEditProfessionType === 'career'
-                          ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-                          : 'bg-gray-100 dark:bg-[#363636] text-gray-600 dark:text-[#b0b0b0] hover:bg-gray-200 dark:hover:bg-[#404040]'
-                      }`}
-                    >
-                      功能职业
-                    </button>
-                    <button
-                      onClick={() => {
-                        setHeaderConfigEditProfessionType('game');
-                        setHeaderConfigEditProfession(null); // 切换类型时清空选择
-                      }}
-                      className={`flex-1 px-3 py-1.5 text-sm rounded-lg transition-colors ${
-                        headerConfigEditProfessionType === 'game'
-                          ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-                          : 'bg-gray-100 dark:bg-[#363636] text-gray-600 dark:text-[#b0b0b0] hover:bg-gray-200 dark:hover:bg-[#404040]'
-                      }`}
-                    >
-                      游戏职业
-                    </button>
-                  </div>
-                  
-                  {/* 职业选择下拉框 */}
-                  <select
-                    value={headerConfigEditProfession || ''}
-                    onChange={(e) => {
-                      const selectedProfession = e.target.value || null;
-                      setHeaderConfigEditProfession(selectedProfession);
-                      // 自动更新名称和人设以反映职业变化
-                      const currentProfessionList = headerConfigEditProfessionType === 'career' 
-                        ? headerConfigCareerProfessions 
-                        : headerConfigGameProfessions;
-                      const { name, systemPrompt } = applyProfessionToNameOrPrompt(
-                        selectedProfession,
-                        headerConfigEditName,
-                        headerConfigEditSystemPrompt,
-                        currentProfessionList
-                      );
-                      setHeaderConfigEditName(name);
-                      setHeaderConfigEditSystemPrompt(systemPrompt);
-                    }}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600"
-                    disabled={isLoadingHeaderProfessions}
-                  >
-                    <option value="">无（自定义）</option>
-                    {(headerConfigEditProfessionType === 'career' ? headerConfigCareerProfessions : headerConfigGameProfessions).map(profession => (
-                      <option key={profession} value={profession}>
-                        {profession}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-1">
-                    选择职业后，会自动更新名称和人设中的职业信息
-                  </p>
-                </div>
-              );
-            })()}
-            
-            {/* 默认模型选择 */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
-                默认模型
-              </label>
-              <select
-                value={headerConfigEditLlmConfigId || ''}
-                onChange={(e) => setHeaderConfigEditLlmConfigId(e.target.value || null)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600"
-              >
-                <option value="">使用当前选择的模型</option>
-                {llmConfigs.filter(c => c.enabled).map(config => (
-                  <option key={config.config_id} value={config.config_id}>
-                    {config.name} ({config.model})
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-1">
-                设置后，每次打开此会话时将自动切换到指定的模型
-              </p>
-            </div>
-            
-            {/* 人设配置 */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
-                人设
-              </label>
-              <textarea
-                value={headerConfigEditSystemPrompt}
-                onChange={(e) => setHeaderConfigEditSystemPrompt(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600 resize-none"
-                rows={6}
-                placeholder="输入系统提示词（人设），用于定义AI的角色和行为..."
-              />
-              <p className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-1">
-                人设定义了AI的角色、风格和行为特征
-              </p>
-            </div>
-            
-            {/* 多媒体保存路径 */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
-                多媒体保存路径
-              </label>
-              <div className="flex items-center space-x-2">
-                <input
-                  type="text"
-                  value={headerConfigEditMediaOutputPath}
-                  onChange={(e) => setHeaderConfigEditMediaOutputPath(e.target.value)}
-                  className="flex-1 px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600"
-                  placeholder="输入保存路径..."
-                />
-                {window.electron && (
-                  <button
-                    onClick={async () => {
-                      try {
-                        const result = await window.electron.selectDirectory();
-                        if (result) {
-                          setHeaderConfigEditMediaOutputPath(result);
-                        }
-                      } catch (error) {
-                        console.error('Failed to select directory:', error);
-                      }
-                    }}
-                    className="px-3 py-2 text-sm font-medium text-gray-700 dark:text-[#ffffff] bg-gray-100 dark:bg-[#363636] hover:bg-gray-200 dark:hover:bg-[#4a4a4a] rounded-lg transition-colors border border-gray-300 dark:border-[#404040]"
-                  >
-                    浏览...
-                  </button>
-                )}
-              </div>
-              <p className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-1">
-                设置后，生成的图片、视频等多媒体内容将保存到此目录
-              </p>
-            </div>
-          </div>
-          
-          {/* 底部按钮 */}
-          <div className="px-5 py-4 bg-gray-50 dark:bg-[#1a1a1a] flex items-center justify-end space-x-3 flex-shrink-0">
-            {(() => {
-              const currentSession = sessions.find(s => s.session_id === currentSessionId);
-              const isAgent = currentSession?.session_type === 'agent';
-              if (!currentSessionId || !currentSession || isTemporarySession || isAgent) return null;
-              return (
-                <button
-                  onClick={async () => {
-                    const name = headerConfigEditName.trim() || currentSession.name || currentSession.title || `角色 ${currentSession.session_id.slice(0, 8)}`;
-                    const avatar = (headerConfigEditAvatar || '').trim();
-                    const systemPrompt = headerConfigEditSystemPrompt.trim();
-                    const llmConfigId = headerConfigEditLlmConfigId;
-                    const mediaOutputPath = headerConfigEditMediaOutputPath.trim();
+    {/* HeaderConfigDialog - 会话配置对话框 */}
+    <HeaderConfigDialog
+      open={showHeaderConfigDialog}
+      onClose={() => setShowHeaderConfigDialog(false)}
+      activeTab={headerConfigActiveTab}
+      setActiveTab={setHeaderConfigActiveTab}
+      editName={headerConfigEditName}
+      setEditName={setHeaderConfigEditName}
+      editAvatar={headerConfigEditAvatar}
+      setEditAvatar={setHeaderConfigEditAvatar}
+      editSystemPrompt={headerConfigEditSystemPrompt}
+      setEditSystemPrompt={setHeaderConfigEditSystemPrompt}
+      editMediaOutputPath={headerConfigEditMediaOutputPath}
+      setEditMediaOutputPath={setHeaderConfigEditMediaOutputPath}
+      editLlmConfigId={headerConfigEditLlmConfigId}
+      setEditLlmConfigId={setHeaderConfigEditLlmConfigId}
+      editProfession={headerConfigEditProfession}
+      setEditProfession={setHeaderConfigEditProfession}
+      editProfessionType={headerConfigEditProfessionType}
+      setEditProfessionType={setHeaderConfigEditProfessionType}
+      careerProfessions={headerConfigCareerProfessions}
+      gameProfessions={headerConfigGameProfessions}
+      isLoadingProfessions={isLoadingHeaderProfessions}
+      sessions={sessions}
+      currentSessionId={currentSessionId}
+      isTemporarySession={isTemporarySession}
+      llmConfigs={llmConfigs}
+      isSavingAsRole={isSavingHeaderAsRole}
+      onShowAddProfessionDialog={() => setShowHeaderAddProfessionDialog(true)}
+      onSaveAsRole={async () => {
+        const currentSession = sessions.find(s => s.session_id === currentSessionId);
+        if (!currentSession || !currentSessionId) return;
+        
+        const name = headerConfigEditName.trim() || currentSession.name || currentSession.title || `角色 ${currentSession.session_id.slice(0, 8)}`;
+        const avatar = (headerConfigEditAvatar || '').trim();
+        const systemPrompt = headerConfigEditSystemPrompt.trim();
+        const llmConfigId = headerConfigEditLlmConfigId;
+        const mediaOutputPath = headerConfigEditMediaOutputPath.trim();
 
-                    if (!avatar || !systemPrompt || !llmConfigId) {
-                      toast({
-                        title: '还差一步',
-                        description: '保存为角色需要：头像、人设、默认LLM。',
-                        variant: 'destructive',
-                      });
-                      setHeaderConfigActiveTab('basic');
-                      return;
-                    }
+        if (!avatar || !systemPrompt || !llmConfigId) {
+          toast({
+            title: '还差一步',
+            description: '保存为角色需要：头像、人设、默认LLM。',
+            variant: 'destructive',
+          });
+          setHeaderConfigActiveTab('basic');
+          return;
+        }
 
-                    try {
-                      setIsSavingHeaderAsRole(true);
-                      const role = await createRole({
-                        name,
-                        avatar,
-                        system_prompt: systemPrompt,
-                        llm_config_id: llmConfigId,
-                        media_output_path: mediaOutputPath || undefined,
-                      });
-                      emitSessionsChanged();
-                      toast({
-                        title: '已保存为角色',
-                        description: `角色「${role.name || role.title || role.session_id}」已加入角色库`,
-                        variant: 'success',
-                      });
-                    } catch (error) {
-                      console.error('Failed to save as role (header config):', error);
-                      toast({
-                        title: '保存为角色失败',
-                        description: error instanceof Error ? error.message : String(error),
-                        variant: 'destructive',
-                      });
-                    } finally {
-                      setIsSavingHeaderAsRole(false);
-                    }
-                  }}
-                  disabled={isSavingHeaderAsRole}
-                  className="px-4 py-2 text-sm font-medium text-primary-700 dark:text-primary-300 bg-primary-100 dark:bg-primary-900/30 hover:bg-primary-200 dark:hover:bg-primary-900/50 rounded-lg transition-colors disabled:opacity-50 flex items-center space-x-2"
-                  title="复制当前配置为一个可复用角色（不影响当前会话）"
-                >
-                  {isSavingHeaderAsRole ? (
-                    <>
-                      <Loader className="w-4 h-4 animate-spin" />
-                      <span>保存为角色中...</span>
-                    </>
-                  ) : (
-                    <span>保存为角色</span>
-                  )}
-                </button>
-              );
-            })()}
-            <Button
-              onClick={() => setShowHeaderConfigDialog(false)}
-              variant="ghost"
-              size="sm"
-            >
-              取消
-            </Button>
-            <Button
-              onClick={async () => {
-                try {
-                  const promises: Promise<void>[] = [];
-                  const currentSession = sessions.find(s => s.session_id === currentSessionId);
-                  if (!currentSession || !currentSessionId) return;
-                  
-                  // 如果职业发生变化，应用职业到名称和人设
-                  let finalName = headerConfigEditName.trim();
-                  let finalSystemPrompt = headerConfigEditSystemPrompt.trim();
-                  
-                  const currentProfessionList = headerConfigEditProfessionType === 'career' 
-                    ? headerConfigCareerProfessions 
-                    : headerConfigGameProfessions;
-                  const currentProfession = extractProfession(currentSession.name, currentSession.system_prompt, currentProfessionList);
-                  if (headerConfigEditProfession !== currentProfession) {
-                    // 职业发生变化，应用职业更新
-                    const applied = applyProfessionToNameOrPrompt(
-                      headerConfigEditProfession,
-                      finalName,
-                      finalSystemPrompt,
-                      currentProfessionList
-                    );
-                    finalName = applied.name;
-                    finalSystemPrompt = applied.systemPrompt;
-                  }
-                  
-                  // 更新名称
-                  if (finalName !== (currentSession.name || '')) {
-                    promises.push(updateSessionName(currentSessionId, finalName));
-                  }
-                  
-                  // 更新头像
-                  if (headerConfigEditAvatar !== currentSession.avatar) {
-                    promises.push(updateSessionAvatar(currentSessionId, headerConfigEditAvatar));
-                    setCurrentSessionAvatar(headerConfigEditAvatar);
-                  }
-                  
-                  // 更新人设
-                  if (finalSystemPrompt !== (currentSession.system_prompt || '')) {
-                    promises.push(updateSessionSystemPrompt(currentSessionId, finalSystemPrompt || null));
-                    setCurrentSystemPrompt(finalSystemPrompt || null);
-                  }
-                  
-                  // 更新多媒体保存路径
-                  if (headerConfigEditMediaOutputPath !== (currentSession.media_output_path || '')) {
-                    promises.push(updateSessionMediaOutputPath(currentSessionId, headerConfigEditMediaOutputPath.trim() || null));
-                  }
-                  
-                  // 更新默认模型
-                  if (headerConfigEditLlmConfigId !== (currentSession.llm_config_id || null)) {
-                    promises.push(updateSessionLLMConfig(currentSessionId, headerConfigEditLlmConfigId));
-                    // 如果设置了默认模型，自动切换当前模型
-                    if (headerConfigEditLlmConfigId) {
-                      setSelectedLLMConfigId(headerConfigEditLlmConfigId);
-                    }
-                  }
-                  
-                  await Promise.all(promises);
-                  
-                  // 刷新会话列表
-                  const allSessions = await getSessions();
-                  setSessions(allSessions);
-                  emitSessionsChanged();
-                  
-                  setShowHeaderConfigDialog(false);
-                } catch (error) {
-                  console.error('Failed to save config:', error);
-                  alert('保存失败，请重试');
-                }
-              }}
-              variant="primary"
-              size="sm"
-            >
-              保存
-            </Button>
-          </div>
-        </div>
-      </div>,
-      document.body
-    )}
+        try {
+          setIsSavingHeaderAsRole(true);
+          const role = await createRole({
+            name,
+            avatar,
+            system_prompt: systemPrompt,
+            llm_config_id: llmConfigId,
+            media_output_path: mediaOutputPath || undefined,
+          });
+          emitSessionsChanged();
+          toast({
+            title: '已保存为角色',
+            description: `角色「${role.name || role.title || role.session_id}」已加入角色库`,
+            variant: 'success',
+          });
+        } catch (error) {
+          console.error('Failed to save as role (header config):', error);
+          toast({
+            title: '保存为角色失败',
+            description: error instanceof Error ? error.message : String(error),
+            variant: 'destructive',
+          });
+        } finally {
+          setIsSavingHeaderAsRole(false);
+        }
+      }}
+      onSave={async () => {
+        try {
+          const promises: Promise<void>[] = [];
+          const currentSession = sessions.find(s => s.session_id === currentSessionId);
+          if (!currentSession || !currentSessionId) return;
+          
+          // 如果职业发生变化，应用职业到名称和人设
+          let finalName = headerConfigEditName.trim();
+          let finalSystemPrompt = headerConfigEditSystemPrompt.trim();
+          
+          const currentProfessionList = headerConfigEditProfessionType === 'career' 
+            ? headerConfigCareerProfessions 
+            : headerConfigGameProfessions;
+          const currentProfession = extractProfession(currentSession.name, currentSession.system_prompt, currentProfessionList);
+          if (headerConfigEditProfession !== currentProfession) {
+            // 职业发生变化，应用职业更新
+            const applied = applyProfessionToNameOrPrompt(
+              headerConfigEditProfession,
+              finalName,
+              finalSystemPrompt,
+              currentProfessionList
+            );
+            finalName = applied.name;
+            finalSystemPrompt = applied.systemPrompt;
+          }
+          
+          // 更新名称
+          if (finalName !== (currentSession.name || '')) {
+            promises.push(updateSessionName(currentSessionId, finalName));
+          }
+          
+          // 更新头像
+          if (headerConfigEditAvatar !== currentSession.avatar) {
+            promises.push(updateSessionAvatar(currentSessionId, headerConfigEditAvatar || ''));
+            setCurrentSessionAvatar(headerConfigEditAvatar);
+          }
+          
+          // 更新人设
+          if (finalSystemPrompt !== (currentSession.system_prompt || '')) {
+            promises.push(updateSessionSystemPrompt(currentSessionId, finalSystemPrompt || null));
+            setCurrentSystemPrompt(finalSystemPrompt || null);
+          }
+          
+          // 更新多媒体保存路径
+          if (headerConfigEditMediaOutputPath !== (currentSession.media_output_path || '')) {
+            promises.push(updateSessionMediaOutputPath(currentSessionId, headerConfigEditMediaOutputPath.trim() || null));
+          }
+          
+          // 更新默认模型
+          if (headerConfigEditLlmConfigId !== (currentSession.llm_config_id || null)) {
+            promises.push(updateSessionLLMConfig(currentSessionId, headerConfigEditLlmConfigId));
+            // 如果设置了默认模型，自动切换当前模型
+            if (headerConfigEditLlmConfigId) {
+              setSelectedLLMConfigId(headerConfigEditLlmConfigId);
+            }
+          }
+          
+          await Promise.all(promises);
+          
+          // 刷新会话列表
+          const allSessions = await getSessions();
+          setSessions(allSessions);
+          emitSessionsChanged();
+          
+          setShowHeaderConfigDialog(false);
+        } catch (error) {
+          console.error('Failed to save config:', error);
+          alert('保存失败，请重试');
+        }
+      }}
+    />
 
-    {/* 头部配置对话框 - 添加自定义职业对话框 */}
-    {showHeaderAddProfessionDialog && (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[10001]" onClick={() => setShowHeaderAddProfessionDialog(false)}>
-        <div className="bg-white dark:bg-[#2d2d2d] rounded-lg shadow-xl p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-[#ffffff]">
-              添加自定义职业
-            </h3>
-            <button
-              onClick={() => setShowHeaderAddProfessionDialog(false)}
-              className="text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-          
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
-                职业类型
-              </label>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setHeaderConfigEditProfessionType('career')}
-                  className={`flex-1 px-3 py-2 text-sm rounded-lg transition-colors ${
-                    headerConfigEditProfessionType === 'career'
-                      ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-                      : 'bg-gray-100 dark:bg-[#363636] text-gray-600 dark:text-[#b0b0b0] hover:bg-gray-200 dark:hover:bg-[#404040]'
-                  }`}
-                >
-                  功能职业
-                </button>
-                <button
-                  onClick={() => setHeaderConfigEditProfessionType('game')}
-                  className={`flex-1 px-3 py-2 text-sm rounded-lg transition-colors ${
-                    headerConfigEditProfessionType === 'game'
-                      ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
-                      : 'bg-gray-100 dark:bg-[#363636] text-gray-600 dark:text-[#b0b0b0] hover:bg-gray-200 dark:hover:bg-[#404040]'
-                  }`}
-                >
-                  游戏职业
-                </button>
-              </div>
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-[#ffffff] mb-2">
-                职业名称
-              </label>
-              <input
-                type="text"
-                value={headerNewProfessionValue}
-                onChange={(e) => setHeaderNewProfessionValue(e.target.value)}
-                onKeyDown={async (e) => {
-                  if (e.key === 'Enter') {
-                    if (!headerNewProfessionValue.trim()) {
-                      toast({ title: '请输入职业名称', variant: 'destructive' });
-                      return;
-                    }
-                    try {
-                      const result = await saveDimensionOption('profession', headerConfigEditProfessionType, headerNewProfessionValue.trim());
-                      if (result.success) {
-                        toast({ title: '职业已添加', variant: 'success' });
-                        // 重新加载职业列表
-                        const options = await getDimensionOptions('profession', headerConfigEditProfessionType);
-                        if (headerConfigEditProfessionType === 'career') {
-                          setHeaderConfigCareerProfessions([...DEFAULT_CAREER_PROFESSIONS, ...options]);
-                        } else {
-                          setHeaderConfigGameProfessions([...DEFAULT_GAME_PROFESSIONS, ...options]);
-                        }
-                        // 自动选择新添加的职业
-                        setHeaderConfigEditProfession(headerNewProfessionValue.trim());
-                        setShowHeaderAddProfessionDialog(false);
-                        setHeaderNewProfessionValue('');
-                      } else {
-                        toast({ title: '添加失败', description: result.error, variant: 'destructive' });
-                      }
-                    } catch (error) {
-                      console.error('[Workflow] Failed to save custom profession:', error);
-                      toast({ title: '添加失败', description: error instanceof Error ? error.message : String(error), variant: 'destructive' });
-                    }
-                  }
-                }}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600"
-                placeholder="输入职业名称..."
-                autoFocus
-              />
-            </div>
-          </div>
-          
-          <div className="flex items-center justify-end space-x-3 mt-6">
-            <button
-              onClick={() => {
-                setShowHeaderAddProfessionDialog(false);
-                setHeaderNewProfessionValue('');
-              }}
-              className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-[#ffffff] bg-gray-100 dark:bg-[#363636] hover:bg-gray-200 dark:hover:bg-[#4a4a4a] rounded-lg transition-colors"
-            >
-              取消
-            </button>
-            <button
-              onClick={async () => {
-                if (!headerNewProfessionValue.trim()) {
-                  toast({ title: '请输入职业名称', variant: 'destructive' });
-                  return;
-                }
-                try {
-                  const result = await saveDimensionOption('profession', headerConfigEditProfessionType, headerNewProfessionValue.trim());
-                  if (result.success) {
-                    toast({ title: '职业已添加', variant: 'success' });
-                    // 重新加载职业列表
-                    const options = await getDimensionOptions('profession', headerConfigEditProfessionType);
-                    if (headerConfigEditProfessionType === 'career') {
-                      setHeaderConfigCareerProfessions([...DEFAULT_CAREER_PROFESSIONS, ...options]);
-                    } else {
-                      setHeaderConfigGameProfessions([...DEFAULT_GAME_PROFESSIONS, ...options]);
-                    }
-                    // 自动选择新添加的职业
-                    setHeaderConfigEditProfession(headerNewProfessionValue.trim());
-                    setShowHeaderAddProfessionDialog(false);
-                    setHeaderNewProfessionValue('');
-                  } else {
-                    toast({ title: '添加失败', description: result.error, variant: 'destructive' });
-                  }
-                } catch (error) {
-                  console.error('[Workflow] Failed to save custom profession:', error);
-                  toast({ title: '添加失败', description: error instanceof Error ? error.message : String(error), variant: 'destructive' });
-                }
-              }}
-              className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors"
-            >
-              添加
-            </button>
-          </div>
-        </div>
-      </div>
-    )}
+    {/* AddProfessionDialog - 添加自定义职业对话框 */}
+    <AddProfessionDialog
+      open={showHeaderAddProfessionDialog}
+      onClose={() => setShowHeaderAddProfessionDialog(false)}
+      professionType={headerConfigEditProfessionType}
+      setProfessionType={setHeaderConfigEditProfessionType}
+      newProfessionValue={headerNewProfessionValue}
+      setNewProfessionValue={setHeaderNewProfessionValue}
+      setCareerProfessions={setHeaderConfigCareerProfessions}
+      setGameProfessions={setHeaderConfigGameProfessions}
+      setEditProfession={setHeaderConfigEditProfession}
+    />
 
     <ConfirmDialog
       open={deleteSessionTarget !== null}
@@ -10172,343 +7316,62 @@ const Workflow: React.FC<WorkflowProps> = ({
       }}
     />
 
-    {/* 角色生成器（从“人设Tag展开区”进入） */}
-    <Dialog
+    {/* 角色生成器（从"人设Tag展开区"进入） */}
+    <RoleGeneratorDialog
       open={showRoleGenerator}
       onOpenChange={(open) => {
         setShowRoleGenerator(open);
         if (!open) {
-          // 关闭后刷新会话（角色创建会产生新的 session）
           emitSessionsChanged();
           loadSessions();
         }
       }}
-    >
-      <DialogContent className="max-w-6xl h-[85vh] flex flex-col p-0">
-        <DialogHeader className="flex-shrink-0 px-6 pt-6 pb-4 border-b border-gray-200 dark:border-[#404040]">
-          <DialogTitle>创建人设</DialogTitle>
-          <DialogDescription>生成并保存一个可复用的人设（角色），然后在对话中一键切换。</DialogDescription>
-        </DialogHeader>
-        <div className="flex-1 min-h-0">
-          <RoleGeneratorPage isEmbedded />
-        </div>
-        <DialogFooter className="flex-shrink-0 px-6 py-4 border-t border-gray-200 dark:border-[#404040]">
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setShowRoleGenerator(false);
-            }}
-          >
-            关闭
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      onClose={() => setShowRoleGenerator(false)}
+    />
 
     {/* 人设选择弹窗（可滚动，按类型分组） */}
-    <Dialog
+    <PersonaPanel
       open={showPersonaPanel}
-      onOpenChange={(open) => {
-        setShowPersonaPanel(open);
-        if (!open) setPersonaSearch('');
-      }}
-    >
-      <DialogContent className="max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>选择人设</DialogTitle>
-          <DialogDescription>按类型选择：Agent / Meeting / Research</DialogDescription>
-        </DialogHeader>
-        <div className="flex items-center gap-2">
-          <Input
-            value={personaSearch}
-            onChange={(e) => setPersonaSearch(e.target.value)}
-            placeholder="搜索 agent / meeting / research..."
-            className="h-9"
-          />
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setShowRoleGenerator(true);
-              setShowPersonaPanel(false);
-            }}
-            title="创建/生成一个新的人设（角色）"
-          >
-            <Plus className="w-4 h-4" />
-            <span>新建Agent</span>
-          </Button>
-        </div>
-
-        <ScrollArea className="h-[60vh] pr-2">
-          <div className="space-y-4 py-2">
-            {/* Agent */}
-            <div>
-              <div className="text-xs font-semibold text-gray-700 dark:text-gray-200 px-1 mb-1">Agent</div>
-              <div className="space-y-1">
-                {('临时会话'.includes(personaSearch.trim()) || !personaSearch.trim()) && (
-                  <DataListItem
-                    id="temporary-session"
-                    title="临时会话"
-                    description="不保存历史"
-                    icon={MessageCircle}
-                    isSelected={isTemporarySession}
-                    onClick={() => switchSessionFromPersona(temporarySessionId)}
-                  />
-                )}
-                {isLoadingPersonaList ? (
-                  <div className="text-xs text-gray-500 dark:text-[#808080] px-1 py-2">加载中...</div>
-                ) : (
-                  personaAgents
-                    .filter((a) => {
-                      const q = personaSearch.trim().toLowerCase();
-                      if (!q) return true;
-                      const name = (a.name || a.title || a.session_id).toLowerCase();
-                      const prompt = (a.system_prompt || '').toLowerCase();
-                      return name.includes(q) || prompt.includes(q);
-                    })
-                    .map((a) => (
-                      <DataListItem
-                        key={a.session_id}
-                        id={a.session_id}
-                        title={a.name || a.title || `Agent ${a.session_id.slice(0, 8)}`}
-                        description={a.system_prompt ? a.system_prompt.split('\n')[0]?.slice(0, 80) + (a.system_prompt.length > 80 ? '...' : '') : `${a.message_count || 0} 条消息 · ${a.last_message_at ? new Date(a.last_message_at).toLocaleDateString() : '无记录'}`}
-                        avatar={a.avatar || undefined}
-                        isSelected={!isTemporarySession && currentSessionId === a.session_id}
-                        onClick={() => switchSessionFromPersona(a.session_id)}
-                        onDelete={(e) => {
-                          e.stopPropagation();
-                          setDeleteSessionTarget({
-                            id: a.session_id,
-                            name: a.name || a.title || `Agent ${a.session_id.slice(0, 8)}`
-                          });
-                        }}
-                      />
-                    ))
-                )}
-              </div>
-            </div>
-
-            {/* Meeting */}
-            <div>
-              <div className="flex items-center justify-between px-1 mb-1">
-                <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">Meeting</div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowNewMeetingDialog(true)}
-                  className="h-6 px-2 text-xs"
-                >
-                  <Plus className="w-3.5 h-3.5 mr-1" />
-                  新建
-                </Button>
-              </div>
-              <div className="space-y-1">
-                {isLoadingPersonaList ? (
-                  <div className="text-xs text-gray-500 dark:text-[#808080] px-1 py-2">加载中...</div>
-                ) : (
-                  personaMeetings
-                    .filter((m) => {
-                      const q = personaSearch.trim().toLowerCase();
-                      if (!q) return true;
-                      return (m.name || '').toLowerCase().includes(q);
-                    })
-                    .map((m) => (
-                      <DataListItem
-                        key={m.round_table_id}
-                        id={m.round_table_id}
-                        title={m.name || `会议 ${m.round_table_id.slice(0, 8)}`}
-                        description={`${m.participant_count} 人 · ${m.status === 'active' ? '进行中' : '已关闭'}`}
-                        icon={Users}
-                        onClick={() => openMeetingFromPersona(m.round_table_id)}
-                        onDelete={(e) => {
-                          e.stopPropagation();
-                          setDeleteRoundTableTarget({
-                            id: m.round_table_id,
-                            name: m.name || `会议 ${m.round_table_id.slice(0, 8)}`
-                          });
-                        }}
-                      />
-                    ))
-                )}
-                {!isLoadingPersonaList && personaMeetings.length === 0 && (
-                  <div className="text-xs text-gray-500 dark:text-[#808080] px-1 py-2">暂无会议</div>
-                )}
-              </div>
-            </div>
-
-            {/* Research */}
-            <div>
-              <div className="flex items-center justify-between px-1 mb-1">
-                <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">Research</div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowNewResearchDialog(true)}
-                  className="h-6 px-2 text-xs"
-                >
-                  <Plus className="w-3.5 h-3.5 mr-1" />
-                  新建
-                </Button>
-              </div>
-              <div className="space-y-1">
-                {isLoadingPersonaList ? (
-                  <div className="text-xs text-gray-500 dark:text-[#808080] px-1 py-2">加载中...</div>
-                ) : (
-                  personaResearchSessions
-                    .filter((s) => {
-                      const q = personaSearch.trim().toLowerCase();
-                      if (!q) return true;
-                      const name = (s.name || s.title || s.session_id).toLowerCase();
-                      return name.includes(q);
-                    })
-                    .map((s) => (
-                      <DataListItem
-                        key={s.session_id}
-                        id={s.session_id}
-                        title={s.name || s.title || `Research ${s.session_id.slice(0, 8)}`}
-                        description="研究资料与检索"
-                        icon={BookOpen}
-                        onClick={() => openResearchFromPersona(s.session_id)}
-                        onDelete={(e) => {
-                          e.stopPropagation();
-                          setDeleteResearchTarget({
-                            id: s.session_id,
-                            name: s.name || s.title || `Research ${s.session_id.slice(0, 8)}`
-                          });
-                        }}
-                      />
-                    ))
-                )}
-                {!isLoadingPersonaList && personaResearchSessions.length === 0 && (
-                  <div className="text-xs text-gray-500 dark:text-[#808080] px-1 py-2">暂无 Research 会话</div>
-                )}
-              </div>
-            </div>
-          </div>
-        </ScrollArea>
-
-        <DialogFooter>
-          <Button variant="secondary" onClick={() => setShowPersonaPanel(false)}>
-            关闭
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      onOpenChange={setShowPersonaPanel}
+      personaSearch={personaSearch}
+      setPersonaSearch={setPersonaSearch}
+      isLoadingPersonaList={isLoadingPersonaList}
+      personaAgents={personaAgents}
+      personaMeetings={personaMeetings}
+      personaResearchSessions={personaResearchSessions}
+      isTemporarySession={isTemporarySession}
+      currentSessionId={currentSessionId}
+      temporarySessionId={temporarySessionId}
+      onSwitchSession={switchSessionFromPersona}
+      onOpenMeeting={openMeetingFromPersona}
+      onOpenResearch={openResearchFromPersona}
+      onDeleteAgent={(id, name) => setDeleteSessionTarget({ id, name })}
+      onDeleteMeeting={(id, name) => setDeleteRoundTableTarget({ id, name })}
+      onDeleteResearch={(id, name) => setDeleteResearchTarget({ id, name })}
+      onShowRoleGenerator={() => setShowRoleGenerator(true)}
+      onShowNewMeetingDialog={() => setShowNewMeetingDialog(true)}
+      onShowNewResearchDialog={() => setShowNewResearchDialog(true)}
+    />
 
     {/* 新建 Meeting 对话框 */}
-    <Dialog
+    <NewMeetingDialog
       open={showNewMeetingDialog}
-      onOpenChange={(open) => {
-        setShowNewMeetingDialog(open);
-        if (!open) setNewMeetingName('');
-      }}
-    >
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>新建会议</DialogTitle>
-          <DialogDescription>输入会议名称并创建</DialogDescription>
-        </DialogHeader>
-        <div className="py-4">
-          <InputField
-            label="会议名称"
-            required
-            inputProps={{
-              id: 'meeting-name',
-              value: newMeetingName,
-              onChange: (e) => setNewMeetingName(e.target.value),
-              placeholder: '例如：项目讨论会',
-              disabled: isCreatingMeeting,
-              onKeyDown: (e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleCreateNewMeeting();
-                }
-              },
-            }}
-          />
-        </div>
-        <DialogFooter>
-          <Button 
-            variant="secondary" 
-            onClick={() => setShowNewMeetingDialog(false)}
-            disabled={isCreatingMeeting}
-          >
-            取消
-          </Button>
-          <Button
-            variant="primary"
-            onClick={handleCreateNewMeeting}
-            disabled={isCreatingMeeting || !newMeetingName.trim()}
-          >
-            {isCreatingMeeting ? (
-              <>
-                <Loader className="w-4 h-4 mr-2 animate-spin" />
-                创建中...
-              </>
-            ) : (
-              '创建'
-            )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      onOpenChange={setShowNewMeetingDialog}
+      meetingName={newMeetingName}
+      setMeetingName={setNewMeetingName}
+      isCreating={isCreatingMeeting}
+      onCreate={handleCreateNewMeeting}
+    />
 
     {/* 新建 Research 对话框 */}
-    <Dialog
+    <NewResearchDialog
       open={showNewResearchDialog}
-      onOpenChange={(open) => {
-        setShowNewResearchDialog(open);
-        if (!open) setNewResearchName('');
-      }}
-    >
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>新建研究任务</DialogTitle>
-          <DialogDescription>输入研究任务名称并创建</DialogDescription>
-        </DialogHeader>
-        <div className="py-4">
-          <InputField
-            label="任务名称"
-            required
-            inputProps={{
-              id: 'research-name',
-              value: newResearchName,
-              onChange: (e) => setNewResearchName(e.target.value),
-              placeholder: '例如：市场分析',
-              disabled: isCreatingResearch,
-              onKeyDown: (e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleCreateNewResearch();
-                }
-              },
-            }}
-          />
-        </div>
-        <DialogFooter>
-          <Button 
-            variant="secondary" 
-            onClick={() => setShowNewResearchDialog(false)}
-            disabled={isCreatingResearch}
-          >
-            取消
-          </Button>
-          <Button
-            variant="primary"
-            onClick={handleCreateNewResearch}
-            disabled={isCreatingResearch || !newResearchName.trim()}
-          >
-            {isCreatingResearch ? (
-              <>
-                <Loader className="w-4 h-4 mr-2 animate-spin" />
-                创建中...
-              </>
-            ) : (
-              '创建'
-            )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      onOpenChange={setShowNewResearchDialog}
+      researchName={newResearchName}
+      setResearchName={setNewResearchName}
+      isCreating={isCreatingResearch}
+      onCreate={handleCreateNewResearch}
+    />
 
     {/* MCP 详情遮罩层 */}
     {showMCPDetailOverlay && selectedMCPDetail && (
@@ -10522,132 +7385,15 @@ const Workflow: React.FC<WorkflowProps> = ({
     )}
 
     {/* 首次访问昵称输入对话框 */}
-    <Dialog open={showNicknameDialog} onOpenChange={(open) => {
-      // 如果用户未填写昵称，不允许关闭对话框
-      if (!open && (!userAccess?.nickname || userAccess?.needs_nickname)) {
-        return;
-      }
-      setShowNicknameDialog(open);
-    }}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>欢迎使用</DialogTitle>
-          <DialogDescription>
-            {userAccess?.is_enabled === false 
-              ? '您的访问已被禁用，请联系管理员。'
-              : '首次访问，请填写您的昵称以便我们识别您。'}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4 py-4">
-          <InputField
-            label="昵称"
-            required
-            inputProps={{
-              id: 'nickname',
-              value: nicknameInput,
-              onChange: (e) => setNicknameInput(e.target.value),
-              placeholder: '请输入您的昵称',
-              disabled: isSubmittingNickname || userAccess?.is_enabled === false,
-              onKeyDown: (e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSubmitNickname();
-                }
-              },
-            }}
-          />
-          {userAccess?.ip_address && (
-            <p className="text-xs text-muted-foreground">
-              您的IP地址: {userAccess.ip_address}
-            </p>
-          )}
-        </div>
-        <DialogFooter>
-          <Button
-            variant="primary"
-            onClick={handleSubmitNickname}
-            disabled={isSubmittingNickname || !nicknameInput.trim() || userAccess?.is_enabled === false}
-          >
-            {isSubmittingNickname ? (
-              <>
-                <Loader className="w-4 h-4 mr-2 animate-spin" />
-                保存中...
-              </>
-            ) : (
-              '保存'
-            )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-    
-    {/* 会话媒体面板 */}
-    <SessionMediaPanel
-      open={sessionMediaPanelOpen}
-      onClose={() => setSessionMediaPanelOpen(false)}
-      media={sessionMedia}
-      initialIndex={sessionMediaInitialIndex}
+    <NicknameDialog
+      open={showNicknameDialog}
+      onOpenChange={setShowNicknameDialog}
+      nicknameInput={nicknameInput}
+      setNicknameInput={setNicknameInput}
+      isSubmitting={isSubmittingNickname}
+      userAccess={userAccess}
+      onSubmit={handleSubmitNickname}
     />
-    
-    {/* 首次访问昵称输入对话框 */}
-    <Dialog open={showNicknameDialog} onOpenChange={(open) => {
-      // 如果用户未填写昵称，不允许关闭对话框
-      if (!open && (!userAccess?.nickname || userAccess?.needs_nickname)) {
-        return;
-      }
-      setShowNicknameDialog(open);
-    }}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>欢迎使用</DialogTitle>
-          <DialogDescription>
-            {userAccess?.is_enabled === false 
-              ? '您的访问已被禁用，请联系管理员。'
-              : '首次访问，请填写您的昵称以便我们识别您。'}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4 py-4">
-          <InputField
-            label="昵称"
-            required
-            inputProps={{
-              id: 'nickname',
-              value: nicknameInput,
-              onChange: (e) => setNicknameInput(e.target.value),
-              placeholder: '请输入您的昵称',
-              disabled: isSubmittingNickname || userAccess?.is_enabled === false,
-              onKeyDown: (e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSubmitNickname();
-                }
-              },
-            }}
-          />
-          {userAccess?.ip_address && (
-            <p className="text-xs text-muted-foreground">
-              您的IP地址: {userAccess.ip_address}
-            </p>
-          )}
-        </div>
-        <DialogFooter>
-          <Button
-            variant="primary"
-            onClick={handleSubmitNickname}
-            disabled={isSubmittingNickname || !nicknameInput.trim() || userAccess?.is_enabled === false}
-          >
-            {isSubmittingNickname ? (
-              <>
-                <Loader className="w-4 h-4 mr-2 animate-spin" />
-                保存中...
-              </>
-            ) : (
-              '保存'
-            )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
     
     {/* 会话媒体面板 */}
     <SessionMediaPanel

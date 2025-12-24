@@ -8,6 +8,8 @@ import { MCPServer } from './mcpClient';
 
 export interface MCPServerConfig {
   id: string;
+  /** 后端返回字段（与 id 等价，历史兼容） */
+  server_id?: string;
   name: string;
   url: string;
   type: 'http-stream' | 'http-post' | 'stdio';
