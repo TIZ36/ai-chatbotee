@@ -12,18 +12,43 @@ import time
 import requests
 import pymysql
 import uuid
+import gzip
+import io
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 from flask import Flask, request, jsonify, send_file, Response, stream_with_context
 from flask_cors import CORS
 from werkzeug.exceptions import RequestEntityTooLarge
+from flask_compress import Compress
 
 
 app = Flask(__name__)
 # 确保JSON响应正确处理中文
 app.config['JSON_AS_ASCII'] = False
 app.config['JSONIFY_MIMETYPE'] = 'application/json; charset=utf-8'
+
+# ==================== HTTP 压缩（响应 gzip） ====================
+# 说明：
+# - 对 JSON/文本等响应启用 gzip，减少大段对话/多媒体元数据的传输体积
+# - 不压缩 text/event-stream（SSE）等流式响应，避免影响实时性
+app.config.setdefault('COMPRESS_ALGORITHM', 'gzip')
+app.config.setdefault('COMPRESS_LEVEL', 6)
+app.config.setdefault('COMPRESS_MIN_SIZE', 1024)
+app.config.setdefault(
+    'COMPRESS_MIMETYPES',
+    [
+        'application/json',
+        'application/javascript',
+        'application/xml',
+        'text/plain',
+        'text/html',
+        'text/css',
+        'text/xml',
+        'text/markdown',
+    ],
+)
+Compress(app)
 
 # 加载配置
 def load_config():
@@ -64,6 +89,7 @@ def handle_request_entity_too_large(e):
 # 统一定义所有允许的CORS请求头，确保所有API接口使用相同的配置
 CORS_ALLOWED_HEADERS = [
     'Content-Type',
+    'Content-Encoding',
     'Accept',
     'Authorization',
     'X-Requested-With',
@@ -93,6 +119,46 @@ CORS_EXPOSE_HEADERS = [
     'Location',
     'Set-Cookie'
 ]
+
+# ==================== HTTP 压缩（请求体 gzip） ====================
+# 前端可在 JSON 请求体较大时发送 Content-Encoding: gzip，本处统一解压，业务代码无感知。
+@app.before_request
+def gunzip_request_body():
+    enc = (request.headers.get('Content-Encoding') or '').lower().strip()
+    if enc != 'gzip':
+        return None
+
+    # 仅处理可能有 body 的方法
+    if request.method not in ('POST', 'PUT', 'PATCH'):
+        return None
+
+    try:
+        compressed = request.get_data(cache=False) or b''
+    except Exception:
+        compressed = request.get_data() or b''
+
+    if not compressed:
+        return None
+
+    try:
+        decompressed = gzip.decompress(compressed)
+    except Exception as e:
+        return jsonify({
+            'error': 'BadRequest',
+            'message': 'Invalid gzip request body',
+            'detail': str(e),
+        }), 400
+
+    # 替换 WSGI input，让后续 request.get_json / request.form 等读取到解压后的内容
+    request.environ['wsgi.input'] = io.BytesIO(decompressed)
+    request.environ['CONTENT_LENGTH'] = str(len(decompressed))
+    # Flask 内部缓存（兼容 get_data/get_json）
+    try:
+        request._cached_data = decompressed  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+    return None
 
 # 将列表转换为字符串（用于响应头）
 CORS_ALLOWED_HEADERS_STR = ', '.join(CORS_ALLOWED_HEADERS)

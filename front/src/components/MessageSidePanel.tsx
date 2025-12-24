@@ -516,17 +516,47 @@ export const MessageSidePanel: React.FC<MessageSidePanelProps> = ({
     }
 
     // 添加 MCP 调用（从 mcpDetail）
-    if (mcpDetail?.tool_calls) {
-      mcpDetail.tool_calls.forEach((call, index) => {
-        const result = mcpDetail.tool_results?.[index];
+    // 兼容两种 MCPDetail 结构：
+    // 1) 旧结构：tool_calls/tool_results（OpenAI tool calls）
+    // 2) 新结构：execution 记录（raw_result/logs/component_type）
+    const legacyToolCalls = (mcpDetail as any)?.tool_calls;
+    if (Array.isArray(legacyToolCalls) && legacyToolCalls.length > 0) {
+      legacyToolCalls.forEach((call: any, index: number) => {
+        const result = (mcpDetail as any)?.tool_results?.[index];
         steps.push({
           type: 'mcp_call',
-          toolName: call.function?.name || 'unknown',
-          arguments: call.function?.arguments,
-          result: result?.content,
+          toolName: call?.function?.name || call?.name || 'unknown',
+          arguments: call?.function?.arguments ?? call?.arguments,
+          result: result?.content ?? result,
           status: 'completed',
         });
       });
+    } else if (mcpDetail && (mcpDetail as any).component_type === 'mcp') {
+      const raw = (mcpDetail as any).raw_result;
+      const results = raw?.results;
+      if (Array.isArray(results) && results.length > 0) {
+        // 按结果拆成多个 MCP 调用块（尽量贴近现有 MCP UX）
+        results.forEach((r: any) => {
+          const toolName = r?.tool ? String(r.tool) : r?.name ? String(r.name) : 'unknown_tool';
+          steps.push({
+            type: 'mcp_call',
+            toolName,
+            arguments: r?.arguments ?? r?.args ?? r?.input,
+            // 保留原始结构，MCPCallBlock 会做 stringify；保证用户能看到“内容”
+            result: r?.result ?? r,
+            status: (mcpDetail as any).status || (r?.status as any) || 'completed',
+          });
+        });
+      } else if (raw) {
+        // 兜底：没有 results 数组时，仍展示 raw_result
+        steps.push({
+          type: 'mcp_call',
+          toolName: (mcpDetail as any).component_name || 'mcp',
+          arguments: undefined,
+          result: raw,
+          status: (mcpDetail as any).status || 'completed',
+        });
+      }
     }
 
     // 添加 MCP 调用（从 toolCalls）
@@ -553,6 +583,19 @@ export const MessageSidePanel: React.FC<MessageSidePanelProps> = ({
       steps.push({
         type: 'workflow',
         workflowInfo: workflowInfo,
+      });
+    }
+    // 兼容：如果 mcpDetail 是 workflow 类型的 execution 记录，也加入工作流步骤
+    if (!workflowInfo && mcpDetail && (mcpDetail as any).component_type === 'workflow') {
+      steps.push({
+        type: 'workflow',
+        workflowInfo: {
+          id: (mcpDetail as any).component_id,
+          name: (mcpDetail as any).component_name,
+          status: (mcpDetail as any).status,
+          result: (mcpDetail as any).raw_result ? formatData((mcpDetail as any).raw_result, 600) : undefined,
+          config: undefined,
+        },
       });
     }
 
@@ -611,10 +654,13 @@ export const MessageSidePanel: React.FC<MessageSidePanelProps> = ({
   }
 
   const panelStyle = messageHeight ? { minHeight: messageHeight } : {};
+  // 旧版并排布局会给 messageHeight，从而允许面板填满高度（h-full）。
+  // 现在堆叠布局通常没有固定高度，因此需要一个可见的最大高度，否则 h-full 可能为 0。
+  const scrollAreaHeightClass = messageHeight ? 'h-full' : 'max-h-[320px]';
 
   return (
     <ScrollArea 
-      className="h-full w-full bg-gray-50/50 dark:bg-[#1a1a1a]/50 rounded-lg border border-gray-200/50 dark:border-[#333]/50"
+      className={`${scrollAreaHeightClass} w-full bg-gray-50/50 dark:bg-[#1a1a1a]/50 rounded-lg border border-gray-200/50 dark:border-[#333]/50`}
       style={panelStyle}
     >
       <div className="p-3 space-y-3">

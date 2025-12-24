@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { X, Download, Play, Music, Copy, Check, ChevronUp, ChevronDown, Image as ImageIcon } from 'lucide-react';
 import { dataUrlToBlob, ensureDataUrlFromMaybeBase64 } from '../../utils/dataUrl';
 import { resolveMediaSrc } from '@/utils/mediaSrc';
+import { preloadImage } from '@/utils/mediaPreload';
 
 export interface SessionMediaItem {
   type: 'image' | 'video' | 'audio';
@@ -40,6 +41,7 @@ export const SessionMediaPanel: React.FC<SessionMediaPanelProps> = ({
   initialIndex = 0,
   imagesOnly = false,
 }) => {
+  // ============ 所有 hooks 必须在任何条件返回之前调用 ============
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const [copied, setCopied] = useState(false);
   const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set());
@@ -51,26 +53,9 @@ export const SessionMediaPanel: React.FC<SessionMediaPanelProps> = ({
   // 过滤媒体
   const filteredMedia = imagesOnly ? media.filter(m => m.type === 'image') : media;
 
-  // 调试日志
-  console.log('[SessionMediaPanel] 渲染:', { 
-    open, 
-    mediaCount: media?.length, 
-    filteredCount: filteredMedia?.length,
-    initialIndex,
-    currentIndex,
-    mediaDetails: media?.slice(0, 3).map(m => ({
-      type: m.type,
-      mimeType: m.mimeType,
-      hasData: !!m.data,
-      dataLength: m.data?.length,
-      role: m.role
-    }))
-  });
-
   // 重置索引当打开时
   useEffect(() => {
     if (open) {
-      console.log('[SessionMediaPanel] 打开面板，设置索引:', initialIndex);
       setCurrentIndex(Math.min(initialIndex, filteredMedia.length - 1));
       setSelectedItems(new Set());
       setIsSelecting(false);
@@ -94,6 +79,27 @@ export const SessionMediaPanel: React.FC<SessionMediaPanelProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [open, currentIndex, filteredMedia.length]);
 
+  // 打开面板后，优先预热"当前 + 前后若干"的图片，提升切换/首帧速度
+  useEffect(() => {
+    if (!open) return;
+    
+    const getMediaSrc = (item: SessionMediaItem) => {
+      const raw = item.url || item.data || '';
+      if (!raw) return '';
+      return resolveMediaSrc(raw, item.mimeType || 'application/octet-stream');
+    };
+    
+    const windowSize = 6;
+    const start = Math.max(0, currentIndex - windowSize);
+    const end = Math.min(filteredMedia.length - 1, currentIndex + windowSize);
+    for (let i = start; i <= end; i++) {
+      const item = filteredMedia[i];
+      if (item?.type !== 'image') continue;
+      void preloadImage(getMediaSrc(item), { decode: true });
+    }
+  }, [open, currentIndex, filteredMedia]);
+
+  // ============ 现在可以安全地做条件返回 ============
   if (!open || filteredMedia.length === 0) return null;
 
   const currentItem = filteredMedia[currentIndex];
@@ -102,7 +108,7 @@ export const SessionMediaPanel: React.FC<SessionMediaPanelProps> = ({
     const raw = item.url || item.data || '';
     if (!raw) return '';
     // 统一处理：纯 base64 / 后端相对路径 / 本地路径
-    // 注意：resolveMediaSrc 内部会对“纯 base64”补齐 data: 前缀
+    // 注意：resolveMediaSrc 内部会对"纯 base64"补齐 data: 前缀
     return resolveMediaSrc(raw, item.mimeType || 'application/octet-stream');
   };
 
@@ -266,6 +272,9 @@ export const SessionMediaPanel: React.FC<SessionMediaPanelProps> = ({
                 src={getMediaSrc(item)}
                 alt={`图片 ${index + 1}`}
                 className="w-full h-full object-cover"
+                loading="lazy"
+                decoding="async"
+                draggable={false}
               />
             )}
             {item.type === 'video' && (

@@ -876,13 +876,15 @@ const SessionSidebar: React.FC<SessionSidebarProps> = ({
                       {v.created_at ? `创建：${v.created_at}` : ''}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 ml-auto">
                     <Button
-                      variant="secondary"
+                      variant="ghost"
+                      size="sm"
                       disabled={v.is_current || activatingVersionId === v.version_id}
                       onClick={async () => {
                         await handleActivateRoleVersion(v.version_id);
                       }}
+                      className="border-0 shadow-none hover:shadow-md transition-shadow"
                     >
                       {activatingVersionId === v.version_id ? '切换中...' : '激活'}
                     </Button>

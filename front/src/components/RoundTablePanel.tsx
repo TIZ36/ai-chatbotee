@@ -63,6 +63,13 @@ import { MessageRenderer } from './conversation/MessageRenderer';
 import { useConversation } from '../conversation/useConversation';
 import { createRoundTableConversationAdapter } from '../conversation/adapters/roundTableConversation';
 import type { UnifiedMessage } from '../conversation/types';
+import { 
+  MessageBubble, 
+  MessageAvatar, 
+  SystemNotification,
+  StreamingResponse,
+  type MessageRole 
+} from './ui/MessageBubble';
 
 export interface RoundTablePanelRef {
   refresh: () => Promise<void>;
@@ -117,7 +124,7 @@ const RoundTablePanel = forwardRef<RoundTablePanelRef, RoundTablePanelProps>(({
   const [workflows, setWorkflows] = useState<WorkflowType[]>([]);
   const [enableMCP, setEnableMCP] = useState(true); // 是否启用 MCP
   const [enableWorkflow, setEnableWorkflow] = useState(true); // 是否启用工作流
-  const [showToolsSidebar, setShowToolsSidebar] = useState(true); // 是否显示工具边栏
+  // 工具箱已集成在发送框工具 Tag 中，右侧工具边栏不再展示
   
   // 上下文和总结
   const [roundTableSummary, setRoundTableSummary] = useState<string | null>(null); // 圆桌会议总结
@@ -132,6 +139,24 @@ const RoundTablePanel = forwardRef<RoundTablePanelRef, RoundTablePanelProps>(({
   
   // 输入框状态
   const [isInputFocused, setIsInputFocused] = useState(false);
+
+  // 浮岛输入区：动态计算消息列表底部 padding，避免被浮岛遮挡
+  const floatingComposerRef = useRef<HTMLDivElement>(null);
+  const [floatingComposerPadding, setFloatingComposerPadding] = useState(180);
+  useEffect(() => {
+    const el = floatingComposerRef.current;
+    if (!el) return;
+    const update = () => {
+      const h = el.getBoundingClientRect().height || 0;
+      setFloatingComposerPadding(Math.max(140, Math.ceil(h + 24)));
+    };
+    update();
+    const RO = (window as any).ResizeObserver as any;
+    if (!RO) return;
+    const ro = new RO(() => update());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   
   // 多模态内容（图片）
   const [attachedMedia, setAttachedMedia] = useState<Array<{
@@ -1584,7 +1609,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
   }
   
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-[#2d2d2d] rounded-lg border border-gray-200 dark:border-[#404040] overflow-hidden">
+    <div className="flex flex-col h-full bg-white dark:bg-[#2d2d2d] overflow-hidden">
       {/* 顶部：标题栏 */}
       <div className="flex-shrink-0 border-b border-gray-200 dark:border-[#404040]">
         {/* 标题栏 */}
@@ -1620,7 +1645,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
         {/* 对话区 */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           {/* 消息列表 */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="flex-1 overflow-y-auto hide-scrollbar px-3 py-2 space-y-4" style={{ paddingBottom: floatingComposerPadding }}>
             {messages.length === 0 ? (
               <div className="text-center text-gray-500 text-sm py-8">
                 开始圆桌会议对话...
@@ -1645,8 +1670,12 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
             <div ref={messagesEndRef} />
           </div>
           
-          {/* 输入区 - 统一设计 */}
-          <div className="border-t border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] px-4 py-3">
+          {/* 输入区（浮岛悬浮） */}
+          <div className="absolute left-0 right-0 bottom-0 z-10 pointer-events-none">
+            <div
+              ref={floatingComposerRef}
+              className="pointer-events-auto rounded-2xl bg-white/35 dark:bg-[#262626]/35 backdrop-blur-md shadow-xl p-0"
+            >
             {/* 引用消息预览 */}
             {replyingTo && (
               <div className="mb-3 flex items-start gap-2 p-2 bg-gray-100 dark:bg-[#363636] rounded-lg border-l-2 border-[var(--color-accent)]">
@@ -1695,18 +1724,22 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
               </div>
             )}
             
-            {/* 输入区（与 Research 保持一致：成员栏 + 工具Tag + 输入框/发送） */}
-            <div className="relative rounded-xl bg-white dark:bg-[#262626] shadow-md">
-              {/* 参会人栏 + 工具 Tags */}
-              <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-100 dark:border-[#363636]">
+            {/* 输入区（浮岛样式：上方工具Tag，下方输入框；聚焦时阴影变化） */}
+            <div
+              className={`relative rounded-xl bg-transparent transition-shadow ${
+                isInputFocused ? 'shadow-lg ring-1 ring-[var(--color-accent)]/20' : 'shadow-sm'
+              }`}
+            >
+              {/* 顶部：参会人栏 */}
+              <div className="px-3 py-2 bg-white/45 dark:bg-[#262626]/45 backdrop-blur-md border-b border-black/5 dark:border-white/10 rounded-t-xl flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5 min-w-0">
-                  <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-[#7c3aed]/10 text-[#7c3aed] text-[10px] font-medium">
+                  <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-[#7c3aed]/10 text-[#7c3aed] text-[10px] font-medium flex-shrink-0">
                     <Users className="w-3 h-3" />
                     <span>{roundTable.participants.length}</span>
                   </div>
 
                   {/* 参会人头像（点击移除） */}
-                  <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-hide">
+                  <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-hide min-w-0">
                     {roundTable.participants.map((p) => (
                       <button
                         key={p.session_id}
@@ -1725,48 +1758,6 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
                       </button>
                     ))}
                   </div>
-
-                  {/* 分隔符 */}
-                  <div className="w-px h-4 bg-gray-200 dark:bg-[#404040] mx-1" />
-
-                  <InputToolTags
-                    mcpServers={mcpServers.filter(s => s.enabled).map(s => ({
-                      id: s.server_id || s.id,
-                      name: s.name,
-                      display_name: s.display_name,
-                    }))}
-                    workflows={workflows.map(w => ({
-                      workflow_id: w.workflow_id,
-                      name: w.name,
-                      description: w.description,
-                    }))}
-                    enableMCP={enableMCP}
-                    onToggleMCP={setEnableMCP}
-                    enableWorkflow={enableWorkflow}
-                    onToggleWorkflow={setEnableWorkflow}
-                    mcpMode="toggle"
-                    workflowMode="toggle"
-                    showSkillPack={false}
-                    showSources={false}
-                    onAttachFile={(files) => {
-                      Array.from(files).forEach(file => {
-                        if (!file.type.startsWith('image/')) return;
-                        const reader = new FileReader();
-                        reader.onload = (e) => {
-                          const result = e.target?.result as string;
-                          const base64Data = result.includes(',') ? result.split(',')[1] : result;
-                          setAttachedMedia(prev => [...prev, {
-                            type: 'image',
-                            mimeType: file.type,
-                            data: base64Data,
-                            preview: result,
-                          }]);
-                        };
-                        reader.readAsDataURL(file);
-                      });
-                    }}
-                    attachedMediaCount={attachedMedia.length}
-                  />
                 </div>
 
                 {/* 添加参会人 */}
@@ -1807,12 +1798,50 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
                 </div>
               </div>
 
+              {/* 顶部：工具 Tag（上方摆放） */}
+              <div className="px-3 py-1.5 border-b border-gray-100 dark:border-[#363636]">
+                <InputToolTags
+                  mcpServers={mcpServers.filter(s => s.enabled).map(s => ({
+                    id: s.server_id || s.id,
+                    name: s.name,
+                    display_name: s.display_name,
+                  }))}
+                  workflows={workflows.map(w => ({
+                    workflow_id: w.workflow_id,
+                    name: w.name,
+                    description: w.description,
+                  }))}
+                  enableMCP={enableMCP}
+                  onToggleMCP={setEnableMCP}
+                  enableWorkflow={enableWorkflow}
+                  onToggleWorkflow={setEnableWorkflow}
+                  mcpMode="toggle"
+                  workflowMode="toggle"
+                  showSkillPack={false}
+                  showSources={false}
+                  onAttachFile={(files) => {
+                    Array.from(files).forEach(file => {
+                      if (!file.type.startsWith('image/')) return;
+                      const reader = new FileReader();
+                      reader.onload = (e) => {
+                        const result = e.target?.result as string;
+                        const base64Data = result.includes(',') ? result.split(',')[1] : result;
+                        setAttachedMedia(prev => [...prev, {
+                          type: 'image',
+                          mimeType: file.type,
+                          data: base64Data,
+                          preview: result,
+                        }]);
+                      };
+                      reader.readAsDataURL(file);
+                    });
+                  }}
+                  attachedMediaCount={attachedMedia.length}
+                />
+              </div>
+
               {/* 输入框 + 发送按钮 */}
-              <div
-                className={`relative flex items-end gap-2 p-2 transition-all ${
-                  isInputFocused ? 'ring-2 ring-[var(--color-accent)]/20' : ''
-                }`}
-              >
+              <div className="relative flex items-end gap-2 p-2 bg-white/45 dark:bg-[#262626]/45 backdrop-blur-md rounded-b-xl">
                 <textarea
                   ref={inputRef}
                   value={inputValue}
@@ -1903,18 +1932,15 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
               )}
               
                 {/* 右侧：发送按钮 */}
-                <button
+                <Button
                   onClick={handleSendMessage}
                   disabled={(!inputValue.trim() && attachedMedia.length === 0) || isSending}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                    (!inputValue.trim() && attachedMedia.length === 0) || isSending
-                      ? 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
-                      : 'bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-white shadow-sm hover:shadow'
-                  }`}
+                  variant="primary"
+                  className="px-4"
                   title="发送"
                 >
                   {isSending ? '…' : '发送'}
-                </button>
+                </Button>
               </div>
             </div>
             
@@ -1938,145 +1964,10 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
               </div>
             )}
           </div>
+          </div>
       </div>
       
-      {/* 右侧工具边栏 */}
-      {showToolsSidebar && (enableMCP || enableWorkflow) && (
-        <div className="w-56 flex-shrink-0 border-l border-gray-200 dark:border-[#404040] flex flex-col bg-gray-50 dark:bg-[#2d2d2d]/50">
-          {/* 边栏头部 */}
-          <div className="p-2 border-b border-gray-200 dark:border-[#404040] flex items-center justify-between">
-            <div className="flex items-center space-x-1.5">
-              <Wrench className="w-4 h-4 text-primary-500" />
-              <span className="text-xs font-medium text-gray-900 dark:text-white">工具箱</span>
-            </div>
-            <button
-              onClick={() => setShowToolsSidebar(false)}
-              className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
-              title="收起"
-            >
-              <ChevronRight className="w-3 h-3 text-gray-500" />
-            </button>
-          </div>
-          
-          {/* 工具列表 */}
-          <div className="flex-1 overflow-y-auto">
-            {/* MCP 服务器（懒加载） */}
-            {enableMCP && mcpServers.filter(s => s.enabled).length > 0 && (
-              <div className="p-2">
-                <div className="flex items-center space-x-1 mb-2">
-                  <Package className="w-3 h-3 text-green-500" />
-                  <span className="text-[10px] font-medium text-gray-600 dark:text-gray-400">
-                    MCP 服务 ({mcpServers.filter(s => s.enabled).length})
-                  </span>
-                </div>
-                <div className="space-y-1">
-                  {mcpServers.filter(s => s.enabled).map((server) => {
-                    const serverId = server.server_id || server.id;
-                    const isConnected = connectedMcpServerIds.has(serverId);
-                    const isConnecting = connectingMcpServerIds.has(serverId);
-                    const tools = mcpTools.get(serverId) || [];
-                    
-                    return (
-                      <div 
-                        key={serverId}
-                        className="p-1.5 bg-white dark:bg-[#2d2d2d] rounded border border-gray-200 dark:border-[#404040] hover:border-green-300 dark:hover:border-green-700 transition-colors"
-                      >
-                        <div className="flex items-center space-x-1.5">
-                          <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 ${
-                            isConnected ? 'bg-green-100 dark:bg-green-900/30' : 
-                            isConnecting ? 'bg-yellow-100 dark:bg-yellow-900/30' : 
-                            'bg-gray-100 dark:bg-gray-700'
-                          }`}>
-                            {isConnecting ? (
-                              <Loader className="w-3 h-3 text-yellow-600 dark:text-yellow-400 animate-spin" />
-                            ) : (
-                              <Plug className={`w-3 h-3 ${
-                                isConnected ? 'text-green-600 dark:text-green-400' : 'text-gray-400'
-                              }`} />
-                            )}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <span className="text-[11px] font-medium text-gray-900 dark:text-white truncate block">
-                              {server.display_name || server.name}
-                            </span>
-                            {isConnected && tools.length > 0 && (
-                              <span className="text-[9px] text-green-500">
-                                {tools.length} 工具
-                              </span>
-                            )}
-                            {!isConnected && !isConnecting && (
-                              <span className="text-[9px] text-gray-400">
-                                按需加载
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        {server.description && (
-                          <p className="mt-1 text-[9px] text-gray-500 line-clamp-2 pl-6">
-                            {server.description}
-                          </p>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-            
-            {/* 工作流 */}
-            {enableWorkflow && workflows.length > 0 && (
-              <div className="p-2 border-t border-gray-200 dark:border-[#404040]">
-                <div className="flex items-center space-x-1 mb-2">
-                  <Zap className="w-3 h-3 text-blue-500" />
-                  <span className="text-[10px] font-medium text-gray-600 dark:text-gray-400">
-                    工作流 ({workflows.length})
-                  </span>
-                </div>
-                <div className="space-y-1">
-                  {workflows.map((workflow) => (
-                    <div 
-                      key={workflow.workflow_id}
-                      className="p-1.5 bg-white dark:bg-[#2d2d2d] rounded border border-gray-200 dark:border-[#404040] hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
-                    >
-                      <div className="flex items-center space-x-1.5">
-                        <div className="w-5 h-5 rounded bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
-                          <Zap className="w-3 h-3 text-blue-600 dark:text-blue-400" />
-                        </div>
-                        <span className="text-[11px] font-medium text-gray-900 dark:text-white truncate">
-                          {workflow.name}
-                        </span>
-                      </div>
-                      {workflow.description && (
-                        <p className="mt-1 text-[9px] text-gray-500 line-clamp-2 pl-6">
-                          {workflow.description}
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            {/* 空状态 */}
-            {(!enableMCP || mcpServers.filter(s => s.enabled).length === 0) && (!enableWorkflow || workflows.length === 0) && (
-              <div className="p-4 text-center text-gray-400 text-xs">
-                暂无可用工具
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-      
-      {/* 收起状态下的展开按钮 */}
-      {!showToolsSidebar && (enableMCP || enableWorkflow) && (
-        <button
-          onClick={() => setShowToolsSidebar(true)}
-          className="absolute right-0 top-1/2 transform -translate-y-1/2 p-1.5 bg-gray-100 dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] rounded-l-lg hover:bg-gray-200 dark:hover:bg-gray-700 shadow-sm z-10"
-          title="展开工具箱"
-        >
-          <ChevronLeft className="w-4 h-4 text-gray-500" />
-        </button>
-      )}
+      {/* 右侧工具箱已移除（工具已在发送框工具 Tag 处集成） */}
       </div>
       
       {/* 配置弹框 */}
@@ -2223,33 +2114,21 @@ const MessageItem: React.FC<MessageItemProps> = ({
   const selectedResponse = responses.find(r => r.is_selected);
   
   if (isSystemMessage) {
-    return (
-      <div className="flex justify-center">
-        <div className="px-3 py-1 bg-gray-100 dark:bg-[#2d2d2d] text-gray-500 text-xs rounded-full">
-          {message.content}
-        </div>
-      </div>
-    );
+    return <SystemNotification content={message.content} />;
   }
   
   // 所有消息都用左右布局：用户右边，AI左边
   return (
     <div className={`flex ${isUserMessage ? 'justify-end' : 'justify-start'}`}>
       <div className={`max-w-[80%]`}>
-        {/* 发送者信息（AI消息显示在左侧） */}
+        {/* 发送者信息（AI消息显示在左侧） - 使用统一头像组件 */}
         {!isUserMessage && (
           <div className="flex items-center space-x-2 mb-1">
-            <div className="w-6 h-6 rounded-full overflow-hidden border border-gray-200 dark:border-[#404040] flex items-center justify-center bg-purple-100 dark:bg-purple-900/30">
-              {(message.meta?.agent_avatar as string | undefined) ? (
-                <img 
-                  src={message.meta?.agent_avatar as string} 
-                  alt={(message.meta?.agent_name as string) || '智能体'} 
-                  className="w-full h-full object-cover" 
-                />
-              ) : (
-                <Bot className="w-3 h-3 text-purple-500" />
-              )}
-            </div>
+            <MessageAvatar 
+              role="assistant" 
+              avatarUrl={message.meta?.agent_avatar as string | undefined}
+              size="sm"
+            />
             <span className="text-xs text-gray-500">{(message.meta?.agent_name as string) || '智能体'}</span>
             {message.meta?.is_raise_hand && (
               <span className="text-xs text-yellow-500 flex items-center">
@@ -2260,23 +2139,22 @@ const MessageItem: React.FC<MessageItemProps> = ({
           </div>
         )}
         
-        {/* 用户信息（显示在右侧） */}
+        {/* 用户信息（显示在右侧） - 使用统一头像组件 */}
         {isUserMessage && (
           <div className="flex items-center justify-end space-x-2 mb-1">
             <span className="text-xs text-gray-500">我</span>
-            <div className="w-6 h-6 rounded-full overflow-hidden border border-gray-200 dark:border-[#404040] flex items-center justify-center bg-primary-100 dark:bg-primary-900/30">
-              <span className="text-xs text-primary-500 font-bold">U</span>
-            </div>
+            <MessageAvatar role="user" size="sm" />
           </div>
         )}
         
-        {/* 消息内容 */}
-        <div
-          className={`px-3 py-2 rounded-lg group/msg relative ${
-            isUserMessage
-              ? 'bg-primary-500 text-white rounded-tr-none'
-              : 'bg-gray-100 dark:bg-[#2d2d2d] text-gray-900 dark:text-white rounded-tl-none'
-          }`}
+        {/* 消息内容 - 使用统一消息气泡样式 */}
+        <MessageBubble
+          role={isUserMessage ? 'user' : 'assistant'}
+          className="group/msg relative"
+          styleConfig={{ 
+            compact: true,
+            cornerDirection: isUserMessage ? 'tr' : 'tl'
+          }}
         >
           {/* 引用消息显示 */}
           {message.meta?.reply_to_message_id && (() => {
@@ -2401,9 +2279,9 @@ const MessageItem: React.FC<MessageItemProps> = ({
               ))}
             </div>
           )}
-        </div>
+        </MessageBubble>
         
-        {/* 流式响应区域（正在生成的响应） */}
+        {/* 流式响应区域（正在生成的响应） - 使用统一组件 */}
         {isUserMessage && pendingAgents && pendingAgents.size > 0 && (
           <div className="mt-2 space-y-2">
             {Array.from(pendingAgents).map(agentId => {
@@ -2412,54 +2290,16 @@ const MessageItem: React.FC<MessageItemProps> = ({
               const agent = participants?.find(p => p.session_id === agentId);
               
               return (
-                <div 
+                <StreamingResponse
                   key={agentId}
-                  className="p-3 rounded-lg border border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/20"
-                >
-                  {/* 头部 */}
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center space-x-2">
-                      <div className="relative w-5 h-5 rounded-full overflow-hidden border border-gray-200 dark:border-[#404040] flex items-center justify-center bg-purple-100 dark:bg-purple-900/30">
-                        {agent?.avatar ? (
-                          <img src={agent.avatar} alt={agent.name} className="w-full h-full object-cover" />
-                        ) : (
-                          <Bot className="w-3 h-3 text-purple-500" />
-                        )}
-                        {/* 加载动画 */}
-                        <div className="absolute inset-0 bg-blue-500/20 animate-pulse rounded-full" />
-                      </div>
-                      <span className="text-xs font-medium text-gray-900 dark:text-white">
-                        {agent?.name || '智能体'}
-                      </span>
-                      <Loader className="w-3 h-3 text-blue-500 animate-spin" />
-                      <span className="text-xs text-blue-500">正在思考...</span>
-                    </div>
-                    
-                    {/* 取消按钮 */}
-                    <button
-                      onClick={() => onCancelAgent?.(agentId)}
-                      className="text-xs px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600 flex items-center"
-                    >
-                      <X className="w-3 h-3 mr-1" />
-                      取消
-                    </button>
-                  </div>
-                  
-                  {/* 思考内容 */}
-                  {streamThinking && (
-                    <div className="mb-2 p-2 bg-gray-100 dark:bg-[#2d2d2d] rounded text-xs text-gray-500 italic">
-                      💭 {streamThinking.substring(0, 200)}{streamThinking.length > 200 ? '...' : ''}
-                    </div>
-                  )}
-                  
-                  {/* 流式内容 */}
-                  {streamContent && (
-                    <div className="text-gray-700 dark:text-gray-300">
-                      <MessageRenderer content={streamContent} variant="compact" />
-                      <span className="inline-block w-1 h-4 bg-blue-500 animate-pulse ml-0.5" />
-                    </div>
-                  )}
-                </div>
+                  agentId={agentId}
+                  agentName={agent?.name}
+                  agentAvatar={agent?.avatar}
+                  streamContent={streamContent}
+                  streamThinking={streamThinking}
+                  onCancel={() => onCancelAgent?.(agentId)}
+                  renderContent={(content) => <MessageRenderer content={content} variant="compact" />}
+                />
               );
             })}
           </div>
@@ -2547,20 +2387,14 @@ const ResponseCard: React.FC<ResponseCardProps> = ({ response, isSelected, onSel
           : 'border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d]'
       }`}
     >
-      {/* 头部 */}
+      {/* 头部 - 使用统一头像组件 */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center space-x-2">
-          <div className="w-5 h-5 rounded-full overflow-hidden border border-gray-200 dark:border-[#404040] flex items-center justify-center bg-purple-100 dark:bg-purple-900/30">
-            {response.agent_avatar ? (
-              <img 
-                src={response.agent_avatar} 
-                alt={response.agent_name} 
-                className="w-full h-full object-cover" 
-              />
-            ) : (
-              <Bot className="w-3 h-3 text-purple-500" />
-            )}
-          </div>
+          <MessageAvatar 
+            role="assistant" 
+            avatarUrl={response.agent_avatar}
+            size="sm"
+          />
           <span className="text-xs font-medium text-gray-900 dark:text-white">
             {response.agent_name}
           </span>

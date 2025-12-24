@@ -10,9 +10,11 @@ import { getMCPServers, MCPServerConfig } from '../services/mcpApi';
 import { mcpManager, MCPTool } from '../services/mcpClient';
 import { getWorkflows, Workflow as WorkflowType } from '../services/workflowApi';
 import InputToolTags from './ui/InputToolTags';
+import { Button } from './ui/Button';
 import { MessageRenderer } from './conversation/MessageRenderer';
 import { useConversation } from '../conversation/useConversation';
 import { createResearchConversationAdapter } from '../conversation/adapters/researchConversation';
+import { MessageAvatar, MessageBubbleContainer } from './ui/MessageBubble';
 
 export interface ResearchPanelProps {
   chatSessionId: string | null;
@@ -221,27 +223,8 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
   const [windows, setWindows] = useState<ResearchWindow[]>([]);
   const [activeWindowId, setActiveWindowId] = useState<string | null>(null);
   
-  // 研究课题Tab标签（支持多个研究课题）- 持久化到 localStorage
-  const [openResearchTabs, setOpenResearchTabs] = useState<Array<{ sessionId: string; name: string }>>(() => {
-    try {
-      const saved = localStorage.getItem('open_research_tabs');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          return parsed;
-        }
-      }
-    } catch (e) {
-      console.warn('[Research] Failed to restore research tabs:', e);
-    }
-    return [];
-  });
-  const [activeResearchTab, setActiveResearchTab] = useState<string | null>(() => {
-    return localStorage.getItem('active_research_tab') || null;
-  });
-  const [editingResearchTabId, setEditingResearchTabId] = useState<string | null>(null); // 正在编辑的research tab
-  const [editingResearchTabName, setEditingResearchTabName] = useState<string>(''); // 编辑中的名称
-  const editingResearchTabInputRef = useRef<HTMLInputElement>(null); // 编辑输入框引用
+  // 去掉 Research 多页签模式：一次仅展示一个 Research 会话
+  const [isInputFocused, setIsInputFocused] = useState(false);
   
   // TODO 分配弹窗
   const [assignTask, setAssignTask] = useState<string | null>(null);
@@ -272,6 +255,9 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
   }>>([]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  // 浮岛输入区：动态计算消息区域底部 padding，避免被浮岛遮挡
+  const floatingComposerRef = useRef<HTMLDivElement>(null);
+  const [floatingComposerPadding, setFloatingComposerPadding] = useState(180);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dirInputRef = useRef<HTMLInputElement>(null);
   const researcherAvatarInputRef = useRef<HTMLInputElement>(null);
@@ -313,6 +299,21 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
         console.warn('[Research] Failed to load MCP servers:', e);
       }
     })();
+  }, []);
+
+  useEffect(() => {
+    const el = floatingComposerRef.current;
+    if (!el) return;
+    const update = () => {
+      const h = el.getBoundingClientRect().height || 0;
+      setFloatingComposerPadding(Math.max(140, Math.ceil(h + 24)));
+    };
+    update();
+    const RO = (window as any).ResizeObserver as any;
+    if (!RO) return;
+    const ro = new RO(() => update());
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
   
   useEffect(() => {
@@ -371,102 +372,11 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
     })();
   }, []);
 
-  // 保存 openResearchTabs 到 localStorage
-  useEffect(() => {
-    localStorage.setItem('open_research_tabs', JSON.stringify(openResearchTabs));
-  }, [openResearchTabs]);
-
-  // 保存 activeResearchTab 到 localStorage
-  useEffect(() => {
-    if (activeResearchTab) {
-      localStorage.setItem('active_research_tab', activeResearchTab);
-    } else {
-      localStorage.removeItem('active_research_tab');
-    }
-  }, [activeResearchTab]);
-
-  // 应用加载时恢复 active research tab 并按创建时间排序
-  useEffect(() => {
-    (async () => {
-      if (openResearchTabs.length > 0) {
-        // 获取所有 tabs 对应的 session 信息，按创建时间排序
-        try {
-          const sessionsData = await Promise.all(
-            openResearchTabs.map(async (tab) => {
-              try {
-                const session = await getSession(tab.sessionId);
-                return { ...tab, created_at: session?.created_at };
-              } catch {
-                return { ...tab, created_at: null };
-              }
-            })
-          );
-          
-          // 过滤有效的会话并按创建时间排序
-          const validTabs = sessionsData.filter(t => t.created_at !== null);
-          const sortedTabs = validTabs.sort((a, b) => {
-            const timeA = new Date(a.created_at || 0).getTime();
-            const timeB = new Date(b.created_at || 0).getTime();
-            return timeA - timeB;
-          });
-          
-          // 更新排序后的 tabs
-          if (sortedTabs.length > 0) {
-            setOpenResearchTabs(sortedTabs.map(t => ({ sessionId: t.sessionId, name: t.name })));
-          }
-        } catch (e) {
-          console.warn('[Research] Failed to sort tabs by creation time:', e);
-        }
-      }
-      
-      // 如果有持久化的 activeResearchTab 但没有当前 researchSessionId，恢复它
-      if (activeResearchTab && !researchSessionId && openResearchTabs.length > 0) {
-        const tabExists = openResearchTabs.some(t => t.sessionId === activeResearchTab);
-        if (tabExists) {
-          onResearchSessionChange(activeResearchTab);
-        } else if (openResearchTabs.length > 0) {
-          // 如果 activeResearchTab 不存在了，切换到第一个 tab
-          const firstTab = openResearchTabs[0];
-          setActiveResearchTab(firstTab.sessionId);
-          onResearchSessionChange(firstTab.sessionId);
-        }
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // 只在组件挂载时运行一次
+  // （已移除）Research 多页签相关持久化逻辑
 
   // 进入 research：为当前 chatSession 创建/复用 researchSession
   useEffect(() => {
-    if (researchSessionId) {
-      // 如果已有researchSessionId，添加到tabs
-      (async () => {
-        try {
-          const session = await getSession(researchSessionId);
-          const sessionName = session?.name || `研究课题 ${researchSessionId.substring(0, 8)}`;
-          setOpenResearchTabs(prev => {
-            if (prev.some(tab => tab.sessionId === researchSessionId)) {
-              // 更新名称
-              return prev.map(tab => 
-                tab.sessionId === researchSessionId ? { ...tab, name: sessionName } : tab
-              );
-            }
-            return [...prev, { sessionId: researchSessionId, name: sessionName }];
-          });
-          setActiveResearchTab(researchSessionId);
-        } catch (e) {
-          console.warn('[Research] Failed to get session:', e);
-          const sessionName = `研究课题 ${researchSessionId.substring(0, 8)}`;
-          setOpenResearchTabs(prev => {
-            if (prev.some(tab => tab.sessionId === researchSessionId)) {
-              return prev;
-            }
-            return [...prev, { sessionId: researchSessionId, name: sessionName }];
-          });
-          setActiveResearchTab(researchSessionId);
-        }
-      })();
-      return;
-    }
+    if (researchSessionId) return;
 
     (async () => {
       const chatId = chatSessionId || 'temporary-session';
@@ -488,34 +398,12 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
     })();
   }, [chatSessionId, onResearchSessionChange, researchSessionId]);
   
-  // 关闭研究课题tab
-  const handleCloseResearchTab = (sessionId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setOpenResearchTabs(prev => prev.filter(tab => tab.sessionId !== sessionId));
-    
-    // 如果关闭的是当前激活的tab，切换到其他tab
-    if (activeResearchTab === sessionId) {
-      const remainingTabs = openResearchTabs.filter(tab => tab.sessionId !== sessionId);
-      if (remainingTabs.length > 0) {
-        const lastTab = remainingTabs[remainingTabs.length - 1];
-        onResearchSessionChange(lastTab.sessionId);
-      } else {
-        // 没有其他tab了，退出Research模式
-        onExit();
-      }
-    }
-  };
-  
   // 创建新的研究课题
   const handleCreateNewResearch = async () => {
     try {
       const chatId = chatSessionId || 'temporary-session';
       const sessionName = `研究课题 ${Date.now().toString().slice(-6)}`;
       const s = await createSession(undefined, sessionName, 'research');
-      
-      // 直接添加到 tabs 并激活
-      setOpenResearchTabs(prev => [...prev, { sessionId: s.session_id, name: s.name || sessionName }]);
-      setActiveResearchTab(s.session_id);
       onResearchSessionChange(s.session_id);
       
       console.log('[Research] Created new research session:', s.session_id);
@@ -523,60 +411,6 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
       console.error('[Research] Failed to create research session:', e);
     }
   };
-
-  // 开始编辑research tab名称
-  const handleStartEditResearchTab = (sessionId: string) => {
-    const tab = openResearchTabs.find(t => t.sessionId === sessionId);
-    if (tab) {
-      setEditingResearchTabId(sessionId);
-      setEditingResearchTabName(tab.name);
-    }
-  };
-  
-  // 保存research tab名称编辑
-  const handleSaveResearchTabEdit = async () => {
-    if (!editingResearchTabId) return;
-    
-    try {
-      await updateSessionName(editingResearchTabId, editingResearchTabName.trim() || undefined);
-      
-      // 更新tabs中的名称
-      setOpenResearchTabs(prev => prev.map(tab => 
-        tab.sessionId === editingResearchTabId 
-          ? { ...tab, name: editingResearchTabName.trim() || tab.name }
-          : tab
-      ));
-    } catch (error) {
-      console.error('[Research] Failed to update session name:', error);
-      alert('保存失败，请重试');
-    } finally {
-      setEditingResearchTabId(null);
-      setEditingResearchTabName('');
-    }
-  };
-  
-  // 取消编辑research tab名称
-  const handleCancelResearchTabEdit = () => {
-    setEditingResearchTabId(null);
-    setEditingResearchTabName('');
-  };
-  
-  // research tab编辑输入框键盘事件
-  const handleResearchTabEditKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleSaveResearchTabEdit();
-    } else if (e.key === 'Escape') {
-      handleCancelResearchTabEdit();
-    }
-  };
-  
-  // 当editingResearchTabId变化时，聚焦输入框
-  useEffect(() => {
-    if (editingResearchTabId && editingResearchTabInputRef.current) {
-      editingResearchTabInputRef.current.focus();
-      editingResearchTabInputRef.current.select();
-    }
-  }, [editingResearchTabId]);
   
   // 加载 research 历史消息（优化：只加载最近的消息，加快加载速度）
   useEffect(() => {
@@ -1259,84 +1093,7 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
 
   return (
     <div className="h-full flex flex-col min-h-0">
-      {/* 研究课题Tab标签栏 - 参考RoundTableChat样式 */}
-      {openResearchTabs.length > 0 && (
-        <div className="flex-shrink-0 bg-gray-100 dark:bg-[#1a1a1a] border-b border-gray-200 dark:border-[#404040]">
-          <div className="flex items-center">
-            {/* Tab 容器 */}
-            <div className="flex-1 flex items-end overflow-x-auto scrollbar-hide px-2 pt-2 gap-0.5">
-              {openResearchTabs.map((tab) => {
-                const isActive = activeResearchTab === tab.sessionId;
-                const isEditing = editingResearchTabId === tab.sessionId;
-                return (
-                  <div
-                    key={tab.sessionId}
-                    className={`
-                      group relative flex items-center min-w-0 max-w-[200px]
-                      ${isActive 
-                        ? 'bg-white dark:bg-[#2d2d2d] border-t border-l border-r border-gray-200 dark:border-[#404040] rounded-t-lg -mb-px z-10' 
-                        : 'bg-gray-50 dark:bg-[#252525] border border-transparent hover:bg-gray-100 dark:hover:bg-[#333333] rounded-t-lg'
-                      }
-                    `}
-                    onClick={() => !isEditing && (() => {
-                      onResearchSessionChange(tab.sessionId);
-                      setActiveResearchTab(tab.sessionId);
-                    })()}
-                    onDoubleClick={() => handleStartEditResearchTab(tab.sessionId)}
-                  >
-                    <div className={`
-                      flex items-center gap-2 px-3 py-2 cursor-pointer w-full min-w-0
-                      ${isActive ? 'text-gray-900 dark:text-white' : 'text-gray-600 dark:text-gray-400'}
-                    `}>
-                      {/* 图标 */}
-                      <BookOpen className="w-4 h-4 flex-shrink-0 text-[#7c3aed]" />
-                      
-                      {/* 名称或编辑输入框 */}
-                      {isEditing ? (
-                        <input
-                          ref={editingResearchTabInputRef}
-                          type="text"
-                          value={editingResearchTabName}
-                          onChange={(e) => setEditingResearchTabName(e.target.value)}
-                          onKeyDown={handleResearchTabEditKeyDown}
-                          onBlur={handleSaveResearchTabEdit}
-                          onClick={(e) => e.stopPropagation()}
-                          className="flex-1 min-w-0 px-1 py-0.5 text-sm bg-white dark:bg-[#363636] border border-primary-500 rounded outline-none text-gray-900 dark:text-white"
-                          placeholder="输入研究课题名称"
-                        />
-                      ) : (
-                        <span className="text-sm truncate flex-1 min-w-0">
-                          {tab.name}
-                        </span>
-                      )}
-                      
-                      {/* 关闭按钮 - 仅在hover时显示且不在编辑状态 */}
-                      {!isEditing && (
-                        <button
-                          onClick={(e) => handleCloseResearchTab(tab.sessionId, e)}
-                          className="flex-shrink-0 w-4 h-4 rounded-sm flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-gray-200 dark:hover:bg-gray-600 transition-all"
-                          title="关闭"
-                        >
-                          <X className="w-3 h-3 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-              
-              {/* 新建 Tab 按钮 */}
-              <button
-                onClick={handleCreateNewResearch}
-                className="flex-shrink-0 w-8 h-8 flex items-center justify-center text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-[#333333] rounded-lg transition-colors mb-1"
-                title="新建研究课题"
-              >
-                <Plus className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 已移除：Research 多页签课题模式（一次仅显示一个 Research 会话） */}
       
       {/* 顶部栏 */}
       <div className="flex-shrink-0 px-3 py-2 border-b border-transparent bg-white/70 dark:bg-[#262626]/70 backdrop-blur">
@@ -1944,7 +1701,11 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
             }
           }}
         >
-          <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto p-3">
+          <div
+            ref={scrollRef}
+            className="flex-1 min-h-0 overflow-auto hide-scrollbar px-3 py-2"
+            style={{ paddingBottom: floatingComposerPadding }}
+          >
               {/* Pinned sources strip */}
               {pinnedSources.length > 0 && (
                 <div className="mb-2">
@@ -1988,50 +1749,62 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
                   </div>
                 </div>
               )}
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {messages.map((m, idx) => {
                     const key = m.local_id || `${m.role}-${idx}`;
-                    if (m.role === 'user') {
-                      return (
-                        <div
-                          key={key}
-                          className="rounded-xl bg-[#e8f4fc] dark:bg-[#1a2332] px-3 py-2"
-                        >
-                          <div className="text-[10px] font-medium text-[#3b82f6] dark:text-[#60a5fa] mb-0.5 uppercase tracking-wide">Q</div>
-                          <div className="text-sm text-gray-800 dark:text-[#e0e0e0] whitespace-pre-wrap">{m.content}</div>
-                        </div>
-                      );
-                    }
-                    // assistant / others: article-style card
+                    const isUserMessage = m.role === 'user';
+                    
                     return (
                       <div
                         key={key}
-                        className="rounded-xl bg-white dark:bg-[#262626] px-3 py-2 shadow-sm"
+                        className={`flex items-start space-x-2 ${isUserMessage ? 'flex-row-reverse space-x-reverse' : ''}`}
                       >
-                        <div className="text-[10px] font-medium text-[#7c3aed] dark:text-[#a78bfa] mb-1 uppercase tracking-wide">
-                          {m.role === 'assistant' ? 'A' : m.role}
-                        </div>
-                        <MarkdownArticle
-                          content={m.content}
-                          onSplitTask={m.role === 'assistant' ? splitTaskToWindow : undefined}
-                          onAssignTask={
-                            m.role === 'assistant'
-                              ? (task) => {
-                                  setAssignTask(task);
-                                  setAssignToAgentId(null);
-                                }
-                              : undefined
-                          }
+                        {/* 统一头像组件 */}
+                        <MessageAvatar 
+                          role={m.role as 'user' | 'assistant' | 'system' | 'tool'} 
+                          avatarUrl={researcherAgent?.avatar}
+                          size="sm"
                         />
+                        
+                        {/* 统一消息气泡容器 */}
+                        <MessageBubbleContainer
+                          role={m.role as 'user' | 'assistant' | 'system' | 'tool'}
+                          className="max-w-[85%]"
+                        >
+                          {isUserMessage ? (
+                            <div className="text-sm whitespace-pre-wrap">{m.content}</div>
+                          ) : (
+                            <MarkdownArticle
+                              content={m.content}
+                              onSplitTask={m.role === 'assistant' ? splitTaskToWindow : undefined}
+                              onAssignTask={
+                                m.role === 'assistant'
+                                  ? (task) => {
+                                      setAssignTask(task);
+                                      setAssignToAgentId(null);
+                                    }
+                                  : undefined
+                              }
+                            />
+                          )}
+                        </MessageBubbleContainer>
                       </div>
                     );
                   })}
               </div>
             </div>
 
-          {/* 输入区（集成课题组/成员/发送） */}
-          <div className="flex-shrink-0 px-3 pb-3 relative z-10">
-            <div className="relative rounded-xl bg-white dark:bg-[#262626] shadow-md">
+          {/* 输入区（浮岛悬浮） */}
+          <div className="absolute left-0 right-0 bottom-0 z-20 pointer-events-none">
+            <div
+              ref={floatingComposerRef}
+              className="pointer-events-auto rounded-2xl bg-white/35 dark:bg-[#262626]/35 backdrop-blur-md shadow-xl"
+            >
+              <div
+                className={`relative rounded-xl bg-transparent transition-shadow ${
+                  isInputFocused ? 'shadow-lg ring-1 ring-[var(--color-accent)]/20' : 'shadow-sm'
+                }`}
+              >
               {/* 附件预览 */}
               {attachedMedia.length > 0 && (
                 <div className="px-3 py-2 border-b border-gray-100 dark:border-[#363636] flex flex-wrap gap-2">
@@ -2053,8 +1826,8 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
                 </div>
               )}
               
-              {/* 课题组成员栏 + 工具 Tags（集成在输入框内顶部） */}
-              <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-100 dark:border-[#363636]">
+              {/* 顶部：课题组成员栏 */}
+              <div className="px-3 py-2 bg-white/45 dark:bg-[#262626]/45 backdrop-blur-md border-b border-black/5 dark:border-white/10 rounded-t-xl flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5 min-w-0">
                   {/* 研究员 */}
                   <button
@@ -2092,45 +1865,7 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
                   </div>
                   
                   {/* 分隔符 */}
-                  <div className="w-px h-4 bg-gray-200 dark:bg-[#404040] mx-1" />
-                  
-                  {/* MCP、工作流、Sources、附件 - 统一 Tag 样式 */}
-                  <InputToolTags
-                    mcpServers={mcpServers.map(s => ({
-                      id: s.server_id || s.id,
-                      name: s.name,
-                      display_name: s.display_name,
-                    }))}
-                    selectedMcpServerIds={selectedMcpServerIds}
-                    connectedMcpServerIds={connectedMcpServerIds}
-                    connectingMcpServerIds={connectingMcpServerIds}
-                    onSelectMCP={(id) => setSelectedMcpServerIds(prev => new Set([...prev, id]))}
-                    onDeselectMCP={(id) => setSelectedMcpServerIds(prev => { const next = new Set(prev); next.delete(id); return next; })}
-                    onConnectMCP={handleConnectMCP}
-                    workflows={workflows.map(w => ({
-                      workflow_id: w.workflow_id,
-                      name: w.name,
-                      description: w.description,
-                    }))}
-                    selectedWorkflowIds={selectedWorkflowIds}
-                    onSelectWorkflow={(id) => setSelectedWorkflowIds(prev => new Set([...prev, id]))}
-                    onDeselectWorkflow={(id) => setSelectedWorkflowIds(prev => { const next = new Set(prev); next.delete(id); return next; })}
-                    sources={sources.map(s => ({
-                      source_id: s.source_id,
-                      title: s.title,
-                      source_type: s.source_type,
-                      url: s.url,
-                      mime_type: s.mime_type,
-                    }))}
-                    pinnedSourceIds={pinnedSourceIds}
-                    onPinSource={pinSource}
-                    onUnpinSource={(id) => setPinnedSourceIds(prev => prev.filter(x => x !== id))}
-                    onInsertSourceToken={(token) => setInput(prev => (prev ? `${prev} $${token}` : `$${token}`))}
-                    showSources={true}
-                    showSkillPack={false}
-                    onAttachFile={handleAttachFile}
-                    attachedMediaCount={attachedMedia.length}
-                  />
+                  <div className="w-px h-4 bg-gray-200 dark:bg-[#404040] mx-1 flex-shrink-0" />
                 </div>
                 <div className="relative">
                   <details className="group">
@@ -2165,9 +1900,49 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
                   </details>
                 </div>
               </div>
+
+              {/* 顶部：工具 Tag（上方摆放） */}
+              <div className="px-3 py-1.5 border-b border-gray-100 dark:border-[#363636]">
+                <InputToolTags
+                  mcpServers={mcpServers.map(s => ({
+                    id: s.server_id || s.id,
+                    name: s.name,
+                    display_name: s.display_name,
+                  }))}
+                  selectedMcpServerIds={selectedMcpServerIds}
+                  connectedMcpServerIds={connectedMcpServerIds}
+                  connectingMcpServerIds={connectingMcpServerIds}
+                  onSelectMCP={(id) => setSelectedMcpServerIds(prev => new Set([...prev, id]))}
+                  onDeselectMCP={(id) => setSelectedMcpServerIds(prev => { const next = new Set(prev); next.delete(id); return next; })}
+                  onConnectMCP={handleConnectMCP}
+                  workflows={workflows.map(w => ({
+                    workflow_id: w.workflow_id,
+                    name: w.name,
+                    description: w.description,
+                  }))}
+                  selectedWorkflowIds={selectedWorkflowIds}
+                  onSelectWorkflow={(id) => setSelectedWorkflowIds(prev => new Set([...prev, id]))}
+                  onDeselectWorkflow={(id) => setSelectedWorkflowIds(prev => { const next = new Set(prev); next.delete(id); return next; })}
+                  sources={sources.map(s => ({
+                    source_id: s.source_id,
+                    title: s.title,
+                    source_type: s.source_type,
+                    url: s.url,
+                    mime_type: s.mime_type,
+                  }))}
+                  pinnedSourceIds={pinnedSourceIds}
+                  onPinSource={pinSource}
+                  onUnpinSource={(id) => setPinnedSourceIds(prev => prev.filter(x => x !== id))}
+                  onInsertSourceToken={(token) => setInput(prev => (prev ? `${prev} $${token}` : `$${token}`))}
+                  showSources={true}
+                  showSkillPack={false}
+                  onAttachFile={handleAttachFile}
+                  attachedMediaCount={attachedMedia.length}
+                />
+              </div>
               
               {/* 输入框 + 发送按钮 */}
-              <div className="relative flex items-end gap-2 p-2">
+              <div className="relative flex items-end gap-2 p-2 bg-white/45 dark:bg-[#262626]/45 backdrop-blur-md rounded-b-xl">
                 <textarea
                   ref={inputRef}
                   value={input}
@@ -2179,6 +1954,8 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
                   onKeyUp={() => requestAnimationFrame(updateAutocomplete)}
                   placeholder="输入问题…（@ 成员，$ 引用）"
                   className="flex-1 min-h-[44px] max-h-[140px] resize-y px-3 py-2 text-sm bg-transparent text-gray-800 dark:text-[#e0e0e0] placeholder-gray-400 dark:placeholder-[#606060] focus:outline-none"
+                  onFocus={() => setIsInputFocused(true)}
+                  onBlur={() => setIsInputFocused(false)}
                   onKeyDown={(e) => {
                     if (acOpen) {
                       if (e.key === 'ArrowDown') {
@@ -2216,14 +1993,9 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
                     }
                   }}
                 />
-                <button
-                  onClick={handleSend}
-                  disabled={isSending || !researchSessionId}
-                  className="px-4 py-2 rounded-lg bg-[#7c3aed] hover:bg-[#6d28d9] text-white text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed"
-                  title="发送"
-                >
+                <Button onClick={handleSend} disabled={isSending || !researchSessionId} variant="primary" className="px-4" title="发送">
                   {isSending ? '…' : '发送'}
-                </button>
+                </Button>
               
                 {/* Autocomplete dropdown */}
                 {acOpen && (
@@ -2266,6 +2038,7 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
                     )}
                   </div>
                 )}
+              </div>
               </div>
             </div>
           </div>

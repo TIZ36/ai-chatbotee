@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Download, Play, Volume2, Film, Music, ZoomIn, ChevronUp, ChevronDown } from 'lucide-react';
 import { resolveMediaSrc } from '@/utils/mediaSrc';
+import { preloadImage } from '@/utils/mediaPreload';
 
 export interface MediaItem {
   type: 'image' | 'video' | 'audio';
@@ -30,6 +31,8 @@ const thumbnailSizes = {
   lg: 'w-24 h-24',
 };
 
+const EMPTY_MEDIA: MediaItem[] = [];
+
 /**
  * 媒体画廊组件 - 横向排列缩略图，点击从右侧滑出画廊面板
  */
@@ -41,39 +44,58 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
   className = '',
   onOpenSessionGallery,
 }) => {
+  // ============ 所有 hooks 必须在任何条件返回之前调用 ============
   const [panelOpen, setPanelOpen] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const audioRef = useRef<HTMLAudioElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // 调试日志
-  console.log('[MediaGallery] 渲染，媒体数量:', media?.length, '媒体详情:', media?.map(m => ({
-    type: m.type,
-    mimeType: m.mimeType,
-    hasData: !!m.data,
-    dataLength: m.data?.length,
-    hasUrl: !!m.url
-  })));
+  const safeMedia = media ?? EMPTY_MEDIA;
 
-  if (!media || media.length === 0) {
-    console.log('[MediaGallery] 没有媒体，返回 null');
-    return null;
-  }
+  // 预渲染（预加载+预解码）：缩略图出现时，后台预热"即将打开媒体库"的图片
+  // 为避免内存/CPU 压力，仅预热前一小段（可按需调大）
+  useEffect(() => {
+    if (safeMedia.length === 0) return;
+    
+    const getMediaSrc = (item: MediaItem) => {
+      const raw = item.url || item.data || '';
+      return resolveMediaSrc(raw, item.mimeType);
+    };
+    
+    const maxPreload = Math.min(safeMedia.length, Math.max(12, maxVisible * 2));
+    for (let i = 0; i < maxPreload; i++) {
+      const item = safeMedia[i];
+      if (item?.type !== 'image') continue;
+      const src = getMediaSrc(item);
+      // fire-and-forget
+      void preloadImage(src, { decode: true });
+    }
+  }, [safeMedia, maxVisible]);
 
-  const visibleMedia = media.slice(0, maxVisible);
-  const hiddenCount = media.length - maxVisible;
+  // 键盘导航
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!panelOpen) return;
+      if (e.key === 'Escape') closePanel();
+      if (e.key === 'ArrowUp') goToPrevious();
+      if (e.key === 'ArrowDown') goToNext();
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [panelOpen, safeMedia.length]);
+
+  // ============ 现在可以安全地做条件返回 ============
+  if (safeMedia.length === 0) return null;
+
+  const visibleMedia = safeMedia.slice(0, maxVisible);
+  const hiddenCount = safeMedia.length - maxVisible;
+  const currentItem = safeMedia[currentIndex];
 
   const getMediaSrc = (item: MediaItem) => {
     const raw = item.url || item.data || '';
     const src = resolveMediaSrc(raw, item.mimeType);
-    console.log('[MediaGallery] getMediaSrc:', { 
-      type: item.type, 
-      mimeType: item.mimeType, 
-      hasUrl: !!item.url, 
-      dataLength: item.data?.length,
-      srcPreview: src.substring(0, 100) + '...'
-    });
     return src;
   };
 
@@ -120,6 +142,11 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
   const openPanel = (index: number) => {
     // 如果有会话级别的画廊回调，则调用它
     if (onOpenSessionGallery) {
+      // 点开前先预热当前点击的图片（命中缓存/完成 decode 后，面板首帧更快）
+      const item = safeMedia[index];
+      if (item?.type === 'image') {
+        void preloadImage(getMediaSrc(item), { decode: true });
+      }
       onOpenSessionGallery(index);
       return;
     }
@@ -139,27 +166,12 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
   };
 
   const goToPrevious = () => {
-    setCurrentIndex((prev) => (prev === 0 ? media.length - 1 : prev - 1));
+    setCurrentIndex((prev) => (prev === 0 ? safeMedia.length - 1 : prev - 1));
   };
 
   const goToNext = () => {
-    setCurrentIndex((prev) => (prev === media.length - 1 ? 0 : prev + 1));
+    setCurrentIndex((prev) => (prev === safeMedia.length - 1 ? 0 : prev + 1));
   };
-
-  // 键盘导航
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (!panelOpen) return;
-      if (e.key === 'Escape') closePanel();
-      if (e.key === 'ArrowUp') goToPrevious();
-      if (e.key === 'ArrowDown') goToNext();
-    };
-    
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [panelOpen, media.length]);
-
-  const currentItem = media[currentIndex];
 
   // 渲染缩略图
   const renderThumbnail = (item: MediaItem, index: number) => {
@@ -176,6 +188,9 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
             src={getMediaSrc(item)}
             alt={`图片 ${index + 1}`}
             className="w-full h-full object-cover"
+            loading="lazy"
+            decoding="async"
+            draggable={false}
           />
           <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
             <ZoomIn className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -404,12 +419,12 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
               <div className="flex items-center gap-2">
                 <span className="font-medium text-gray-800 dark:text-gray-200">媒体预览</span>
                 <span className="text-sm text-gray-500 dark:text-gray-400">
-                  {currentIndex + 1} / {media.length}
+                  {currentIndex + 1} / {safeMedia.length}
                 </span>
               </div>
               <div className="flex items-center gap-1">
                 {/* 上下切换按钮 */}
-                {media.length > 1 && (
+                {safeMedia.length > 1 && (
                   <>
                     <button
                       onClick={goToPrevious}
@@ -454,10 +469,10 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
             </div>
 
             {/* 媒体列表 */}
-            {media.length > 1 && (
+            {safeMedia.length > 1 && (
               <div className="border-t border-gray-200 dark:border-[#404040] max-h-[240px] overflow-y-auto">
                 <div className="p-3 space-y-2">
-                  {media.map((item, index) => renderPanelItem(item, index))}
+                  {safeMedia.map((item, index) => renderPanelItem(item, index))}
                 </div>
               </div>
             )}

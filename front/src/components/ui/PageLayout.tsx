@@ -39,28 +39,28 @@ const PageLayout: React.FC<PageLayoutProps> = ({
   compact = false,
 }) => {
   return (
-    <div className="h-full flex flex-col overflow-hidden gnome-page-container">
-      {/* 主容器 - 统一的立体阴影效果 */}
-      <div className="flex-1 flex flex-col overflow-hidden gnome-main-panel">
-        {/* 页面头部 - 带底部阴影分隔 */}
+    <div className="h-full flex flex-col overflow-hidden">
+      {/* 主容器 - 毛玻璃效果 */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* 页面头部 - 毛玻璃效果 */}
         {showHeader && (
-          <div className="gnome-panel-header">
+          <div className="flex-shrink-0 px-3 py-2 glass-header">
             <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
+              <div className="flex items-center space-x-2">
                 {Icon && (
-                  <div className="gnome-icon-box">
-                    <Icon className="w-5 h-5 text-[#7c3aed]" strokeWidth={1.5} />
+                  <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-[var(--color-accent)]/10 dark:bg-[var(--color-accent)]/20">
+                    <Icon className="w-4 h-4 text-[var(--color-accent)]" strokeWidth={1.5} />
                   </div>
                 )}
                 <div>
-                  <h1 className="text-lg font-semibold text-gray-900 dark:text-white">{title}</h1>
+                  <h1 className="text-sm font-semibold text-gray-900 dark:text-white">{title}</h1>
                   {description && (
-                    <p className="text-xs text-gray-500 dark:text-[#a0a0a0] mt-0.5">{description}</p>
+                    <p className="text-[10px] text-gray-500 dark:text-[#808080] mt-0.5">{description}</p>
                   )}
                 </div>
               </div>
               {headerActions && (
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center space-x-1.5">
                   {headerActions}
                 </div>
               )}
@@ -71,7 +71,7 @@ const PageLayout: React.FC<PageLayoutProps> = ({
         {/* 内容区域 - 带滚动 */}
         <div className={`
           flex-1 overflow-auto
-          ${fullWidth ? '' : compact ? 'p-4' : 'p-5'}
+          ${fullWidth ? '' : compact ? 'p-2' : 'p-3'}
           ${contentClassName}
         `}>
           {children}
@@ -107,21 +107,21 @@ export const Card: React.FC<CardProps> = ({
   size = 'default',
 }) => {
   const paddingClass = {
-    compact: 'p-3',
-    default: 'p-4',
-    relaxed: 'p-5',
+    compact: 'p-2',
+    default: 'p-3',
+    relaxed: 'p-4',
   }[size];
 
   return (
-    <div className={`gnome-card ${className}`}>
+    <div className={`glass-card ${className}`}>
       {(title || headerAction) && (
-        <div className="gnome-card-header">
+        <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200/30 dark:border-white/5">
           <div>
             {title && (
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{title}</h3>
+              <h3 className="text-xs font-semibold text-gray-900 dark:text-white">{title}</h3>
             )}
             {description && (
-              <p className="text-xs text-gray-500 dark:text-[#a0a0a0] mt-0.5">{description}</p>
+              <p className="text-[10px] text-gray-500 dark:text-[#808080] mt-0.5">{description}</p>
             )}
           </div>
           {headerAction}
@@ -153,21 +153,21 @@ export const Section: React.FC<SectionProps> = ({
   headerAction,
 }) => {
   return (
-    <div className={`gnome-section ${className}`}>
+    <div className={`glass-section mb-3 ${className}`}>
       {(title || headerAction) && (
-        <div className="gnome-section-header">
+        <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200/20 dark:border-white/5">
           <div>
             {title && (
-              <h2 className="text-base font-semibold text-gray-900 dark:text-white">{title}</h2>
+              <h2 className="text-sm font-semibold text-gray-900 dark:text-white">{title}</h2>
             )}
             {description && (
-              <p className="text-xs text-gray-500 dark:text-[#a0a0a0] mt-0.5">{description}</p>
+              <p className="text-[10px] text-gray-500 dark:text-[#808080] mt-0.5">{description}</p>
             )}
           </div>
           {headerAction}
         </div>
       )}
-      <div className="gnome-section-content">
+      <div className="p-2">
         {children}
       </div>
     </div>
@@ -196,8 +196,11 @@ export const ListItem: React.FC<ListItemProps> = ({
     <div
       onClick={!disabled ? onClick : undefined}
       className={`
-        gnome-list-item
-        ${active ? 'gnome-list-item-active' : ''}
+        px-2 py-1.5 rounded-md transition-all duration-150
+        ${active 
+          ? 'bg-primary-100/80 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300' 
+          : 'hover:bg-gray-100/60 dark:hover:bg-white/5'
+        }
         ${disabled ? 'opacity-50 cursor-not-allowed' : onClick ? 'cursor-pointer' : ''}
         ${className}
       `}

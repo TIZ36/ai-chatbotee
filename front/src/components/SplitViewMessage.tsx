@@ -5,22 +5,24 @@
 
 import React, { useRef, useEffect, useState } from 'react';
 import { 
-  User, 
-  Bot, 
-  Wrench, 
-  Plug, 
-  Workflow as WorkflowIcon,
-  Brain,
-  Sparkles,
   CheckSquare,
   Square,
   Quote,
   Edit2,
   RotateCw,
-  ChevronRight,
-  ChevronLeft
+  ChevronDown,
+  ChevronUp,
+  Plug
 } from 'lucide-react';
-import { MessageSidePanel, MessageSidePanelProps, ProcessStep } from './MessageSidePanel';
+import { MessageSidePanel, ProcessStep } from './MessageSidePanel';
+import { 
+  MessageBubble, 
+  MessageAvatar, 
+  MessageStatusIndicator,
+  getMessageBubbleClasses,
+  type MessageRole,
+  type ToolType
+} from './ui/MessageBubble';
 import type { MCPDetail } from '../services/sessionApi';
 import type { WorkflowNode, WorkflowConnection } from '../services/workflowApi';
 
@@ -128,29 +130,26 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
   processSteps,
 }) => {
   const leftRef = useRef<HTMLDivElement>(null);
-  const [leftHeight, setLeftHeight] = useState<number>(0);
-  const [showSidePanel, setShowSidePanel] = useState(true);
-
-  // 监听左侧消息高度变化
-  useEffect(() => {
-    if (!leftRef.current) return;
-    
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setLeftHeight(entry.contentRect.height);
-      }
-    });
-    
-    observer.observe(leftRef.current);
-    return () => observer.disconnect();
-  }, []);
 
   // 判断是否需要显示右侧面板（只有assistant消息且有额外内容时显示）
   const hasThinking = thinking && thinking.trim().length > 0;
-  const hasMCPDetail = mcpDetail && (mcpDetail.tool_calls?.length > 0 || mcpDetail.tool_results?.length > 0);
+  // MCPDetail 在本项目里可能是：
+  // - 旧结构：tool_calls/tool_results
+  // - 新结构：execution 记录（raw_result/logs/component_type/status）
+  const hasMCPDetail = !!mcpDetail && (() => {
+    const anyDetail = mcpDetail as any;
+    if (Array.isArray(anyDetail?.tool_calls) && anyDetail.tool_calls.length > 0) return true;
+    if (Array.isArray(anyDetail?.tool_results) && anyDetail.tool_results.length > 0) return true;
+    if (anyDetail?.raw_result) return true;
+    if (Array.isArray(anyDetail?.logs) && anyDetail.logs.length > 0) return true;
+    // execution 记录本身存在也认为有过程可展示（至少有状态/错误）
+    if (anyDetail?.status) return true;
+    return false;
+  })();
   const hasToolCalls = toolCalls && Array.isArray(toolCalls) && toolCalls.length > 0;
   const hasWorkflow = role === 'tool' && (toolType === 'workflow' || toolType === 'mcp') && workflowStatus;
   const hasProcessSteps = processSteps && processSteps.length > 0;
+  const hasContent = !!content && content.trim().length > 0;
   
   const shouldShowSidePanel = role === 'assistant' && (
     hasThinking || 
@@ -162,108 +161,28 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
     thoughtSignature
   );
 
+  // 过程面板（堆叠在模型输出之上）
+  // 默认规则：
+  // - 模型还没有输出时：默认展开过程
+  // - 模型输出后：默认折叠过程
+  const userToggledRef = useRef(false);
+  const [processExpanded, setProcessExpanded] = useState<boolean>(() => !hasContent);
+  useEffect(() => {
+    if (!shouldShowSidePanel) return;
+    if (!hasContent) {
+      // 没输出时强制展示过程（符合“默认展示过程”）
+      userToggledRef.current = false;
+      setProcessExpanded(true);
+      return;
+    }
+    // 有输出后，如果用户没有手动展开过，则自动折叠
+    if (!userToggledRef.current) {
+      setProcessExpanded(false);
+    }
+  }, [hasContent, shouldShowSidePanel]);
+
   // 用户消息不显示分栏
   const isUserMessage = role === 'user';
-
-  // 获取头像组件
-  const renderAvatar = () => {
-    const avatarClasses = `w-7 h-7 rounded-full flex items-center justify-center shadow-sm overflow-hidden ${
-      role === 'user'
-        ? 'bg-primary-500 text-white'
-        : role === 'assistant'
-        ? 'bg-primary-500 text-white'
-        : role === 'tool'
-          ? toolType === 'workflow'
-            ? 'bg-primary-500 text-white'
-            : toolType === 'mcp'
-            ? 'bg-green-500 text-white'
-            : 'bg-gray-500 text-white'
-        : 'bg-gray-400 text-white'
-    }`;
-
-    return (
-      <div className={avatarClasses}>
-        {role === 'user' ? (
-          <User className="w-4 h-4" />
-        ) : role === 'assistant' ? (
-          avatarUrl ? (
-            <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
-          ) : (
-            <Bot className="w-4 h-4" />
-          )
-        ) : role === 'tool' ? (
-          toolType === 'workflow' ? (
-            <WorkflowIcon className="w-4 h-4" />
-          ) : toolType === 'mcp' ? (
-            <Plug className="w-4 h-4" />
-          ) : (
-            <Wrench className="w-4 h-4" />
-          )
-        ) : (
-          <Bot className="w-4 h-4" />
-        )}
-      </div>
-    );
-  };
-
-  // 获取状态指示器
-  const renderStatusIndicator = () => {
-    if (role !== 'assistant') return null;
-
-    if (isThinking && (!content || content.length === 0)) {
-      return (
-        <div className="flex items-center space-x-2">
-          <div className="relative">
-            <Brain className="w-4 h-4 text-primary-500 animate-pulse" />
-            <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-primary-400 rounded-full animate-ping opacity-75" />
-          </div>
-          <div className="flex items-center space-x-1">
-            <span className="text-xs text-primary-600 dark:text-primary-400 font-medium">
-              {llmProvider === 'gemini' ? '深度思考中' : '思考中'}
-            </span>
-            <div className="flex space-x-0.5 ml-1">
-              <div className="w-1 h-1 bg-primary-500 rounded-full animate-bounce" style={{ animationDelay: '0ms', animationDuration: '1s' }} />
-              <div className="w-1 h-1 bg-primary-500 rounded-full animate-bounce" style={{ animationDelay: '200ms', animationDuration: '1s' }} />
-              <div className="w-1 h-1 bg-primary-500 rounded-full animate-bounce" style={{ animationDelay: '400ms', animationDuration: '1s' }} />
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    if (isStreaming && (!content || content.length === 0)) {
-      return (
-        <div className="flex items-center space-x-2">
-          <div className="relative">
-            <Sparkles className="w-4 h-4 text-amber-500 animate-pulse" />
-          </div>
-          <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">
-            {llmProvider === 'gemini' ? '生成中，请稍候...' : '处理中...'}
-          </span>
-          <div className="flex space-x-0.5">
-            <div className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" style={{ animationDelay: '0ms' }} />
-            <div className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" style={{ animationDelay: '200ms' }} />
-            <div className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" style={{ animationDelay: '400ms' }} />
-          </div>
-        </div>
-      );
-    }
-
-    if (isStreaming) {
-      return (
-        <div className="flex items-center space-x-1.5">
-          <div className="flex space-x-0.5">
-            <div className="w-1.5 h-1.5 bg-primary-500 rounded-full animate-pulse" style={{ animationDelay: '0ms' }} />
-            <div className="w-1.5 h-1.5 bg-primary-500 rounded-full animate-pulse" style={{ animationDelay: '150ms' }} />
-            <div className="w-1.5 h-1.5 bg-primary-500 rounded-full animate-pulse" style={{ animationDelay: '300ms' }} />
-          </div>
-          <span className="text-xs text-gray-500 dark:text-[#b0b0b0] font-medium">回答中</span>
-        </div>
-      );
-    }
-
-    return null;
-  };
 
   // 构造消息对象传给 renderContent
   const messageObj = {
@@ -313,42 +232,93 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
         </div>
       )}
 
-      {/* 头像和状态指示器 */}
+      {/* 头像和状态指示器 - 使用统一组件 */}
       <div className="flex-shrink-0 flex items-center space-x-1.5">
-        {renderAvatar()}
-        {renderStatusIndicator()}
+        <MessageAvatar 
+          role={role as MessageRole} 
+          toolType={toolType as ToolType} 
+          avatarUrl={avatarUrl}
+          size="md"
+        />
+        {role === 'assistant' && (
+          <MessageStatusIndicator
+            isThinking={isThinking}
+            isStreaming={isStreaming}
+            hasContent={!!content && content.length > 0}
+            currentStep={currentStep}
+            llmProvider={llmProvider}
+          />
+        )}
       </div>
 
       {/* 消息内容区域 */}
       <div className="flex-1 group relative">
-        {/* 分栏布局：左边消息内容，右边侧面板（各占50%） */}
-        <div className={`flex ${shouldShowSidePanel && showSidePanel ? 'gap-3' : ''}`}>
-          {/* 左侧：消息内容 */}
-          <div 
-            ref={leftRef}
-            className={`${shouldShowSidePanel && showSidePanel ? 'w-1/2 min-w-0' : 'w-full'}`}
-          >
-            <div
-              className={`rounded-lg p-2.5 transition-all duration-300 ${
-                role === 'user'
-                  ? 'bg-primary-50 dark:bg-primary-900/20 text-gray-900 dark:text-[#ffffff] shadow-sm hover:shadow-md'
-                  : role === 'assistant'
-                  ? 'bg-white dark:bg-[#2d2d2d] text-gray-900 dark:text-[#ffffff] border border-gray-200 dark:border-[#404040] shadow-lg hover:shadow-xl'
-                  : role === 'tool'
-                  ? toolType === 'workflow'
-                    ? 'bg-primary-50 dark:bg-primary-900/20 text-gray-900 dark:text-[#ffffff] border border-primary-200 dark:border-primary-700 shadow-sm hover:shadow-md'
-                    : toolType === 'mcp'
-                    ? 'bg-green-50 dark:bg-green-900/20 text-gray-900 dark:text-[#ffffff] border border-green-200 dark:border-green-700 shadow-sm hover:shadow-md'
-                    : 'bg-gray-50 dark:bg-[#2d2d2d] text-gray-900 dark:text-[#ffffff] shadow-sm hover:shadow-md'
-                  : 'bg-yellow-50 dark:bg-yellow-900/20 text-gray-700 dark:text-[#ffffff] shadow-sm hover:shadow-md'
-              }`}
-              style={{
-                fontSize: role === 'assistant' ? '13px' : '12px',
-                lineHeight: role === 'assistant' ? '1.6' : '1.5',
-              }}
-            >
-              {renderContent(messageObj)}
+        {/* 堆叠布局：上方过程（默认自动展开/折叠），下方模型输出 */}
+        <div className="space-y-2">
+          {/* 过程区域（思考/工具/工作流） */}
+          {shouldShowSidePanel && (
+            <div className="rounded-lg border border-gray-200 dark:border-[#404040] bg-white/60 dark:bg-[#2d2d2d]/60 backdrop-blur-sm overflow-hidden">
+              <button
+                onClick={() => {
+                  userToggledRef.current = true;
+                  setProcessExpanded(v => !v);
+                }}
+                className="w-full px-3 py-2 flex items-center justify-between hover:bg-gray-50/80 dark:hover:bg-[#363636]/60 transition-colors"
+                title={processExpanded ? '折叠过程' : '展开过程'}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <Plug className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                  <span className="text-xs font-medium text-gray-700 dark:text-gray-200 truncate">
+                    思考 / 工具 / Workflow 过程
+                  </span>
+                  {!hasContent && (
+                    <span className="text-[10px] text-gray-500 dark:text-gray-400 flex-shrink-0">
+                      （模型未输出，默认展示）
+                    </span>
+                  )}
+                  {hasContent && !processExpanded && (
+                    <span className="text-[10px] text-gray-500 dark:text-gray-400 flex-shrink-0">
+                      （已输出，默认折叠）
+                    </span>
+                  )}
+                </div>
+                {processExpanded ? (
+                  <ChevronUp className="w-4 h-4 text-gray-400" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 text-gray-400" />
+                )}
+              </button>
+
+              {processExpanded && (
+                <div className="border-t border-gray-200/60 dark:border-[#404040]/60 p-2">
+                  <MessageSidePanel
+                    thinking={thinking}
+                    isThinking={isThinking}
+                    mcpDetail={mcpDetail}
+                    toolCalls={hasToolCalls ? (toolCalls as Array<{ name: string; arguments: any; result?: any }>) : undefined}
+                    workflowInfo={hasWorkflow ? {
+                      id: workflowId,
+                      name: workflowName,
+                      status: workflowStatus,
+                      result: workflowResult,
+                      config: workflowConfig,
+                    } : undefined}
+                    currentStep={currentStep}
+                    isStreaming={isStreaming}
+                    thoughtSignature={thoughtSignature}
+                    hasContent={hasContent}
+                    processSteps={processSteps}
+                  />
+                </div>
+              )}
             </div>
+          )}
+
+          {/* 模型输出（消息气泡） */}
+          <div ref={leftRef} className="min-w-0">
+            <MessageBubble role={role as MessageRole} toolType={toolType as ToolType}>
+              {renderContent(messageObj)}
+            </MessageBubble>
 
             {/* 操作按钮 - 显示在气泡上方 */}
             {/* 用户消息的编辑、重新发送和引用按钮 */}
@@ -418,49 +388,7 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
               </div>
             )}
           </div>
-
-          {/* 右侧：侧边面板（思考过程、MCP调用、工作流）- 占50%宽度 */}
-          {shouldShowSidePanel && showSidePanel && (
-            <div 
-              className="w-1/2 flex-shrink-0 relative"
-              style={{ minHeight: leftHeight > 0 ? leftHeight : 'auto' }}
-            >
-              <MessageSidePanel
-                thinking={thinking}
-                isThinking={isThinking}
-                mcpDetail={mcpDetail}
-                toolCalls={hasToolCalls ? (toolCalls as Array<{ name: string; arguments: any; result?: any }>) : undefined}
-                workflowInfo={hasWorkflow ? {
-                  id: workflowId,
-                  name: workflowName,
-                  status: workflowStatus,
-                  result: workflowResult,
-                  config: workflowConfig,
-                } : undefined}
-                currentStep={currentStep}
-                isStreaming={isStreaming}
-                thoughtSignature={thoughtSignature}
-                messageHeight={leftHeight}
-                processSteps={processSteps}
-              />
-            </div>
-          )}
         </div>
-
-        {/* 侧边面板切换按钮 */}
-        {shouldShowSidePanel && (
-          <button
-            onClick={() => setShowSidePanel(!showSidePanel)}
-            className="absolute -right-3 top-1/2 transform -translate-y-1/2 z-10 p-1 bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] rounded-full shadow-md hover:bg-gray-50 dark:hover:bg-[#363636] transition-all opacity-0 group-hover:opacity-100"
-            title={showSidePanel ? '隐藏详情面板' : '显示详情面板'}
-          >
-            {showSidePanel ? (
-              <ChevronRight className="w-3 h-3 text-gray-500" />
-            ) : (
-              <ChevronLeft className="w-3 h-3 text-gray-500" />
-            )}
-          </button>
-        )}
       </div>
     </div>
   );

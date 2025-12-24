@@ -24,6 +24,50 @@ export class ApiClient {
     this.baseURL = baseURL;
   }
 
+  private async maybeGzipJsonBody(body: BodyInit | null | undefined, headers: HeadersInit | undefined): Promise<{
+    body: BodyInit | null | undefined;
+    headers: HeadersInit | undefined;
+  }> {
+    if (!body) return { body, headers };
+    if (typeof body !== 'string') return { body, headers };
+
+    const h = new Headers(headers || {});
+    const contentType = (h.get('Content-Type') || '').toLowerCase();
+    // 仅压缩 JSON（对 multipart / 二进制不做处理）
+    if (!contentType.includes('application/json')) return { body, headers };
+
+    // 已经被调用方压缩/声明过，则不重复
+    const existingEnc = (h.get('Content-Encoding') || '').toLowerCase();
+    if (existingEnc) return { body, headers };
+
+    // 太小不压缩（减少 CPU/延迟）
+    if (body.length < 2048) return { body, headers };
+
+    // Chromium/Electron 支持 CompressionStream；不支持则直接返回原 body
+    const CS = (globalThis as any).CompressionStream as
+      | (new (format: 'gzip' | 'deflate' | 'deflate-raw') => CompressionStream)
+      | undefined;
+    if (!CS) return { body, headers };
+
+    try {
+      const cs = new CS('gzip');
+      const writer = cs.writable.getWriter();
+      await writer.write(new TextEncoder().encode(body));
+      await writer.close();
+
+      const compressedBuffer = await new Response(cs.readable).arrayBuffer();
+      const compressedBytes = new Uint8Array(compressedBuffer);
+
+      // 标记请求体已 gzip
+      h.set('Content-Encoding', 'gzip');
+
+      return { body: compressedBytes, headers: h };
+    } catch {
+      // 失败时兜底走原 body
+      return { body, headers };
+    }
+  }
+
   private async request<T>(
     endpoint: string,
     options: RequestInit = {}
@@ -34,11 +78,18 @@ export class ApiClient {
       'Content-Type': 'application/json',
     };
 
+    const mergedHeaders: HeadersInit = {
+      ...defaultHeaders,
+      ...options.headers,
+    };
+
+    const { body: finalBody, headers: finalHeaders } = await this.maybeGzipJsonBody(options.body, mergedHeaders);
+
     const response = await fetch(url, {
       ...options,
+      body: finalBody,
       headers: {
-        ...defaultHeaders,
-        ...options.headers,
+        ...(finalHeaders as any),
       },
     });
 

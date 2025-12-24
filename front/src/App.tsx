@@ -3,6 +3,18 @@ import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom'
 import { Brain, Plug, Workflow as WorkflowIcon, Settings, Code, Terminal, MessageCircle, Globe, Sparkles, Bot, Users, BookOpen, Shield, Activity } from 'lucide-react';
 import appLogoDark from '../assets/app_logo_dark.png';
 import appLogoLight from '../assets/app_logo_light.png';
+import { Button } from './components/ui/Button';
+import { Input } from './components/ui/Input';
+import { ScrollArea } from './components/ui/ScrollArea';
+import { DataListItem } from './components/ui/DataListItem';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from './components/ui/Dialog';
 import TerminalPanel from './components/TerminalPanel';
 import { setTerminalExecutor } from './utils/terminalExecutor';
 import SettingsPanel from './components/SettingsPanel';
@@ -16,6 +28,8 @@ import ResearchPanel from './components/ResearchPanel';
 import UserAccessPage from './components/UserAccessPage';
 // 新架构组件
 import SystemStatusPanel from './components/SystemStatusPanel';
+import { getAgents, getSessions, type Session } from './services/sessionApi';
+import { getRoundTables, type RoundTable } from './services/roundTableApi';
 
 // 导航项组件 - 带动画和tooltip
 interface NavItemProps {
@@ -33,12 +47,12 @@ const NavItem: React.FC<NavItemProps> = ({ to, icon, title, isActive }) => {
       <Link
         to={to}
         className={`
-          w-9 h-9 flex items-center justify-center rounded-xl 
+          w-8 h-8 flex items-center justify-center rounded-lg 
           transition-all duration-200 ease-out relative
           flex-shrink-0
           ${isActive 
-            ? 'bg-[var(--color-accent)] text-white shadow-sm' 
-            : 'text-gray-600 dark:text-[#e0e0e0] hover:bg-[var(--color-hover-bg)] hover:text-gray-900 dark:hover:text-white'
+            ? 'bg-[var(--color-accent)]/90 text-white shadow-sm backdrop-blur-sm' 
+            : 'text-gray-500 dark:text-[#a0a0a0] hover:bg-white/50 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white'
           }
         `}
         onMouseEnter={() => setShowTooltip(true)}
@@ -49,11 +63,11 @@ const NavItem: React.FC<NavItemProps> = ({ to, icon, title, isActive }) => {
           {icon}
         </div>
       </Link>
-      {/* Tooltip */}
+      {/* Tooltip - 毛玻璃效果 */}
       {showTooltip && (
-        <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 px-2 py-1 bg-[#363636] text-white text-xs rounded-lg shadow-lg z-50 whitespace-nowrap pointer-events-none border border-[#404040]">
+        <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 px-2 py-1 glass-popup text-gray-800 dark:text-white text-xs z-50 whitespace-nowrap pointer-events-none">
           {title}
-          <div className="absolute right-full top-1/2 -translate-y-1/2 w-0 h-0 border-t-4 border-b-4 border-r-4 border-transparent border-r-[#363636]" />
+          <div className="absolute right-full top-1/2 -translate-y-1/2 w-0 h-0 border-t-4 border-b-4 border-r-4 border-transparent border-r-white/85 dark:border-r-[#1e1e1e]/90" />
         </div>
       )}
     </div>
@@ -215,6 +229,44 @@ const App: React.FC = () => {
   const [currentResearchSessionId, setCurrentResearchSessionId] = useState<string | null>(null);
   const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 
+  // 全局“切换对话”弹窗（Agent / Meeting / Research）
+  const [showConversationSwitcher, setShowConversationSwitcher] = useState(false);
+  const [switcherSearch, setSwitcherSearch] = useState('');
+  const [isLoadingSwitcher, setIsLoadingSwitcher] = useState(false);
+  const [switcherAgents, setSwitcherAgents] = useState<Session[]>([]);
+  const [switcherMeetings, setSwitcherMeetings] = useState<RoundTable[]>([]);
+  const [switcherResearchSessions, setSwitcherResearchSessions] = useState<Session[]>([]);
+
+  useEffect(() => {
+    if (!showConversationSwitcher) return;
+    let canceled = false;
+    (async () => {
+      try {
+        setIsLoadingSwitcher(true);
+        const [agents, meetings, allSessions] = await Promise.all([
+          getAgents(),
+          getRoundTables(),
+          getSessions(),
+        ]);
+        if (canceled) return;
+        setSwitcherAgents(agents || []);
+        setSwitcherMeetings(meetings || []);
+        const researchSessions = (allSessions || []).filter((s) => s.session_type === 'research');
+        setSwitcherResearchSessions(researchSessions);
+      } catch (e) {
+        if (canceled) return;
+        setSwitcherAgents([]);
+        setSwitcherMeetings([]);
+        setSwitcherResearchSessions([]);
+      } finally {
+        if (!canceled) setIsLoadingSwitcher(false);
+      }
+    })();
+    return () => {
+      canceled = true;
+    };
+  }, [showConversationSwitcher]);
+
   // 左侧边栏显示状态
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
@@ -272,11 +324,11 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="h-screen bg-gray-50 dark:bg-[#1a1a1a] flex flex-col transition-colors duration-200 overflow-hidden">
+    <div className="h-screen bg-gradient-to-br from-gray-100 via-gray-50 to-gray-100 dark:from-[#0f0f0f] dark:via-[#141414] dark:to-[#0f0f0f] flex flex-col transition-colors duration-200 overflow-hidden">
       {/* macOS 专用小标题栏 - 仅用于红黄绿按钮拖拽区域 */}
       {isMac && (
         <div
-          className="w-full h-7 flex-shrink-0 app-drag bg-white dark:bg-[#2d2d2d]"
+          className="w-full h-7 flex-shrink-0 app-drag glass-header"
           onDoubleClick={() => {
             window.electronAPI?.toggleMaximize?.();
           }}
@@ -284,15 +336,15 @@ const App: React.FC = () => {
       )}
       
       <div className="flex flex-1 min-h-0 overflow-hidden">
-      {/* 左侧导航栏 - GNOME 风格 */}
+      {/* 左侧导航栏 - 毛玻璃效果 */}
         <nav 
-          className={`bg-white dark:bg-[#2d2d2d] border-r border-gray-200 dark:border-[#404040] flex flex-col items-center flex-shrink-0 z-50 pt-3 transition-all duration-300 ease-in-out overflow-hidden ${
-            isSidebarCollapsed ? 'w-0 border-r-0' : 'w-[52px]'
+          className={`glass-sidebar flex flex-col items-center flex-shrink-0 z-50 pt-2 transition-all duration-300 ease-in-out overflow-hidden ${
+            isSidebarCollapsed ? 'w-0 border-r-0' : 'w-[48px]'
           }`}
         >
 
         {/* 上方导航：聊天、MCP、Workflow */}
-        <div className="flex flex-col items-center space-y-1.5 w-full px-1.5 app-no-drag">
+        <div className="flex flex-col items-center space-y-1 w-full px-1 app-no-drag">
           <NavItem
             to="/"
             icon={<Bot className="w-[18px] h-[18px]" strokeWidth={1.5} />}
@@ -319,10 +371,10 @@ const App: React.FC = () => {
         <div className="flex-1 app-drag" />
         
         {/* 分隔线 */}
-        <div className="w-6 h-px bg-gray-200 dark:bg-[#404040] my-1.5 app-no-drag" />
+        <div className="w-5 h-px bg-gray-300/50 dark:bg-white/10 my-1 app-no-drag" />
         
         {/* 下方导航：设置、模型录入及其他功能 */}
-        <div className="flex flex-col items-center space-y-1.5 w-full px-1.5 app-no-drag flex-shrink-0 mb-2">
+        <div className="flex flex-col items-center space-y-1 w-full px-1 app-no-drag flex-shrink-0 mb-1.5">
           <NavItem
             to="/settings"
             icon={<Settings className="w-[18px] h-[18px]" strokeWidth={1.5} />}
@@ -360,33 +412,23 @@ const App: React.FC = () => {
             title="系统状态"
             isActive={location.pathname === '/system-status'}
           />
-
-          {/* 用户访问管理 - 仅管理员可见 */}
-          {isAdmin && (
-            <NavItem
-              to="/user-access"
-              icon={<Shield className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-              title="用户访问管理"
-              isActive={location.pathname === '/user-access'}
-            />
-          )}
           
           {/* 终端按钮 - 点击时独占右侧 */}
           <div className="relative group">
             <Link
               to="/terminal"
               className={`
-                w-9 h-9 flex items-center justify-center rounded-xl 
+                w-8 h-8 flex items-center justify-center rounded-lg 
                 transition-all duration-200 ease-out relative
                 ${isTerminalPage
-                  ? 'bg-[var(--color-accent)] text-white' 
-                  : 'text-[#b0b0b0] hover:bg-[#202022] hover:text-white'
+                  ? 'bg-[var(--color-accent)]/90 text-white backdrop-blur-sm' 
+                  : 'text-gray-500 dark:text-[#a0a0a0] hover:bg-white/50 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white'
                 }
               `}
               title="终端"
             >
               <div className={`transition-transform duration-200 ${isTerminalPage ? '' : 'group-hover:scale-105'}`}>
-                <Terminal className="w-[18px] h-[18px]" strokeWidth={1.5} />
+                <Terminal className="w-4 h-4" strokeWidth={1.5} />
               </div>
             </Link>
           </div>
@@ -405,11 +447,11 @@ const App: React.FC = () => {
                   alert('在浏览器环境中，请使用以下快捷键打开开发者工具：\n\nWindows/Linux: F12 或 Ctrl+Shift+I\nMac: Cmd+Option+I');
                 }
               }}
-              className="w-9 h-9 flex items-center justify-center rounded-xl transition-all duration-200 ease-out text-[#b0b0b0] hover:bg-[#363636] hover:text-white"
+              className="w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-200 ease-out text-gray-500 dark:text-[#a0a0a0] hover:bg-white/50 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white"
               title="开发者工具 (F12)"
             >
               <div className="transition-transform duration-200 group-hover:scale-105">
-                <Code className="w-[18px] h-[18px]" strokeWidth={1.5} />
+                <Code className="w-4 h-4" strokeWidth={1.5} />
               </div>
             </button>
           </div>
@@ -418,78 +460,210 @@ const App: React.FC = () => {
 
       {/* 主要内容区域 - 包含 header 和页面内容 */}
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-        {/* Header - Logo + 模式切换（仅聊天页显示切换按钮） */}
+        {/* Header - Logo + 模式切换（仅聊天页显示切换按钮）- 毛玻璃效果 */}
         <header 
-          className="h-12 flex-shrink-0 bg-white dark:bg-[#2d2d2d] border-b border-gray-200 dark:border-[#404040] flex items-center justify-between px-4"
+          className="h-10 flex-shrink-0 glass-header flex items-center justify-between px-3"
         >
           {/* 左侧 Logo */}
-          <div
-            className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
-            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            title="点击隐藏/显示侧边栏"
-          >
-            <img
-              src={isDarkMode ? appLogoDark : appLogoLight}
-              alt="chatee"
-              className="h-7 w-7 object-contain"
-            />
-            <span className="text-base font-semibold text-gray-800 dark:text-gray-100">chatee</span>
+          <div className="flex items-center gap-2">
+            <div
+              className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity"
+              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+              title="点击隐藏/显示侧边栏"
+            >
+              <img
+                src={isDarkMode ? appLogoDark : appLogoLight}
+                alt="chatee"
+                className="h-6 w-6 object-contain"
+              />
+              <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">chatee</span>
+            </div>
           </div>
 
-          {/* 右侧 会话/会议/Research 切换（仅聊天页显示） */}
-          {isChatPage && (
-            <div className="flex items-center gap-1 rounded-xl border border-gray-200 dark:border-[#3f3f46] bg-gray-50 dark:bg-[#27272a] p-1">
-              <button
+          {/* 右侧切换对话按钮 */}
+          <div className="flex items-center gap-2">
+            {isChatPage && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs glass-toolbar"
                 onClick={() => {
-                  setIsRoundTableMode(false);
-                  setIsResearchMode(false);
+                  setShowConversationSwitcher(true);
                 }}
-                className={`px-3 h-8 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-1.5 ${
-                  !isRoundTableMode && !isResearchMode
-                    ? 'bg-[var(--color-accent)] text-white shadow-sm'
-                    : 'text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-[#3f3f46]'
-                }`}
+                title="切换对话（Agent / Meeting / Research）"
               >
-                <Bot className="w-4 h-4" strokeWidth={1.7} />
-                会话
-              </button>
-              <button
-                onClick={handleToggleRoundTable}
-                className={`px-3 h-8 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-1.5 ${
-                  isRoundTableMode
-                    ? 'bg-[var(--color-accent)] text-white shadow-sm'
-                    : 'text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-[#3f3f46]'
-                }`}
-              >
-                <Users className="w-4 h-4" strokeWidth={1.7} />
-                会议
-              </button>
-              <button
-                onClick={handleToggleResearch}
-                className={`px-3 h-8 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-1.5 ${
-                  isResearchMode
-                    ? 'bg-[var(--color-accent)] text-white shadow-sm'
-                    : 'text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-[#3f3f46]'
-                }`}
-              >
-                <BookOpen className="w-4 h-4" strokeWidth={1.7} />
-                Research
-              </button>
-            </div>
-          )}
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>切换</span>
+              </Button>
+            )}
+          </div>
         </header>
+
+        {/* 全局切换对话弹窗（在 Meeting/Research/Agent 模式都可用） */}
+        <Dialog
+          open={showConversationSwitcher}
+          onOpenChange={(open) => {
+            setShowConversationSwitcher(open);
+            if (!open) setSwitcherSearch('');
+          }}
+        >
+          <DialogContent className="max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>选择对话</DialogTitle>
+              <DialogDescription>按类型选择：Agent / Meeting / Research</DialogDescription>
+            </DialogHeader>
+
+            <div className="flex items-center gap-2">
+              <Input
+                value={switcherSearch}
+                onChange={(e) => setSwitcherSearch(e.target.value)}
+                placeholder="搜索 agent / meeting / research..."
+                className="h-9"
+              />
+            </div>
+
+            <ScrollArea className="h-[60vh] pr-2">
+              <div className="space-y-4 py-2">
+                {/* Agent */}
+                <div>
+                  <div className="text-xs font-semibold text-gray-700 dark:text-gray-200 px-1 mb-1">Agent</div>
+                  <div className="space-y-1">
+                    {(!switcherSearch.trim() || '临时会话'.includes(switcherSearch.trim())) && (
+                      <DataListItem
+                        id="temporary-session"
+                        title="临时会话"
+                        description="不保存历史"
+                        icon={MessageCircle}
+                        isSelected={selectedSessionId === 'temporary-session' && !isRoundTableMode && !isResearchMode}
+                        onClick={() => {
+                          setShowConversationSwitcher(false);
+                          handleSelectSession('temporary-session');
+                        }}
+                      />
+                    )}
+                    {isLoadingSwitcher ? (
+                      <div className="text-xs text-gray-500 dark:text-[#808080] px-1 py-2">加载中...</div>
+                    ) : (
+                      switcherAgents
+                        .filter((a) => {
+                          const q = switcherSearch.trim().toLowerCase();
+                          if (!q) return true;
+                          const name = (a.name || a.title || a.session_id).toLowerCase();
+                          const prompt = (a.system_prompt || '').toLowerCase();
+                          return name.includes(q) || prompt.includes(q);
+                        })
+                        .map((a) => (
+                          <DataListItem
+                            key={a.session_id}
+                            id={a.session_id}
+                            title={a.name || a.title || `Agent ${a.session_id.slice(0, 8)}`}
+                            description={
+                              a.system_prompt
+                                ? a.system_prompt.split('\n')[0]?.slice(0, 80) + (a.system_prompt.length > 80 ? '...' : '')
+                                : `${a.message_count || 0} 条消息 · ${a.last_message_at ? new Date(a.last_message_at).toLocaleDateString() : '无记录'}`
+                            }
+                            avatar={a.avatar || undefined}
+                            isSelected={!isRoundTableMode && !isResearchMode && selectedSessionId === a.session_id}
+                            onClick={() => {
+                              setShowConversationSwitcher(false);
+                              handleSelectSession(a.session_id);
+                            }}
+                          />
+                        ))
+                    )}
+                  </div>
+                </div>
+
+                {/* Meeting */}
+                <div>
+                  <div className="text-xs font-semibold text-gray-700 dark:text-gray-200 px-1 mb-1">Meeting</div>
+                  <div className="space-y-1">
+                    {isLoadingSwitcher ? (
+                      <div className="text-xs text-gray-500 dark:text-[#808080] px-1 py-2">加载中...</div>
+                    ) : (
+                      switcherMeetings
+                        .filter((m) => {
+                          const q = switcherSearch.trim().toLowerCase();
+                          if (!q) return true;
+                          return (m.name || '').toLowerCase().includes(q);
+                        })
+                        .map((m) => (
+                          <DataListItem
+                            key={m.round_table_id}
+                            id={m.round_table_id}
+                            title={m.name || `会议 ${m.round_table_id.slice(0, 8)}`}
+                            description={`${m.participant_count} 人 · ${m.status === 'active' ? '进行中' : '已关闭'}`}
+                            icon={Users}
+                            isSelected={isRoundTableMode && currentRoundTableId === m.round_table_id}
+                            onClick={() => {
+                              setShowConversationSwitcher(false);
+                              handleSelectMeeting(m.round_table_id);
+                            }}
+                          />
+                        ))
+                    )}
+                    {!isLoadingSwitcher && switcherMeetings.length === 0 && (
+                      <div className="text-xs text-gray-500 dark:text-[#808080] px-1 py-2">暂无会议</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Research */}
+                <div>
+                  <div className="text-xs font-semibold text-gray-700 dark:text-gray-200 px-1 mb-1">Research</div>
+                  <div className="space-y-1">
+                    {isLoadingSwitcher ? (
+                      <div className="text-xs text-gray-500 dark:text-[#808080] px-1 py-2">加载中...</div>
+                    ) : (
+                      switcherResearchSessions
+                        .filter((s) => {
+                          const q = switcherSearch.trim().toLowerCase();
+                          if (!q) return true;
+                          const name = (s.name || s.title || s.session_id).toLowerCase();
+                          return name.includes(q);
+                        })
+                        .map((s) => (
+                          <DataListItem
+                            key={s.session_id}
+                            id={s.session_id}
+                            title={s.name || s.title || `Research ${s.session_id.slice(0, 8)}`}
+                            description="研究资料与检索"
+                            icon={BookOpen}
+                            isSelected={isResearchMode && currentResearchSessionId === s.session_id}
+                            onClick={() => {
+                              setShowConversationSwitcher(false);
+                              handleSelectResearch(s.session_id);
+                            }}
+                          />
+                        ))
+                    )}
+                    {!isLoadingSwitcher && switcherResearchSessions.length === 0 && (
+                      <div className="text-xs text-gray-500 dark:text-[#808080] px-1 py-2">暂无 Research 会话</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </ScrollArea>
+
+            <DialogFooter>
+              <Button variant="secondary" onClick={() => setShowConversationSwitcher(false)}>
+                关闭
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* 页面内容区域 */}
         <main
           className={`flex flex-col flex-1 min-h-0 transition-all duration-200 relative ${
             isTerminalPage ? 'overflow-visible' : 'overflow-hidden'
-          } bg-gray-100 dark:bg-[#18181b]`}
+          }`}
         >
           
           {isTerminalPage ? (
           /* Terminal 独占页面 */
-          <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-visible m-2">
-            <div className="flex-1 rounded-xl bg-white dark:bg-[#18181b] border border-gray-200 dark:border-[#27272a] overflow-visible">
+          <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-visible m-1">
+            <div className="flex-1 rounded-lg glass-panel overflow-visible">
               <TerminalPanel
                 isOpen={true}
                 onClose={() => navigate('/')}
@@ -504,9 +678,9 @@ const App: React.FC = () => {
             </div>
           </div>
         ) : isChatPage ? (
-          /* 聊天页面 - 无会话侧栏（人设选择在对话顶部） */
-          <div className="relative flex flex-1 min-h-0 min-w-0 p-2">
-            <div className="flex-1 relative overflow-hidden border border-gray-200 dark:border-[#27272a] bg-white dark:bg-[#18181b] rounded-xl">
+          /* 聊天页面 - 毛玻璃效果 */
+          <div className="relative flex flex-1 min-h-0 min-w-0 p-0">
+            <div className="flex-1 relative overflow-hidden">
               <div
                 key={`${isResearchMode ? 'research' : isRoundTableMode ? 'roundtable' : 'chat'}-${selectedSessionId}-${participantRefreshKey}`}
                 className="h-full fade-in"
@@ -536,9 +710,9 @@ const App: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="flex flex-1 min-h-0 min-w-0 p-2 gap-2">
-            {/* 主内容区域面板 - GNOME 风格 */}
-            <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden rounded-xl bg-white dark:bg-[#18181b] border border-gray-200 dark:border-[#27272a]">
+          <div className="flex flex-1 min-h-0 min-w-0 p-1 gap-1">
+            {/* 主内容区域面板 - 毛玻璃效果 */}
+            <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden rounded-lg glass-panel">
               <div className="flex-1 overflow-hidden min-w-0 flex flex-col relative">
                 <div className={`h-full flex flex-col`}>
                   <Routes>
@@ -589,9 +763,9 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* 右侧终端区域 - GNOME 风格 */}
+            {/* 右侧终端区域 - 毛玻璃效果 */}
             {isTerminalOpen && !isTerminalPage && (
-              <div className="w-[45%] min-w-[400px] flex flex-col min-h-0 min-w-0 flex-shrink-0 rounded-xl bg-white dark:bg-[#18181b] border border-gray-200 dark:border-[#27272a] overflow-visible slide-in-right">
+              <div className="w-[45%] min-w-[400px] flex flex-col min-h-0 min-w-0 flex-shrink-0 rounded-lg glass-panel overflow-visible slide-in-right">
                 <TerminalPanel
                   isOpen={true}
                   onClose={() => setIsTerminalOpen(false)}
