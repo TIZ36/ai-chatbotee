@@ -47,6 +47,8 @@ import {
 import { useFloatingComposerPadding } from './workflow/useFloatingComposerPadding';
 import { parseMCPContentBlocks, renderMCPBlocks, renderMCPMedia } from './workflow/mcpRender';
 import { MessageContent, Message, ProcessStep } from './workflow/MessageContent';
+import { useChatInput } from './workflow/useChatInput';
+import { calculateCursorPosition } from './workflow/utils';
 import {
   SessionTypeDialog,
   UpgradeToAgentDialog,
@@ -215,23 +217,12 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [selectedMCPDetail, setSelectedMCPDetail] = useState<any>(null);
   
   // @ 符号选择器状态
-  const [showAtSelector, setShowAtSelector] = useState(false);
-  const [atSelectorPosition, setAtSelectorPosition] = useState({ top: 0, left: 0, maxHeight: 256 });
-  const [atSelectorQuery, setAtSelectorQuery] = useState('');
-  const [atSelectorIndex, setAtSelectorIndex] = useState(-1); // @ 符号在输入中的位置
   const [selectedComponentIndex, setSelectedComponentIndex] = useState(0); // 当前选中的组件索引（用于键盘导航）
   const [selectedComponents, setSelectedComponents] = useState<Array<{ type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string }>>([]); // 已选定的组件（tag）
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const isComposingRef = useRef(false);
   const editingMessageIdRef = useRef<string | null>(null);
   const selectorRef = useRef<HTMLDivElement>(null);
   const blurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  
-  // /模块 选择器状态
-  const [showModuleSelector, setShowModuleSelector] = useState(false);
-  const [moduleSelectorPosition, setModuleSelectorPosition] = useState({ top: 0, left: 0, maxHeight: 256 });
-  const [moduleSelectorQuery, setModuleSelectorQuery] = useState('');
-  const [moduleSelectorIndex, setModuleSelectorIndex] = useState(-1); // /模块 在输入中的位置
   
   // 批次数据项选择器状态
   const [showBatchItemSelector, setShowBatchItemSelector] = useState(false);
@@ -3209,19 +3200,6 @@ const Workflow: React.FC<WorkflowProps> = ({
     });
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key !== 'Enter') return;
-    // IME composing should not trigger send.
-    if (isComposingRef.current || (e.nativeEvent as any)?.isComposing) return;
-    // If any selector is open, let it handle Enter.
-    if (showBatchItemSelector || showModuleSelector || showAtSelector) return;
-    // shift+Enter: newline
-    if (e.shiftKey) return;
-    // Enter / Ctrl+Enter / Cmd+Enter: send
-        e.preventDefault();
-        handleSend();
-  };
-
   // 开始编辑消息
   const handleStartEdit = (messageId: string) => {
     const message = messages.find(m => m.id === messageId);
@@ -3321,446 +3299,6 @@ const Workflow: React.FC<WorkflowProps> = ({
   };
   
   // 处理输入框变化，检测 @ 符号和 /模块 命令
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const value = e.target.value;
-    setInput(value);
-    
-    const cursorPosition = e.target.selectionStart || 0;
-    const textBeforeCursor = value.substring(0, cursorPosition);
-    
-    // 检测 / 命令（优先于@符号）
-    const lastSlashIndex = textBeforeCursor.lastIndexOf('/');
-    if (lastSlashIndex !== -1) {
-      // 检查 / 后面是否有空格或换行（如果有，说明不是在选择）
-      const textAfterSlash = textBeforeCursor.substring(lastSlashIndex + 1);
-      const hasSpaceOrNewline = textAfterSlash.includes(' ') || textAfterSlash.includes('\n');
-      
-      // 检查是否在行首（/ 前面是行首或空格）
-      const textBeforeSlash = textBeforeCursor.substring(0, lastSlashIndex);
-      const isAtLineStart = textBeforeSlash.length === 0 || textBeforeSlash.endsWith('\n') || textBeforeSlash.endsWith(' ');
-      
-      if (!hasSpaceOrNewline && isAtLineStart) {
-        // 显示模块选择器
-        const query = textAfterSlash.toLowerCase();
-        setModuleSelectorIndex(lastSlashIndex);
-        setModuleSelectorQuery(query);
-        setShowAtSelector(false); // 隐藏@选择器
-        
-        // 计算选择器位置（参考@选择器的逻辑，从下往上展开）
-        if (inputRef.current) {
-          const textarea = inputRef.current;
-          const textareaRect = textarea.getBoundingClientRect();
-          const styles = window.getComputedStyle(textarea);
-          
-          // 使用更可靠的方法：创建一个完全镜像 textarea 的隐藏 div 元素
-          const mirror = document.createElement('div');
-          
-          // 复制关键样式，确保与 textarea 完全一致
-          mirror.style.position = 'absolute';
-          mirror.style.visibility = 'hidden';
-          mirror.style.whiteSpace = styles.whiteSpace || 'pre-wrap';
-          mirror.style.wordWrap = styles.wordWrap || 'break-word';
-          mirror.style.overflowWrap = styles.overflowWrap || 'break-word';
-          mirror.style.font = styles.font;
-          mirror.style.fontSize = styles.fontSize;
-          mirror.style.fontFamily = styles.fontFamily;
-          mirror.style.fontWeight = styles.fontWeight;
-          mirror.style.fontStyle = styles.fontStyle;
-          mirror.style.letterSpacing = styles.letterSpacing;
-          mirror.style.padding = styles.padding;
-          mirror.style.border = styles.border;
-          mirror.style.width = `${textarea.offsetWidth}px`;
-          mirror.style.boxSizing = styles.boxSizing;
-          mirror.style.lineHeight = styles.lineHeight;
-          mirror.style.wordSpacing = styles.wordSpacing;
-          mirror.style.top = `${textareaRect.top}px`;
-          mirror.style.left = `${textareaRect.left}px`;
-          
-          // 设置文本内容到光标位置
-          mirror.textContent = textBeforeCursor;
-          document.body.appendChild(mirror);
-          
-          // 使用 Range API 来获取文本末尾（光标位置）的精确坐标
-          let cursorX: number;
-          let cursorY: number;
-          
-          try {
-            const range = document.createRange();
-            const mirrorTextNode = mirror.firstChild;
-            
-            if (mirrorTextNode && mirrorTextNode.nodeType === Node.TEXT_NODE) {
-              // 设置 range 到文本末尾（光标位置）
-              const textLength = mirrorTextNode.textContent?.length || 0;
-              range.setStart(mirrorTextNode, textLength);
-              range.setEnd(mirrorTextNode, textLength);
-              const rangeRect = range.getBoundingClientRect();
-              
-              // 使用 right 属性来获取光标右侧的位置（更可靠）
-              cursorX = rangeRect.right;
-              cursorY = rangeRect.top;
-              
-              // 如果 right 和 left 相同（width 为 0），说明光标在文本末尾
-              if (rangeRect.width === 0 && textLength > 0) {
-                // 创建一个临时元素来测量文本宽度
-                const measureSpan = document.createElement('span');
-                measureSpan.style.font = styles.font;
-                measureSpan.style.fontSize = styles.fontSize;
-                measureSpan.style.fontFamily = styles.fontFamily;
-                measureSpan.style.fontWeight = styles.fontWeight;
-                measureSpan.style.fontStyle = styles.fontStyle;
-                measureSpan.style.letterSpacing = styles.letterSpacing;
-                measureSpan.style.whiteSpace = 'pre';
-                measureSpan.textContent = textBeforeCursor;
-                measureSpan.style.position = 'absolute';
-                measureSpan.style.visibility = 'hidden';
-                document.body.appendChild(measureSpan);
-                const textWidth = measureSpan.offsetWidth;
-                document.body.removeChild(measureSpan);
-                
-                // 使用 mirror 的位置 + padding + 文本宽度
-                const mirrorRect = mirror.getBoundingClientRect();
-                const paddingLeft = parseFloat(styles.paddingLeft) || 0;
-                cursorX = mirrorRect.left + paddingLeft + textWidth;
-              }
-            } else {
-              throw new Error('No text node found');
-            }
-          } catch (e) {
-            // 如果 Range API 失败，使用备用方法
-            const mirrorRect = mirror.getBoundingClientRect();
-            const lines = textBeforeCursor.split('\n');
-            const lineIndex = lines.length - 1;
-            const lineText = lines[lineIndex] || '';
-            
-            // 计算当前行的宽度
-            const lineMeasure = document.createElement('span');
-            lineMeasure.style.font = styles.font;
-            lineMeasure.style.fontSize = styles.fontSize;
-            lineMeasure.style.fontFamily = styles.fontFamily;
-            lineMeasure.style.fontWeight = styles.fontWeight;
-            lineMeasure.style.fontStyle = styles.fontStyle;
-            lineMeasure.style.letterSpacing = styles.letterSpacing;
-            lineMeasure.style.whiteSpace = 'pre';
-            lineMeasure.textContent = lineText;
-            lineMeasure.style.position = 'absolute';
-            lineMeasure.style.visibility = 'hidden';
-            document.body.appendChild(lineMeasure);
-            const lineWidth = lineMeasure.offsetWidth;
-            document.body.removeChild(lineMeasure);
-            
-            // 计算行高和 padding
-            const lineHeight = parseFloat(styles.lineHeight) || parseFloat(styles.fontSize) * 1.2;
-            const paddingTop = parseFloat(styles.paddingTop) || 0;
-            const paddingLeft = parseFloat(styles.paddingLeft) || 0;
-            
-            cursorX = mirrorRect.left + paddingLeft + lineWidth;
-            cursorY = mirrorRect.top + paddingTop + (lineIndex * lineHeight);
-          }
-          
-          // 清理临时元素
-          document.body.removeChild(mirror);
-          
-          // 选择器尺寸
-          const selectorMaxHeight = 256; // max-h-64 = 256px
-          const selectorWidth = 320; // 与 CrawlerModuleSelector 的宽度一致
-          const viewportWidth = window.innerWidth;
-          
-          // 计算选择器位置（以光标为锚点，从下往上展开）
-          // 策略：弹框底部紧贴光标位置，向上扩展
-          
-          // 左侧位置：光标右侧，加间距
-          let left = cursorX + 8;
-          
-          // 如果选择器会超出右侧边界，则显示在光标左侧
-          if (left + selectorWidth > viewportWidth - 10) {
-            left = cursorX - selectorWidth - 8; // 显示在光标左侧
-            // 如果左侧也不够，就显示在光标右侧（即使会超出）
-            if (left < 10) {
-              left = cursorX + 8;
-            }
-          }
-          
-          // 确保不会超出左侧
-          if (left < 10) {
-            left = 10;
-          }
-          
-          // 使用 bottom 定位：弹框底部紧贴光标，向上扩展
-          // 计算 bottom 值：从窗口底部到光标位置的距离
-          const bottom = window.innerHeight - cursorY + 5; // 5px 间距，让弹框稍微在光标上方
-          
-          // 计算可用的向上高度（从光标到屏幕顶部的空间）
-          const availableHeightAbove = cursorY - 20; // 留20px顶部边距
-          
-          // 最大高度取较小值：配置的最大高度 或 可用空间
-          const actualMaxHeight = Math.min(selectorMaxHeight, availableHeightAbove);
-          
-          console.log('[Workflow] Module selector position:', {
-            cursorY,
-            bottom,
-            availableHeightAbove,
-            actualMaxHeight,
-            windowHeight: window.innerHeight
-          });
-          
-          setModuleSelectorPosition({
-            bottom, // 使用 bottom 定位，从下往上扩展
-            left,
-            maxHeight: actualMaxHeight
-          } as any);
-          setShowModuleSelector(true);
-        }
-        return;
-      } else {
-        // / 后面有空格或换行，或不在行首，关闭选择器
-        console.log('[Workflow] / 字符条件不符合，关闭模块选择器');
-        setShowModuleSelector(false);
-        setModuleSelectorIndex(-1);
-      }
-    } else {
-      // 没有找到 / 字符，关闭选择器
-      if (showModuleSelector) {
-        console.log('[Workflow] 删除了 / 字符，关闭模块选择器');
-        setShowModuleSelector(false);
-        setModuleSelectorIndex(-1);
-      }
-    }
-    
-    // 检测 @ 符号
-    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
-    
-    console.log('[Workflow] Input change:', {
-      value,
-      cursorPosition,
-      textBeforeCursor,
-      lastAtIndex,
-      showAtSelector,
-    });
-    
-    if (lastAtIndex !== -1) {
-      // 检查 @ 后面是否有空格或换行（如果有，说明不是在选择组件）
-      const textAfterAt = textBeforeCursor.substring(lastAtIndex + 1);
-      const hasSpaceOrNewline = textAfterAt.includes(' ') || textAfterAt.includes('\n');
-      
-      console.log('[Workflow] @ symbol detected:', {
-        textAfterAt,
-        hasSpaceOrNewline,
-      });
-      
-      if (!hasSpaceOrNewline) {
-        // 检查是否已经选择了感知组件
-        if (selectedComponents.length > 0) {
-          // 已经选择了组件，提示需要先删除
-          console.log('[Workflow] Component already selected, need to remove first');
-          setShowAtSelector(false);
-          // 可以显示一个提示，但先不显示选择器
-          return;
-        }
-        
-        // 显示选择器
-        const query = textAfterAt.toLowerCase();
-        setAtSelectorIndex(lastAtIndex);
-        setAtSelectorQuery(query);
-        
-        console.log('[Workflow] Showing selector with query:', query);
-        
-        // 计算选择器位置（跟随光标位置，出现在右上方）
-        if (inputRef.current) {
-          const textarea = inputRef.current;
-          const textareaRect = textarea.getBoundingClientRect();
-          const styles = window.getComputedStyle(textarea);
-          
-          // 使用更可靠的方法：创建一个完全镜像 textarea 的隐藏 div 元素
-          const mirror = document.createElement('div');
-          
-          // 复制关键样式，确保与 textarea 完全一致
-          mirror.style.position = 'absolute';
-          mirror.style.visibility = 'hidden';
-          mirror.style.whiteSpace = styles.whiteSpace || 'pre-wrap';
-          mirror.style.wordWrap = styles.wordWrap || 'break-word';
-          mirror.style.overflowWrap = styles.overflowWrap || 'break-word';
-          mirror.style.font = styles.font;
-          mirror.style.fontSize = styles.fontSize;
-          mirror.style.fontFamily = styles.fontFamily;
-          mirror.style.fontWeight = styles.fontWeight;
-          mirror.style.fontStyle = styles.fontStyle;
-          mirror.style.letterSpacing = styles.letterSpacing;
-          mirror.style.padding = styles.padding;
-          mirror.style.border = styles.border;
-          mirror.style.width = `${textarea.offsetWidth}px`;
-          mirror.style.boxSizing = styles.boxSizing;
-          mirror.style.lineHeight = styles.lineHeight;
-          mirror.style.wordSpacing = styles.wordSpacing;
-          mirror.style.top = `${textareaRect.top}px`;
-          mirror.style.left = `${textareaRect.left}px`;
-          
-          // 设置文本内容到光标位置
-          const textBeforeCursor = value.substring(0, cursorPosition);
-          mirror.textContent = textBeforeCursor;
-          
-          document.body.appendChild(mirror);
-          
-          // 使用 Range API 来获取文本末尾（光标位置）的精确坐标
-          let cursorX: number;
-          let cursorY: number;
-          
-          try {
-            const range = document.createRange();
-            const mirrorTextNode = mirror.firstChild;
-            
-            if (mirrorTextNode && mirrorTextNode.nodeType === Node.TEXT_NODE) {
-              // 设置 range 到文本末尾（光标位置）
-              const textLength = mirrorTextNode.textContent?.length || 0;
-              range.setStart(mirrorTextNode, textLength);
-              range.setEnd(mirrorTextNode, textLength);
-              const rangeRect = range.getBoundingClientRect();
-              
-              // 使用 right 属性来获取光标右侧的位置（更可靠）
-              // 对于空 range（光标位置），right 会指向光标右侧
-              cursorX = rangeRect.right;
-              cursorY = rangeRect.top;
-              
-              // 如果 right 和 left 相同（width 为 0），说明光标在文本末尾
-              // 这种情况下，我们需要测量文本的实际宽度
-              if (rangeRect.width === 0 && textLength > 0) {
-                // 创建一个临时元素来测量文本宽度
-                const measureSpan = document.createElement('span');
-                measureSpan.style.font = styles.font;
-                measureSpan.style.fontSize = styles.fontSize;
-                measureSpan.style.fontFamily = styles.fontFamily;
-                measureSpan.style.fontWeight = styles.fontWeight;
-                measureSpan.style.fontStyle = styles.fontStyle;
-                measureSpan.style.letterSpacing = styles.letterSpacing;
-                measureSpan.style.whiteSpace = 'pre';
-                measureSpan.textContent = textBeforeCursor;
-                measureSpan.style.position = 'absolute';
-                measureSpan.style.visibility = 'hidden';
-                document.body.appendChild(measureSpan);
-                const textWidth = measureSpan.offsetWidth;
-                document.body.removeChild(measureSpan);
-                
-                // 使用 mirror 的位置 + padding + 文本宽度
-                const mirrorRect = mirror.getBoundingClientRect();
-                const paddingLeft = parseFloat(styles.paddingLeft) || 0;
-                cursorX = mirrorRect.left + paddingLeft + textWidth;
-              }
-            } else {
-              throw new Error('No text node found');
-            }
-          } catch (e) {
-            // 如果 Range API 失败，使用备用方法
-            const mirrorRect = mirror.getBoundingClientRect();
-            const lines = textBeforeCursor.split('\n');
-            const lineIndex = lines.length - 1;
-            const lineText = lines[lineIndex] || '';
-            
-            // 计算当前行的宽度
-            const lineMeasure = document.createElement('span');
-            lineMeasure.style.font = styles.font;
-            lineMeasure.style.fontSize = styles.fontSize;
-            lineMeasure.style.fontFamily = styles.fontFamily;
-            lineMeasure.style.fontWeight = styles.fontWeight;
-            lineMeasure.style.fontStyle = styles.fontStyle;
-            lineMeasure.style.letterSpacing = styles.letterSpacing;
-            lineMeasure.style.whiteSpace = 'pre';
-            lineMeasure.textContent = lineText;
-            lineMeasure.style.position = 'absolute';
-            lineMeasure.style.visibility = 'hidden';
-            document.body.appendChild(lineMeasure);
-            const lineWidth = lineMeasure.offsetWidth;
-            document.body.removeChild(lineMeasure);
-            
-            // 计算行高和 padding
-            const lineHeight = parseFloat(styles.lineHeight) || parseFloat(styles.fontSize) * 1.2;
-            const paddingTop = parseFloat(styles.paddingTop) || 0;
-            const paddingLeft = parseFloat(styles.paddingLeft) || 0;
-            
-            cursorX = mirrorRect.left + paddingLeft + lineWidth;
-            cursorY = mirrorRect.top + paddingTop + (lineIndex * lineHeight);
-          }
-          
-          // 清理临时元素
-          document.body.removeChild(mirror);
-          
-          // 选择器尺寸
-          const selectorMaxHeight = 256; // max-h-64 = 256px
-          const selectorWidth = 300; // maxWidth
-          const viewportHeight = window.innerHeight;
-          const viewportWidth = window.innerWidth;
-          
-          // 计算选择器位置（以光标为锚点，从下往上展开）
-          // 策略：弹框底部对齐光标位置，向上展开
-          // 先计算弹框的理想高度（最大不超过 selectorMaxHeight）
-          const idealHeight = selectorMaxHeight;
-          
-          // 计算弹框顶部位置：光标位置 - 弹框高度
-          // 这样弹框底部会对齐光标位置
-          let top = cursorY - idealHeight;
-          let left = cursorX + 8; // 光标右侧，加上间距
-          
-          // 如果弹框会超出顶部，调整位置
-          // 确保至少留出 10px 的顶部边距
-          if (top < 10) {
-            // 如果上方空间不足，限制弹框高度，使其顶部对齐到 10px
-            // 这样弹框会从顶部开始，但底部尽量靠近光标
-            // 注意：实际高度会在 CSS 中通过 max-height 限制，位置会在 useEffect 中进一步调整
-            top = 10;
-          }
-          
-          // 如果选择器会超出右侧边界，则显示在光标左侧
-          if (left + selectorWidth > viewportWidth - 10) {
-            left = cursorX - selectorWidth - 8; // 显示在光标左侧
-            // 如果左侧也不够，就显示在光标右侧（即使会超出）
-            if (left < 10) {
-              left = cursorX + 8;
-            }
-          }
-          
-          // 确保不会超出左侧
-          if (left < 10) {
-            left = 10;
-          }
-          
-          // 计算实际可用的最大高度（从 top 到光标位置的距离）
-          const maxAvailableHeight = cursorY - top - 8; // 减去一些间距
-          
-          // 如果可用高度小于最大高度，使用可用高度
-          const actualMaxHeight = Math.min(selectorMaxHeight, maxAvailableHeight);
-          
-          console.log('[Workflow] Selector position calculated (cursor):', { 
-            top, 
-            left, 
-            cursorX,
-            cursorY,
-            textareaRect,
-            viewportHeight,
-            viewportWidth,
-            cursorPosition,
-            actualMaxHeight,
-            maxAvailableHeight
-          });
-          
-          setAtSelectorPosition({ 
-            top, 
-            left,
-            maxHeight: actualMaxHeight // 传递最大高度
-          });
-          setShowAtSelector(true);
-          setSelectedComponentIndex(0); // 重置选中索引
-        } else {
-          console.warn('[Workflow] inputRef.current is null');
-        }
-      } else {
-        console.log('[Workflow] Hiding selector: space or newline after @');
-        setShowAtSelector(false);
-      }
-    } else {
-      console.log('[Workflow] No @ symbol found, hiding selector');
-      setShowAtSelector(false);
-    }
-  };
-  
-  // 获取可选择的组件列表（用于键盘导航）- 显示所有MCP，不仅仅是已连接的
   const getSelectableComponents = React.useCallback(() => {
     const mcpList = mcpServers
       .filter(s => s.name.toLowerCase().includes(atSelectorQuery))
@@ -4665,6 +4203,37 @@ const Workflow: React.FC<WorkflowProps> = ({
       setIsCreatingResearch(false);
     }
   };
+
+  const {
+    moduleSelectorIndex,
+    setModuleSelectorIndex,
+    moduleSelectorQuery,
+    setModuleSelectorQuery,
+    moduleSelectorPosition,
+    atSelectorIndex,
+    setAtSelectorIndex,
+    atSelectorQuery,
+    setAtSelectorQuery,
+    atSelectorPosition,
+    isComposingRef,
+    handleInputChange,
+    handleKeyPress,
+    handleKeyDown,
+  } = useChatInput({
+    input,
+    setInput,
+    inputRef,
+    handleSend,
+    showBatchItemSelector,
+    showModuleSelector,
+    setShowModuleSelector,
+    showAtSelector,
+    setShowAtSelector,
+    handleSelectComponent,
+    getSelectableComponents,
+    selectedComponentIndex,
+    setSelectedComponentIndex,
+  });
 
   return (
     <>
@@ -5605,44 +5174,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                   });
                 }
               }}
-                onKeyDown={(e) => {
-                  // Send/newline handling (runs before selector navigation).
-                  handleKeyPress(e);
-                  if (e.defaultPrevented) return;
-                  // 如果批次数据项选择器显示，不处理键盘事件（由 CrawlerBatchItemSelector 处理）
-                  if (showBatchItemSelector) {
-                    return;
-                  }
-                  
-                  // 如果模块选择器显示，不处理键盘事件（由 CrawlerModuleSelector 处理）
-                  if (showModuleSelector) {
-                    return;
-                  }
-                  
-                  // 如果@选择器显示，处理上下箭头和回车
-                  if (showAtSelector) {
-                    const selectableComponentsList = getSelectableComponents();
-                    
-                    if (e.key === 'ArrowDown') {
-                      e.preventDefault();
-                      setSelectedComponentIndex(prev => 
-                        prev < selectableComponentsList.length - 1 ? prev + 1 : prev
-                      );
-                    } else if (e.key === 'ArrowUp') {
-                      e.preventDefault();
-                      setSelectedComponentIndex(prev => prev > 0 ? prev - 1 : 0);
-                    } else if (e.key === 'Enter') {
-                      e.preventDefault();
-                      if (selectableComponentsList[selectedComponentIndex]) {
-                        handleSelectComponent(selectableComponentsList[selectedComponentIndex]);
-                      }
-                    } else if (e.key === 'Escape') {
-                      e.preventDefault();
-                      console.log('[Workflow] Closing selector via Escape');
-                      setShowAtSelector(false);
-                    }
-                  }
-                }}
+                onKeyDown={handleKeyDown}
                 onBlur={(e) => {
                   setIsInputFocused(false);
                   // 如果批次数据项选择器显示，不处理blur（由组件自己处理）
