@@ -37,6 +37,7 @@ import {
 } from './ui/Dialog';
 import { Button } from './ui/Button';
 import { toast } from './ui/use-toast';
+import { floatingComposerContainerClass, floatingComposerInnerClass } from './shared/floatingComposerStyles';
 
 // 检测是否为沉默响应
 const isSilentResponse = (content: string): boolean => {
@@ -369,57 +370,173 @@ const RoundTablePanel = forwardRef<RoundTablePanelRef, RoundTablePanelProps>(({
     }
   }, [messages]);
   
-  // 处理 @ 提及
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const value = e.target.value;
-    setInputValue(value);
-    
-    // 检查是否在输入 @
-    const lastAtIndex = value.lastIndexOf('@');
-    if (lastAtIndex !== -1 && lastAtIndex === value.length - 1) {
-      setShowMentionDropdown(true);
-      setMentionFilter('');
-      setMentionSelectedIndex(0);
-    } else if (lastAtIndex !== -1) {
-      const afterAt = value.substring(lastAtIndex + 1);
-      if (!afterAt.includes(' ')) {
-        setShowMentionDropdown(true);
-        setMentionFilter(afterAt);
-        setMentionSelectedIndex(0);
-      } else {
-        setShowMentionDropdown(false);
-      }
-    } else {
-      setShowMentionDropdown(false);
-    }
+  type AtSuggestionKind = 'agent' | 'mcp_server' | 'mcp_tool' | 'workflow';
+  type AtSuggestionItem = {
+    id: string;
+    kind: AtSuggestionKind;
+    label: string;
+    insertText: string; // 不含尾随空格
+    description?: string;
+    searchText: string; // 用于过滤
   };
   
-  // 获取过滤后的参与者列表
-  const getFilteredParticipants = () => {
-    if (!roundTable) return [];
-    return roundTable.participants.filter(p => 
-      !mentionFilter || 
-      p.name.toLowerCase().includes(mentionFilter.toLowerCase())
-    );
+  const getAtTriggerContext = (text: string, caret: number): { start: number; query: string } | null => {
+    const safeCaret = Math.max(0, Math.min(caret, text.length));
+    const left = text.slice(0, safeCaret);
+    const at = left.lastIndexOf('@');
+    if (at < 0) return null;
+    // 必须处于同一个 token 内：@ 与光标之间不能出现空白字符
+    const query = left.slice(at + 1);
+    if (/[ \t\r\n]/.test(query)) return null;
+    // 避免把邮箱/英文 token 当成 mention（如 email@domain.com）
+    // 仅在 @ 前一个字符是“典型英文单词字符”时禁止触发；中文等场景允许直接“你好@”
+    const prev = at === 0 ? '' : text[at - 1];
+    if (prev && /[A-Za-z0-9._%+\-]/.test(prev)) return null;
+    return { start: at, query };
   };
+  
+  const replaceTextRange = (text: string, start: number, end: number, replacement: string) => {
+    return text.slice(0, start) + replacement + text.slice(end);
+  };
+  
+  const atSuggestions = useMemo<AtSuggestionItem[]>(() => {
+    const items: AtSuggestionItem[] = [];
+    
+    // Agents
+    const participants = roundTable?.participants || [];
+    for (const p of participants) {
+      const name = p.name || p.session_id;
+      items.push({
+        id: `agent:${p.session_id}`,
+        kind: 'agent',
+        label: name,
+        insertText: `@${name}`,
+        description: '智能体',
+        searchText: name.toLowerCase(),
+      });
+    }
+    
+    // MCP Servers / Tools（按启用与连接状态）
+    if (enableMCP) {
+      const enabledServers = (mcpServers || []).filter(s => s.enabled);
+      for (const s of enabledServers) {
+        const display = s.display_name || s.name || s.id;
+        items.push({
+          id: `mcp_server:${s.server_id || s.id}`,
+          kind: 'mcp_server',
+          label: `mcp:${display}`,
+          insertText: `@mcp:${display}`,
+          description: s.description || 'MCP 服务',
+          searchText: `mcp ${display}`.toLowerCase(),
+        });
+      }
+      
+      // 已连接服务器的工具（可选：帮助用户快速引用工具名）
+      for (const serverId of connectedMcpServerIds) {
+        const tools = mcpTools.get(serverId) || [];
+        if (tools.length === 0) continue;
+        const server = (mcpServers || []).find(s => (s.server_id || s.id) === serverId);
+        const serverDisplay = server?.display_name || server?.name || serverId;
+        for (const t of tools) {
+          const label = `mcp:${serverDisplay}/${t.name}`;
+          items.push({
+            id: `mcp_tool:${serverId}:${t.name}`,
+            kind: 'mcp_tool',
+            label,
+            insertText: `@mcp:${serverDisplay}/${t.name}`,
+            description: t.description || 'MCP 工具',
+            searchText: `mcp ${serverDisplay} ${t.name} ${t.description || ''}`.toLowerCase(),
+          });
+        }
+      }
+    }
+    
+    // Workflows
+    if (enableWorkflow) {
+      for (const w of workflows || []) {
+        const name = w.name || w.workflow_id || w.id;
+        items.push({
+          id: `workflow:${w.workflow_id || w.id}`,
+          kind: 'workflow',
+          label: `workflow:${name}`,
+          insertText: `@workflow:${name}`,
+          description: w.description || '工作流',
+          searchText: `workflow ${name} ${w.description || ''}`.toLowerCase(),
+        });
+      }
+    }
+    
+    return items;
+  }, [roundTable?.participants, enableMCP, enableWorkflow, mcpServers, mcpTools, connectedMcpServerIds, workflows]);
+  
+  const filteredAtSuggestions = useMemo(() => {
+    const q = (mentionFilter || '').trim().toLowerCase();
+    if (!q) return atSuggestions;
+    return atSuggestions.filter(it => it.searchText.includes(q) || it.label.toLowerCase().includes(q));
+  }, [atSuggestions, mentionFilter]);
   
   // 当过滤结果改变时，确保选中索引有效
   useEffect(() => {
-    const filtered = getFilteredParticipants();
-    if (mentionSelectedIndex >= filtered.length) {
-      setMentionSelectedIndex(Math.max(0, filtered.length - 1));
+    if (mentionSelectedIndex >= filteredAtSuggestions.length) {
+      setMentionSelectedIndex(Math.max(0, filteredAtSuggestions.length - 1));
     }
-  }, [mentionFilter]);
+  }, [filteredAtSuggestions.length, mentionSelectedIndex]);
   
-  // 选择提及的智能体
-  const handleSelectMention = (participant: RoundTableParticipant) => {
-    const lastAtIndex = inputValue.lastIndexOf('@');
-    if (lastAtIndex !== -1) {
-      const newValue = inputValue.substring(0, lastAtIndex) + `@${participant.name} `;
-      setInputValue(newValue);
+  // 统一更新 @ 下拉（从 ref 读取真实 caret，避免 onChange 瞬时 selectionStart 抖动导致“闪一下就消失”）
+  const rafUpdateRef = useRef<number | null>(null);
+  const scheduleUpdateAtDropdown = useCallback(() => {
+    if (rafUpdateRef.current) {
+      cancelAnimationFrame(rafUpdateRef.current);
     }
+    rafUpdateRef.current = requestAnimationFrame(() => {
+      rafUpdateRef.current = null;
+      const el = inputRef.current;
+      if (!el) return;
+      const text = el.value ?? '';
+      const caret = el.selectionStart ?? text.length;
+      const ctx = getAtTriggerContext(text, caret);
+      if (!ctx) {
+        setShowMentionDropdown(false);
+        setMentionFilter('');
+        return;
+      }
+      setShowMentionDropdown(true);
+      setMentionFilter(ctx.query);
+      setMentionSelectedIndex(0);
+    });
+  }, []);
+  
+  useEffect(() => {
+    return () => {
+      if (rafUpdateRef.current) cancelAnimationFrame(rafUpdateRef.current);
+    };
+  }, []);
+  
+  // 处理 @ 触发
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInputValue(e.target.value);
+    scheduleUpdateAtDropdown();
+  };
+  
+  const pickAtSuggestion = (item: AtSuggestionItem) => {
+    const el = inputRef.current;
+    if (!el) return;
+    const caret = el.selectionStart ?? inputValue.length;
+    const ctx = getAtTriggerContext(inputValue, caret);
+    if (!ctx) {
+      setShowMentionDropdown(false);
+      return;
+    }
+    
+    const replacement = item.insertText + ' ';
+    const next = replaceTextRange(inputValue, ctx.start, caret, replacement);
+    setInputValue(next);
     setShowMentionDropdown(false);
-    inputRef.current?.focus();
+    requestAnimationFrame(() => {
+      el.focus();
+      const pos = ctx.start + replacement.length;
+      el.setSelectionRange(pos, pos);
+    });
   };
   
   // 取消智能体响应
@@ -1523,12 +1640,12 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // 如果正在显示 @ 提及下拉菜单
     if (showMentionDropdown) {
-      const filteredParticipants = getFilteredParticipants();
+      const list = filteredAtSuggestions;
       
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         setMentionSelectedIndex(prev => 
-          prev < filteredParticipants.length - 1 ? prev + 1 : 0
+          prev < list.length - 1 ? prev + 1 : 0
         );
         return;
       }
@@ -1536,15 +1653,15 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
       if (e.key === 'ArrowUp') {
         e.preventDefault();
         setMentionSelectedIndex(prev => 
-          prev > 0 ? prev - 1 : filteredParticipants.length - 1
+          prev > 0 ? prev - 1 : list.length - 1
         );
         return;
       }
       
       if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault();
-        if (filteredParticipants.length > 0) {
-          handleSelectMention(filteredParticipants[mentionSelectedIndex]);
+        if (list.length > 0) {
+          pickAtSuggestion(list[mentionSelectedIndex]);
         }
         return;
       }
@@ -1643,10 +1760,10 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
           </div>
           
           {/* 输入区（浮岛悬浮） */}
-          <div className="absolute left-0 right-0 bottom-0 z-10 pointer-events-none">
+          <div className={floatingComposerContainerClass}>
             <div
               ref={floatingComposerRef}
-              className="pointer-events-auto rounded-2xl bg-white/35 dark:bg-[#262626]/35 backdrop-blur-md shadow-xl p-0"
+              className={floatingComposerInnerClass}
             >
             {/* 引用消息预览 */}
             {replyingTo && (
@@ -1819,8 +1936,14 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
                   value={inputValue}
                   onChange={handleInputChange}
                   onKeyDown={handleKeyDown}
+                  onKeyUp={() => scheduleUpdateAtDropdown()}
+                  onClick={() => scheduleUpdateAtDropdown()}
+                  onSelect={() => scheduleUpdateAtDropdown()}
                   onFocus={() => setIsInputFocused(true)}
-                  onBlur={() => setIsInputFocused(false)}
+                  onBlur={() => {
+                    setIsInputFocused(false);
+                    setShowMentionDropdown(false);
+                  }}
                   onPaste={(e) => {
                   // 检查粘贴板中是否有图片
                   const items = e.clipboardData?.items;
@@ -1868,36 +1991,41 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
                 />
               
               {/* @ 提及下拉菜单 */}
-              {showMentionDropdown && roundTable.participants.length > 0 && (
+              {showMentionDropdown && (
                 <div className="absolute bottom-full left-0 mb-1 w-56 bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] rounded-lg shadow-lg max-h-48 overflow-y-auto z-20">
-                  {getFilteredParticipants().length === 0 ? (
-                    <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">无匹配的智能体</div>
+                  {filteredAtSuggestions.length === 0 ? (
+                    <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
+                      无匹配项（支持：智能体 / MCP / Workflow）
+                    </div>
                   ) : (
-                    getFilteredParticipants().map((participant, index) => (
-                      <button
-                        key={participant.session_id}
-                        onClick={() => handleSelectMention(participant)}
-                        className={`w-full px-3 py-2 text-left flex items-center space-x-2 transition-colors ${
-                          index === mentionSelectedIndex 
-                            ? 'bg-[var(--color-accent)]/10 text-[var(--color-accent)]' 
-                            : 'hover:bg-gray-100 dark:hover:bg-[#363636]'
-                        }`}
+                    filteredAtSuggestions.map((item, index) => (
+                      <Button
+                        key={item.id}
+                        variant="ghost"
+                        size="sm"
+                        onMouseDown={(e) => {
+                          // 保持 textarea 焦点与 caret，避免点击候选导致下拉闪烁/消失
+                          e.preventDefault();
+                        }}
+                        onClick={() => pickAtSuggestion(item)}
+                        className={[
+                          'w-full h-auto px-3 py-2 rounded-none justify-start items-start',
+                          'text-left flex gap-2',
+                          index === mentionSelectedIndex
+                            ? 'bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
+                            : 'hover:bg-gray-100 dark:hover:bg-[#363636]',
+                        ].join(' ')}
                       >
-                        <div className="w-6 h-6 rounded-full overflow-hidden border border-gray-200 dark:border-[#404040] flex items-center justify-center bg-purple-100 dark:bg-purple-900/30 flex-shrink-0">
-                          {participant.avatar ? (
-                            <img 
-                              src={participant.avatar} 
-                              alt={participant.name} 
-                              className="w-full h-full object-cover" 
-                            />
-                          ) : (
-                            <Bot className="w-3 h-3 text-purple-500" />
-                          )}
+                        <div className="w-6 h-6 rounded-full overflow-hidden border border-gray-200 dark:border-[#404040] flex items-center justify-center bg-purple-100 dark:bg-purple-900/30 flex-shrink-0 mt-0.5">
+                          <Bot className="w-3 h-3 text-purple-500" />
                         </div>
-                        <span className="text-sm text-gray-900 dark:text-white truncate">
-                          {participant.name}
-                        </span>
-                      </button>
+                        <div className="min-w-0">
+                          <div className="text-sm text-gray-900 dark:text-white truncate">{item.label}</div>
+                          <div className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
+                            {item.description || (item.kind === 'agent' ? '智能体' : item.kind === 'workflow' ? '工作流' : 'MCP')}
+                          </div>
+                        </div>
+                      </Button>
                     ))
                   )}
                 </div>

@@ -48,19 +48,22 @@ export function getMessageBubbleClasses(
   
   // 基础样式
   const baseClasses = cn(
-    'rounded-lg transition-all duration-200',
-    compact ? 'px-3 py-2' : 'p-2.5',
-    // 圆角方向
-    cornerDirection === 'tl' && 'rounded-tl-none',
-    cornerDirection === 'tr' && 'rounded-tr-none',
-    cornerDirection === 'bl' && 'rounded-bl-none',
-    cornerDirection === 'br' && 'rounded-br-none',
+    'transition-all duration-200',
+    // assistant 和 tool 消息全屏显示，减少圆角和内边距
+    role === 'assistant' || role === 'tool' 
+      ? 'rounded-none px-4 py-3' 
+      : cn('rounded-lg', compact ? 'px-3 py-2' : 'p-2.5'),
+    // 圆角方向（仅对非 assistant/tool 消息生效）
+    role !== 'assistant' && role !== 'tool' && cornerDirection === 'tl' && 'rounded-tl-none',
+    role !== 'assistant' && role !== 'tool' && cornerDirection === 'tr' && 'rounded-tr-none',
+    role !== 'assistant' && role !== 'tool' && cornerDirection === 'bl' && 'rounded-bl-none',
+    role !== 'assistant' && role !== 'tool' && cornerDirection === 'br' && 'rounded-br-none',
   );
   
   // 角色特定样式 - 统一配色方案
   const roleClasses = {
     user: 'bg-primary-50 dark:bg-primary-900/20 text-gray-900 dark:text-white shadow-sm hover:shadow-md',
-    assistant: 'bg-white dark:bg-[#2d2d2d] text-gray-900 dark:text-white border border-gray-200 dark:border-[#404040] shadow-lg hover:shadow-xl',
+    assistant: 'bg-white/60 dark:bg-[#2d2d2d]/60 backdrop-blur-md text-gray-900 dark:text-white',
     system: 'bg-yellow-50 dark:bg-yellow-900/20 text-gray-700 dark:text-white shadow-sm',
     tool: getToolClasses(toolType),
   };
@@ -74,11 +77,11 @@ export function getMessageBubbleClasses(
 function getToolClasses(toolType?: ToolType): string {
   switch (toolType) {
     case 'workflow':
-      return 'bg-primary-50 dark:bg-primary-900/20 text-gray-900 dark:text-white border border-primary-200 dark:border-primary-700 shadow-sm hover:shadow-md';
+      return 'bg-primary-50/60 dark:bg-primary-900/30 backdrop-blur-md text-gray-900 dark:text-white';
     case 'mcp':
-      return 'bg-green-50 dark:bg-green-900/20 text-gray-900 dark:text-white border border-green-200 dark:border-green-700 shadow-sm hover:shadow-md';
+      return 'bg-green-50/60 dark:bg-green-900/30 backdrop-blur-md text-gray-900 dark:text-white';
     default:
-      return 'bg-gray-50 dark:bg-[#2d2d2d] text-gray-900 dark:text-white shadow-sm hover:shadow-md';
+      return 'bg-gray-50/60 dark:bg-[#2d2d2d]/60 backdrop-blur-md text-gray-900 dark:text-white';
   }
 }
 
@@ -98,8 +101,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     <div
       className={cn(bubbleClasses, className)}
       style={{
-        fontSize: role === 'assistant' ? '13px' : '12px',
-        lineHeight: role === 'assistant' ? '1.6' : '1.5',
+        fontSize: role === 'assistant' || role === 'tool' ? '12px' : '12px',
+        lineHeight: role === 'assistant' || role === 'tool' ? '1.5' : '1.5',
         wordBreak: 'break-word',
         overflowWrap: 'break-word',
       }}
@@ -138,7 +141,7 @@ export function getAvatarClasses(
   };
   
   const baseClasses = cn(
-    'rounded-full flex items-center justify-center shadow-sm overflow-hidden',
+    'rounded-md flex items-center justify-center shadow-sm overflow-hidden',
     sizeClasses[size]
   );
   
@@ -442,8 +445,8 @@ export const MessageBubbleContainer: React.FC<MessageBubbleContainerProps> = ({
     <div
       className={cn(bubbleClasses, className)}
       style={{
-        fontSize: role === 'assistant' ? '13px' : '12px',
-        lineHeight: role === 'assistant' ? '1.6' : '1.5',
+        fontSize: role === 'assistant' || role === 'tool' ? '12px' : '12px',
+        lineHeight: role === 'assistant' || role === 'tool' ? '1.5' : '1.5',
         wordBreak: 'break-word',
         overflowWrap: 'break-word',
       }}

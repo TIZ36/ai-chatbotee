@@ -715,7 +715,7 @@ export const MessageContent: React.FC<MessageContentProps> = ({
       
       {/* AI assistant messages use Markdown rendering */}
       {message.role === 'assistant' ? (
-        <div className="prose prose-sm dark:prose-invert max-w-none text-gray-900 dark:text-[#ffffff] markdown-content">
+        <div className="prose prose-sm dark:prose-invert max-w-none text-gray-900 dark:text-[#ffffff] markdown-content text-xs">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{

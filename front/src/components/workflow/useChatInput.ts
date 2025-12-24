@@ -11,6 +11,8 @@ export interface ChatInputProps {
   setShowModuleSelector: (show: boolean) => void;
   showAtSelector: boolean;
   setShowAtSelector: (show: boolean) => void;
+  atSelectorQuery: string;
+  setAtSelectorQuery: (query: string) => void;
   handleSelectComponent: (component: any) => void;
   getSelectableComponents: () => any[];
   selectedComponentIndex: number;
@@ -27,6 +29,8 @@ export const useChatInput = ({
   setShowModuleSelector,
   showAtSelector,
   setShowAtSelector,
+  atSelectorQuery,
+  setAtSelectorQuery,
   handleSelectComponent,
   getSelectableComponents,
   selectedComponentIndex,
@@ -37,16 +41,34 @@ export const useChatInput = ({
   const [moduleSelectorPosition, setModuleSelectorPosition] = useState({ bottom: 0, left: 0, maxHeight: 0 });
   
   const [atSelectorIndex, setAtSelectorIndex] = useState(-1);
-  const [atSelectorQuery, setAtSelectorQuery] = useState('');
   const [atSelectorPosition, setAtSelectorPosition] = useState({ bottom: 0, left: 0, maxHeight: 0 });
   
   const isComposingRef = useRef(false);
+  const rafUpdateRef = useRef<number | null>(null);
+  const atCtxMissRef = useRef(0); // 容错：避免 caret/selectionStart 瞬时抖动导致选择器“闪一下就消失”
 
-  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const value = e.target.value;
-    setInput(value);
-    
-    const cursorPosition = e.target.selectionStart || 0;
+  const getAtTriggerContext = useCallback(
+    (text: string, caret: number): { start: number; query: string } | null => {
+      const safeCaret = Math.max(0, Math.min(caret, text.length));
+      const left = text.slice(0, safeCaret);
+      const at = left.lastIndexOf('@');
+      if (at < 0) return null;
+      const query = left.slice(at + 1);
+      // @ 与光标之间不能出现空白（只在同一个 token 内触发）
+      if (/[ \t\r\n]/.test(query)) return null;
+      // 避免把邮箱/英文 token 当成 @ 选择器（如 email@domain.com）
+      const prev = at === 0 ? '' : text[at - 1];
+      if (prev && /[A-Za-z0-9._%+\-]/.test(prev)) return null;
+      return { start: at, query };
+    },
+    []
+  );
+
+  const updateSelectorsFromDom = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const value = el.value ?? '';
+    const cursorPosition = el.selectionStart ?? value.length;
     const textBeforeCursor = value.substring(0, cursorPosition);
     
     // Detect / command
@@ -63,85 +85,110 @@ export const useChatInput = ({
         setModuleSelectorQuery(query);
         setShowAtSelector(false);
         
-        if (inputRef.current) {
-          const { x, y } = calculateCursorPosition(inputRef.current, textBeforeCursor);
-          
-          const selectorMaxHeight = 256;
-          const selectorWidth = 320;
-          const viewportWidth = window.innerWidth;
-          
-          let left = x + 8;
-          if (left + selectorWidth > viewportWidth - 10) {
-            left = x - selectorWidth - 8;
-            if (left < 10) left = x + 8;
-          }
-          if (left < 10) left = 10;
-          
-          const bottom = window.innerHeight - y + 5;
-          const availableHeightAbove = y - 20;
-          const actualMaxHeight = Math.min(selectorMaxHeight, availableHeightAbove);
-          
-          setModuleSelectorPosition({ bottom, left, maxHeight: actualMaxHeight });
-          setShowModuleSelector(true);
+        const { x, y } = calculateCursorPosition(el, textBeforeCursor);
+        const selectorMaxHeight = 256;
+        const selectorMinHeight = 120;
+        const selectorWidth = 320;
+        const viewportWidth = window.innerWidth;
+        
+        let left = x + 8;
+        if (left + selectorWidth > viewportWidth - 10) {
+          left = x - selectorWidth - 8;
+          if (left < 10) left = x + 8;
         }
+        if (left < 10) left = 10;
+        
+        const rawBottom = window.innerHeight - y + 5;
+        // 保证弹框至少能显示出一部分：限制 bottom 让 top 不会跑到屏幕外
+        const bottom = Math.max(10, Math.min(rawBottom, window.innerHeight - selectorMinHeight - 10));
+        const availableHeightAbove = y - 20;
+        const actualMaxHeight = Math.max(
+          selectorMinHeight,
+          Math.min(selectorMaxHeight, availableHeightAbove)
+        );
+        
+        setModuleSelectorPosition({ bottom, left, maxHeight: actualMaxHeight });
+        setShowModuleSelector(true);
         return;
       } else {
         setShowModuleSelector(false);
         setModuleSelectorIndex(-1);
       }
-    } else {
-      if (showModuleSelector) {
-        setShowModuleSelector(false);
-        setModuleSelectorIndex(-1);
-      }
+    } else if (showModuleSelector) {
+      setShowModuleSelector(false);
+      setModuleSelectorIndex(-1);
     }
     
-    // Detect @ symbol
-    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
-    if (lastAtIndex !== -1) {
-      const textAfterAt = textBeforeCursor.substring(lastAtIndex + 1);
-      const hasSpaceOrNewline = textAfterAt.includes(' ') || textAfterAt.includes('\n');
-      
-      if (!hasSpaceOrNewline) {
-        const query = textAfterAt.toLowerCase();
-        setAtSelectorIndex(lastAtIndex);
-        setAtSelectorQuery(query);
-        setShowModuleSelector(false);
-        
-        if (inputRef.current) {
-          const { x, y } = calculateCursorPosition(inputRef.current, textBeforeCursor);
-          
-          const selectorMaxHeight = 256;
-          const selectorWidth = 280;
-          const viewportWidth = window.innerWidth;
-          
-          let left = x + 8;
-          if (left + selectorWidth > viewportWidth - 10) {
-            left = x - selectorWidth - 8;
-            if (left < 10) left = x + 8;
-          }
-          if (left < 10) left = 10;
-          
-          const bottom = window.innerHeight - y + 5;
-          const availableHeightAbove = y - 20;
-          const actualMaxHeight = Math.min(selectorMaxHeight, availableHeightAbove);
-          
-          setAtSelectorPosition({ bottom, left, maxHeight: actualMaxHeight });
-          setShowAtSelector(true);
-          setSelectedComponentIndex(0);
-        }
-        return;
-      } else {
-        setShowAtSelector(false);
-        setAtSelectorIndex(-1);
+    // Detect @ token（与 RoundTable 的策略一致：基于 caret 的 token 上下文）
+    const atCtx = getAtTriggerContext(value, cursorPosition);
+    if (atCtx) {
+      atCtxMissRef.current = 0;
+      setAtSelectorIndex(atCtx.start);
+      setAtSelectorQuery(atCtx.query.toLowerCase());
+      setShowModuleSelector(false);
+
+      const { x, y } = calculateCursorPosition(el, textBeforeCursor);
+      const selectorMaxHeight = 256;
+      const selectorMinHeight = 120;
+      const selectorWidth = 280;
+      const viewportWidth = window.innerWidth;
+
+      let left = x + 8;
+      if (left + selectorWidth > viewportWidth - 10) {
+        left = x - selectorWidth - 8;
+        if (left < 10) left = x + 8;
       }
-    } else {
-      if (showAtSelector) {
-        setShowAtSelector(false);
-        setAtSelectorIndex(-1);
-      }
+      if (left < 10) left = 10;
+
+      const rawBottom = window.innerHeight - y + 5;
+      const bottom = Math.max(10, Math.min(rawBottom, window.innerHeight - selectorMinHeight - 10));
+      const availableHeightAbove = y - 20;
+      const actualMaxHeight = Math.max(
+        selectorMinHeight,
+        Math.min(selectorMaxHeight, availableHeightAbove)
+      );
+
+      setAtSelectorPosition({ bottom, left, maxHeight: actualMaxHeight });
+      setShowAtSelector(true);
+      setSelectedComponentIndex(0);
+      return;
     }
-  }, [inputRef, setInput, setShowAtSelector, setShowModuleSelector, setSelectedComponentIndex, showAtSelector, showModuleSelector]);
+
+    if (showAtSelector) {
+      // 容错：允许 1 次瞬时 miss（常见于受控 textarea/输入法导致 selectionStart 抖动）
+      atCtxMissRef.current += 1;
+      if (atCtxMissRef.current < 2) {
+        return;
+      }
+      setShowAtSelector(false);
+      setAtSelectorIndex(-1);
+      atCtxMissRef.current = 0;
+    }
+  }, [
+    inputRef,
+    getAtTriggerContext,
+    setAtSelectorQuery,
+    setSelectedComponentIndex,
+    setShowAtSelector,
+    setShowModuleSelector,
+    showAtSelector,
+    showModuleSelector,
+  ]);
+
+  const scheduleUpdateSelectors = useCallback(() => {
+    if (rafUpdateRef.current) cancelAnimationFrame(rafUpdateRef.current);
+    rafUpdateRef.current = requestAnimationFrame(() => {
+      rafUpdateRef.current = null;
+      updateSelectorsFromDom();
+    });
+  }, [updateSelectorsFromDom]);
+
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value);
+    // 在受控 textarea 场景下，某些平台/输入法会导致 selectionStart 瞬时异常，
+    // 用 rAF 在 DOM commit 后读取真实 caret，避免“闪一下就消失”。
+    scheduleUpdateSelectors();
+  }, [scheduleUpdateSelectors, setInput]);
 
   const handleKeyPress = useCallback((e: React.KeyboardEvent) => {
     if (e.key !== 'Enter') return;
@@ -190,8 +237,6 @@ export const useChatInput = ({
     moduleSelectorPosition,
     atSelectorIndex,
     setAtSelectorIndex,
-    atSelectorQuery,
-    setAtSelectorQuery,
     atSelectorPosition,
     isComposingRef,
     handleInputChange,

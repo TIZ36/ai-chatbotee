@@ -26,6 +26,15 @@ import CrawlerBatchItemSelector from './CrawlerBatchItemSelector';
 import ComponentThumbnails from './ComponentThumbnails';
 import { Button } from './ui/Button';
 import { ConfirmDialog } from './ui/ConfirmDialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from './ui/Dialog';
+import { ScrollArea } from './ui/ScrollArea';
+import { DataListItem } from './ui/DataListItem';
 import { toast } from './ui/use-toast';
 import { PluginExecutionPanel } from './PluginExecutionPanel';
 import { MCPExecutionCard } from './MCPExecutionCard';
@@ -49,6 +58,8 @@ import { parseMCPContentBlocks, renderMCPBlocks, renderMCPMedia } from './workfl
 import { MessageContent, Message, ProcessStep } from './workflow/MessageContent';
 import { useChatInput } from './workflow/useChatInput';
 import { calculateCursorPosition } from './workflow/utils';
+import { TokenCounter } from './workflow/TokenCounter';
+import { floatingComposerContainerClass, floatingComposerInnerClass } from './shared/floatingComposerStyles';
 import {
   SessionTypeDialog,
   UpgradeToAgentDialog,
@@ -217,6 +228,9 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [selectedMCPDetail, setSelectedMCPDetail] = useState<any>(null);
   
   // @ 符号选择器状态
+  const [showAtSelector, setShowAtSelector] = useState(false); // 是否显示 @ 选择器
+  const [showModuleSelector, setShowModuleSelector] = useState(false); // 是否显示模块选择器（/ 命令）
+  const [atSelectorQuery, setAtSelectorQuery] = useState(''); // @ 选择器的查询字符串
   const [selectedComponentIndex, setSelectedComponentIndex] = useState(0); // 当前选中的组件索引（用于键盘导航）
   const [selectedComponents, setSelectedComponents] = useState<Array<{ type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string }>>([]); // 已选定的组件（tag）
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -262,6 +276,7 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [isSavingHeaderAsRole, setIsSavingHeaderAsRole] = useState(false);
   const [isEditingSystemPrompt, setIsEditingSystemPrompt] = useState(false); // 是否正在编辑人设
   const [systemPromptDraft, setSystemPromptDraft] = useState(''); // 人设编辑草稿
+  const [showModelSelectDialog, setShowModelSelectDialog] = useState(false); // 是否显示模型选择对话框
   const [showHelpTooltip, setShowHelpTooltip] = useState(false); // 是否显示帮助提示
   const [showSessionTypeDialog, setShowSessionTypeDialog] = useState(false); // 是否显示会话类型选择对话框
   const [showUpgradeToAgentDialog, setShowUpgradeToAgentDialog] = useState(false); // 是否显示升级为智能体对话框
@@ -789,43 +804,15 @@ const Workflow: React.FC<WorkflowProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSessionId, sessions, isTemporarySession]);
   
-  // 当弹框显示时，调整位置使底部对齐光标，并滚动到底部
+  // 当弹框显示时：只滚动到底部（位置由 useChatInput 计算的 bottom/left 决定）
+  // NOTE: 之前这里会直接写 selector.style.top，与渲染层使用 bottom/left 存在冲突，
+  // 在某些布局/分辨率下会导致弹框“看不到”（跑飞/被挤出视口）。
   useEffect(() => {
     if (showAtSelector && selectorRef.current && inputRef.current) {
       // 使用 setTimeout 确保 DOM 已更新
       setTimeout(() => {
         if (selectorRef.current && inputRef.current) {
           const selector = selectorRef.current;
-          const actualHeight = selector.offsetHeight;
-          
-          // 重新获取光标位置
-          const textarea = inputRef.current;
-          const textareaRect = textarea.getBoundingClientRect();
-          const cursorPosition = textarea.selectionStart || 0;
-          const value = textarea.value;
-          const textBeforeCursor = value.substring(0, cursorPosition);
-          
-          // 计算光标位置（简化版本，使用之前的逻辑）
-          const styles = window.getComputedStyle(textarea);
-          const lines = textBeforeCursor.split('\n');
-          const lineIndex = lines.length - 1;
-          
-          // 计算行高和 padding
-          const lineHeight = parseFloat(styles.lineHeight) || parseFloat(styles.fontSize) * 1.2;
-          const paddingTop = parseFloat(styles.paddingTop) || 0;
-          
-          const cursorY = textareaRect.top + paddingTop + (lineIndex * lineHeight) - textarea.scrollTop;
-          
-          // 调整弹框位置，使底部对齐光标
-          const newTop = cursorY - actualHeight;
-          
-          // 如果调整后超出顶部，则限制在顶部
-          if (newTop < 10) {
-            selector.style.top = '10px';
-          } else {
-            selector.style.top = `${newTop}px`;
-          }
-          
           // 滚动到底部，使最新内容在底部显示
           selector.scrollTop = selector.scrollHeight;
         }
@@ -3308,12 +3295,8 @@ const Workflow: React.FC<WorkflowProps> = ({
       .filter(w => w.name.toLowerCase().includes(atSelectorQuery))
       .map(w => ({ type: 'workflow' as const, id: w.workflow_id, name: w.name }));
     
-    const skillPackList = allSkillPacks
-      .filter(sp => sp.name.toLowerCase().includes(atSelectorQuery))
-      .map(sp => ({ type: 'skillpack' as const, id: sp.skill_pack_id, name: sp.name }));
-    
-    return [...mcpList, ...workflowList, ...skillPackList];
-  }, [mcpServers, workflows, allSkillPacks, atSelectorQuery]);
+    return [...mcpList, ...workflowList];
+  }, [mcpServers, workflows, atSelectorQuery]);
   
   // 处理模块选择（/模块命令）
   const handleModuleSelect = async (moduleId: string, batchId: string, batchName: string) => {
@@ -4212,8 +4195,6 @@ const Workflow: React.FC<WorkflowProps> = ({
     moduleSelectorPosition,
     atSelectorIndex,
     setAtSelectorIndex,
-    atSelectorQuery,
-    setAtSelectorQuery,
     atSelectorPosition,
     isComposingRef,
     handleInputChange,
@@ -4229,6 +4210,8 @@ const Workflow: React.FC<WorkflowProps> = ({
     setShowModuleSelector,
     showAtSelector,
     setShowAtSelector,
+    atSelectorQuery,
+    setAtSelectorQuery,
     handleSelectComponent,
     getSelectableComponents,
     selectedComponentIndex,
@@ -4300,36 +4283,8 @@ const Workflow: React.FC<WorkflowProps> = ({
               
             </div>
             <div className="flex items-center space-x-2">
-              {/* 模型选择和流式开关 - 右对齐 */}
+              {/* 流式响应开关 - 右对齐 */}
               <div className="flex items-center space-x-2">
-                {/* 模型选择 = 当前模型展示（统一 label，避免不一致） */}
-                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded border border-gray-200 dark:border-[#404040] bg-white/80 dark:bg-[#2d2d2d]/60">
-                  {selectedLLMConfig ? (
-                    <CheckCircle className="w-3 h-3 text-green-600 dark:text-green-400" />
-                  ) : (
-                    <AlertCircle className="w-3 h-3 text-amber-600 dark:text-amber-400" />
-                  )}
-                  <Brain className="w-3 h-3 text-gray-600 dark:text-[#b0b0b0]" />
-                  <select
-                    value={selectedLLMConfigId || ''}
-                    onChange={(e) => {
-                      console.log('[Workflow] Select onChange:', e.target.value);
-                      handleLLMConfigChange(e.target.value);
-                    }}
-                    className="bg-transparent text-[10px] min-w-[160px] max-w-[220px] h-6 outline-none"
-                    title={selectedLLMConfig ? `${selectedLLMConfig.name}${selectedLLMConfig.model ? ` (${selectedLLMConfig.model})` : ''}` : '未配置'}
-                  >
-                    <option value="">{'未配置'}</option>
-                    {llmConfigs.map((config) => {
-                      const label = `${config.name}${config.model ? ` (${config.model})` : ''}`;
-                      return (
-                        <option key={config.config_id} value={config.config_id}>
-                          {label}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </div>
                 {/* 流式响应开关 */}
                 <label className="flex items-center space-x-1 cursor-pointer group px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-[#404040] transition-colors">
                   <input
@@ -4341,41 +4296,6 @@ const Workflow: React.FC<WorkflowProps> = ({
                   <span className="text-[10px] text-gray-600 dark:text-[#b0b0b0]">流式</span>
                 </label>
               </div>
-              
-              {/* 创建技能包按钮 */}
-              {currentSessionId && messages.filter(m => m.role !== 'system').length > 0 && (
-                <Button
-                  onClick={() => {
-                    setSkillPackSelectionMode(!skillPackSelectionMode);
-                    if (skillPackSelectionMode) {
-                      setSelectedMessageIds(new Set());
-                    }
-                  }}
-                  variant={skillPackSelectionMode ? 'primary' : 'secondary'}
-                  size="sm"
-                  title="创建技能包"
-                >
-                  <Package className="w-3.5 h-3.5" />
-                  <span>{skillPackSelectionMode ? '取消' : '技能包'}</span>
-                </Button>
-              )}
-              {/* Summarize 按钮 */}
-              {currentSessionId && messages.filter(m => m.role !== 'system').length > 0 && (
-                <Button
-                  onClick={handleManualSummarize}
-                  disabled={isSummarizing}
-                  variant="primary"
-                  size="sm"
-                  title="总结当前会话内容"
-                >
-                  {isSummarizing ? (
-                    <Loader className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Sparkles className="w-3.5 h-3.5" />
-                  )}
-                  <span>总结</span>
-                </Button>
-              )}
                 </div>
           </div>
         </div>
@@ -4558,8 +4478,12 @@ const Workflow: React.FC<WorkflowProps> = ({
               key={message.id}
               data-message-id={message.id}
               onClick={() => toggleMessageSelection(message.id)}
-              className={`flex items-start space-x-2 fade-in-up stagger-item ${
-                message.role === 'user' ? 'flex-row-reverse space-x-reverse' : ''
+              className={`flex items-start fade-in-up stagger-item ${
+                message.role === 'user' 
+                  ? 'flex-row-reverse space-x-reverse space-x-2' 
+                  : message.role === 'assistant' || message.role === 'tool'
+                    ? 'flex-col w-full'
+                    : 'space-x-2'
               } ${
                 skillPackSelectionMode 
                   ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-[#404040] rounded-lg p-2 -m-2 transition-all duration-200' 
@@ -4580,117 +4504,153 @@ const Workflow: React.FC<WorkflowProps> = ({
                   )}
                 </div>
               )}
-              <div className="flex-shrink-0 flex items-center space-x-1.5">
-                {/* 统一头像组件 */}
-                <MessageAvatar 
-                  role={message.role}
-                  avatarUrl={message.role === 'assistant' ? currentSessionAvatar || undefined : undefined}
-                  toolType={message.toolType}
-                />
-                {/* 统一状态指示器组件 */}
-                {message.role === 'assistant' && (
-                  <MessageStatusIndicator
-                    isThinking={message.isThinking}
-                    isStreaming={message.isStreaming}
-                    hasContent={!!message.content && message.content.length > 0}
-                    currentStep={message.currentStep}
-                    llmProvider={selectedLLMConfig?.provider}
-                  />
-                )}
-              </div>
-              <div className={`flex-1 group relative ${message.role === 'user' ? 'flex justify-end' : ''}`}>
-                {/* 统一消息气泡容器 */}
-                <MessageBubbleContainer
-                  role={message.role}
-                  toolType={message.toolType}
-                  className="max-w-[85%]"
-                >
-                  <MessageContent
-                    message={message}
-                    messages={messages}
-                    abortController={abortController}
-                    setAbortController={setAbortController}
-                    setMessages={setMessages}
-                    setIsLoading={setIsLoading}
-                    collapsedThinking={collapsedThinking}
-                    toggleThinkingCollapse={toggleThinkingCollapse}
-                    handleExecuteWorkflow={handleExecuteWorkflow}
-                    handleDeleteWorkflowMessage={handleDeleteWorkflowMessage}
-                    findSessionMediaIndex={findSessionMediaIndex}
-                    openSessionMediaPanel={openSessionMediaPanel}
-                  />
-                </MessageBubbleContainer>
-                {/* 会话扩展面板：展示 MCP/Workflow 等外部插件的执行过程与原始返回（含多媒体） */}
-                {message.role === 'tool' && (message.toolType === 'mcp' || message.toolType === 'workflow') && (
-                  <PluginExecutionPanel
-                    messageId={message.id}
-                    sessionId={currentSessionId}
-                    toolType={message.toolType}
-                  />
-                )}
-                {/* 用户消息的编辑、重新发送和引用按钮 - 显示在气泡上方 */}
-                {message.role === 'user' && !isLoading && (
-                  <div className="absolute -top-7 right-0 flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-[#2d2d2d] rounded-lg shadow-md border border-gray-200 dark:border-[#404040] px-1 py-0.5">
-                    <button
-                      onClick={() => setQuotedMessageId(message.id)}
-                      className="p-1.5 text-gray-500 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-all"
-                      title="引用此消息"
-                    >
-                      <Quote className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleStartEdit(message.id)}
-                      className="p-1.5 text-gray-500 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-all"
-                      title="编辑消息"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleResendMessage(message.id)}
-                      className="p-1.5 text-gray-500 hover:text-green-600 dark:text-gray-400 dark:hover:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 rounded transition-all"
-                      title="重新发送"
-                    >
-                      <RotateCw className="w-3.5 h-3.5" />
-                    </button>
+              {(message.role === 'assistant' || message.role === 'tool') ? (
+                <div className="w-full">
+                  {/* 全屏显示时，头像和状态指示器放在顶部 */}
+                  <div className="flex items-center space-x-2 mb-2">
+                    <MessageAvatar 
+                      role={message.role}
+                      avatarUrl={message.role === 'assistant' ? currentSessionAvatar || undefined : undefined}
+                      toolType={message.toolType}
+                    />
+                    {message.role === 'assistant' && (
+                      <MessageStatusIndicator
+                        isThinking={message.isThinking}
+                        isStreaming={message.isStreaming}
+                        hasContent={!!message.content && message.content.length > 0}
+                        currentStep={message.currentStep}
+                        llmProvider={selectedLLMConfig?.provider}
+                      />
+                    )}
                   </div>
-                )}
-                
-                {/* Assistant消息的 MCP 详情按钮 - 显示在气泡上方 */}
-                {message.role === 'assistant' && message.mcpdetail && (
-                  <div className="absolute -top-7 right-0 flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={() => {
-                        setSelectedMCPDetail(message.mcpdetail);
-                        setShowMCPDetailOverlay(true);
-                      }}
-                      className="px-2 py-1 text-xs font-medium text-emerald-600 dark:text-emerald-400 bg-white dark:bg-[#2d2d2d] hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded-lg transition-all flex items-center space-x-1.5 border border-gray-200 dark:border-[#404040] shadow-md"
-                      title="查看 MCP 详情"
+                  <div className="w-full group relative">
+                    {/* 统一消息气泡容器 */}
+                    <MessageBubbleContainer
+                      role={message.role}
+                      toolType={message.toolType}
+                      className="w-full"
                     >
-                      <Plug className="w-3.5 h-3.5" />
-                      <span>MCP 详情</span>
-                    </button>
+                      <MessageContent
+                        message={message}
+                        messages={messages}
+                        abortController={abortController}
+                        setAbortController={setAbortController}
+                        setMessages={setMessages}
+                        setIsLoading={setIsLoading}
+                        collapsedThinking={collapsedThinking}
+                        toggleThinkingCollapse={toggleThinkingCollapse}
+                        handleExecuteWorkflow={handleExecuteWorkflow}
+                        handleDeleteWorkflowMessage={handleDeleteWorkflowMessage}
+                        findSessionMediaIndex={findSessionMediaIndex}
+                        openSessionMediaPanel={openSessionMediaPanel}
+                      />
+                    </MessageBubbleContainer>
                   </div>
-                )}
-                
-                {/* Assistant错误消息的重试按钮 - 显示在气泡上方 */}
-                {message.role === 'assistant' && 
-                 message.content?.includes('❌ 错误') && 
-                 message.toolCalls && 
-                 typeof message.toolCalls === 'object' &&
-                 (message.toolCalls as any).canRetry === true && (
-                  <div className="absolute -top-8 right-0 flex items-center space-x-1">
-                    <button
-                      onClick={() => handleRetryMessage(message.id)}
-                      disabled={isLoading}
-                      className="px-2.5 py-1 text-xs font-medium text-white bg-primary-500 hover:bg-primary-600 disabled:bg-gray-400 disabled:cursor-not-allowed rounded-lg transition-all flex items-center space-x-1.5 shadow-md"
-                      title="重试发送"
+                  {/* 会话扩展面板：展示 MCP/Workflow 等外部插件的执行过程与原始返回（含多媒体） */}
+                  {message.role === 'tool' && (message.toolType === 'mcp' || message.toolType === 'workflow') && (
+                    <PluginExecutionPanel
+                      messageId={message.id}
+                      sessionId={currentSessionId}
+                      toolType={message.toolType}
+                    />
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div className="flex-shrink-0 flex items-center space-x-1.5">
+                    {/* 统一头像组件 */}
+                    <MessageAvatar 
+                      role={message.role}
+                      toolType={message.toolType}
+                    />
+                  </div>
+                  <div className={`flex-1 group relative ${message.role === 'user' ? 'flex justify-end' : ''}`}>
+                    {/* 统一消息气泡容器 */}
+                    <MessageBubbleContainer
+                      role={message.role}
+                      toolType={message.toolType}
+                      className="max-w-[85%]"
                     >
-                      <RotateCw className="w-3.5 h-3.5" />
-                      <span>重试</span>
-                    </button>
+                      <MessageContent
+                        message={message}
+                        messages={messages}
+                        abortController={abortController}
+                        setAbortController={setAbortController}
+                        setMessages={setMessages}
+                        setIsLoading={setIsLoading}
+                        collapsedThinking={collapsedThinking}
+                        toggleThinkingCollapse={toggleThinkingCollapse}
+                        handleExecuteWorkflow={handleExecuteWorkflow}
+                        handleDeleteWorkflowMessage={handleDeleteWorkflowMessage}
+                        findSessionMediaIndex={findSessionMediaIndex}
+                        openSessionMediaPanel={openSessionMediaPanel}
+                      />
+                    </MessageBubbleContainer>
+                    {/* 用户消息的编辑、重新发送和引用按钮 - 显示在气泡上方 */}
+                    {message.role === 'user' && !isLoading && (
+                      <div className="absolute -top-7 right-0 flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-[#2d2d2d] rounded-lg shadow-md border border-gray-200 dark:border-[#404040] px-1 py-0.5">
+                        <button
+                          onClick={() => setQuotedMessageId(message.id)}
+                          className="p-1.5 text-gray-500 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-all"
+                          title="引用此消息"
+                        >
+                          <Quote className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleStartEdit(message.id)}
+                          className="p-1.5 text-gray-500 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-all"
+                          title="编辑消息"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleResendMessage(message.id)}
+                          className="p-1.5 text-gray-500 hover:text-green-600 dark:text-gray-400 dark:hover:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 rounded transition-all"
+                          title="重新发送"
+                        >
+                          <RotateCw className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+                </>
+              )}
+              
+              {/* Assistant消息的 MCP 详情按钮 - 显示在气泡上方 */}
+              {message.role === 'assistant' && message.mcpdetail && (
+                <div className="absolute -top-7 right-0 flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={() => {
+                      setSelectedMCPDetail(message.mcpdetail);
+                      setShowMCPDetailOverlay(true);
+                    }}
+                    className="px-2 py-1 text-xs font-medium text-emerald-600 dark:text-emerald-400 bg-white dark:bg-[#2d2d2d] hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded-lg transition-all flex items-center space-x-1.5 border border-gray-200 dark:border-[#404040] shadow-md"
+                    title="查看 MCP 详情"
+                  >
+                    <Plug className="w-3.5 h-3.5" />
+                    <span>MCP 详情</span>
+                  </button>
+                </div>
+              )}
+              
+              {/* Assistant错误消息的重试按钮 - 显示在气泡上方 */}
+              {message.role === 'assistant' && 
+               message.content?.includes('❌ 错误') && 
+               message.toolCalls && 
+               typeof message.toolCalls === 'object' &&
+               (message.toolCalls as any).canRetry === true && (
+                <div className="absolute -top-8 right-0 flex items-center space-x-1">
+                  <button
+                    onClick={() => handleRetryMessage(message.id)}
+                    disabled={isLoading}
+                    className="px-2.5 py-1 text-xs font-medium text-white bg-primary-500 hover:bg-primary-600 disabled:bg-gray-400 disabled:cursor-not-allowed rounded-lg transition-all flex items-center space-x-1.5 shadow-md"
+                    title="重试发送"
+                  >
+                    <RotateCw className="w-3.5 h-3.5" />
+                    <span>重试</span>
+                  </button>
+                </div>
+              )}
             </div>
             );
           })}
@@ -4738,10 +4698,10 @@ const Workflow: React.FC<WorkflowProps> = ({
         </div>
 
         {/* 输入框（浮岛悬浮） */}
-          <div className="absolute left-0 right-0 bottom-0 z-20 pointer-events-none">
+          <div className={floatingComposerContainerClass.replace('z-10', 'z-20')}>
           <div 
             ref={floatingComposerRef}
-            className={`pointer-events-auto rounded-2xl bg-white/35 dark:bg-[#262626]/35 backdrop-blur-md shadow-xl p-0 relative transition-colors ${
+            className={`${floatingComposerInnerClass} relative transition-colors ${
               isDraggingOver ? 'ring-2 ring-primary-400/30' : ''
             }`}
             onDragOver={handleDragOver}
@@ -5187,41 +5147,47 @@ const Workflow: React.FC<WorkflowProps> = ({
                     return;
                   }
                   
-                  // 如果选择器未显示，不需要处理
-                  if (!showAtSelector) {
-                    return;
-                  }
-                  
-                  // 清除之前的定时器
-                  if (blurTimeoutRef.current) {
-                    clearTimeout(blurTimeoutRef.current);
-                    blurTimeoutRef.current = null;
-                  }
-                  
-                  // 延迟关闭，以便点击选择器时不会立即关闭
-                  blurTimeoutRef.current = setTimeout(() => {
-                    // 检查当前焦点是否在选择器或其子元素上
-                    const activeElement = document.activeElement;
-                    const isFocusInSelector = activeElement?.closest('.at-selector-container');
-                    
-                    // 检查选择器元素是否仍然存在且显示
-                    const selectorElement = selectorRef.current;
-                    const isSelectorVisible = selectorElement && 
-                                             document.contains(selectorElement) && 
-                                             showAtSelector;
-                    
-                    // 如果焦点不在选择器上，且选择器仍然显示，则关闭
-                    if (isSelectorVisible && !isFocusInSelector) {
-                      // 再次检查relatedTarget（可能为null）
-                      const relatedTarget = e.relatedTarget as HTMLElement;
-                      if (!relatedTarget || !relatedTarget.closest('.at-selector-container')) {
-                        console.log('[Workflow] Closing selector via blur');
-                        setShowAtSelector(false);
-                      }
+                  // 如果 @ 选择器显示，检查是否点击了选择器
+                  if (showAtSelector) {
+                    // 检查 relatedTarget 是否在选择器内
+                    const relatedTarget = e.relatedTarget as HTMLElement;
+                    if (relatedTarget && relatedTarget.closest('.at-selector-container')) {
+                      // 焦点移到了选择器，不关闭
+                      return;
                     }
                     
-                    blurTimeoutRef.current = null;
-                  }, 300); // 增加延迟时间
+                    // 清除之前的定时器
+                    if (blurTimeoutRef.current) {
+                      clearTimeout(blurTimeoutRef.current);
+                      blurTimeoutRef.current = null;
+                    }
+                    
+                    // 延迟关闭，以便点击选择器时不会立即关闭
+                    blurTimeoutRef.current = setTimeout(() => {
+                      // 检查当前焦点是否在选择器或其子元素上
+                      const activeElement = document.activeElement;
+                      const isFocusInSelector = activeElement?.closest('.at-selector-container');
+                      
+                      // 检查选择器元素是否仍然存在且显示
+                      const selectorElement = selectorRef.current;
+                      const isSelectorVisible = selectorElement && 
+                                               document.contains(selectorElement) && 
+                                               showAtSelector;
+                      
+                      // 如果焦点不在选择器上，且选择器仍然显示，则关闭
+                      if (isSelectorVisible && !isFocusInSelector) {
+                        // 再次检查relatedTarget（可能为null）
+                        const relatedTarget = e.relatedTarget as HTMLElement;
+                        if (!relatedTarget || !relatedTarget.closest('.at-selector-container')) {
+                          console.log('[Workflow] Closing selector via blur');
+                          setShowAtSelector(false);
+                        }
+                      }
+                      
+                      blurTimeoutRef.current = null;
+                    }, 500); // 增加延迟时间到 500ms，给用户更多时间点击
+                    return;
+                  }
                 }}
               placeholder={
                 editingMessageId
@@ -5293,229 +5259,205 @@ const Workflow: React.FC<WorkflowProps> = ({
           {showAtSelector && (
             <div
               ref={selectorRef}
-              className="fixed z-[100] bg-white dark:bg-[#2d2d2d] border border-gray-300 dark:border-[#404040] rounded-lg shadow-lg overflow-y-auto at-selector-container"
-                  style={{
-                    top: `${atSelectorPosition.top}px`,
-                    left: `${atSelectorPosition.left}px`,
-                    minWidth: '200px',
-                    maxWidth: '300px',
-                    maxHeight: `${atSelectorPosition.maxHeight || 256}px`, // 使用动态计算的最大高度
-                  }}
-                  onMouseDown={(e) => {
-                    e.preventDefault(); // 防止触发 blur
-                    e.stopPropagation(); // 阻止事件冒泡
-                    // 清除blur定时器，防止选择器被关闭
-                    if (blurTimeoutRef.current) {
-                      clearTimeout(blurTimeoutRef.current);
-                      blurTimeoutRef.current = null;
-                    }
-                  }}
-                  onMouseUp={(e) => {
-                    e.preventDefault(); // 防止触发 blur
-                    e.stopPropagation(); // 阻止事件冒泡
-                  }}
-                >
-                  <div className="p-2 border-b border-gray-200 dark:border-[#404040]">
-                    <div className="text-xs font-semibold text-gray-700 dark:text-[#ffffff]">
-                      选择感知组件
-                    </div>
+              className="fixed z-[200] bg-white dark:bg-[#2d2d2d] border border-gray-300 dark:border-[#404040] rounded-lg shadow-lg overflow-y-auto at-selector-container"
+              style={{
+                bottom: `${atSelectorPosition.bottom || 100}px`,
+                left: `${atSelectorPosition.left || 10}px`,
+                minWidth: '200px',
+                maxWidth: '300px',
+                maxHeight: `${atSelectorPosition.maxHeight || 256}px`,
+              }}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (blurTimeoutRef.current) {
+                  clearTimeout(blurTimeoutRef.current);
+                  blurTimeoutRef.current = null;
+                }
+              }}
+              onMouseUp={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+            >
+              <div className="p-2 border-b border-gray-200 dark:border-[#404040]">
+                <div className="text-xs font-semibold text-gray-700 dark:text-[#ffffff]">
+                  选择感知组件
+                </div>
+              </div>
+
+              {/* MCP 服务器列表 */}
+              {mcpServers.filter(s => s.name.toLowerCase().includes(atSelectorQuery)).length > 0 && (
+                <div className="py-1">
+                  <div className="text-xs font-medium text-gray-500 dark:text-[#b0b0b0] px-3 py-1.5 flex items-center justify-between">
+                    <span>MCP 服务器</span>
+                    <span className="text-[10px]">
+                      ({connectedMcpServerIds.size}/{mcpServers.length}已连接)
+                    </span>
                   </div>
-                  
-                  {/* MCP 服务器列表 - 显示所有MCP，不仅仅是已连接的 */}
-                  {mcpServers.filter(s => 
-                    s.name.toLowerCase().includes(atSelectorQuery)
-                  ).length > 0 && (
-                    <div className="py-1">
-                      <div className="text-xs font-medium text-gray-500 dark:text-[#b0b0b0] px-3 py-1.5 flex items-center justify-between">
-                        <span>MCP 服务器</span>
-                        <span className="text-[10px]">
-                          ({connectedMcpServerIds.size}/{mcpServers.length}已连接)
-                        </span>
-                      </div>
-                      {mcpServers
-                        .filter(s => s.name.toLowerCase().includes(atSelectorQuery))
-                        .map((server) => {
-                          const isConnected = connectedMcpServerIds.has(server.id);
-                          const isConnecting = connectingServers.has(server.id);
-                          const component = { type: 'mcp' as const, id: server.id, name: server.name };
-                          const selectableComponents = getSelectableComponents();
-                          const componentIndex = selectableComponents.findIndex((c: { type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string }) => c.id === component.id && c.type === component.type);
-                          const isSelected = componentIndex === selectedComponentIndex;
-                          return (
-                            <div
-                              key={server.id}
-                              onClick={async () => {
-                                if (isConnecting) return;
-                                if (!isConnected) {
-                                  // 未连接则先连接
-                                  await handleConnectServer(server.id);
-                                  // 连接成功后自动选择
-                                  const newComponent = { type: 'mcp' as const, id: server.id, name: server.name };
-                                  handleSelectComponent(newComponent);
-                                } else {
-                                  handleSelectComponent(component);
-                                }
-                              }}
-                              className={`px-3 py-2 cursor-pointer flex items-center space-x-2 ${
-                                isConnecting
-                                  ? 'opacity-70 cursor-wait'
-                                  : isSelected 
-                                    ? 'bg-primary-100 dark:bg-primary-900/30' 
-                                    : !isConnected
-                                      ? 'hover:bg-yellow-50 dark:hover:bg-yellow-900/20'
-                                      : 'hover:bg-gray-100 dark:hover:bg-gray-700'
-                              }`}
-                            >
-                              <div className="relative">
-                                {isConnecting ? (
-                                  <div className="w-4 h-4 border-2 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
-                                ) : (
-                                  <>
-                                    <Plug className={`w-4 h-4 flex-shrink-0 ${isConnected ? 'text-primary-500' : 'text-gray-400'}`} />
-                                    {isConnected && (
-                                      <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-green-500 rounded-full"></span>
-                                    )}
-                                  </>
+                  {mcpServers
+                    .filter(s => s.name.toLowerCase().includes(atSelectorQuery))
+                    .map((server) => {
+                      const isConnected = connectedMcpServerIds.has(server.id);
+                      const isConnecting = connectingServers.has(server.id);
+                      const component = { type: 'mcp' as const, id: server.id, name: server.name };
+                      const selectableComponents = getSelectableComponents();
+                      const componentIndex = selectableComponents.findIndex(
+                        (c: { type: 'mcp' | 'workflow'; id: string; name: string }) =>
+                          c.id === component.id && c.type === component.type
+                      );
+                      const isSelected = componentIndex === selectedComponentIndex;
+
+                      return (
+                        <div
+                          key={server.id}
+                          onMouseDown={(e) => {
+                            e.preventDefault(); // 防止触发输入框的 blur
+                          }}
+                          onClick={async (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (blurTimeoutRef.current) {
+                              clearTimeout(blurTimeoutRef.current);
+                              blurTimeoutRef.current = null;
+                            }
+                            if (isConnecting) return;
+                            if (!isConnected) {
+                              await handleConnectServer(server.id);
+                              const newComponent = { type: 'mcp' as const, id: server.id, name: server.name };
+                              handleSelectComponent(newComponent);
+                            } else {
+                              handleSelectComponent(component);
+                            }
+                          }}
+                          className={`px-3 py-2 cursor-pointer flex items-center space-x-2 ${
+                            isConnecting
+                              ? 'opacity-70 cursor-wait'
+                              : isSelected
+                                ? 'bg-primary-100 dark:bg-primary-900/30'
+                                : !isConnected
+                                  ? 'hover:bg-yellow-50 dark:hover:bg-yellow-900/20'
+                                  : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                          }`}
+                        >
+                          <div className="relative">
+                            {isConnecting ? (
+                              <div className="w-4 h-4 border-2 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
+                            ) : (
+                              <>
+                                <Plug className={`w-4 h-4 flex-shrink-0 ${isConnected ? 'text-primary-500' : 'text-gray-400'}`} />
+                                {isConnected && (
+                                  <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-green-500 rounded-full"></span>
                                 )}
-                              </div>
-                              <span className={`text-sm ${isConnected ? 'text-gray-900 dark:text-[#ffffff]' : 'text-gray-600 dark:text-gray-400'}`}>
-                                {server.display_name || server.client_name || server.name}
-                              </span>
-                              {isConnecting && (
-                                <span className="text-[10px] text-primary-500 ml-auto">连接中...</span>
-                              )}
-                              {!isConnected && !isConnecting && (
-                                <span className="text-[10px] text-yellow-600 dark:text-yellow-400 ml-auto">点击连接</span>
-                              )}
-                            </div>
-                          );
-                        })}
-                    </div>
-                  )}
-                  
-                  {/* 工作流列表 */}
-                  {workflows.filter(w => 
-                    w.name.toLowerCase().includes(atSelectorQuery)
-                  ).length > 0 && (
-                    <div className="py-1">
-                      <div className="text-xs font-medium text-gray-500 dark:text-[#b0b0b0] px-3 py-1.5">
-                        工作流
-                      </div>
-                      {workflows
-                        .filter(w => w.name.toLowerCase().includes(atSelectorQuery))
-                        .map((workflow) => {
-                          const component = { type: 'workflow' as const, id: workflow.workflow_id, name: workflow.name };
-                          const selectableComponents = getSelectableComponents();
-                          const componentIndex = selectableComponents.findIndex((c: { type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string }) => c.id === component.id && c.type === component.type);
-                          const isSelected = componentIndex === selectedComponentIndex;
-                          return (
-                            <div
-                              key={workflow.workflow_id}
-                              onClick={() => handleSelectComponent(component)}
-                              className={`px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer flex items-center space-x-2 ${
-                                isSelected ? 'bg-primary-100 dark:bg-primary-900/30' : ''
-                              }`}
-                            >
-                              <WorkflowIcon className="w-4 h-4 text-primary-500 flex-shrink-0" />
-                              <span className="text-sm text-gray-900 dark:text-[#ffffff]">{workflow.name}</span>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  )}
-                  
-                  {/* 技能包列表 */}
-                  {allSkillPacks.filter(sp => 
-                    sp.name.toLowerCase().includes(atSelectorQuery)
-                  ).length > 0 && (
-                    <div className="py-1">
-                      <div className="text-xs font-medium text-gray-500 dark:text-[#b0b0b0] px-3 py-1.5">
-                        技能包
-                      </div>
-                      {allSkillPacks
-                        .filter(sp => sp.name.toLowerCase().includes(atSelectorQuery))
-                        .map((skillPack) => {
-                          const component = { type: 'skillpack' as const, id: skillPack.skill_pack_id, name: skillPack.name };
-                          const selectableComponents = getSelectableComponents();
-                          const componentIndex = selectableComponents.findIndex((c: { type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string }) => c.id === component.id && c.type === component.type);
-                          const isSelected = componentIndex === selectedComponentIndex;
-                          return (
-                            <div
-                              key={skillPack.skill_pack_id}
-                              onClick={() => handleSelectComponent(component)}
-                              className={`px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer flex items-center space-x-2 ${
-                                isSelected ? 'bg-primary-100 dark:bg-primary-900/30' : ''
-                              }`}
-                            >
-                              <Package className="w-4 h-4 text-amber-500 flex-shrink-0" />
-                              <span className="text-sm text-gray-900 dark:text-[#ffffff]">{skillPack.name}</span>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  )}
-                  
-                  {/* 无匹配结果 */}
-                  {mcpServers.filter(s => 
-                    s.name.toLowerCase().includes(atSelectorQuery)
-                  ).length === 0 &&
-                  workflows.filter(w => 
-                    w.name.toLowerCase().includes(atSelectorQuery)
-                  ).length === 0 &&
-                  allSkillPacks.filter(sp => 
-                    sp.name.toLowerCase().includes(atSelectorQuery)
-                  ).length === 0 && (
-                    <div className="px-3 py-2 text-xs text-gray-500 dark:text-[#b0b0b0] text-center">
-                      未找到匹配的感知组件
-                    </div>
-                  )}
+                              </>
+                            )}
+                          </div>
+                          <span className={`text-sm ${isConnected ? 'text-gray-900 dark:text-[#ffffff]' : 'text-gray-600 dark:text-gray-400'}`}>
+                            {server.display_name || server.client_name || server.name}
+                          </span>
+                          {isConnecting && (
+                            <span className="text-[10px] text-primary-500 ml-auto">连接中...</span>
+                          )}
+                          {!isConnected && !isConnecting && (
+                            <span className="text-[10px] text-yellow-600 dark:text-yellow-400 ml-auto">点击连接</span>
+                          )}
+                        </div>
+                      );
+                    })}
                 </div>
               )}
+
+              {/* 工作流列表 */}
+              {workflows.filter(w => w.name.toLowerCase().includes(atSelectorQuery)).length > 0 && (
+                <div className="py-1">
+                  <div className="text-xs font-medium text-gray-500 dark:text-[#b0b0b0] px-3 py-1.5">
+                    工作流
+                  </div>
+                  {workflows
+                    .filter(w => w.name.toLowerCase().includes(atSelectorQuery))
+                    .map((workflow) => {
+                      const component = { type: 'workflow' as const, id: workflow.workflow_id, name: workflow.name };
+                      const selectableComponents = getSelectableComponents();
+                      const componentIndex = selectableComponents.findIndex(
+                        (c: { type: 'mcp' | 'workflow'; id: string; name: string }) =>
+                          c.id === component.id && c.type === component.type
+                      );
+                      const isSelected = componentIndex === selectedComponentIndex;
+
+                      return (
+                        <div
+                          key={workflow.workflow_id}
+                          onMouseDown={(e) => {
+                            e.preventDefault(); // 防止触发输入框的 blur
+                          }}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (blurTimeoutRef.current) {
+                              clearTimeout(blurTimeoutRef.current);
+                              blurTimeoutRef.current = null;
+                            }
+                            handleSelectComponent(component);
+                          }}
+                          className={`px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer flex items-center space-x-2 ${
+                            isSelected ? 'bg-primary-100 dark:bg-primary-900/30' : ''
+                          }`}
+                        >
+                          <WorkflowIcon className="w-4 h-4 text-primary-500 flex-shrink-0" />
+                          <span className="text-sm text-gray-900 dark:text-[#ffffff]">{workflow.name}</span>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+
+              {/* 无匹配结果 */}
+              {mcpServers.filter(s => s.name.toLowerCase().includes(atSelectorQuery)).length === 0 &&
+                workflows.filter(w => w.name.toLowerCase().includes(atSelectorQuery)).length === 0 && (
+                  <div className="px-3 py-2 text-xs text-gray-500 dark:text-[#b0b0b0] text-center">
+                    未找到匹配的感知组件
+                  </div>
+                )}
+            </div>
+          )}
               
-              {/* 输入框底部：Token 计数 + 发送按钮（左统计、右动作；小屏自动收敛） */}
+              {/* 输入框底部：Token 计数 + 模型选择 + 发送按钮（左统计、右模型+发送；小屏自动收敛） */}
               <div className="flex items-center justify-between gap-3 px-3 py-2 bg-white/45 dark:bg-[#262626]/45 backdrop-blur-md border-t border-black/5 dark:border-white/10 rounded-b-xl">
                 <div className="min-w-0">
-            {selectedLLMConfig && messages.filter(m => m.role !== 'system' && !m.isSummary).length > 0 ? (() => {
-              const model = selectedLLMConfig.model || 'gpt-4';
-              let lastSummaryIndex = -1;
-              for (let i = messages.length - 1; i >= 0; i--) {
-                if (messages[i].isSummary) { lastSummaryIndex = i; break; }
-              }
-              const messagesToCount = lastSummaryIndex >= 0 ? messages.slice(lastSummaryIndex) : messages;
-              const conversationMessages = messagesToCount
-                .filter(m => !(m.role === 'system' && !m.isSummary))
-                .map(msg => msg.isSummary 
-                  ? { role: 'user' as const, content: msg.content, thinking: undefined }
-                  : { role: msg.role, content: msg.content, thinking: msg.thinking }
-                );
-              const currentTokens = estimate_messages_tokens(conversationMessages, model);
-              const maxTokens = selectedLLMConfig?.max_tokens || get_model_max_tokens(model);
-              const ratio = maxTokens > 0 ? currentTokens / maxTokens : 0;
-              const colorClass =
-                ratio >= 0.9
-                  ? 'text-red-500 dark:text-red-400'
-                  : ratio >= 0.75
-                  ? 'text-amber-600 dark:text-amber-400'
-                  : 'text-gray-400 dark:text-[#808080]';
-              return (
-                      <span className={`text-[11px] truncate ${colorClass}`} title={`${currentTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens`}>
-                        {currentTokens.toLocaleString()} / {maxTokens.toLocaleString()} tokens
-                      </span>
-              );
-                  })() : null}
+                  <TokenCounter selectedLLMConfig={selectedLLMConfig} messages={messages} />
                 </div>
 
-                {/* 右侧：发送按钮（固定） */}
-                <Button
-                  onClick={handleSend}
-                  disabled={isLoading || (!input.trim() && attachedMedia.length === 0) || !selectedLLMConfig}
-                  variant="primary"
-                  size="default"
-                  className="gap-1.5 px-3 py-1.5 flex-shrink-0"
-                >
-                  {isLoading ? <Loader className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                  <span className="hidden sm:inline">{editingMessageId ? '重新发送' : '发送'}</span>
-                </Button>
+                {/* 右侧：模型选择图标按钮 + 发送按钮（紧挨着） */}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {/* 模型选择图标按钮 */}
+                  <button
+                    onClick={() => setShowModelSelectDialog(true)}
+                    className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors ${
+                      selectedLLMConfig
+                        ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 hover:bg-primary-200 dark:hover:bg-primary-900/50'
+                        : 'bg-gray-100 dark:bg-[#363636] text-gray-500 dark:text-[#808080] hover:bg-gray-200 dark:hover:bg-[#404040]'
+                    }`}
+                    title={selectedLLMConfig ? `${selectedLLMConfig.name}${selectedLLMConfig.model ? ` (${selectedLLMConfig.model})` : ''}` : '选择模型'}
+                  >
+                    {selectedLLMConfig ? (
+                      <CheckCircle className="w-4 h-4" />
+                    ) : (
+                      <Brain className="w-4 h-4" />
+                    )}
+                  </button>
+
+                  {/* 发送按钮 */}
+                  <Button
+                    onClick={handleSend}
+                    disabled={isLoading || (!input.trim() && attachedMedia.length === 0) || !selectedLLMConfig}
+                    variant="primary"
+                    size="default"
+                    className="gap-1.5 px-3 py-1.5 flex-shrink-0"
+                  >
+                    {isLoading ? <Loader className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    <span className="hidden sm:inline">{editingMessageId ? '重新发送' : '发送'}</span>
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
@@ -5608,6 +5550,43 @@ const Workflow: React.FC<WorkflowProps> = ({
               }
             }}
           />
+
+          {/* 模型选择对话框 */}
+          <Dialog open={showModelSelectDialog} onOpenChange={setShowModelSelectDialog}>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Brain className="w-5 h-5 text-primary-600 dark:text-primary-400" />
+                  选择模型
+                </DialogTitle>
+                <DialogDescription>
+                  选择一个 LLM 模型用于对话
+                </DialogDescription>
+              </DialogHeader>
+              <ScrollArea className="h-[60vh] pr-2">
+                <div className="space-y-1 py-2">
+                  {/* 模型列表 */}
+                  {llmConfigs.map((config) => {
+                    const isSelected = selectedLLMConfigId === config.config_id;
+                    return (
+                      <DataListItem
+                        key={config.config_id}
+                        id={config.config_id}
+                        title={config.name}
+                        description={config.model || undefined}
+                        icon={Brain}
+                        isSelected={isSelected}
+                        onClick={() => {
+                          handleLLMConfigChange(config.config_id);
+                          setShowModelSelectDialog(false);
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              </ScrollArea>
+            </DialogContent>
+          </Dialog>
 
           {/* 头像配置对话框 */}
           <AvatarConfigDialog

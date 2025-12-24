@@ -15,6 +15,7 @@ import { MessageRenderer } from './conversation/MessageRenderer';
 import { useConversation } from '../conversation/useConversation';
 import { createResearchConversationAdapter } from '../conversation/adapters/researchConversation';
 import { MessageAvatar, MessageBubbleContainer } from './ui/MessageBubble';
+import { floatingComposerContainerClass, floatingComposerInnerClass } from './shared/floatingComposerStyles';
 
 export interface ResearchPanelProps {
   chatSessionId: string | null;
@@ -1795,10 +1796,10 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
             </div>
 
           {/* 输入区（浮岛悬浮） */}
-          <div className="absolute left-0 right-0 bottom-0 z-20 pointer-events-none">
+          <div className={floatingComposerContainerClass.replace('z-10', 'z-20')}>
             <div
               ref={floatingComposerRef}
-              className="pointer-events-auto rounded-2xl bg-white/35 dark:bg-[#262626]/35 backdrop-blur-md shadow-xl"
+              className={floatingComposerInnerClass}
             >
               <div
                 className={`relative rounded-xl bg-transparent transition-shadow ${
