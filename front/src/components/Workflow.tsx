@@ -1396,15 +1396,6 @@ const Workflow: React.FC<WorkflowProps> = ({
       console.error('[Workflow] Failed to load summaries:', error);
     }
   };
-  
-  // 创建新会话 - 显示类型选择对话框
-  const handleCreateNewSession = () => {
-    if (!selectedLLMConfigId) {
-      alert('请先选择 LLM 模型');
-      return;
-    }
-    setShowSessionTypeDialog(true);
-  };
 
   // 创建记忆体会话
   const handleCreateMemorySession = async () => {
@@ -1609,20 +1600,6 @@ const Workflow: React.FC<WorkflowProps> = ({
         variant: 'destructive',
       });
     }
-  };
-
-  // 删除会话（确认）
-  const handleDeleteSession = (sessionId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const targetSession = sessions.find((s) => s.session_id === sessionId);
-    setDeleteSessionTarget({
-      id: sessionId,
-      name:
-        targetSession?.name ||
-        targetSession?.title ||
-        targetSession?.preview_text ||
-        '未命名会话',
-    });
   };
   
   // 处理总结的通用函数
@@ -1896,49 +1873,6 @@ const Workflow: React.FC<WorkflowProps> = ({
     }
   };
 
-  /**
-   * 断开 MCP 服务器连接
-   */
-  const handleDisconnectServer = (serverId: string) => {
-    mcpManager.removeServer(serverId);
-    setConnectedMcpServerIds(prev => {
-      const newSet = new Set(prev);
-      newSet.delete(serverId);
-      return newSet;
-    });
-    setSelectedMcpServerIds(prev => {
-      const newSet = new Set(prev);
-      newSet.delete(serverId);
-      return newSet;
-    });
-    setMcpTools(prev => {
-      const newMap = new Map(prev);
-      newMap.delete(serverId);
-      return newMap;
-    });
-    setExpandedServerIds(prev => {
-      const newSet = new Set(prev);
-      newSet.delete(serverId);
-      return newSet;
-    });
-    console.log(`[Workflow] Disconnected from server: ${serverId}`);
-  };
-
-  /**
-   * 切换服务器工具展开状态
-   */
-  const handleToggleServerExpand = (serverId: string) => {
-    setExpandedServerIds(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(serverId)) {
-        newSet.delete(serverId);
-      } else {
-        newSet.add(serverId);
-      }
-      return newSet;
-    });
-  };
-
   const handleLLMConfigChange = async (configId: string) => {
     console.log('[Workflow] LLM config changed:', configId);
     
@@ -1975,24 +1909,6 @@ const Workflow: React.FC<WorkflowProps> = ({
       };
       setMessages(prev => [...prev, errorMsg]);
     }
-  };
-
-  /**
-   * 切换是否使用某个 MCP 服务器的工具
-   */
-  const handleToggleMcpServerUsage = (serverId: string) => {
-    setSelectedMcpServerIds(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(serverId)) {
-        newSet.delete(serverId);
-      } else {
-        // 只有已连接的服务器才能被选择使用
-        if (connectedMcpServerIds.has(serverId)) {
-          newSet.add(serverId);
-        }
-      }
-      return newSet;
-    });
   };
 
   const handleSend = async () => {
