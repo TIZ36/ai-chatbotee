@@ -122,24 +122,30 @@ export function useConversation(adapter: ConversationAdapter | null, options?: U
     [adapter, enableCache, pageSize, saveToCache]
   );
 
-  const loadMoreBefore = useCallback(async () => {
+  const loadMoreBefore = useCallback(async (): Promise<number> => {
     if (!adapter) return;
     const key = adapter.key;
-    if (!hasMore || !nextCursor) return;
+    if (!hasMore || !nextCursor) return 0;
     setIsLoading(true);
     setError(null);
     try {
       const res = await adapter.listMessages({ cursor: nextCursor, pageSize });
       const nextItems = uniqById(res.items);
+      let addedCount = 0;
       setMessages(prev => {
         const merged = uniqById([...nextItems, ...prev]);
+        // 以最终去重后的长度差作为“实际 prepend 成功的数量”
+        addedCount = Math.max(0, merged.length - prev.length);
         saveToCache(key, { messages: merged, nextCursor: res.nextCursor, hasMore: res.hasMore });
         return merged;
       });
       setNextCursor(res.nextCursor);
       setHasMore(res.hasMore);
+      // React 的 setState(updater) 会在同一 tick 执行 updater；如遇并发模式导致 addedCount 未及时赋值，fallback 用 nextItems.length
+      return addedCount || nextItems.length || 0;
     } catch (e: any) {
       setError(e instanceof Error ? e : new Error(String(e)));
+      return 0;
     } finally {
       setIsLoading(false);
     }

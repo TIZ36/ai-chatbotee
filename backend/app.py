@@ -3101,6 +3101,215 @@ def delete_mcp_server(server_id):
         print(f"Error deleting MCP server: {e}")
         return jsonify({'error': str(e)}), 500
 
+# ==================== MCP 市场（Market）API ====================
+
+@app.route('/api/mcp/market/sources', methods=['GET', 'POST', 'OPTIONS'])
+def mcp_market_sources():
+    """列出/创建 MCP 市场源"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    try:
+        from database import get_mysql_connection
+        from services.mcp_market_service import MCPMarketService
+
+        service = MCPMarketService(get_mysql_connection)
+        # 确保默认源存在
+        service.ensure_default_sources()
+
+        if request.method == 'GET':
+            sources = service.list_sources()
+            return jsonify({
+                'sources': [
+                    {
+                        'source_id': s.source_id,
+                        'display_name': s.display_name,
+                        'type': s.type,
+                        'enabled': s.enabled,
+                        'config': s.config,
+                        'sync_interval_seconds': s.sync_interval_seconds,
+                        'last_sync_at': s.last_sync_at,
+                    }
+                    for s in sources
+                ]
+            })
+
+        # POST
+        data = request.get_json() or {}
+        source = service.upsert_source(data)
+        return jsonify({
+            'source': {
+                'source_id': source.source_id,
+                'display_name': source.display_name,
+                'type': source.type,
+                'enabled': source.enabled,
+                'config': source.config,
+                'sync_interval_seconds': source.sync_interval_seconds,
+            }
+        }), 201
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/mcp/market/sources/<source_id>', methods=['PUT', 'OPTIONS'])
+def mcp_market_update_source(source_id):
+    """更新 MCP 市场源"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    try:
+        from database import get_mysql_connection
+        from services.mcp_market_service import MCPMarketService
+
+        data = request.get_json() or {}
+        data['source_id'] = source_id
+        service = MCPMarketService(get_mysql_connection)
+        source = service.upsert_source(data)
+        return jsonify({
+            'source': {
+                'source_id': source.source_id,
+                'display_name': source.display_name,
+                'type': source.type,
+                'enabled': source.enabled,
+                'config': source.config,
+                'sync_interval_seconds': source.sync_interval_seconds,
+            }
+        })
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/mcp/market/sources/<source_id>/sync', methods=['POST', 'OPTIONS'])
+def mcp_market_sync_source(source_id):
+    """同步指定市场源"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    try:
+        from database import get_mysql_connection
+        from services.mcp_market_service import MCPMarketService
+
+        data = request.get_json() or {}
+        force = bool(data.get('force', False))
+        service = MCPMarketService(get_mysql_connection)
+        result = service.sync_source(source_id, force=force)
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/mcp/market/search', methods=['GET', 'OPTIONS'])
+def mcp_market_search():
+    """搜索市场条目（从缓存表搜索）"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    try:
+        from database import get_mysql_connection
+        from services.mcp_market_service import MCPMarketService
+
+        q = request.args.get('q', '') or ''
+        runtime_type = request.args.get('runtime_type')
+        source_id = request.args.get('source_id')
+        limit = request.args.get('limit', 50, type=int)
+        offset = request.args.get('offset', 0, type=int)
+
+        service = MCPMarketService(get_mysql_connection)
+        result = service.search_items(q=q, runtime_type=runtime_type, source_id=source_id, limit=limit, offset=offset)
+        return jsonify(result)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e), 'items': [], 'total': 0}), 500
+
+
+@app.route('/api/mcp/market/items/<item_id>', methods=['GET', 'OPTIONS'])
+def mcp_market_item_detail(item_id):
+    """获取市场条目详情"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    try:
+        from database import get_mysql_connection
+        from services.mcp_market_service import MCPMarketService
+
+        service = MCPMarketService(get_mysql_connection)
+        item = service.get_item(item_id)
+        if not item:
+            return jsonify({'error': 'item not found'}), 404
+        return jsonify(item)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/mcp/market/install', methods=['POST', 'OPTIONS'])
+def mcp_market_install():
+    """一键安装市场条目：转换为 mcp_servers 记录"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    try:
+        data = request.get_json() or {}
+        item_id = data.get('item_id')
+        if not item_id:
+            return jsonify({'error': 'item_id is required'}), 400
+
+        from database import get_mysql_connection
+        from services.mcp_market_service import MCPMarketService
+
+        service = MCPMarketService(get_mysql_connection)
+        server_data = service.install_item(item_id, overrides=data.get('overrides') or {})
+
+        # 落库复用现有 create_mcp_server 逻辑（这里直接写 DB，避免 HTTP 自调用）
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            import uuid
+            server_id = server_data.get('id') or f"mcp-{uuid.uuid4().hex[:12]}"
+            cursor.execute(
+                """
+                INSERT INTO mcp_servers
+                (server_id, name, url, type, enabled, use_proxy, description, metadata, ext)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                (
+                    server_id,
+                    server_data['name'],
+                    server_data['url'],
+                    server_data.get('type', 'http-stream'),
+                    server_data.get('enabled', True),
+                    server_data.get('use_proxy', True),
+                    server_data.get('description'),
+                    json.dumps(server_data.get('metadata', {})),
+                    json.dumps(server_data.get('ext', {})) if server_data.get('ext') else None,
+                ),
+            )
+            conn.commit()
+            return jsonify({'server_id': server_id, 'message': 'installed'}), 201
+        finally:
+            try:
+                if cursor:
+                    cursor.close()
+            except Exception:
+                pass
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/llm/configs', methods=['GET'])
 def list_llm_configs():
     """获取所有LLM配置列表"""
@@ -4396,9 +4605,41 @@ def _load_messages_in_background(session_id: str, page: int, page_size: int, lig
     thread = threading.Thread(target=load_task, daemon=True)
     thread.start()
 
+def _process_message_row(row):
+    """处理消息数据库行，返回格式化的消息字典"""
+    # 解析 ext 字段
+    ext_data = None
+    if row.get('ext'):
+        try:
+            ext_data = json.loads(row['ext']) if isinstance(row['ext'], str) else row['ext']
+        except (json.JSONDecodeError, TypeError):
+            pass
+    
+    # 解析 mcpdetail 字段
+    mcpdetail_data = None
+    if row.get('mcpdetail'):
+        try:
+            mcpdetail_data = json.loads(row['mcpdetail']) if isinstance(row['mcpdetail'], str) else row['mcpdetail']
+        except (json.JSONDecodeError, TypeError):
+            pass
+    
+    return {
+        'message_id': row['message_id'],
+        'session_id': row.get('session_id'),
+        'role': row['role'],
+        'content': row['content'],
+        'thinking': row.get('thinking'),
+        'tool_calls': json.loads(row['tool_calls']) if row.get('tool_calls') else None,
+        'token_count': row.get('token_count'),
+        'ext': ext_data,
+        'mcpdetail': mcpdetail_data,
+        'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+    }
+
+
 @app.route('/api/sessions/<session_id>/messages', methods=['GET', 'OPTIONS'])
 def get_session_messages(session_id):
-    """获取会话消息（分页）- 优化版本：前10条立即返回，其他后台加载到Redis"""
+    """获取会话消息（分页）- 支持游标分页和传统分页两种模式"""
     if request.method == 'OPTIONS':
         return handle_cors_preflight()
     
@@ -4408,31 +4649,118 @@ def get_session_messages(session_id):
         if not conn:
             return jsonify({'messages': [], 'total': 0, 'error': 'MySQL not available'}), 503
         
+        # 游标分页参数（优先使用，更高效）
+        before_id = request.args.get('before_id')  # 获取此消息之前的消息
+        limit_param = request.args.get('limit')  # 如果有 limit 参数，使用游标分页模式
+        limit = int(limit_param) if limit_param else 20
+        
+        # 传统分页参数（向后兼容）
         page = int(request.args.get('page', 1))
-        page_size = int(request.args.get('page_size', 20))  # 默认只加载20条，加快初始加载速度
-        # 轻量级模式：只返回必要字段，用于快速加载（如 ResearchPanel）
+        page_size = int(request.args.get('page_size', 20))
+        
+        # 轻量级模式：只返回必要字段，用于快速加载
         lightweight = request.args.get('lightweight', 'false').lower() == 'true'
+        
+        # 判断使用哪种分页模式：有 limit 参数或 before_id 参数时使用游标分页
+        use_cursor_pagination = limit_param is not None or before_id is not None
         
         cursor = None
         try:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             
+            # ========== 游标分页模式（高效） ==========
+            if use_cursor_pagination:
+                if before_id:
+                    # 有 before_id：获取该消息之前的消息
+                    cursor.execute(
+                        "SELECT created_at FROM messages WHERE message_id = %s",
+                        (before_id,)
+                    )
+                    before_row = cursor.fetchone()
+                    if not before_row:
+                        return jsonify({'messages': [], 'has_more': False, 'next_cursor': None, 'error': 'before_id not found'}), 404
+                    
+                    before_time = before_row['created_at']
+                    
+                    # 获取 created_at < before_time 的消息
+                    if lightweight:
+                        cursor.execute("""
+                            SELECT message_id, role, content, created_at
+                            FROM messages
+                            WHERE session_id = %s AND created_at < %s
+                            ORDER BY created_at DESC
+                            LIMIT %s
+                        """, (session_id, before_time, limit + 1))
+                    else:
+                        cursor.execute("""
+                            SELECT message_id, session_id, role, content, thinking, 
+                                   tool_calls, token_count, acc_token, ext, mcpdetail, created_at
+                            FROM messages
+                            WHERE session_id = %s AND created_at < %s
+                            ORDER BY created_at DESC
+                            LIMIT %s
+                        """, (session_id, before_time, limit + 1))
+                else:
+                    # 没有 before_id：获取最新的消息
+                    if lightweight:
+                        cursor.execute("""
+                            SELECT message_id, role, content, created_at
+                            FROM messages
+                            WHERE session_id = %s
+                            ORDER BY created_at DESC
+                            LIMIT %s
+                        """, (session_id, limit + 1))
+                    else:
+                        cursor.execute("""
+                            SELECT message_id, session_id, role, content, thinking, 
+                                   tool_calls, token_count, acc_token, ext, mcpdetail, created_at
+                            FROM messages
+                            WHERE session_id = %s
+                            ORDER BY created_at DESC
+                            LIMIT %s
+                        """, (session_id, limit + 1))
+                
+                rows = cursor.fetchall()
+                has_more = len(rows) > limit
+                if has_more:
+                    rows = rows[:limit]
+                
+                # 处理消息
+                messages = []
+                for row in rows:
+                    if lightweight:
+                        messages.append({
+                            'message_id': row['message_id'],
+                            'role': row['role'],
+                            'content': row['content'],
+                            'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+                        })
+                    else:
+                        messages.append(_process_message_row(row))
+                
+                # 反转顺序，使最旧的在前（用于前端显示）
+                messages.reverse()
+                
+                return jsonify({
+                    'messages': messages,
+                    'has_more': has_more,
+                    'next_cursor': messages[0]['message_id'] if messages and has_more else None,
+                })
+            
+            # ========== 传统分页模式（向后兼容） ==========
             # 获取总数
             cursor.execute("SELECT COUNT(*) as total FROM messages WHERE session_id = %s", (session_id,))
             total = cursor.fetchone()['total']
             
             # 第一页：只返回前10条，其他后台加载到Redis
-            # 后续页：正常分页
             if page == 1:
-                immediate_limit = 10  # 立即返回前10条
+                immediate_limit = 10
                 offset = 0
             else:
                 immediate_limit = page_size
                 offset = (page - 1) * page_size
             
             # 获取消息（按时间倒序，最新的在前）
-            # 使用索引 idx_session_created (session_id, created_at) 优化查询性能
-            # 轻量级模式：只查询必要字段，减少数据传输
             if lightweight:
                 cursor.execute("""
                     SELECT 

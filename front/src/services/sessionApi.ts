@@ -241,7 +241,7 @@ export async function getSession(session_id: string): Promise<Session> {
 }
 
 /**
- * 获取会话消息（分页）
+ * 获取会话消息（分页）- 传统分页方式，向后兼容
  * @param lightweight 轻量级模式：只返回必要字段（role, content, created_at），加快加载速度
  */
 export async function getSessionMessages(
@@ -273,6 +273,44 @@ export async function getSessionMessages(
   } catch (error) {
     console.warn('Error fetching messages:', error);
     return { messages: [], total: 0, page, page_size, total_pages: 0 };
+  }
+}
+
+/**
+ * 获取会话消息（游标分页）- 高效分页方式，基于 message_id
+ * @param before_id 获取此消息之前的消息（游标）
+ * @param limit 获取数量
+ * @param lightweight 轻量级模式
+ */
+export async function getSessionMessagesCursor(
+  session_id: string,
+  before_id: string | null = null,
+  limit: number = 20,
+  lightweight: boolean = false
+): Promise<{
+  messages: Message[];
+  has_more: boolean;
+  next_cursor: string | null;
+}> {
+  try {
+    const url = new URL(`${API_BASE}/sessions/${session_id}/messages`);
+    if (before_id) {
+      url.searchParams.set('before_id', before_id);
+    }
+    url.searchParams.set('limit', limit.toString());
+    if (lightweight) {
+      url.searchParams.set('lightweight', 'true');
+    }
+    
+    const response = await fetch(url.toString());
+    if (!response.ok) {
+      console.warn(`Failed to fetch messages: ${response.statusText}`);
+      return { messages: [], has_more: false, next_cursor: null };
+    }
+    return await response.json();
+  } catch (error) {
+    console.warn('Error fetching messages:', error);
+    return { messages: [], has_more: false, next_cursor: null };
   }
 }
 

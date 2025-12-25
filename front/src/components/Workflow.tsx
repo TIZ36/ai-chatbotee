@@ -8,6 +8,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Send, Loader, Bot, Wrench, AlertCircle, CheckCircle, Brain, Plug, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Sparkles, Workflow as WorkflowIcon, Play, ArrowRight, Trash2, X, Edit2, RotateCw, Database, Paperclip, Music, HelpCircle, Package, CheckSquare, Square, Quote, Lightbulb } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Virtuoso } from 'react-virtuoso';
 import { LLMClient, LLMMessage } from '../services/llmClient';
 import { getLLMConfigs, getLLMConfig, getLLMConfigApiKey, LLMConfigFromDB } from '../services/llmApi';
 import { mcpManager, MCPServer, MCPTool } from '../services/mcpClient';
@@ -36,6 +37,7 @@ import {
 import { ScrollArea } from './ui/ScrollArea';
 import { DataListItem } from './ui/DataListItem';
 import { toast } from './ui/use-toast';
+import { HistoryLoadTop } from './ui/HistoryLoadTop';
 import { PluginExecutionPanel } from './PluginExecutionPanel';
 import { MCPExecutionCard } from './MCPExecutionCard';
 import { MCPDetailOverlay } from './MCPDetailOverlay';
@@ -44,10 +46,13 @@ import { getDimensionOptions } from '../services/roleDimensionApi';
 import { SplitViewMessage } from './SplitViewMessage';
 import { MediaGallery, MediaItem } from './ui/MediaGallery';
 import { SessionMediaPanel, SessionMediaItem } from './ui/SessionMediaPanel';
+import { IconButton } from './ui/IconButton';
 import { truncateBase64Strings } from '../utils/textUtils';
+import { ensureDataUrlFromMaybeBase64 } from '../utils/dataUrl';
 import { useConversation } from '../conversation/useConversation';
 import { createSessionConversationAdapter } from '../conversation/adapters/sessionConversation';
 import { MessageAvatar, MessageBubbleContainer, MessageStatusIndicator } from './ui/MessageBubble';
+import { messageApi } from '../services/api';
 import {
   applyProfessionToNameOrPrompt,
   detectProfessionType,
@@ -91,6 +96,10 @@ const Workflow: React.FC<WorkflowProps> = ({
   onSelectMeeting,
   onSelectResearch,
 }) => {
+  // Virtuoso 使用 firstItemIndex 来稳定处理 prepend；该值不能小于 0。
+  // 当总数未知时，建议使用一个足够大的基准值，然后每次 prepend 时递减。
+  const VIRTUOSO_BASE_INDEX = 100000;
+
   const temporarySessionId = 'temporary-session'; // 临时会话ID（固定）
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(temporarySessionId);
   const [isTemporarySession, setIsTemporarySession] = useState(true); // 当前是否为临时会话（默认是临时会话）
@@ -307,6 +316,8 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [showNewMessagePrompt, setShowNewMessagePrompt] = useState(false);
   const [unreadMessageCount, setUnreadMessageCount] = useState(0);
+  const [isNearTop, setIsNearTop] = useState(false); // 是否接近顶部（用于显示加载更多）
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false); // 是否显示跳转到最新消息按钮
 
   // useConversation 的加载状态/是否可继续向上翻页，同步到旧状态字段（避免大面积改 UI）
   useEffect(() => {
@@ -370,20 +381,39 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [draggingComponent, setDraggingComponent] = useState<{ type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string } | null>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement | null>(null);
+  const [chatScrollEl, setChatScrollEl] = useState<HTMLDivElement | null>(null);
   // 浮岛输入区：动态计算消息列表底部 padding，避免被浮岛遮挡
   const { ref: floatingComposerRef, padding: floatingComposerPadding } = useFloatingComposerPadding();
   const wasAtBottomRef = useRef(true);
   const isInitialLoadRef = useRef(true);
   const shouldMaintainScrollRef = useRef(false);
   const isUserScrollingRef = useRef(false);
-  const scrollPositionRef = useRef<{ anchorMessageId: string; anchorOffsetTop: number; scrollTop: number } | null>(null);
+  const historyCooldownUntilRef = useRef(0);
+  const historyAutoFiredInNearTopRef = useRef(false);
+  const historyTopStayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollTopRef = useRef(0);
+  const [virtuosoFirstItemIndex, setVirtuosoFirstItemIndex] = useState(VIRTUOSO_BASE_INDEX);
   
   // 消息缓存：按 session_id 缓存消息，Map<session_id, Map<message_id, Message>>
   const messageCacheRef = useRef<Map<string, Map<string, Message>>>(new Map());
 
   const isLoadingMoreRef = useRef(false);
   const lastMessageCountRef = useRef(0);
+  
+  // 消息引用，用于在回调中访问最新消息而不触发重渲染
+  const messagesRef = useRef<Message[]>(messages);
+  messagesRef.current = messages;
+  
+  // 获取消息的前一条消息内容（用于优化 MessageContent 渲染）
+  const getPrevMessageContent = useCallback((messageId: string): string | undefined => {
+    const msgs = messagesRef.current;
+    const idx = msgs.findIndex(m => m.id === messageId);
+    if (idx > 0) {
+      return msgs[idx - 1]?.content;
+    }
+    return undefined;
+  }, []);
   
   // 保存最后一次请求信息，用于快速重试
   const lastRequestRef = useRef<{
@@ -420,6 +450,17 @@ const Workflow: React.FC<WorkflowProps> = ({
       wasAtBottomRef.current = true;
     }
   };
+
+  // 会话切换时重置“顶部加载”状态（避免跨会话继承 cooldown/autoFired）
+  useEffect(() => {
+    historyAutoFiredInNearTopRef.current = false;
+    historyCooldownUntilRef.current = 0;
+    if (historyTopStayTimerRef.current) {
+      clearTimeout(historyTopStayTimerRef.current);
+      historyTopStayTimerRef.current = null;
+    }
+    setVirtuosoFirstItemIndex(VIRTUOSO_BASE_INDEX);
+  }, [currentSessionId, isTemporarySession]);
 
   useEffect(() => {
     // 如果需要保持滚动位置（加载更多历史消息），不滚动
@@ -888,409 +929,96 @@ const Workflow: React.FC<WorkflowProps> = ({
         setShowNewMessagePrompt(false);
         setUnreadMessageCount(0);
         await loadPersistedInitial({ force: true });
+        setVirtuosoFirstItemIndex(VIRTUOSO_BASE_INDEX);
+        historyAutoFiredInNearTopRef.current = false;
+        historyCooldownUntilRef.current = 0;
         setMessagePage(1);
         return;
       }
 
-      // 加载更多历史消息：保持滚动位置（复用原锚点逻辑）
-      if (chatContainerRef.current && messages.length > 0) {
-        isLoadingMoreRef.current = true;
-        const container = chatContainerRef.current;
-        const scrollTop = container.scrollTop;
+      // 加载更多历史消息：Virtuoso 使用 firstItemIndex 做 prepend 锚定，避免 DOM offsetTop 的脆弱方案
+      const prevCount = messagesRef.current.length;
+      isLoadingMoreRef.current = true;
+      shouldMaintainScrollRef.current = true;
 
-        let anchorMessageId: string | null = null;
-        let anchorOffsetTop = 0;
-        const threshold = 200;
-
-        for (const msg of messages) {
-          const element = container.querySelector(`[data-message-id="${msg.id}"]`) as HTMLElement;
-          if (element) {
-            const elementTop = element.offsetTop;
-            const relativeTop = elementTop - scrollTop;
-            if (relativeTop >= -threshold && relativeTop <= threshold) {
-              anchorMessageId = msg.id;
-              anchorOffsetTop = elementTop;
-              break;
-            }
-          }
-        }
-
-        if (!anchorMessageId && messages.length > 0) {
-          const firstElement = container.querySelector(`[data-message-id="${messages[0].id}"]`) as HTMLElement;
-          if (firstElement) {
-            anchorMessageId = messages[0].id;
-            anchorOffsetTop = firstElement.offsetTop;
-          }
-        }
-
-        if (anchorMessageId) {
-          scrollPositionRef.current = {
-            anchorMessageId,
-            anchorOffsetTop,
-            scrollTop,
-          };
-          shouldMaintainScrollRef.current = true;
-        }
-      }
-
-      await loadMorePersistedMessages();
+      const added = await loadMorePersistedMessages();
       setMessagePage(page);
-
-      // DOM 更新后恢复滚动锚点
-      setTimeout(() => {
-        const container = chatContainerRef.current;
-        if (!container || !scrollPositionRef.current) {
-          isLoadingMoreRef.current = false;
-          return;
-        }
-        container.style.scrollBehavior = 'auto';
-        const { anchorMessageId, anchorOffsetTop, scrollTop: oldScrollTop } = scrollPositionRef.current;
-        const anchorElement = anchorMessageId
-          ? (container.querySelector(`[data-message-id="${anchorMessageId}"]`) as HTMLElement)
-          : null;
-        if (anchorElement) {
-          const newAnchorOffsetTop = anchorElement.offsetTop;
-          const distanceFromTop = anchorOffsetTop - oldScrollTop;
-          container.scrollTop = newAnchorOffsetTop - distanceFromTop;
-        }
-        scrollPositionRef.current = null;
-        isLoadingMoreRef.current = false;
-      }, 0);
-    } finally {
-      setIsLoadingMessages(false);
-    }
-    return;
-
-    try {
-      setIsLoadingMessages(true);
-      
-      // 第一页加载时，先清空系统提示词状态（只有在找到系统提示词消息时才设置）
-      if (page === 1) {
-        setSelectedBatchItem(null);
-      }
-      
-      // 如果是加载更多历史消息（page > 1），记录当前滚动位置（顶部附近）
-      const containerForAnchor = chatContainerRef.current;
-      if (page > 1 && containerForAnchor && messages.length > 0) {
-        isLoadingMoreRef.current = true;
-        const container = containerForAnchor!;
-        const scrollTop = container.scrollTop;
-        
-        // 找到容器顶部附近的第一条消息作为锚点（历史消息在上方）
-        let anchorMessageId: string | null = null;
-        let anchorOffsetTop = 0;
-        const threshold = 200; // 距离顶部200px内的消息
-        
-        for (const msg of messages) {
-          const element = container.querySelector(`[data-message-id="${msg.id}"]`) as HTMLElement;
-          if (element) {
-            const elementTop = element.offsetTop;
-            const relativeTop = elementTop - scrollTop;
-            
-            // 找到最接近顶部且在阈值内的消息
-            if (relativeTop >= -threshold && relativeTop <= threshold) {
-              anchorMessageId = msg.id;
-              anchorOffsetTop = elementTop;
-              break;
-            }
-          }
-        }
-        
-        // 如果没找到合适的锚点，使用第一条消息（历史消息在上方）
-        if (!anchorMessageId && messages.length > 0) {
-          const firstElement = container.querySelector(`[data-message-id="${messages[0].id}"]`) as HTMLElement;
-          if (firstElement) {
-            anchorMessageId = messages[0].id;
-            anchorOffsetTop = firstElement.offsetTop;
-          }
-        }
-        
-        if (anchorMessageId !== null) {
-          scrollPositionRef.current = {
-            anchorMessageId: anchorMessageId!,
-            anchorOffsetTop,
-            scrollTop,
-          };
-          shouldMaintainScrollRef.current = true;
-        }
-      }
-      
-      // 统一使用分页加载（懒加载）
-      // 第一页只加载 5 条消息，加快初始加载速度（特别是局域网访问时）
-      // 后续页加载 20 条消息，平衡加载速度和用户体验
-      const page_size = page === 1 ? 5 : 20;
-      const data = await getSessionMessages(session_id, page, page_size);
-      
-      // 获取或创建该会话的缓存
-      if (!messageCacheRef.current.has(session_id)) {
-        messageCacheRef.current.set(session_id, new Map());
-      }
-      const sessionCache = messageCacheRef.current.get(session_id)!;
-      
-      // 先加载总结列表，用于关联总结消息和提示信息
-      const summaryList = await getSessionSummaries(session_id);
-      
-      // 格式化消息，恢复工作流信息
-      const formatMessage = async (msg: any): Promise<Message | null> => {
-        // 确保 role 正确：如果是 'workflow'，转换为 'tool'
-        let role = msg.role;
-        if (role === 'workflow') {
-          role = 'tool';
-          console.warn('[Workflow] Fixed invalid role "workflow" to "tool" for message:', msg.message_id);
-        }
-        
-        // 检查是否是总结消息（通过 content 前缀识别）
-        const isSummaryMessage = role === 'system' && msg.content?.startsWith('__SUMMARY__');
-        const actualContent = isSummaryMessage 
-          ? msg.content.replace(/^__SUMMARY__/, '') // 移除前缀，保留实际内容
-          : msg.content;
-        
-        // 检查是否是系统提示词消息（通过 tool_calls 中的 isSystemPrompt 标识）
-        const toolCalls = msg.tool_calls && typeof msg.tool_calls === 'object' ? msg.tool_calls : null;
-        const isSystemPromptMessage = role === 'system' && toolCalls && (toolCalls as any).isSystemPrompt === true;
-        
-        const baseMessage: Message = {
-          id: msg.message_id,
-          role: role as 'user' | 'assistant' | 'tool' | 'system',
-          content: actualContent,
-          thinking: msg.thinking,
-          toolCalls: msg.tool_calls,
-          isSummary: isSummaryMessage, // 标记为总结消息
-          mcpdetail: msg.mcpdetail, // MCP 执行详情
-        };
-        
-        // 恢复多模态内容（从 tool_calls 中读取）
-        // 注意：tool_calls 可能是对象（包含 media）或数组（标准工具调用格式）
-        if (toolCalls && typeof toolCalls === 'object' && !Array.isArray(toolCalls) && (toolCalls as any).media) {
-          baseMessage.media = (toolCalls as any).media;
-        }
-        
-        // 恢复思维签名（从 tool_calls 或 ext 中读取）
-        if (toolCalls && typeof toolCalls === 'object') {
-          if ((toolCalls as any).thoughtSignature) {
-            baseMessage.thoughtSignature = (toolCalls as any).thoughtSignature;
-          }
-          if ((toolCalls as any).toolCallSignatures) {
-            baseMessage.toolCallSignatures = (toolCalls as any).toolCallSignatures;
-          }
-        }
-        
-        // 从 ext 字段恢复扩展数据
-        const ext = msg.ext && typeof msg.ext === 'object' ? msg.ext : null;
-        if (ext) {
-          // 恢复思维签名（优先从 ext 读取）
-          if (ext.thoughtSignature) {
-            baseMessage.thoughtSignature = ext.thoughtSignature;
-          }
-          if (ext.toolCallSignatures) {
-            baseMessage.toolCallSignatures = ext.toolCallSignatures;
-          }
-          // 恢复媒体内容
-          if (ext.media) {
-            baseMessage.media = ext.media;
-          }
-          // 恢复过程步骤（思考和MCP调用历史）
-          if (ext.processSteps && Array.isArray(ext.processSteps)) {
-            baseMessage.processSteps = ext.processSteps;
-            console.log(`[Workflow] Restored ${ext.processSteps.length} process steps for message:`, msg.message_id);
-          }
-        }
-        
-        // 如果是系统提示词消息，恢复 selectedBatchItem（只在第一页加载时处理，避免重复设置）
-        // 注意：第一页加载时，系统提示词的恢复已经在消息处理完成后统一处理，这里只处理后续页加载的情况
-        if (isSystemPromptMessage && toolCalls && page > 1) {
-          const systemPromptData = toolCalls as any;
-          if (systemPromptData.batchName && systemPromptData.item) {
-            setSelectedBatchItem({
-              batchName: systemPromptData.batchName,
-              item: systemPromptData.item,
-            });
-            console.log('[Workflow] Restored system prompt from message (page > 1):', msg.message_id);
-          }
-        }
-        
-        // 如果是工具消息（感知组件），尝试从 content 或 tool_calls 中恢复工作流信息
-        if (baseMessage.role === 'tool') {
-          // 过滤掉没有执行输出的感知组件（pending状态且没有content）
-          if (!msg.content || msg.content.trim() === '' || msg.content === '[]') {
-            const toolCalls = msg.tool_calls && typeof msg.tool_calls === 'object' ? msg.tool_calls : null;
-            const workflowStatus = toolCalls?.workflowStatus;
-            if (workflowStatus === 'pending') {
-              // 跳过这个无效的感知组件消息
-              console.log('[Workflow] Skipping invalid tool message (pending without output):', msg.message_id);
-              return null;
-            }
-          }
-          
-          // 尝试从 tool_calls 中恢复工作流信息（如果之前保存过）
-          if (msg.tool_calls && typeof msg.tool_calls === 'object') {
-            baseMessage.toolType = msg.tool_calls.toolType || msg.tool_calls.workflowType; // 兼容旧数据
-            baseMessage.workflowId = msg.tool_calls.workflowId;
-            baseMessage.workflowName = msg.tool_calls.workflowName;
-            baseMessage.workflowStatus = msg.tool_calls.workflowStatus || 'completed';
-            
-            // 确保恢复的消息有完整的工作流信息，允许重新执行
-            if (!baseMessage.workflowId || !baseMessage.toolType) {
-              console.warn('[Workflow] Restored tool message missing workflowId or toolType:', msg.message_id);
-            }
-          } else {
-            // 如果没有 tool_calls，尝试从 content 中解析（兼容旧数据）
-            console.warn('[Workflow] Restored tool message missing tool_calls:', msg.message_id);
-          }
-          
-          // 如果工作流ID存在，尝试加载工作流配置
-          if (baseMessage.workflowId && baseMessage.toolType === 'workflow') {
-            try {
-              const workflowDetails = await getWorkflow(baseMessage.workflowId);
-              baseMessage.workflowConfig = workflowDetails?.config;
-            } catch (error) {
-              console.error('[Workflow] Failed to load workflow details:', error);
-              // 即使加载失败，也允许重新执行（使用已有的 workflowId）
-            }
-          }
-        }
-        
-        return baseMessage;
-      };
-      
-      // 格式化消息，恢复工作流信息
-      const formattedMessages = await Promise.all(data.messages.map(formatMessage));
-      // 过滤掉null值（无效的感知组件消息）
-      const validMessages = formattedMessages.filter((msg): msg is Message => msg !== null);
-      
-      // 将所有格式化后的消息存入缓存
-      for (const msg of validMessages) {
-        if (msg && msg.id) {
-          sessionCache.set(msg.id, msg);
-        }
-      }
-      
-      // 在总结消息之后插入提示消息
-      const messagesWithNotifications: Message[] = [];
-      for (let i = 0; i < validMessages.length; i++) {
-        const msg = validMessages[i];
-        messagesWithNotifications.push(msg);
-        
-        // 如果是总结消息，查找对应的总结记录并添加提示消息
-        if (msg.isSummary) {
-          // 检查下一条消息是否已经是提示消息（避免重复添加）
-          const nextMsg = validMessages[i + 1];
-          const isAlreadyHasNotification = nextMsg && 
-            nextMsg.role === 'system' && 
-            (nextMsg.content.includes('已精简为') || nextMsg.content.includes('总结完成'));
-          
-          if (!isAlreadyHasNotification) {
-            // 通过内容匹配找到对应的总结记录
-            const matchingSummary = summaryList.find(s => 
-              s.summary_content === msg.content || 
-              msg.content.includes(s.summary_content) ||
-              s.summary_content.includes(msg.content)
-            );
-            
-            if (matchingSummary) {
-              const tokenAfter = matchingSummary?.token_count_after ?? 0;
-              const tokenBefore = matchingSummary?.token_count_before ?? 0;
-              const notificationMessage: Message = {
-                id: `notification-${msg.id}`,
-                role: 'system',
-                content: `您的对话内容已精简为 ${tokenAfter.toLocaleString()} token（原 ${tokenBefore.toLocaleString()} token）`,
-              };
-              messagesWithNotifications.push(notificationMessage);
-            }
-          }
-        }
-      }
-      
-      // 后端返回的消息已经是正序（最旧在前，最新在后），符合正常聊天显示顺序
-      // 第一页加载时，只显示最新的消息（在底部），然后历史消息追加到上方
-      if (page === 1) {
-        // 统一使用懒加载：只取最后几条消息（最新的），直接显示在底部
-        // 后端返回的是正序（最旧在前，最新在后），我们只取最后的部分
-        // 优化：初始只加载最后 5 条消息，加快加载速度（特别是局域网访问时）
-        const latestMessages = messagesWithNotifications.slice(-5); // 只取最后5条（最新的）
-        setMessages(latestMessages);
-        isInitialLoadRef.current = true; // 标记为初始加载，会直接跳到底部（最新消息位置）
-        lastMessageCountRef.current = latestMessages.length;
-        // 重置新消息提示
-        setShowNewMessagePrompt(false);
-        setUnreadMessageCount(0);
-        
-        // 检查是否有系统提示词消息，如果有则设置 selectedBatchItem
-        // 注意：这里需要检查所有消息，不仅仅是 latestMessages，因为系统提示词可能在历史消息中
-        let foundSystemPrompt = false;
-        for (const msg of messagesWithNotifications) {
-          if (msg.role === 'system' && 
-              msg.toolCalls && 
-              typeof msg.toolCalls === 'object' &&
-              (msg.toolCalls as any).isSystemPrompt === true) {
-            const systemPromptData = msg.toolCalls as any;
-            if (systemPromptData.batchName && systemPromptData.item) {
-              setSelectedBatchItem({
-                batchName: systemPromptData.batchName,
-                item: systemPromptData.item,
-              });
-              foundSystemPrompt = true;
-              console.log('[Workflow] Restored system prompt from message:', msg.id);
-              break;
-            }
-          }
-        }
-        // 如果没有找到系统提示词消息，确保 selectedBatchItem 为 null
-        if (!foundSystemPrompt) {
-          setSelectedBatchItem(null);
-        }
+      if (added > 0) {
+        setVirtuosoFirstItemIndex((prev) => Math.max(0, prev - added));
+        lastMessageCountRef.current = prevCount + added;
       } else {
-        // 后续页，加载历史消息，追加到数组前面（显示在上方）
-        // 在设置消息之前，先设置标志阻止自动滚动，并预计算新消息数量
-        shouldMaintainScrollRef.current = true;
-        const oldMessageCount = messages.length;
-        const newTotalCount = oldMessageCount + messagesWithNotifications.length;
-        
-        // 预先更新 lastMessageCountRef，这样 useEffect 就不会误判为新消息
-        lastMessageCountRef.current = newTotalCount;
-        
-        setMessages(prev => {
-          // 历史消息追加到数组前面（显示在上方）
-          const newMessages = [...messagesWithNotifications, ...prev];
-          
-          // 恢复滚动位置（保持锚点消息的位置不变，类似微信的加载历史消息）
-          if (scrollPositionRef.current && chatContainerRef.current) {
-            // 使用 setTimeout 确保 DOM 完全更新，并禁用滚动动画
-            setTimeout(() => {
-              const container = chatContainerRef.current;
-              if (container && scrollPositionRef.current) {
-                container.style.scrollBehavior = 'auto';
-                const { anchorMessageId, anchorOffsetTop, scrollTop: oldScrollTop } = scrollPositionRef.current;
-                if (anchorMessageId) {
-                  const anchorElement = container.querySelector(`[data-message-id="${anchorMessageId}"]`) as HTMLElement;
-                  if (anchorElement) {
-                    // 计算新位置：目标消息的新位置 - 之前目标消息距离顶部的距离
-                    const newAnchorOffsetTop = anchorElement.offsetTop;
-                    const distanceFromTop = anchorOffsetTop - oldScrollTop;
-                    const newScrollTop = newAnchorOffsetTop - distanceFromTop;
-                    container.scrollTop = newScrollTop;
-                  }
-                }
-                scrollPositionRef.current = null;
-                isLoadingMoreRef.current = false;
-              }
-            }, 0);
-          } else {
-            isLoadingMoreRef.current = false;
-          }
-          
-          return newMessages;
-        });
+        lastMessageCountRef.current = prevCount;
       }
-      
-      setMessagePage(page);
-      setHasMoreMessages(data.page < data.total_pages);
-    } catch (error) {
-      console.error('[Workflow] Failed to load messages:', error);
+      isLoadingMoreRef.current = false;
     } finally {
       setIsLoadingMessages(false);
     }
   };
+
+  const triggerLoadMoreHistory = useCallback(
+    async (source: 'manual' | 'auto') => {
+      if (!currentSessionId || isTemporarySession) return;
+      if (!hasMoreMessages) return;
+      if (isLoadingMessages) return;
+      if (isLoadingMoreRef.current) return;
+
+      const now = Date.now();
+      if (now < historyCooldownUntilRef.current) return;
+      if (source === 'auto' && historyAutoFiredInNearTopRef.current) return;
+
+      // 触发一次后，在离开顶部前不再自动触发（防止“加载完仍在顶部 → 连环加载”）
+      historyAutoFiredInNearTopRef.current = true;
+
+      // 取消“顶部停留”计时器
+      if (historyTopStayTimerRef.current) {
+        clearTimeout(historyTopStayTimerRef.current);
+        historyTopStayTimerRef.current = null;
+      }
+
+      const prevCount = messages.length;
+      setIsLoadingMessages(true);
+      isLoadingMoreRef.current = true;
+      shouldMaintainScrollRef.current = true;
+      try {
+        const added = await loadMorePersistedMessages();
+        setMessagePage((p) => p + 1);
+        if (added > 0) {
+          setVirtuosoFirstItemIndex((prev) => Math.max(0, prev - added));
+          lastMessageCountRef.current = prevCount + added;
+        } else {
+          lastMessageCountRef.current = prevCount;
+        }
+      } finally {
+        isLoadingMoreRef.current = false;
+        setIsLoadingMessages(false);
+        historyCooldownUntilRef.current = Date.now() + 900;
+      }
+    },
+    [currentSessionId, hasMoreMessages, isLoadingMessages, isTemporarySession, loadMorePersistedMessages]
+  );
+
+  // 顶部停留触发（hybrid）：接近顶部后停留一段时间，只自动触发一次
+  useEffect(() => {
+    if (!isNearTop || !hasMoreMessages) return;
+    if (historyAutoFiredInNearTopRef.current) return;
+
+    if (historyTopStayTimerRef.current) {
+      clearTimeout(historyTopStayTimerRef.current);
+    }
+
+    historyTopStayTimerRef.current = setTimeout(() => {
+      if (!isNearTop) return;
+      if (scrollTopRef.current > 20) return;
+      void triggerLoadMoreHistory('auto');
+    }, 800);
+
+    return () => {
+      if (historyTopStayTimerRef.current) {
+        clearTimeout(historyTopStayTimerRef.current);
+        historyTopStayTimerRef.current = null;
+      }
+    };
+  }, [hasMoreMessages, isNearTop, triggerLoadMoreHistory]);
   
   // 加载会话总结
   const loadSessionSummaries = async (session_id: string) => {
@@ -2338,7 +2066,37 @@ const Workflow: React.FC<WorkflowProps> = ({
       let lastThinkingLength = 0; // 上一次的思考内容长度
       let currentMCPToolName = ''; // 当前正在执行的 MCP 工具名
       
-      // 创建临时消息更新函数（包含过程步骤）
+      // 流式更新节流：缓冲最新状态，每 33ms（~30fps）最多刷新一次
+      let pendingUpdate: {
+        content: string;
+        thinking?: string;
+        isThinking?: boolean;
+        isStreaming?: boolean;
+        currentStep?: string;
+      } | null = null;
+      let rafId: number | null = null;
+      
+      const flushPendingUpdate = () => {
+        if (!pendingUpdate) return;
+        const { content, thinking, isThinking, isStreaming, currentStep } = pendingUpdate;
+        setMessages(prev => prev.map(msg => 
+          msg.id === assistantMessageId 
+            ? { 
+                ...msg, 
+                content, 
+                thinking: thinking !== undefined ? thinking : msg.thinking,
+                isThinking: isThinking !== undefined ? isThinking : msg.isThinking,
+                isStreaming: isStreaming !== undefined ? isStreaming : msg.isStreaming,
+                currentStep: currentStep !== undefined ? currentStep : msg.currentStep,
+                processSteps: [...currentProcessSteps],
+              }
+            : msg
+        ));
+        pendingUpdate = null;
+        rafId = null;
+      };
+      
+      // 创建临时消息更新函数（包含过程步骤）- 带节流
       const updateMessage = (content: string, thinking?: string, isThinking?: boolean, isStreaming?: boolean, currentStep?: string) => {
         // 检测思考内容变化，如果有新的思考内容，添加到过程步骤
         const thinkingContent = thinking !== undefined ? thinking : '';
@@ -2359,19 +2117,22 @@ const Workflow: React.FC<WorkflowProps> = ({
           lastThinkingLength = thinkingContent.length;
         }
         
-        setMessages(prev => prev.map(msg => 
-          msg.id === assistantMessageId 
-            ? { 
-                ...msg, 
-                content, 
-                thinking: thinking !== undefined ? thinking : msg.thinking,
-                isThinking: isThinking !== undefined ? isThinking : msg.isThinking,
-                isStreaming: isStreaming !== undefined ? isStreaming : msg.isStreaming,
-                currentStep: currentStep !== undefined ? currentStep : msg.currentStep,
-                processSteps: [...currentProcessSteps],
-              }
-            : msg
-        ));
+        // 如果 isStreaming=false，立即刷新（最终状态）
+        if (isStreaming === false) {
+          if (rafId) {
+            cancelAnimationFrame(rafId);
+            rafId = null;
+          }
+          pendingUpdate = { content, thinking, isThinking, isStreaming, currentStep };
+          flushPendingUpdate();
+          return;
+        }
+        
+        // 缓冲更新，等待下一帧刷新
+        pendingUpdate = { content, thinking, isThinking, isStreaming, currentStep };
+        if (!rafId) {
+          rafId = requestAnimationFrame(flushPendingUpdate);
+        }
       };
       
       // 步骤变化回调（捕获 MCP 调用状态变化）
@@ -2402,15 +2163,16 @@ const Workflow: React.FC<WorkflowProps> = ({
           currentMCPToolName = '';
         }
         
-        setMessages(prev => prev.map(msg => 
-          msg.id === assistantMessageId 
-            ? { 
-                ...msg, 
-                currentStep: step,
-                processSteps: [...currentProcessSteps],
-              }
-            : msg
-        ));
+        // 使用节流更新，避免频繁 setMessages 导致输入卡顿
+        // 将 currentStep 合并到 pendingUpdate 中，在下一帧统一刷新
+        if (pendingUpdate) {
+          pendingUpdate = { ...pendingUpdate, currentStep: step };
+        } else {
+          pendingUpdate = { content: fullResponse, thinking: fullThinking, isThinking: undefined, isStreaming: true, currentStep: step };
+        }
+        if (!rafId) {
+          rafId = requestAnimationFrame(flushPendingUpdate);
+        }
       };
 
       // MCP 调用回调（捕获完整的 MCP 调用信息）
@@ -2423,7 +2185,7 @@ const Workflow: React.FC<WorkflowProps> = ({
         mcpServer?: string;
         error?: string;
       }) => {
-        console.log(`[Workflow] MCP 调用:`, info.toolName, info.status);
+        console.log(`[Workflow] MCP 调用:`, info.toolName, info.status, '结果:', info.result ? '有结果' : '无结果', typeof info.result);
         
         if (info.status === 'running') {
           // MCP 调用开始，添加新步骤
@@ -2659,7 +2421,13 @@ const Workflow: React.FC<WorkflowProps> = ({
               // 保存过程步骤（思考和MCP调用历史）
               if (currentProcessSteps.length > 0) {
                 extData.processSteps = currentProcessSteps;
-                console.log(`[Workflow] 保存 ${currentProcessSteps.length} 个过程步骤到数据库`);
+                console.log(`[Workflow] 保存 ${currentProcessSteps.length} 个过程步骤到数据库:`, currentProcessSteps.map(s => ({
+                  type: s.type,
+                  toolName: s.toolName,
+                  hasResult: s.result !== undefined,
+                  resultPreview: typeof s.result === 'object' ? JSON.stringify(s.result).substring(0, 100) : String(s.result).substring(0, 100),
+                  status: s.status
+                })));
               }
               
               if (Object.keys(extData).length > 0) {
@@ -2778,7 +2546,13 @@ const Workflow: React.FC<WorkflowProps> = ({
               // 保存过程步骤（思考和MCP调用历史）
               if (currentProcessSteps.length > 0) {
                 extData.processSteps = currentProcessSteps;
-                console.log(`[Workflow] 保存 ${currentProcessSteps.length} 个过程步骤到数据库`);
+                console.log(`[Workflow] 保存 ${currentProcessSteps.length} 个过程步骤到数据库:`, currentProcessSteps.map(s => ({
+                  type: s.type,
+                  toolName: s.toolName,
+                  hasResult: s.result !== undefined,
+                  resultPreview: typeof s.result === 'object' ? JSON.stringify(s.result).substring(0, 100) : String(s.result).substring(0, 100),
+                  status: s.status
+                })));
               }
               
               if (Object.keys(extData).length > 0) {
@@ -2921,7 +2695,19 @@ const Workflow: React.FC<WorkflowProps> = ({
       let fullThinking = '';
       let hasStartedContent = false;
       
-      const updateMessage = (content: string, thinking?: string, isThinking?: boolean, isStreaming?: boolean, currentStep?: string) => {
+      // 流式更新节流：缓冲最新状态，每帧最多刷新一次
+      let retryPendingUpdate: {
+        content: string;
+        thinking?: string;
+        isThinking?: boolean;
+        isStreaming?: boolean;
+        currentStep?: string;
+      } | null = null;
+      let retryRafId: number | null = null;
+      
+      const flushRetryPendingUpdate = () => {
+        if (!retryPendingUpdate) return;
+        const { content, thinking, isThinking, isStreaming, currentStep } = retryPendingUpdate;
         setMessages(prev => prev.map(msg => 
           msg.id === messageId 
             ? { 
@@ -2934,10 +2720,57 @@ const Workflow: React.FC<WorkflowProps> = ({
               }
             : msg
         ));
+        retryPendingUpdate = null;
+        retryRafId = null;
       };
       
-      // 步骤变化回调（用于重试）
+      const updateMessage = (content: string, thinking?: string, isThinking?: boolean, isStreaming?: boolean, currentStep?: string) => {
+        // 如果 isStreaming=false，立即刷新（最终状态）
+        if (isStreaming === false) {
+          if (retryRafId) {
+            cancelAnimationFrame(retryRafId);
+            retryRafId = null;
+          }
+          retryPendingUpdate = { content, thinking, isThinking, isStreaming, currentStep };
+          flushRetryPendingUpdate();
+          return;
+        }
+        
+        // 缓冲更新，等待下一帧刷新
+        retryPendingUpdate = { content, thinking, isThinking, isStreaming, currentStep };
+        if (!retryRafId) {
+          retryRafId = requestAnimationFrame(flushRetryPendingUpdate);
+        }
+      };
+      
+      // 步骤变化回调（用于重试）- 也使用节流
+      let retryStepPending: string | null = null;
+      let retryStepRafId: number | null = null;
+      
+      const flushRetryStepUpdate = () => {
+        if (retryStepPending === null) return;
+        const step = retryStepPending;
+        setMessages(prev => prev.map(msg => 
+          msg.id === messageId 
+            ? { 
+                ...msg, 
+                currentStep: step,
+              }
+            : msg
+        ));
+        retryStepPending = null;
+        retryStepRafId = null;
+      };
+      
       const handleStepChange = (step: string) => {
+        retryStepPending = step;
+        if (!retryStepRafId) {
+          retryStepRafId = requestAnimationFrame(flushRetryStepUpdate);
+        }
+      };
+      
+      // 保留原有的 handleStepChange 设置逻辑，但不再直接调用 setMessages
+      const _legacyHandleStepChange = (step: string) => {
         setMessages(prev => prev.map(msg => 
           msg.id === messageId 
             ? { 
@@ -3194,6 +3027,24 @@ const Workflow: React.FC<WorkflowProps> = ({
       editingMessageIdRef.current = messageId;
       setEditingMessageId(messageId);
       setInput(message.content);
+      // 恢复该条消息的媒体附件（用于"编辑/重发"时保留图片等）
+      if (message.media && message.media.length > 0) {
+        setAttachedMedia(
+          message.media.map(m => {
+            // UnifiedMedia 使用 url 字段存储数据，兼容可能存在的 data 字段
+            const rawData = (m as any).data || m.url || '';
+            return {
+              type: m.type,
+              mimeType: m.mimeType || 'image/jpeg',
+              data: rawData,
+              // 统一用 base64/dataURL 渲染
+              preview: ensureDataUrlFromMaybeBase64(rawData, m.mimeType || 'image/jpeg'),
+            };
+          })
+        );
+      } else {
+        setAttachedMedia([]);
+      }
       inputRef.current?.focus();
     }
   };
@@ -3203,6 +3054,61 @@ const Workflow: React.FC<WorkflowProps> = ({
     editingMessageIdRef.current = null;
     setEditingMessageId(null);
     setInput('');
+    setAttachedMedia([]);
+  };
+
+  // 引用消息（会同步恢复该消息的媒体附件，确保图片等可正确加载并随新消息发送）
+  const handleQuoteMessage = async (messageId: string) => {
+    const message = messages.find(m => m.id === messageId);
+    if (!message || message.role !== 'user') return;
+
+    setQuotedMessageId(messageId);
+
+    // 将被引用消息的媒体附件合并到当前附件里（去重）
+    if (message.media && message.media.length > 0) {
+      setAttachedMedia(prev => {
+        const next = [...prev];
+        for (const m of message.media || []) {
+          // UnifiedMedia 使用 url 字段存储数据，兼容可能存在的 data 字段
+          const rawData = (m as any).data || m.url || '';
+          const key = `${m.type}:${m.mimeType}:${rawData.slice(0, 128)}`;
+          const exists = next.some(x => `${x.type}:${x.mimeType}:${(x.data || '').slice(0, 128)}` === key);
+          if (!exists && rawData) {
+            next.push({
+              type: m.type,
+              mimeType: m.mimeType || 'image/jpeg',
+              data: rawData,
+              preview: ensureDataUrlFromMaybeBase64(rawData, m.mimeType || 'image/jpeg'),
+            });
+          }
+        }
+        return next;
+      });
+    }
+
+    // 聚焦输入框，方便继续输入
+    setTimeout(() => inputRef.current?.focus(), 0);
+  };
+
+  const handleRollbackToMessage = async (messageId: string) => {
+    if (!confirm('确定要回滚到这条消息吗？这条消息之后的所有对话都会被删除。')) return;
+
+    try {
+      // 停止当前生成（如果有）
+      if (abortController) {
+        abortController.abort();
+        setAbortController(null);
+      }
+      setIsLoading(false);
+      // 退出编辑/引用状态
+      editingMessageIdRef.current = null;
+      setEditingMessageId(null);
+      setQuotedMessageId(null);
+      // 触发回滚
+      await rollbackMessages(messageId);
+    } catch (e) {
+      console.error('[Workflow] rollback failed:', e);
+    }
   };
 
   // 重新发送消息（编辑后或直接重新发送）
@@ -4025,9 +3931,6 @@ const Workflow: React.FC<WorkflowProps> = ({
       return;
     }
     
-    // 找到回退范围内的所有消息ID
-    const messagesToDelete = messages.slice(targetIndex + 1).map(m => m.id);
-    
     // 检查回退范围内是否有工作流消息或AI回复（可能触发过summarize）
     const rollbackMessagesList = messages.slice(targetIndex + 1);
     const hasWorkflowOrAssistant = rollbackMessagesList.some(msg => 
@@ -4049,22 +3952,28 @@ const Workflow: React.FC<WorkflowProps> = ({
     // 回退消息列表
     setMessages(prev => prev.slice(0, targetIndex + 1));
     
-    // 从数据库删除回退的消息（如果已保存）
-    if (currentSessionId && messagesToDelete.length > 0) {
+    // 从数据库回退（真正删除目标消息之后的所有消息）
+    if (currentSessionId && !isTemporarySession) {
       try {
-        // TODO: 批量删除消息的API
-        console.log('[Workflow] Rolled back messages:', messagesToDelete);
+        await messageApi.rollbackToMessage(currentSessionId, targetMessageId);
+        // 回退会自动刷新缓存，这里只给一个轻量提示
+        console.log('[Workflow] Rolled back messages to:', targetMessageId);
       } catch (error) {
-        console.error('[Workflow] Failed to rollback messages:', error);
+        console.error('[Workflow] Failed to rollback messages via API:', error);
+        toast({
+          title: '回滚失败',
+          description: error instanceof Error ? error.message : String(error),
+          variant: 'destructive',
+        });
       }
     }
   };
 
-  const renderMessageContent = (message: Message) => {
+  const renderMessageContent = useCallback((message: Message) => {
     return (
       <MessageContent
         message={message}
-        messages={messages}
+        prevMessageContent={getPrevMessageContent(message.id)}
         abortController={abortController}
         setAbortController={setAbortController}
         setMessages={setMessages}
@@ -4077,10 +3986,290 @@ const Workflow: React.FC<WorkflowProps> = ({
         openSessionMediaPanel={openSessionMediaPanel}
       />
     );
-  };
+  }, [
+    abortController,
+    collapsedThinking,
+    findSessionMediaIndex,
+    getPrevMessageContent,
+    handleDeleteWorkflowMessage,
+    handleExecuteWorkflow,
+    openSessionMediaPanel,
+    setAbortController,
+    setIsLoading,
+    setMessages,
+    toggleThinkingCollapse,
+  ]);
 
   // 统计可用工具数量
   const totalTools = Array.from(mcpTools.values()).flat().length;
+
+  // 不渲染（高度为 0）但保留在 data 中：配合 Virtuoso firstItemIndex 的 prepend 锚定
+  const shouldHideMessage = useCallback((msg: Message) => {
+    if ((msg as any).isSummary) return true;
+    if (
+      msg.role === 'system' &&
+      msg.toolCalls &&
+      typeof msg.toolCalls === 'object' &&
+      (msg.toolCalls as any).isSystemPrompt === true
+    ) {
+      return true;
+    }
+    return false;
+  }, []);
+
+  // 稳定的 Virtuoso computeItemKey 回调
+  const computeMessageKey = useCallback((_: number, m: Message) => m.id, []);
+
+  const renderChatMessage = useCallback(
+    (message: Message) => {
+      // 如果是总结提示消息，使用特殊的居中显示样式
+      const isSummaryNotification =
+        message.role === 'system' &&
+        (message.content.includes('总结完成') || message.content.includes('已精简为'));
+
+      if (isSummaryNotification) {
+        return (
+          <div data-message-id={message.id} className="flex justify-center my-2">
+            <div className="text-xs text-gray-500 dark:text-[#b0b0b0] px-3 py-1.5 bg-gray-100 dark:bg-[#2d2d2d] rounded-full">
+              {message.content}
+            </div>
+          </div>
+        );
+      }
+
+      const isSelected = selectedMessageIds.has(message.id);
+
+      // 检查 assistant 消息是否有侧边面板内容（思考过程、MCP详情等）
+      const hasThinkingContent = message.thinking && message.thinking.trim().length > 0;
+      const hasMCPDetail =
+        !!message.mcpdetail &&
+        (() => {
+          const anyDetail = message.mcpdetail as any;
+          if (Array.isArray(anyDetail?.tool_calls) && anyDetail.tool_calls.length > 0) return true;
+          if (Array.isArray(anyDetail?.tool_results) && anyDetail.tool_results.length > 0) return true;
+          if (anyDetail?.raw_result) return true;
+          if (Array.isArray(anyDetail?.logs) && anyDetail.logs.length > 0) return true;
+          if (anyDetail?.status) return true;
+          return false;
+        })();
+      const hasToolCallsArray =
+        message.toolCalls && Array.isArray(message.toolCalls) && message.toolCalls.length > 0;
+      const hasProcessSteps = message.processSteps && message.processSteps.length > 0;
+      const shouldUseSplitView =
+        message.role === 'assistant' &&
+        (hasThinkingContent ||
+          hasMCPDetail ||
+          hasToolCallsArray ||
+          hasProcessSteps ||
+          message.isThinking ||
+          message.currentStep ||
+          message.thoughtSignature);
+
+      if (shouldUseSplitView) {
+        return (
+          <SplitViewMessage
+            id={message.id}
+            role={message.role}
+            content={message.content}
+            thinking={message.thinking}
+            isThinking={message.isThinking}
+            isStreaming={message.isStreaming}
+            currentStep={message.currentStep}
+            toolType={message.toolType}
+            workflowId={message.workflowId}
+            workflowName={message.workflowName}
+            workflowStatus={message.workflowStatus}
+            workflowResult={message.workflowResult}
+            workflowConfig={message.workflowConfig}
+            toolCalls={Array.isArray(message.toolCalls) ? message.toolCalls : undefined}
+            mcpDetail={message.mcpdetail}
+            thoughtSignature={message.thoughtSignature}
+            media={message.media}
+            avatarUrl={currentSessionAvatar || undefined}
+            isSelected={isSelected}
+            selectionMode={skillPackSelectionMode}
+            isLoading={isLoading}
+            llmProvider={selectedLLMConfig?.provider}
+            renderContent={renderMessageContent}
+            onToggleSelection={() => toggleMessageSelection(message.id)}
+            onViewMCPDetail={() => {
+              setSelectedMCPDetail(message.mcpdetail);
+              setShowMCPDetailOverlay(true);
+            }}
+            onRetry={() => handleRetryMessage(message.id)}
+            processSteps={message.processSteps}
+          />
+        );
+      }
+
+      return (
+        <div
+          data-message-id={message.id}
+          onClick={() => toggleMessageSelection(message.id)}
+          className={`flex items-start fade-in-up stagger-item ${
+            message.role === 'user'
+              ? 'flex-row-reverse space-x-reverse space-x-2'
+              : message.role === 'assistant' || message.role === 'tool'
+                ? 'flex-col w-full'
+                : 'space-x-2'
+          } ${
+            skillPackSelectionMode
+              ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-[#404040] rounded-lg p-2 -m-2 transition-all duration-200'
+              : ''
+          } ${
+            isSelected && skillPackSelectionMode
+              ? 'bg-primary-50 dark:bg-primary-900/20 ring-2 ring-primary-300 dark:ring-primary-700 rounded-lg p-2 -m-2'
+              : ''
+          }`}
+        >
+          {/* 选择复选框（仅在选择模式下显示） */}
+          {skillPackSelectionMode && (
+            <div className={`flex-shrink-0 mt-0.5 ${message.role === 'user' ? 'ml-1.5' : 'mr-1.5'}`}>
+              {isSelected ? (
+                <CheckSquare className="w-4 h-4 text-primary-500" />
+              ) : (
+                <Square className="w-4 h-4 text-gray-400" />
+              )}
+            </div>
+          )}
+
+          {(message.role === 'assistant' || message.role === 'tool') ? (
+            <div className="w-full">
+              <div className="flex items-center space-x-2 mb-2">
+                <MessageAvatar
+                  role={message.role}
+                  avatarUrl={message.role === 'assistant' ? currentSessionAvatar || undefined : undefined}
+                  toolType={message.toolType}
+                />
+                {message.role === 'assistant' && (
+                  <MessageStatusIndicator
+                    isThinking={message.isThinking}
+                    isStreaming={message.isStreaming}
+                    hasContent={!!message.content && message.content.length > 0}
+                    currentStep={message.currentStep}
+                    llmProvider={selectedLLMConfig?.provider}
+                  />
+                )}
+              </div>
+              <div className="w-full group relative">
+                <MessageBubbleContainer role={message.role} toolType={message.toolType} className="w-full">
+                  <MessageContent
+                    message={message}
+                    prevMessageContent={getPrevMessageContent(message.id)}
+                    abortController={abortController}
+                    setAbortController={setAbortController}
+                    setMessages={setMessages}
+                    setIsLoading={setIsLoading}
+                    collapsedThinking={collapsedThinking}
+                    toggleThinkingCollapse={toggleThinkingCollapse}
+                    handleExecuteWorkflow={handleExecuteWorkflow}
+                    handleDeleteWorkflowMessage={handleDeleteWorkflowMessage}
+                    findSessionMediaIndex={findSessionMediaIndex}
+                    openSessionMediaPanel={openSessionMediaPanel}
+                  />
+                </MessageBubbleContainer>
+              </div>
+              {message.role === 'tool' && (message.toolType === 'mcp' || message.toolType === 'workflow') && (
+                <PluginExecutionPanel messageId={message.id} sessionId={currentSessionId} toolType={message.toolType} />
+              )}
+            </div>
+          ) : (
+            <>
+              <div className="flex-shrink-0 flex items-center space-x-1.5">
+                <MessageAvatar role={message.role} toolType={message.toolType} />
+              </div>
+              <div className={`flex-1 group relative ${message.role === 'user' ? 'flex justify-end' : ''}`}>
+                {/* 用户消息操作：引用 / 编辑 / 回滚 */}
+                {message.role === 'user' && !skillPackSelectionMode && (
+                  <div className="absolute -top-7 right-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-[#2d2d2d] rounded-lg shadow-md border border-gray-200 dark:border-[#404040] px-1 py-0.5">
+                    <IconButton
+                      icon={Quote}
+                      label="引用此消息"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleQuoteMessage(message.id);
+                      }}
+                      className="h-7 w-7"
+                    />
+                    <IconButton
+                      icon={Edit2}
+                      label="编辑此消息"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleStartEdit(message.id);
+                      }}
+                      className="h-7 w-7"
+                    />
+                    <IconButton
+                      icon={RotateCw}
+                      label="回滚到此消息"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleRollbackToMessage(message.id);
+                      }}
+                      className="h-7 w-7"
+                    />
+                  </div>
+                )}
+                <MessageBubbleContainer role={message.role} toolType={message.toolType} className="max-w-[85%]">
+                  <MessageContent
+                    message={message}
+                    prevMessageContent={getPrevMessageContent(message.id)}
+                    abortController={abortController}
+                    setAbortController={setAbortController}
+                    setMessages={setMessages}
+                    setIsLoading={setIsLoading}
+                    collapsedThinking={collapsedThinking}
+                    toggleThinkingCollapse={toggleThinkingCollapse}
+                    handleExecuteWorkflow={handleExecuteWorkflow}
+                    handleDeleteWorkflowMessage={handleDeleteWorkflowMessage}
+                    findSessionMediaIndex={findSessionMediaIndex}
+                    openSessionMediaPanel={openSessionMediaPanel}
+                  />
+                </MessageBubbleContainer>
+              </div>
+            </>
+          )}
+        </div>
+      );
+    },
+    [
+      abortController,
+      collapsedThinking,
+      currentSessionAvatar,
+      currentSessionId,
+      findSessionMediaIndex,
+      getPrevMessageContent,
+      handleExecuteWorkflow,
+      handleRetryMessage,
+      handleDeleteWorkflowMessage,
+      isLoading,
+      openSessionMediaPanel,
+      renderMessageContent,
+      selectedLLMConfig?.provider,
+      selectedMessageIds,
+      setAbortController,
+      setIsLoading,
+      setMessages,
+      skillPackSelectionMode,
+      toggleMessageSelection,
+    ]
+  );
+
+  // 稳定的 Virtuoso itemContent 回调，避免每次渲染都创建新函数
+  const renderVirtuosoItem = useCallback(
+    (_index: number, message: Message) => {
+      if (shouldHideMessage(message)) {
+        return <div data-message-id={message.id} style={{ display: 'none' }} />;
+      }
+      return (
+        <div className="py-1" data-message-id={message.id}>
+          {renderChatMessage(message)}
+        </div>
+      );
+    },
+    [renderChatMessage, shouldHideMessage]
+  );
 
   const switchSessionFromPersona = (sessionId: string) => {
     setShowPersonaPanel(false);
@@ -4302,12 +4491,27 @@ const Workflow: React.FC<WorkflowProps> = ({
 
         {/* 消息列表 - 正常顺序显示（老消息在上，新消息在下） - 优化布局 */}
           <div 
-            ref={chatContainerRef}
-            className="flex-1 overflow-y-auto hide-scrollbar px-3 py-2 space-y-6 relative bg-gray-50/50 dark:bg-gray-950/50"
+            ref={(el) => {
+              chatContainerRef.current = el;
+              setChatScrollEl(el);
+            }}
+            className="flex-1 overflow-y-auto hide-scrollbar px-3 py-2 space-y-2 relative bg-gray-50/50 dark:bg-gray-950/50"
             style={{ scrollBehavior: 'auto', paddingBottom: floatingComposerPadding }}
-            onScroll={(e) => {
-              const container = e.currentTarget;
+            onWheel={(e) => {
+              // hybrid 自动触发：接近顶部时继续上拉（滚轮向上）只触发一次
+              if (e.deltaY < 0 && isNearTop && scrollTopRef.current < 80) {
+                void triggerLoadMoreHistory('auto');
+              }
+            }}
+            onScroll={() => {
+              const container = chatContainerRef.current;
+              if (!container) return;
+              
               const scrollTop = container.scrollTop;
+              const scrollHeight = container.scrollHeight;
+              const clientHeight = container.clientHeight;
+              scrollTopRef.current = scrollTop;
+              
               const atBottom = shouldAutoScroll();
               wasAtBottomRef.current = atBottom;
               
@@ -4320,15 +4524,28 @@ const Workflow: React.FC<WorkflowProps> = ({
                 }, 500);
               }
               
-              // 滚动到顶部附近时，自动加载更多历史消息（历史消息在上方）
-              if (scrollTop < 150 && hasMoreMessages && !isLoadingMessages && !isLoadingMoreRef.current) {
-                loadSessionMessages(currentSessionId!, messagePage + 1);
+              // 检测是否接近顶部（距离顶部小于150px）- 用于显示和自动加载更多历史消息
+              const nearTop = scrollTop < 150;
+              setIsNearTop(nearTop);
+              if (!nearTop) {
+                // 离开顶部区域后，允许下一次自动触发
+                historyAutoFiredInNearTopRef.current = false;
+                if (historyTopStayTimerRef.current) {
+                  clearTimeout(historyTopStayTimerRef.current);
+                  historyTopStayTimerRef.current = null;
+                }
               }
+              
+              // 检测是否应该显示"跳转到最新消息"按钮
+              // 当距离底部超过300px（约5条消息的高度）时显示
+              const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+              setShowScrollToBottom(distanceFromBottom > 300);
               
               // 用户滚动到底部时，隐藏新消息提示（最新消息在底部）
               if (atBottom) {
                 setShowNewMessagePrompt(false);
                 setUnreadMessageCount(0);
+                setShowScrollToBottom(false);
               }
             }}
             onDragOver={(e) => {
@@ -4343,27 +4560,16 @@ const Workflow: React.FC<WorkflowProps> = ({
               }
             }}
           >
-          {/* 加载更多历史消息提示（固定在顶部，历史消息在上方） */}
-          {hasMoreMessages && (
-            <div className="sticky top-0 z-10 flex justify-center mb-2 pointer-events-none">
-              <div className="bg-white/95 dark:bg-[#2d2d2d]/95 backdrop-blur-sm px-3 py-1.5 rounded-full shadow-sm border border-gray-200 dark:border-[#404040] pointer-events-auto">
-                {isLoadingMessages ? (
-                  <div className="flex items-center space-x-2 text-xs text-gray-600 dark:text-[#b0b0b0]">
-                    <Loader className="w-3 h-3 animate-spin" />
-                    <span>加载历史消息...</span>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => loadSessionMessages(currentSessionId!, messagePage + 1)}
-                    className="flex items-center space-x-2 text-xs text-gray-600 dark:text-[#b0b0b0] hover:text-gray-900 dark:hover:text-[#cccccc] transition-colors"
-                  >
-                    <ChevronUp className="w-3 h-3" />
-                    <span>加载更多</span>
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
+          {/* 加载更多历史消息提示（固定在顶部，带迷雾效果）- 只有接近顶部且有更多消息时才显示 */}
+          <HistoryLoadTop
+            visible={isNearTop}
+            hasMore={hasMoreMessages}
+            isLoading={isLoadingMessages}
+            hintMode="hybrid"
+            onLoadMore={() => {
+              void triggerLoadMoreHistory('manual');
+            }}
+          />
           
           {/* 新消息提示（固定在底部，最新消息在底部） */}
           {showNewMessagePrompt && unreadMessageCount > 0 && (
@@ -4383,277 +4589,31 @@ const Workflow: React.FC<WorkflowProps> = ({
               </button>
             </div>
           )}
-          {messages.filter(msg => {
-            // 过滤掉总结消息和系统提示词消息（系统提示词消息已在输入框上方显示）
-            if (msg.isSummary) return false;
-            if (msg.role === 'system' && 
-                msg.toolCalls && 
-                typeof msg.toolCalls === 'object' &&
-                (msg.toolCalls as any).isSystemPrompt === true) {
-              return false; // 不显示系统提示词消息
-            }
-            return true;
-          }).map((message) => {
-            // 如果是总结提示消息，使用特殊的居中显示样式
-            const isSummaryNotification = message.role === 'system' && 
-              (message.content.includes('总结完成') || message.content.includes('已精简为'));
-            
-            if (isSummaryNotification) {
-              return (
-                <div key={message.id} data-message-id={message.id} className="flex justify-center my-2">
-                  <div className="text-xs text-gray-500 dark:text-[#b0b0b0] px-3 py-1.5 bg-gray-100 dark:bg-[#2d2d2d] rounded-full">
-                    {message.content}
-                  </div>
-                </div>
-              );
-            }
-            
-            const isSelected = selectedMessageIds.has(message.id);
-            
-            // 检查 assistant 消息是否有侧边面板内容（思考过程、MCP详情等）
-            const hasThinkingContent = message.thinking && message.thinking.trim().length > 0;
-            const hasMCPDetail = !!message.mcpdetail && (() => {
-              const anyDetail = message.mcpdetail as any;
-              if (Array.isArray(anyDetail?.tool_calls) && anyDetail.tool_calls.length > 0) return true;
-              if (Array.isArray(anyDetail?.tool_results) && anyDetail.tool_results.length > 0) return true;
-              if (anyDetail?.raw_result) return true;
-              if (Array.isArray(anyDetail?.logs) && anyDetail.logs.length > 0) return true;
-              if (anyDetail?.status) return true;
-              return false;
-            })();
-            const hasToolCallsArray = message.toolCalls && Array.isArray(message.toolCalls) && message.toolCalls.length > 0;
-            const hasProcessSteps = message.processSteps && message.processSteps.length > 0;
-            const shouldUseSplitView = message.role === 'assistant' && (
-              hasThinkingContent || 
-              hasMCPDetail || 
-              hasToolCallsArray ||
-              hasProcessSteps ||
-              message.isThinking ||
-              message.currentStep ||
-              message.thoughtSignature
-            );
-            
-            // 对于 assistant 消息且有侧边面板内容，使用 SplitViewMessage 组件
-            if (shouldUseSplitView) {
-              return (
-                <SplitViewMessage
-                  key={message.id}
-                  id={message.id}
-                  role={message.role}
-                  content={message.content}
-                  thinking={message.thinking}
-                  isThinking={message.isThinking}
-                  isStreaming={message.isStreaming}
-                  currentStep={message.currentStep}
-                  toolType={message.toolType}
-                  workflowId={message.workflowId}
-                  workflowName={message.workflowName}
-                  workflowStatus={message.workflowStatus}
-                  workflowResult={message.workflowResult}
-                  workflowConfig={message.workflowConfig}
-                  toolCalls={Array.isArray(message.toolCalls) ? message.toolCalls : undefined}
-                  mcpDetail={message.mcpdetail}
-                  thoughtSignature={message.thoughtSignature}
-                  media={message.media}
-                  avatarUrl={currentSessionAvatar || undefined}
-                  isSelected={isSelected}
-                  selectionMode={skillPackSelectionMode}
-                  isLoading={isLoading}
-                  llmProvider={selectedLLMConfig?.provider}
-                  renderContent={renderMessageContent}
-                  onToggleSelection={() => toggleMessageSelection(message.id)}
-                  onViewMCPDetail={() => {
-                    setSelectedMCPDetail(message.mcpdetail);
-                    setShowMCPDetailOverlay(true);
-                  }}
-                  onRetry={() => handleRetryMessage(message.id)}
-                  processSteps={message.processSteps}
-                />
-              );
-            }
-            
-            // 其他消息类型使用统一消息组件渲染
-            return (
-            <div
-              key={message.id}
-              data-message-id={message.id}
-              onClick={() => toggleMessageSelection(message.id)}
-              className={`flex items-start fade-in-up stagger-item ${
-                message.role === 'user' 
-                  ? 'flex-row-reverse space-x-reverse space-x-2' 
-                  : message.role === 'assistant' || message.role === 'tool'
-                    ? 'flex-col w-full'
-                    : 'space-x-2'
-              } ${
-                skillPackSelectionMode 
-                  ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-[#404040] rounded-lg p-2 -m-2 transition-all duration-200' 
-                  : ''
-              } ${
-                isSelected && skillPackSelectionMode
-                  ? 'bg-primary-50 dark:bg-primary-900/20 ring-2 ring-primary-300 dark:ring-primary-700 rounded-lg p-2 -m-2' 
-                  : ''
-              }`}
-            >
-              {/* 选择复选框（仅在选择模式下显示） */}
-              {skillPackSelectionMode && (
-                <div className={`flex-shrink-0 mt-0.5 ${message.role === 'user' ? 'ml-1.5' : 'mr-1.5'}`}>
-                  {isSelected ? (
-                    <CheckSquare className="w-4 h-4 text-primary-500" />
-                  ) : (
-                    <Square className="w-4 h-4 text-gray-400" />
-                  )}
-                </div>
-              )}
-              {(message.role === 'assistant' || message.role === 'tool') ? (
-                <div className="w-full">
-                  {/* 全屏显示时，头像和状态指示器放在顶部 */}
-                  <div className="flex items-center space-x-2 mb-2">
-                    <MessageAvatar 
-                      role={message.role}
-                      avatarUrl={message.role === 'assistant' ? currentSessionAvatar || undefined : undefined}
-                      toolType={message.toolType}
-                    />
-                    {message.role === 'assistant' && (
-                      <MessageStatusIndicator
-                        isThinking={message.isThinking}
-                        isStreaming={message.isStreaming}
-                        hasContent={!!message.content && message.content.length > 0}
-                        currentStep={message.currentStep}
-                        llmProvider={selectedLLMConfig?.provider}
-                      />
-                    )}
-                  </div>
-                  <div className="w-full group relative">
-                    {/* 统一消息气泡容器 */}
-                    <MessageBubbleContainer
-                      role={message.role}
-                      toolType={message.toolType}
-                      className="w-full"
-                    >
-                      <MessageContent
-                        message={message}
-                        messages={messages}
-                        abortController={abortController}
-                        setAbortController={setAbortController}
-                        setMessages={setMessages}
-                        setIsLoading={setIsLoading}
-                        collapsedThinking={collapsedThinking}
-                        toggleThinkingCollapse={toggleThinkingCollapse}
-                        handleExecuteWorkflow={handleExecuteWorkflow}
-                        handleDeleteWorkflowMessage={handleDeleteWorkflowMessage}
-                        findSessionMediaIndex={findSessionMediaIndex}
-                        openSessionMediaPanel={openSessionMediaPanel}
-                      />
-                    </MessageBubbleContainer>
-                  </div>
-                  {/* 会话扩展面板：展示 MCP/Workflow 等外部插件的执行过程与原始返回（含多媒体） */}
-                  {message.role === 'tool' && (message.toolType === 'mcp' || message.toolType === 'workflow') && (
-                    <PluginExecutionPanel
-                      messageId={message.id}
-                      sessionId={currentSessionId}
-                      toolType={message.toolType}
-                    />
-                  )}
-                </div>
-              ) : (
-                <>
-                  <div className="flex-shrink-0 flex items-center space-x-1.5">
-                    {/* 统一头像组件 */}
-                    <MessageAvatar 
-                      role={message.role}
-                      toolType={message.toolType}
-                    />
-                  </div>
-                  <div className={`flex-1 group relative ${message.role === 'user' ? 'flex justify-end' : ''}`}>
-                    {/* 统一消息气泡容器 */}
-                    <MessageBubbleContainer
-                      role={message.role}
-                      toolType={message.toolType}
-                      className="max-w-[85%]"
-                    >
-                      <MessageContent
-                        message={message}
-                        messages={messages}
-                        abortController={abortController}
-                        setAbortController={setAbortController}
-                        setMessages={setMessages}
-                        setIsLoading={setIsLoading}
-                        collapsedThinking={collapsedThinking}
-                        toggleThinkingCollapse={toggleThinkingCollapse}
-                        handleExecuteWorkflow={handleExecuteWorkflow}
-                        handleDeleteWorkflowMessage={handleDeleteWorkflowMessage}
-                        findSessionMediaIndex={findSessionMediaIndex}
-                        openSessionMediaPanel={openSessionMediaPanel}
-                      />
-                    </MessageBubbleContainer>
-                    {/* 用户消息的编辑、重新发送和引用按钮 - 显示在气泡上方 */}
-                    {message.role === 'user' && !isLoading && (
-                      <div className="absolute -top-7 right-0 flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-[#2d2d2d] rounded-lg shadow-md border border-gray-200 dark:border-[#404040] px-1 py-0.5">
-                        <button
-                          onClick={() => setQuotedMessageId(message.id)}
-                          className="p-1.5 text-gray-500 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-all"
-                          title="引用此消息"
-                        >
-                          <Quote className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleStartEdit(message.id)}
-                          className="p-1.5 text-gray-500 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-all"
-                          title="编辑消息"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleResendMessage(message.id)}
-                          className="p-1.5 text-gray-500 hover:text-green-600 dark:text-gray-400 dark:hover:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 rounded transition-all"
-                          title="重新发送"
-                        >
-                          <RotateCw className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-              
-              {/* Assistant消息的 MCP 详情按钮 - 显示在气泡上方 */}
-              {message.role === 'assistant' && message.mcpdetail && (
-                <div className="absolute -top-7 right-0 flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    onClick={() => {
-                      setSelectedMCPDetail(message.mcpdetail);
-                      setShowMCPDetailOverlay(true);
-                    }}
-                    className="px-2 py-1 text-xs font-medium text-emerald-600 dark:text-emerald-400 bg-white dark:bg-[#2d2d2d] hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded-lg transition-all flex items-center space-x-1.5 border border-gray-200 dark:border-[#404040] shadow-md"
-                    title="查看 MCP 详情"
-                  >
-                    <Plug className="w-3.5 h-3.5" />
-                    <span>MCP 详情</span>
-                  </button>
-                </div>
-              )}
-              
-              {/* Assistant错误消息的重试按钮 - 显示在气泡上方 */}
-              {message.role === 'assistant' && 
-               message.content?.includes('❌ 错误') && 
-               message.toolCalls && 
-               typeof message.toolCalls === 'object' &&
-               (message.toolCalls as any).canRetry === true && (
-                <div className="absolute -top-8 right-0 flex items-center space-x-1">
-                  <button
-                    onClick={() => handleRetryMessage(message.id)}
-                    disabled={isLoading}
-                    className="px-2.5 py-1 text-xs font-medium text-white bg-primary-500 hover:bg-primary-600 disabled:bg-gray-400 disabled:cursor-not-allowed rounded-lg transition-all flex items-center space-x-1.5 shadow-md"
-                    title="重试发送"
-                  >
-                    <RotateCw className="w-3.5 h-3.5" />
-                    <span>重试</span>
-                  </button>
-                </div>
-              )}
+          
+          {/* 跳转到最新消息按钮（当距离底部较远时显示） */}
+          {showScrollToBottom && !showNewMessagePrompt && (
+            <div className="sticky bottom-4 z-10 flex justify-end pr-4 pointer-events-none">
+              <button
+                onClick={() => {
+                  scrollToBottom('smooth');
+                  setShowScrollToBottom(false);
+                }}
+                className="bg-gray-800/90 hover:bg-gray-700 dark:bg-gray-700/90 dark:hover:bg-gray-600 text-white w-10 h-10 rounded-full shadow-lg flex items-center justify-center transition-all pointer-events-auto hover:scale-110"
+                title="跳转到最新消息"
+              >
+                <ChevronDown className="w-5 h-5" />
+              </button>
             </div>
-            );
-          })}
+          )}
+          
+          <Virtuoso
+            customScrollParent={chatScrollEl || undefined}
+            data={messages}
+            firstItemIndex={virtuosoFirstItemIndex}
+            computeItemKey={computeMessageKey}
+            increaseViewportBy={{ top: 600, bottom: 800 }}
+            itemContent={renderVirtuosoItem}
+          />
           <div ref={messagesEndRef} />
           
           {/* 技能包选择确认栏 */}
@@ -4880,6 +4840,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                     <div className="text-sm text-gray-700 dark:text-[#ffffff] line-clamp-2">
                       {quotedMsg.content.substring(0, 100)}{quotedMsg.content.length > 100 ? '...' : ''}
                     </div>
+                    {/* 引用媒体缩略图已移至下方附件预览区统一展示，此处不再重复显示 */}
                   </div>
                   <button
                     onClick={() => setQuotedMessageId(null)}
@@ -4901,7 +4862,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                     {media.type === 'image' ? (
                       <div className="w-16 h-16 rounded-lg overflow-hidden border border-gray-200 dark:border-[#404040] hover:border-primary-500 dark:hover:border-primary-500 transition-all hover:scale-105">
                         <img
-                          src={media.preview || `data:${media.mimeType};base64,${media.data}`}
+                          src={media.preview || ensureDataUrlFromMaybeBase64(media.data, media.mimeType)}
                           alt={`附件 ${index + 1}`}
                           className="w-full h-full object-cover"
                         />
@@ -4909,7 +4870,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                     ) : media.type === 'video' ? (
                       <div className="w-16 h-16 rounded-lg overflow-hidden border border-gray-200 dark:border-[#404040] hover:border-primary-500 dark:hover:border-primary-500 transition-all hover:scale-105 relative bg-gray-900">
                         <video
-                          src={media.preview || `data:${media.mimeType};base64,${media.data}`}
+                          src={media.preview || ensureDataUrlFromMaybeBase64(media.data, media.mimeType)}
                           className="w-full h-full object-cover"
                           muted
                         />
@@ -4943,18 +4904,18 @@ const Workflow: React.FC<WorkflowProps> = ({
                 isInputFocused ? 'shadow-lg ring-1 ring-[var(--color-accent)]/20' : 'shadow-sm'
               }`}
             >
-              {/* 输入框扩大按钮 - 当输入框聚焦时显示 */}
-              {isInputFocused && (
+              {/* 输入框扩大/缩小按钮 - 输入框内部右上角小箭头 */}
+              {!editingMessageId && (
                 <button
                   onMouseDown={(e) => {
                     // Prevent textarea blur so click still toggles expand.
                     e.preventDefault();
                   }}
                   onClick={() => setIsInputExpanded(!isInputExpanded)}
-                  className="absolute -top-8 left-1/2 transform -translate-x-1/2 z-10 p-1.5 bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] rounded-lg shadow-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-all"
+                  className="absolute top-1.5 right-1.5 z-10 p-0.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors opacity-50 hover:opacity-100"
                   title={isInputExpanded ? "缩小输入框" : "扩大输入框"}
                 >
-                  <ChevronUp className={`w-4 h-4 text-gray-600 dark:text-[#b0b0b0] transition-transform ${isInputExpanded ? 'rotate-180' : ''}`} />
+                  <ChevronUp className={`w-3 h-3 transition-transform ${isInputExpanded ? 'rotate-180' : ''}`} />
                 </button>
               )}
               
@@ -5198,13 +5159,13 @@ const Workflow: React.FC<WorkflowProps> = ({
                     ? `输入你的任务，我可以使用 ${totalTools} 个工具帮助你完成... (输入 @ 选择感知组件)`
                     : '输入你的问题，我会尽力帮助你... (输入 @ 选择感知组件，输入 / 引用爬虫数据)'
               }
-                className={`flex-1 resize-none w-full transition-all duration-200 bg-transparent border-none focus:outline-none focus:ring-0 text-gray-900 dark:text-[#ffffff] placeholder-gray-400 dark:placeholder-[#808080] px-3 pt-3 ${
+                className={`flex-1 resize-none w-full transition-all duration-200 bg-transparent border-none focus:outline-none focus:ring-0 text-gray-900 dark:text-[#ffffff] placeholder-gray-400 dark:placeholder-[#808080] px-3 py-2 ${
                   isInputExpanded 
-                    ? 'min-h-[300px] max-h-[500px]' 
-                    : 'min-h-[50px] max-h-[200px]'
+                    ? 'min-h-[200px] max-h-[400px]' 
+                    : 'min-h-[36px] max-h-[120px]'
                 }`}
-              style={{ fontSize: '15px', lineHeight: '1.6' }}
-              rows={2}
+              style={{ fontSize: '14px', lineHeight: '1.5' }}
+              rows={1}
               disabled={isLoading || !selectedLLMConfig}
             />
             {/* 编辑模式提示和取消按钮 */}
@@ -5255,17 +5216,15 @@ const Workflow: React.FC<WorkflowProps> = ({
             />
           )}
           
-          {/* @ 符号选择器 */}
+          {/* @ 符号选择器 - 相对于输入框容器定位 */}
           {showAtSelector && (
             <div
               ref={selectorRef}
-              className="fixed z-[200] bg-white dark:bg-[#2d2d2d] border border-gray-300 dark:border-[#404040] rounded-lg shadow-lg overflow-y-auto at-selector-container"
+              className="absolute bottom-full left-0 mb-1 z-[200] bg-white dark:bg-[#2d2d2d] border border-gray-300 dark:border-[#404040] rounded-lg shadow-lg overflow-y-auto at-selector-container"
               style={{
-                bottom: `${atSelectorPosition.bottom || 100}px`,
-                left: `${atSelectorPosition.left || 10}px`,
                 minWidth: '200px',
                 maxWidth: '300px',
-                maxHeight: `${atSelectorPosition.maxHeight || 256}px`,
+                maxHeight: '256px',
               }}
               onMouseDown={(e) => {
                 e.preventDefault();
@@ -5421,18 +5380,18 @@ const Workflow: React.FC<WorkflowProps> = ({
             </div>
           )}
               
-              {/* 输入框底部：Token 计数 + 模型选择 + 发送按钮（左统计、右模型+发送；小屏自动收敛） */}
-              <div className="flex items-center justify-between gap-3 px-3 py-2 bg-white/45 dark:bg-[#262626]/45 backdrop-blur-md border-t border-black/5 dark:border-white/10 rounded-b-xl">
+              {/* 输入框底部：Token 计数 + 模型选择 + 发送按钮（紧凑布局） */}
+              <div className="flex items-center justify-between gap-2 px-2.5 py-1 bg-white/45 dark:bg-[#262626]/45 backdrop-blur-md border-t border-black/5 dark:border-white/10 rounded-b-xl">
                 <div className="min-w-0">
                   <TokenCounter selectedLLMConfig={selectedLLMConfig} messages={messages} />
                 </div>
 
                 {/* 右侧：模型选择图标按钮 + 发送按钮（紧挨着） */}
-                <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="flex items-center gap-1.5 flex-shrink-0">
                   {/* 模型选择图标按钮 */}
                   <button
                     onClick={() => setShowModelSelectDialog(true)}
-                    className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors ${
+                    className={`flex items-center justify-center w-6 h-6 rounded transition-colors ${
                       selectedLLMConfig
                         ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 hover:bg-primary-200 dark:hover:bg-primary-900/50'
                         : 'bg-gray-100 dark:bg-[#363636] text-gray-500 dark:text-[#808080] hover:bg-gray-200 dark:hover:bg-[#404040]'
@@ -5440,9 +5399,9 @@ const Workflow: React.FC<WorkflowProps> = ({
                     title={selectedLLMConfig ? `${selectedLLMConfig.name}${selectedLLMConfig.model ? ` (${selectedLLMConfig.model})` : ''}` : '选择模型'}
                   >
                     {selectedLLMConfig ? (
-                      <CheckCircle className="w-4 h-4" />
+                      <CheckCircle className="w-3.5 h-3.5" />
                     ) : (
-                      <Brain className="w-4 h-4" />
+                      <Brain className="w-3.5 h-3.5" />
                     )}
                   </button>
 
@@ -5451,11 +5410,11 @@ const Workflow: React.FC<WorkflowProps> = ({
                     onClick={handleSend}
                     disabled={isLoading || (!input.trim() && attachedMedia.length === 0) || !selectedLLMConfig}
                     variant="primary"
-                    size="default"
-                    className="gap-1.5 px-3 py-1.5 flex-shrink-0"
+                    size="sm"
+                    className="gap-1 px-2 py-1 h-6 text-xs flex-shrink-0"
                   >
-                    {isLoading ? <Loader className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                    <span className="hidden sm:inline">{editingMessageId ? '重新发送' : '发送'}</span>
+                    {isLoading ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                    <span className="hidden sm:inline">{editingMessageId ? '重发' : '发送'}</span>
                   </Button>
                 </div>
               </div>
@@ -5951,4 +5910,5 @@ const Workflow: React.FC<WorkflowProps> = ({
   );
 };
 
+// Workflow component export
 export default Workflow;

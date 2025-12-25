@@ -274,14 +274,113 @@ export interface CreateMessageParams {
   mcpdetail?: Record<string, any>;
 }
 
+/** 分页消息响应 */
+export interface PaginatedMessagesResponse {
+  messages: Message[];
+  latest_message_id: string | null;
+  has_more: boolean;
+  total_count: number;
+  cache_hit: boolean;
+}
+
+/** 媒体消息项 */
+export interface MediaMessageItem {
+  message_id: string;
+  timestamp: number;
+}
+
 export const messageApi = {
-  /** 获取会话消息 */
+  /** 
+   * 获取会话消息（旧 API，保持兼容）
+   * @deprecated 请使用 getMessagesPaginated 代替
+   */
   getMessages: (sessionId: string, params?: { limit?: number; before?: string }) => {
     const query = new URLSearchParams();
     if (params?.limit) query.set('limit', params.limit.toString());
     if (params?.before) query.set('before', params.before);
     return request<Message[]>(`/api/messages/session/${sessionId}?${query.toString()}`);
   },
+  
+  /**
+   * 分页获取会话消息（优化版）
+   * 支持 Redis 缓存和按需加载
+   * 
+   * @param sessionId 会话 ID
+   * @param params 分页参数
+   * @returns 包含最新消息ID和分页信息的响应
+   */
+  getMessagesPaginated: async (sessionId: string, params?: { 
+    limit?: number; 
+    before?: string;
+    after?: string;
+    use_cache?: boolean;
+  }): Promise<PaginatedMessagesResponse> => {
+    const query = new URLSearchParams();
+    if (params?.limit) query.set('limit', params.limit.toString());
+    // 后端使用 before_id 和 after_id
+    if (params?.before) query.set('before_id', params.before);
+    if (params?.after) query.set('after_id', params.after);
+    if (params?.use_cache !== undefined) query.set('use_cache', params.use_cache.toString());
+    
+    const response = await request<{
+      messages: Message[];
+      latest_message_id: string | null;
+      has_more: boolean;
+      count: number;
+    }>(`/api/messages/session/${sessionId}/paginated?${query.toString()}`);
+    
+    // 转换响应格式
+    return {
+      messages: response.messages,
+      latest_message_id: response.latest_message_id,
+      has_more: response.has_more,
+      total_count: response.count,
+      cache_hit: false, // 后端暂未返回此字段
+    };
+  },
+  
+  /**
+   * 获取最新消息 ID
+   * 用于检查是否有新消息
+   */
+  getLatestMessageId: (sessionId: string): Promise<{ latest_message_id: string | null }> =>
+    request<{ latest_message_id: string | null }>(`/api/messages/session/${sessionId}/latest`),
+  
+  /**
+   * 获取媒体消息列表
+   * 用于媒体浏览器快速导航
+   */
+  getMediaMessages: async (sessionId: string, params?: {
+    limit?: number;
+    offset?: number;
+  }): Promise<{ media_messages: MediaMessageItem[]; total_count: number }> => {
+    const query = new URLSearchParams();
+    if (params?.limit) query.set('limit', params.limit.toString());
+    if (params?.offset) query.set('offset', params.offset.toString());
+    
+    const response = await request<{
+      media: MediaMessageItem[];
+      total: number;
+      offset: number;
+      limit: number;
+    }>(`/api/messages/session/${sessionId}/media?${query.toString()}`);
+    
+    // 转换响应格式
+    return {
+      media_messages: response.media,
+      total_count: response.total,
+    };
+  },
+  
+  /**
+   * 刷新消息缓存
+   * 在消息编辑或回退后调用
+   */
+  refreshCache: (sessionId: string): Promise<{ success: boolean; message: string }> =>
+    request<{ success: boolean; message: string }>(
+      `/api/messages/session/${sessionId}/cache/refresh`,
+      { method: 'POST' }
+    ),
   
   /** 获取单个消息 */
   getMessage: (messageId: string) => 
@@ -306,6 +405,16 @@ export const messageApi = {
   /** 删除会话所有消息 */
   deleteSessionMessages: (sessionId: string) => 
     request<{ success: boolean; deleted_count: number }>(`/api/messages/session/${sessionId}`, { method: 'DELETE' }),
+  
+  /** 
+   * 回退到指定消息（删除之后的所有消息）
+   * 会自动清空缓存
+   */
+  rollbackToMessage: (sessionId: string, messageId: string): Promise<{ success: boolean; deleted_count: number }> =>
+    request<{ success: boolean; deleted_count: number }>(
+      `/api/messages/session/${sessionId}/rollback/${messageId}`,
+      { method: 'DELETE' }
+    ),
   
   /** 统计会话消息数量 */
   countMessages: (sessionId: string) => 

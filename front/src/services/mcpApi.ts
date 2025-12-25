@@ -144,6 +144,95 @@ export async function getMCPServer(serverId: string): Promise<MCPServerConfig | 
   }
 }
 
+// ==================== MCP 市场（Market）API ====================
+
+export interface MCPMarketSource {
+  source_id: string;
+  display_name: string;
+  type: 'github_repo' | 'http_json' | 'html_scrape';
+  enabled: boolean;
+  config: Record<string, any>;
+  sync_interval_seconds?: number;
+  last_sync_at?: number | null;
+}
+
+export interface MCPMarketItemSummary {
+  item_id: string;
+  source_id: string;
+  name: string;
+  description: string;
+  runtime_type: 'local_stdio' | 'remote_http';
+  homepage?: string;
+  tags?: string[];
+}
+
+export interface MCPMarketSearchResult {
+  items: MCPMarketItemSummary[];
+  total: number;
+}
+
+export async function getMCPMarketSources(): Promise<MCPMarketSource[]> {
+  const backendUrl = getBackendUrl();
+  const response = await fetch(`${backendUrl}/api/mcp/market/sources`);
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${response.status}: ${response.statusText}`);
+  }
+  const data = await response.json();
+  return data.sources || [];
+}
+
+export async function syncMCPMarketSource(sourceId: string, force: boolean = false): Promise<any> {
+  const backendUrl = getBackendUrl();
+  const response = await fetch(`${backendUrl}/api/mcp/market/sources/${encodeURIComponent(sourceId)}/sync`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ force }),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${response.status}: ${response.statusText}`);
+  }
+  return await response.json();
+}
+
+export async function searchMCPMarket(params: {
+  q?: string;
+  runtime_type?: 'local_stdio' | 'remote_http';
+  source_id?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<MCPMarketSearchResult> {
+  const backendUrl = getBackendUrl();
+  const url = new URL(`${backendUrl}/api/mcp/market/search`);
+  if (params.q) url.searchParams.set('q', params.q);
+  if (params.runtime_type) url.searchParams.set('runtime_type', params.runtime_type);
+  if (params.source_id) url.searchParams.set('source_id', params.source_id);
+  if (params.limit != null) url.searchParams.set('limit', String(params.limit));
+  if (params.offset != null) url.searchParams.set('offset', String(params.offset));
+
+  const response = await fetch(url.toString());
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${response.status}: ${response.statusText}`);
+  }
+  return await response.json();
+}
+
+export async function installMCPMarketItem(itemId: string, overrides?: Record<string, any>): Promise<{ server_id: string; message: string }> {
+  const backendUrl = getBackendUrl();
+  const response = await fetch(`${backendUrl}/api/mcp/market/install`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ item_id: itemId, overrides: overrides || {} }),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${response.status}: ${response.statusText}`);
+  }
+  return await response.json();
+}
+
 // ==================== 通用 OAuth MCP 服务器配置 API ====================
 
 export interface OAuthProtectedResource {

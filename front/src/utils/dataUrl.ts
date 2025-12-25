@@ -4,7 +4,8 @@
  * 目标：兼容历史数据中“纯 base64（无 data: 前缀）”的图片/媒体，统一转换为可直接用于 <img src> 的 data URL。
  */
 
-const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
+// 兼容 base64 与 base64url（- _），并允许末尾 padding
+const BASE64_RE = /^[A-Za-z0-9+/_-]+={0,2}$/;
 
 export function inferImageMimeFromBase64Payload(payload: string): string | null {
   const base64 = payload.startsWith('data:') ? payload.slice(payload.indexOf(',') + 1) : payload.trim();
@@ -20,8 +21,9 @@ export function looksLikeBase64Payload(value: string, minLen: number = 256): boo
   const trimmed = value.trim();
   if (trimmed.startsWith('data:')) return true;
   // 太短的字符串不处理，避免误判普通路径/短 token
-  if (trimmed.length < minLen) return false;
-  return BASE64_RE.test(trimmed);
+  const normalized = trimmed.replace(/\s+/g, '');
+  if (normalized.length < minLen) return false;
+  return BASE64_RE.test(normalized);
 }
 
 /**
@@ -39,11 +41,13 @@ export function ensureDataUrlFromMaybeBase64(value: string, fallbackMime: string
   if (/^(https?:|data:|blob:|file:)/i.test(trimmed)) return trimmed;
 
   // 纯 base64：补齐 data:
-  if (!looksLikeBase64Payload(trimmed)) return trimmed;
+  // 这里先做一次去空白的归一化：后端/历史数据可能把 base64 分行存储
+  const normalized = trimmed.replace(/\s+/g, '');
+  if (!looksLikeBase64Payload(normalized)) return trimmed;
 
-  const inferred = inferImageMimeFromBase64Payload(trimmed);
+  const inferred = inferImageMimeFromBase64Payload(normalized);
   const mime = inferred || fallbackMime || 'application/octet-stream';
-  return `data:${mime};base64,${trimmed}`;
+  return `data:${mime};base64,${normalized}`;
 }
 
 export function parseDataUrl(dataUrl: string): { mimeType: string; base64: string } | null {

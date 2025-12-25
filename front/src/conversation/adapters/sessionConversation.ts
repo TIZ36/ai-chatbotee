@@ -1,5 +1,5 @@
 import type { ConversationAdapter, ListMessagesParams, ListMessagesResult, UnifiedMedia, UnifiedMessage } from '../types';
-import { deleteMessage, getSessionMessages, saveMessage, type Message } from '../../services/sessionApi';
+import { deleteMessage, getSessionMessages, getSessionMessagesCursor, saveMessage, type Message } from '../../services/sessionApi';
 
 function mapSessionMedia(msg: Message): UnifiedMedia[] | undefined {
   const media: UnifiedMedia[] = [];
@@ -37,6 +37,29 @@ function mapSessionMessage(msg: Message): UnifiedMessage {
   const toolCalls = (msg.tool_calls as any) && typeof msg.tool_calls === 'object' ? (msg.tool_calls as any) : null;
   const isSystemPrompt = msg.role === 'system' && toolCalls && toolCalls.isSystemPrompt === true;
 
+  // Extract ext data
+  const ext: any = (msg as any).ext;
+  
+  // Extract processSteps from ext (if saved there)
+  const processSteps = ext?.processSteps;
+  
+  // Extract thoughtSignature from ext
+  const thoughtSignature = ext?.thoughtSignature;
+  
+  // Extract mcpdetail from message or ext
+  const mcpdetail = (msg as any).mcpdetail;
+  
+  // Debug: Log processSteps mapping for assistant messages with MCP calls
+  if (msg.role === 'assistant' && (processSteps || mcpdetail)) {
+    console.log(`[sessionConversation] 映射消息 ${msg.message_id}:`, {
+      hasExt: !!ext,
+      hasProcessSteps: !!processSteps,
+      processStepsCount: processSteps?.length,
+      processStepTypes: processSteps?.map((s: any) => ({ type: s.type, hasResult: s.result !== undefined })),
+      hasMcpdetail: !!mcpdetail,
+    });
+  }
+
   return {
     id: msg.message_id,
     role: msg.role,
@@ -46,15 +69,23 @@ function mapSessionMessage(msg: Message): UnifiedMessage {
     thinking: msg.thinking,
     toolCalls: msg.tool_calls,
     tokenCount: (msg as any).token_count,
+    // Expose processSteps at top level for UI rendering
+    processSteps,
+    // Expose thoughtSignature at top level
+    thoughtSignature,
+    // Expose mcpdetail at top level
+    mcpdetail,
     meta: {
       thinking: msg.thinking,
       tool_calls: msg.tool_calls,
       token_count: (msg as any).token_count,
-      ext: (msg as any).ext,
-      mcpdetail: (msg as any).mcpdetail,
+      ext,
+      mcpdetail,
       tool_type: (msg as any).tool_type,
       isSummary,
       isSystemPrompt,
+      processSteps,
+      thoughtSignature,
     },
     ...(isSummary ? ({ isSummary: true } as any) : null),
   };
@@ -74,16 +105,18 @@ export function createSessionConversationAdapter(
 
     async listMessages(params: ListMessagesParams): Promise<ListMessagesResult> {
       const pageSize = params.pageSize ?? 20;
-      // 后端第一页会强制 immediate_limit=10；为避免分页错位，这里统一使用 <=10
-      const requestPageSize = Math.min(pageSize, 10);
-      const page = params.cursor ? Number(params.cursor) : 1;
-      const res = await getSessionMessages(sessionId, page, requestPageSize, lightweight);
+      
+      // 使用游标分页（更高效）
+      // cursor 是 message_id，表示获取此消息之前的消息
+      const beforeId = params.cursor as string | null;
+      
+      const res = await getSessionMessagesCursor(sessionId, beforeId, pageSize, lightweight);
       const items = (res.messages || []).map(mapSessionMessage);
-      const hasMore = res.page < res.total_pages;
+      
       return {
         items,
-        hasMore,
-        nextCursor: hasMore ? String(page + 1) : null,
+        hasMore: res.has_more,
+        nextCursor: res.next_cursor,
       };
     },
 

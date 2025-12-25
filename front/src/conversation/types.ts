@@ -25,6 +25,22 @@ export interface UnifiedMessage {
   thinking?: string;
   toolCalls?: any;
   tokenCount?: number;
+  /** 过程步骤（思考 + MCP 调用历史），从 ext.processSteps 提取 */
+  processSteps?: Array<{
+    type: 'thinking' | 'mcp_call' | 'workflow';
+    timestamp?: number;
+    thinking?: string;
+    mcpServer?: string;
+    toolName?: string;
+    arguments?: any;
+    result?: any;
+    status?: 'pending' | 'running' | 'completed' | 'error';
+    duration?: number;
+  }>;
+  /** 思维签名（Gemini 模型使用） */
+  thoughtSignature?: string;
+  /** MCP 执行详情 */
+  mcpdetail?: Record<string, any>;
   /** 容纳各模块特有信息（会议多响应、tokens、toolCalls 等） */
   meta?: Record<string, any>;
 }

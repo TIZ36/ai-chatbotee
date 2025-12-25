@@ -11,7 +11,7 @@
  * - User messages
  */
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -24,7 +24,6 @@ import {
   Trash2,
   XCircle,
   Wrench,
-  Lightbulb,
   FileText,
 } from 'lucide-react';
 import { MediaGallery, MediaItem } from '../ui/MediaGallery';
@@ -104,8 +103,8 @@ export interface Message {
 export interface MessageContentProps {
   /** The message to render */
   message: Message;
-  /** All messages (to find previous message for context) */
-  messages: Message[];
+  /** Previous message content (for context display, optimized to avoid passing entire messages array) */
+  prevMessageContent?: string;
   /** Abort controller for canceling generation */
   abortController: AbortController | null;
   /** Setter for abort controller */
@@ -187,20 +186,32 @@ const parseMCPContent = (content: any): {
  * MessageContent component
  * Renders the content of a message based on its type and state
  */
-export const MessageContent: React.FC<MessageContentProps> = ({
+const MessageContentInner: React.FC<MessageContentProps> = ({
   message,
-  messages,
+  prevMessageContent,
   abortController,
   setAbortController,
   setMessages,
   setIsLoading,
-  collapsedThinking,
-  toggleThinkingCollapse,
+  collapsedThinking: _collapsedThinking, // Kept for API compatibility, thinking is shown in MessageSidePanel
+  toggleThinkingCollapse: _toggleThinkingCollapse, // Kept for API compatibility
   handleExecuteWorkflow,
   handleDeleteWorkflowMessage,
   findSessionMediaIndex,
   openSessionMediaPanel,
 }) => {
+  const galleryMedia = useMemo<MediaItem[] | null>(() => {
+    const list = message.media;
+    if (!list || list.length === 0) return null;
+    // 保持引用稳定：避免父级因输入重渲染时，每次都创建新数组触发 MediaGallery 的 preload effect
+    return list.map(m => ({
+      type: m.type,
+      mimeType: m.mimeType,
+      data: m.data,
+      url: m.url,
+    }));
+  }, [message.media]);
+
   // Helper function to render MCP blocks for a message
   const renderMCPBlocksForMessage = (blocks: any[], messageId?: string) => {
     return renderMCPBlocks({
@@ -225,53 +236,14 @@ export const MessageContent: React.FC<MessageContentProps> = ({
   };
 
   // Thinking/generating placeholder (when content is empty and processing)
+  // NOTE: Thinking content is now displayed in MessageSidePanel, not here.
+  // This only shows a simple loading indicator when the assistant is thinking/streaming.
   if (message.role === 'assistant' && (!message.content || message.content.length === 0) && (message.isThinking || message.isStreaming)) {
-    const hasThinkingContent = message.thinking && message.thinking.trim().length > 0;
-    
-    // If there's thinking content, show streaming thinking process without animation
-    if (hasThinkingContent) {
-      return (
-        <div className="w-full">
-          <div className="mb-2">
-            <div className="flex items-center space-x-1 text-[10px] text-gray-400 dark:text-[#808080] mb-1">
-              <Lightbulb className="w-3 h-3" />
-              <span>思考过程</span>
-              {message.isThinking && (
-                <>
-                  <span>思考中...</span>
-                  <span className="inline-block ml-1 w-1 h-1 bg-gray-400 dark:bg-gray-500 rounded-full animate-pulse"></span>
-                </>
-              )}
-            </div>
-            <div className="text-[11px] text-gray-400 dark:text-[#808080] font-mono leading-relaxed whitespace-pre-wrap break-words bg-transparent">
-              {message.thinking}
-            </div>
-          </div>
-          {/* Abort button */}
-          {abortController && (
-            <button
-              onClick={() => {
-                abortController.abort();
-                setAbortController(null);
-                setMessages(prev => prev.filter(msg => msg.id !== message.id));
-                setIsLoading(false);
-              }}
-              className="mt-2 px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg transition-colors"
-            >
-              <XCircle className="w-3.5 h-3.5 inline mr-1" />
-              中断生成
-            </button>
-          )}
-        </div>
-      );
-    }
-    
-    // If no thinking content, show simple loading indicator
     return (
-      <div className="flex flex-col items-center justify-center py-4 px-4">
-        <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-[#b0b0b0]">
-          <Loader className="w-4 h-4 animate-spin" />
-          <span>思考中...</span>
+      <div className="flex flex-col items-start py-2">
+        <div className="flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400">
+          <Loader className="w-3.5 h-3.5 animate-spin" />
+          <span>正在生成...</span>
         </div>
         {/* Abort button */}
         {abortController && (
@@ -282,7 +254,7 @@ export const MessageContent: React.FC<MessageContentProps> = ({
               setMessages(prev => prev.filter(msg => msg.id !== message.id));
               setIsLoading(false);
             }}
-            className="mt-3 px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg transition-colors"
+            className="mt-2 px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
           >
             <XCircle className="w-3.5 h-3.5 inline mr-1" />
             中断生成
@@ -312,17 +284,9 @@ export const MessageContent: React.FC<MessageContentProps> = ({
   
   // Media content display (images, video, audio) - using thumbnail gallery
   const renderMedia = () => {
-    if (!message.media || message.media.length === 0) {
+    if (!galleryMedia || galleryMedia.length === 0) {
       return null;
     }
-    
-    // Convert to MediaGallery format
-    const galleryMedia: MediaItem[] = message.media.map(m => ({
-      type: m.type,
-      mimeType: m.mimeType,
-      data: m.data,
-      url: m.url,
-    }));
     
     return (
       <div className="mb-3">
@@ -344,10 +308,6 @@ export const MessageContent: React.FC<MessageContentProps> = ({
   if (message.role === 'tool' && message.toolType) {
     // MCP message uses dedicated MCPExecutionCard component
     if (message.toolType === 'mcp') {
-      const messageIndex = messages.findIndex(m => m.id === message.id);
-      const prevMessage = messageIndex > 0 ? messages[messageIndex - 1] : null;
-      const inputText = prevMessage?.content || '';
-
       return (
         <MCPExecutionCard
           messageId={message.id}
@@ -355,7 +315,7 @@ export const MessageContent: React.FC<MessageContentProps> = ({
           mcpServerId={message.workflowId || ''}
           status={message.workflowStatus || 'pending'}
           content={message.content}
-          inputText={inputText}
+          inputText={prevMessageContent || ''}
           onExecute={() => handleExecuteWorkflow(message.id)}
           onDelete={() => handleDeleteWorkflowMessage(message.id)}
         />
@@ -408,11 +368,7 @@ export const MessageContent: React.FC<MessageContentProps> = ({
                 输入
               </div>
               <div className="text-xs text-gray-600 dark:text-[#b0b0b0] text-center max-w-[120px] px-2 py-1 bg-gray-50 dark:bg-[#2d2d2d] rounded">
-                {(() => {
-                  const messageIndex = messages.findIndex(m => m.id === message.id);
-                  const prevMessage = messageIndex > 0 ? messages[messageIndex - 1] : null;
-                  return prevMessage?.content?.substring(0, 25) || '等待输入...';
-                })()}
+                {prevMessageContent?.substring(0, 25) || '等待输入...'}
               </div>
             </div>
             
@@ -663,53 +619,13 @@ export const MessageContent: React.FC<MessageContentProps> = ({
     );
   }
 
-  const isThinkingCollapsed = collapsedThinking.has(message.id);
-  const hasThinking = message.thinking && message.thinking.trim().length > 0;
-  const isThinkingActive = message.isThinking && message.isStreaming;
+  // Note: Thinking and MCP details are shown in MessageSidePanel (above message bubble).
+  // We don't render them here in MessageContent to avoid duplication.
+  // The collapsedThinking and toggleThinkingCollapse props are kept for API compatibility
+  // but not used here since thinking is now only displayed in the side panel.
 
   return (
     <div>
-      {hasThinking && (
-        <div className="mb-2">
-          {isThinkingCollapsed ? (
-            // Collapsed state: show small lightbulb button
-            <button
-              onClick={() => toggleThinkingCollapse(message.id)}
-              className="flex items-center space-x-1 text-[10px] text-gray-400 dark:text-[#808080] hover:text-gray-600 dark:hover:text-gray-400 transition-colors"
-              title="展开思考过程"
-            >
-              <Lightbulb className="w-3 h-3" />
-              <span>思考过程</span>
-            </button>
-          ) : (
-            // Expanded state: show thinking content
-            <div className="mb-2">
-              <button
-                onClick={() => toggleThinkingCollapse(message.id)}
-                className="flex items-center space-x-1 text-[10px] text-gray-400 dark:text-[#808080] hover:text-gray-600 dark:hover:text-gray-400 transition-colors mb-1"
-                title="折叠思考过程"
-              >
-                <Lightbulb className="w-3 h-3" />
-                <span>思考过程</span>
-              </button>
-              <div className="text-[11px] text-gray-400 dark:text-[#808080] font-mono leading-relaxed whitespace-pre-wrap break-words bg-transparent">
-                {message.thinking}
-                {isThinkingActive && (
-                  <span className="inline-block ml-1 w-1 h-1 bg-gray-400 dark:bg-gray-500 rounded-full animate-pulse"></span>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-      {/* If thinking but no thinking content yet, show streaming thinking indicator */}
-      {message.isThinking && !hasThinking && (
-        <div className="mb-2 text-[10px] text-gray-400 dark:text-[#808080] flex items-center space-x-1">
-          <Lightbulb className="w-3 h-3 animate-pulse" />
-          <span>思考中...</span>
-          <span className="inline-block w-1 h-1 bg-gray-400 dark:bg-gray-500 rounded-full animate-pulse"></span>
-        </div>
-      )}
       {/* Multimodal content display */}
       {renderMedia()}
       
@@ -731,14 +647,14 @@ export const MessageContent: React.FC<MessageContentProps> = ({
                     const [copied, setCopied] = useState(false);
                     
                     return (
-                      <div className="relative group my-3">
+                      <div className="relative group my-2">
                         {/* Language label */}
                         {language && (
-                          <div className="absolute top-2 left-2 text-xs text-gray-400 dark:text-[#808080] font-mono bg-gray-800/50 dark:bg-[#363636] px-2 py-0.5 rounded z-10">
+                          <div className="absolute top-1.5 left-2 text-xs text-gray-400 dark:text-[#808080] font-mono bg-gray-800/50 dark:bg-[#363636] px-2 py-0.5 rounded z-10">
                             {language}
                           </div>
                         )}
-                        <pre className="bg-gray-900 dark:bg-gray-950 text-gray-100 rounded-lg p-4 pt-8 overflow-x-auto border border-gray-700 dark:border-[#404040]">
+                        <pre className="bg-gray-900 dark:bg-gray-950 text-gray-100 rounded-lg p-3 pt-7 overflow-x-auto border border-gray-700 dark:border-[#404040]">
                           <code className={className} {...props}>
                             {children}
                           </code>
@@ -783,18 +699,18 @@ export const MessageContent: React.FC<MessageContentProps> = ({
                 }
               },
               // Paragraph styling
-              p: ({ children }: any) => <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>,
+              p: ({ children }: any) => <p className="mb-2 last:mb-0 leading-snug">{children}</p>,
               // Heading styling
-              h1: ({ children }: any) => <h1 className="text-2xl font-bold mt-4 mb-3 first:mt-0">{children}</h1>,
-              h2: ({ children }: any) => <h2 className="text-xl font-bold mt-4 mb-3 first:mt-0">{children}</h2>,
-              h3: ({ children }: any) => <h3 className="text-lg font-bold mt-3 mb-2 first:mt-0">{children}</h3>,
+              h1: ({ children }: any) => <h1 className="text-xl font-bold mt-3 mb-2 first:mt-0">{children}</h1>,
+              h2: ({ children }: any) => <h2 className="text-lg font-bold mt-3 mb-2 first:mt-0">{children}</h2>,
+              h3: ({ children }: any) => <h3 className="text-base font-bold mt-2 mb-1.5 first:mt-0">{children}</h3>,
               // List styling
-              ul: ({ children }: any) => <ul className="list-disc list-inside mb-3 space-y-1 ml-4">{children}</ul>,
-              ol: ({ children }: any) => <ol className="list-decimal list-inside mb-3 space-y-1 ml-4">{children}</ol>,
-              li: ({ children }: any) => <li className="leading-relaxed">{children}</li>,
+              ul: ({ children }: any) => <ul className="list-disc list-inside mb-2 space-y-0.5 ml-3">{children}</ul>,
+              ol: ({ children }: any) => <ol className="list-decimal list-inside mb-2 space-y-0.5 ml-3">{children}</ol>,
+              li: ({ children }: any) => <li className="leading-snug">{children}</li>,
               // Blockquote styling
               blockquote: ({ children }: any) => (
-                <blockquote className="border-l-4 border-primary-500 dark:border-primary-400 pl-4 my-3 italic text-gray-700 dark:text-[#ffffff]">
+                <blockquote className="border-l-4 border-primary-500 dark:border-primary-400 pl-3 my-2 italic text-gray-700 dark:text-[#ffffff]">
                   {children}
                 </blockquote>
               ),
@@ -811,7 +727,7 @@ export const MessageContent: React.FC<MessageContentProps> = ({
               ),
               // Table styling
               table: ({ children }: any) => (
-                <div className="overflow-x-auto my-3">
+                <div className="overflow-x-auto my-2">
                   <table className="min-w-full border-collapse border border-gray-300 dark:border-[#404040]">
                     {children}
                   </table>
@@ -825,17 +741,17 @@ export const MessageContent: React.FC<MessageContentProps> = ({
                 <tr className="border-b border-gray-200 dark:border-[#404040]">{children}</tr>
               ),
               th: ({ children }: any) => (
-                <th className="border border-gray-300 dark:border-[#404040] px-3 py-2 text-left font-semibold">
+                <th className="border border-gray-300 dark:border-[#404040] px-2 py-1.5 text-left font-semibold">
                   {children}
                 </th>
               ),
               td: ({ children }: any) => (
-                <td className="border border-gray-300 dark:border-[#404040] px-3 py-2">
+                <td className="border border-gray-300 dark:border-[#404040] px-2 py-1.5">
                   {children}
                 </td>
               ),
               // Horizontal rule
-              hr: () => <hr className="my-4 border-gray-300 dark:border-[#404040]" />,
+              hr: () => <hr className="my-3 border-gray-300 dark:border-[#404040]" />,
               // Emphasis styling
               strong: ({ children }: any) => <strong className="font-semibold">{children}</strong>,
               em: ({ children }: any) => <em className="italic">{children}</em>,
@@ -884,73 +800,31 @@ export const MessageContent: React.FC<MessageContentProps> = ({
                   imageSrc = `${backendUrl}${src}`;
                 }
                 
-                // Use independent component to manage state
-                const MarkdownImage = () => {
-                  const [status, setStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
-                  
-                  return (
-                    <span className="block my-3">
-                      {/* Loading state */}
-                      {status === 'loading' && (
-                        <div className="flex items-center justify-center bg-gray-100 dark:bg-[#2d2d2d] rounded-lg border border-gray-200 dark:border-[#404040] p-4 text-gray-500 dark:text-gray-400 text-sm" style={{ minHeight: '100px' }}>
-                          <div className="text-center">
-                            <div className="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
-                            <div>加载中...</div>
-                          </div>
-                        </div>
-                      )}
-                      
-                      {/* Load failed state */}
-                      {status === 'error' && (
-                        <div className="flex items-center justify-center bg-gray-100 dark:bg-[#2d2d2d] rounded-lg border border-gray-200 dark:border-[#404040] p-4 text-gray-500 dark:text-gray-400 text-sm" style={{ minHeight: '100px' }}>
-                          <div className="text-center">
-                            <svg className="w-8 h-8 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                            </svg>
-                            <div className="mb-1">图片加载失败</div>
-                            <div className="text-xs text-gray-400 mb-2">{alt || '未知图片'}</div>
-                            <a 
-                              href={imageSrc} 
-                              target="_blank" 
-                              rel="noopener noreferrer" 
-                              className="text-xs text-primary-500 hover:underline"
-                            >
-                              查看原链接
-                            </a>
-                          </div>
-                        </div>
-                      )}
-                      
-                      {/* Image - hidden until loaded */}
-                      <img
-                        src={imageSrc}
-                        alt={alt || '图片'}
-                        loading="lazy"
-                        className={`max-w-full h-auto rounded-lg border border-gray-200 dark:border-[#404040] cursor-pointer hover:opacity-90 transition-opacity ${status !== 'loaded' ? 'hidden' : ''}`}
-                        style={{ maxHeight: '400px', objectFit: 'contain' }}
-                        onLoad={() => setStatus('loaded')}
-                        onError={() => setStatus('error')}
-                        onClick={() => {
-                          // Click image to preview in new window
-                          const win = window.open('', '_blank');
-                          if (win) {
-                            win.document.write(`
-                              <html>
-                                <head><title>${alt || '图片预览'}</title></head>
-                                <body style="margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#000">
-                                  <img src="${imageSrc}" style="max-width:100%;max-height:100vh;object-fit:contain;" alt="${alt || '图片'}" />
-                                </body>
-                              </html>
-                            `);
-                          }
-                        }}
-                        {...props}
-                      />
-                    </span>
-                  );
-                };
-                
-                return <MarkdownImage />;
+                // Simple image rendering - no loading state to avoid UI complexity
+                return (
+                  <img
+                    src={imageSrc}
+                    alt={alt || '图片'}
+                    loading="lazy"
+                    className="max-w-full h-auto rounded-lg border border-gray-200 dark:border-[#404040] cursor-pointer hover:opacity-90 transition-opacity my-3"
+                    style={{ maxHeight: '400px', objectFit: 'contain' }}
+                    onClick={() => {
+                      // Click image to preview in new window
+                      const win = window.open('', '_blank');
+                      if (win) {
+                        win.document.write(`
+                          <html>
+                            <head><title>${alt || '图片预览'}</title></head>
+                            <body style="margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#000">
+                              <img src="${imageSrc}" style="max-width:100%;max-height:100vh;object-fit:contain;" alt="${alt || '图片'}" />
+                            </body>
+                          </html>
+                        `);
+                      }
+                    }}
+                    {...props}
+                  />
+                );
               },
             }}
           >
@@ -965,5 +839,47 @@ export const MessageContent: React.FC<MessageContentProps> = ({
     </div>
   );
 };
+
+/**
+ * Custom comparison function for React.memo
+ * Prevents unnecessary re-renders by comparing only the relevant props
+ */
+const arePropsEqual = (
+  prevProps: MessageContentProps,
+  nextProps: MessageContentProps
+): boolean => {
+  // Compare message by reference first (fast path)
+  if (prevProps.message === nextProps.message) {
+    // If message is the same, check other props that might change
+    return (
+      prevProps.prevMessageContent === nextProps.prevMessageContent &&
+      prevProps.collapsedThinking === nextProps.collapsedThinking
+    );
+  }
+  
+  // If message reference changed, compare key fields that affect rendering
+  const pm = prevProps.message;
+  const nm = nextProps.message;
+  
+  return (
+    pm.id === nm.id &&
+    pm.content === nm.content &&
+    pm.role === nm.role &&
+    pm.thinking === nm.thinking &&
+    pm.isStreaming === nm.isStreaming &&
+    pm.isThinking === nm.isThinking &&
+    pm.currentStep === nm.currentStep &&
+    pm.workflowStatus === nm.workflowStatus &&
+    pm.media === nm.media &&
+    prevProps.prevMessageContent === nextProps.prevMessageContent &&
+    prevProps.collapsedThinking === nextProps.collapsedThinking
+  );
+};
+
+/**
+ * Memoized MessageContent component
+ * Prevents unnecessary re-renders when parent component updates
+ */
+export const MessageContent = React.memo(MessageContentInner, arePropsEqual);
 
 export default MessageContent;

@@ -70,6 +70,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // MCP OAuth (打开外部浏览器)
   mcpOAuthOpenExternal: (params: { authorizationUrl: string }) => 
     ipcRenderer.invoke('mcp-oauth-open-external', params),
+
+  // ============================================================================
+  // MCP Runner（stdio 本地进程）
+  // ============================================================================
+
+  mcpRunnerStart: (params: { serverId: string; command: string; args?: string[]; env?: Record<string, string>; cwd?: string }) =>
+    ipcRenderer.invoke('mcp-runner-start', params),
+  mcpRunnerStop: (params: { serverId: string }) =>
+    ipcRenderer.invoke('mcp-runner-stop', params),
+  mcpRunnerListTools: (params: { serverId: string; forceRefresh?: boolean }) =>
+    ipcRenderer.invoke('mcp-runner-list-tools', params),
+  mcpRunnerCallTool: (params: { serverId: string; toolName: string; args: Record<string, any>; timeoutMs?: number }) =>
+    ipcRenderer.invoke('mcp-runner-call-tool', params),
   
   // Notion OAuth (保留向后兼容)
   notionOAuthAuthorize: (authorizationUrl: string) => 
@@ -153,6 +166,14 @@ export interface ElectronAPI {
   mcpOAuthAuthorize: (params: { authorizationUrl: string; windowTitle?: string }) => Promise<{ code: string; state: string }>;
   mcpOAuthOpenExternal: (params: { authorizationUrl: string }) => Promise<{ success: boolean }>;
   notionOAuthAuthorize: (authorizationUrl: string) => Promise<{ code: string; state: string }>;
+
+  // ============================================================================
+  // MCP Runner（stdio）
+  // ============================================================================
+  mcpRunnerStart: (params: { serverId: string; command: string; args?: string[]; env?: Record<string, string>; cwd?: string }) => Promise<{ success: boolean; error?: string }>;
+  mcpRunnerStop: (params: { serverId: string }) => Promise<{ success: boolean; error?: string }>;
+  mcpRunnerListTools: (params: { serverId: string; forceRefresh?: boolean }) => Promise<{ tools: any[] }>;
+  mcpRunnerCallTool: (params: { serverId: string; toolName: string; args: Record<string, any>; timeoutMs?: number }) => Promise<{ result: any; isError?: boolean }>;
   
   // ============================================================================
   // 窗口控制

@@ -203,6 +203,51 @@ def create_tables():
                 print("  ✓ Column 'ext' already exists")
         except Exception as e:
             print(f"  ⚠ Warning: Could not check/add 'ext' column: {e}")
+
+        # MCP Market Sources 表（市场源配置）
+        create_mcp_market_sources_table = """
+        CREATE TABLE IF NOT EXISTS `mcp_market_sources` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `source_id` VARCHAR(150) NOT NULL UNIQUE COMMENT '市场源ID',
+            `display_name` VARCHAR(255) NOT NULL COMMENT '显示名称',
+            `type` VARCHAR(50) NOT NULL COMMENT '源类型: github_repo/http_json/html_scrape',
+            `enabled` TINYINT(1) DEFAULT 1 COMMENT '是否启用',
+            `config` JSON DEFAULT NULL COMMENT '源配置(JSON)',
+            `sync_interval_seconds` INT DEFAULT 3600 COMMENT '同步间隔(秒)',
+            `last_sync_at` BIGINT DEFAULT NULL COMMENT '上次同步时间戳(秒)',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+            INDEX `idx_source_enabled` (`enabled`),
+            INDEX `idx_source_type` (`type`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='MCP 市场源配置表';
+        """
+        cursor.execute(create_mcp_market_sources_table)
+        print("✓ Table 'mcp_market_sources' created/verified successfully")
+
+        # MCP Market Items 表（市场条目缓存）
+        create_mcp_market_items_table = """
+        CREATE TABLE IF NOT EXISTS `mcp_market_items` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `item_id` VARCHAR(255) NOT NULL UNIQUE COMMENT '条目ID(全局唯一)',
+            `source_id` VARCHAR(150) NOT NULL COMMENT '来源source_id',
+            `name` VARCHAR(255) NOT NULL COMMENT '名称',
+            `description` TEXT DEFAULT NULL COMMENT '描述',
+            `runtime_type` VARCHAR(50) NOT NULL COMMENT '运行形态: local_stdio/remote_http',
+            `homepage` TEXT DEFAULT NULL COMMENT '主页',
+            `tags` JSON DEFAULT NULL COMMENT '标签列表',
+            `remote` JSON DEFAULT NULL COMMENT 'remote_http 配置',
+            `stdio` JSON DEFAULT NULL COMMENT 'local_stdio 配置',
+            `raw` JSON DEFAULT NULL COMMENT '原始数据(调试/追溯)',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+            INDEX `idx_item_source` (`source_id`),
+            INDEX `idx_item_runtime` (`runtime_type`),
+            INDEX `idx_item_name` (`name`),
+            INDEX `idx_item_updated` (`updated_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='MCP 市场条目缓存表';
+        """
+        cursor.execute(create_mcp_market_items_table)
+        print("✓ Table 'mcp_market_items' created/verified successfully")
         
         # 创建 OAuth tokens 表
         create_oauth_tokens_table = """

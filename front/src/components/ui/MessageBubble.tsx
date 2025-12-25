@@ -51,8 +51,8 @@ export function getMessageBubbleClasses(
     'transition-all duration-200',
     // assistant 和 tool 消息全屏显示，减少圆角和内边距
     role === 'assistant' || role === 'tool' 
-      ? 'rounded-none px-4 py-3' 
-      : cn('rounded-lg', compact ? 'px-3 py-2' : 'p-2.5'),
+      ? 'rounded-none px-3 py-2' 
+      : cn('rounded-lg', compact ? 'px-2 py-1.5' : 'p-2'),
     // 圆角方向（仅对非 assistant/tool 消息生效）
     role !== 'assistant' && role !== 'tool' && cornerDirection === 'tl' && 'rounded-tl-none',
     role !== 'assistant' && role !== 'tool' && cornerDirection === 'tr' && 'rounded-tr-none',
@@ -62,7 +62,7 @@ export function getMessageBubbleClasses(
   
   // 角色特定样式 - 统一配色方案
   const roleClasses = {
-    user: 'bg-primary-50 dark:bg-primary-900/20 text-gray-900 dark:text-white shadow-sm hover:shadow-md',
+    user: 'bg-gray-100 dark:bg-[#3a3a3a] text-gray-900 dark:text-white shadow-sm hover:shadow-md',
     assistant: 'bg-white/60 dark:bg-[#2d2d2d]/60 backdrop-blur-md text-gray-900 dark:text-white',
     system: 'bg-yellow-50 dark:bg-yellow-900/20 text-gray-700 dark:text-white shadow-sm',
     tool: getToolClasses(toolType),

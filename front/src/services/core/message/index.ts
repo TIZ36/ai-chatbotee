@@ -19,3 +19,20 @@ export {
   initMessageStore,
   type MessageStoreStatus,
 } from './MessageStore';
+
+// MessageManager - 高效消息获取和缓存管理
+export {
+  MessageManager,
+  createMessageManager,
+  type MessageManagerOptions,
+  type MessageState,
+  type MediaState,
+} from './MessageManager';
+
+// React Hooks
+export {
+  useMessageManager,
+  useMediaMessages,
+  type UseMessageManagerResult,
+  type UseMediaMessagesResult,
+} from './useMessageManager';

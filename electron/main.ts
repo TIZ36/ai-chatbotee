@@ -10,6 +10,111 @@ import { spawn, ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 import * as pty from 'node-pty';
 
+// ============================================================================
+// MCP Runner（stdio 本地进程）- 运行时管理
+// ============================================================================
+
+type StdioRunnerState = {
+  serverId: string;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  cwd?: string;
+  client: any | null;
+  transport: any | null;
+  startedAt: number;
+  toolsCache?: any[];
+  toolsCacheAt?: number;
+};
+
+const stdioRunners: Map<string, StdioRunnerState> = new Map();
+
+async function loadMcpClientSdk(): Promise<{ Client: any; StdioTransport: any }> {
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+  // 不同版本 SDK 的导出路径可能不同：做兼容探测
+  const candidates = [
+    '@modelcontextprotocol/sdk/client/stdio.js',
+    '@modelcontextprotocol/sdk/client/stdio/index.js',
+    '@modelcontextprotocol/sdk/client/stdio',
+  ];
+  let StdioTransport: any = null;
+  for (const c of candidates) {
+    try {
+      const mod: any = await import(c);
+      StdioTransport = mod.StdioClientTransport || mod.StdioTransport || mod.default || null;
+      if (StdioTransport) break;
+    } catch {
+      // try next
+    }
+  }
+  if (!StdioTransport) {
+    throw new Error('Failed to load MCP stdio client transport from @modelcontextprotocol/sdk');
+  }
+  return { Client, StdioTransport };
+}
+
+async function ensureRunnerStarted(params: { serverId: string; command: string; args?: string[]; env?: Record<string, string>; cwd?: string }) {
+  const serverId = params.serverId;
+  const existing = stdioRunners.get(serverId);
+  if (existing && existing.client) {
+    return existing;
+  }
+
+  const command = params.command;
+  const args = params.args || [];
+  const env = params.env || {};
+
+  const { Client, StdioTransport } = await loadMcpClientSdk();
+
+  const transport = new StdioTransport({
+    command,
+    args,
+    env: { ...process.env, ...env },
+    cwd: params.cwd,
+  });
+
+  const client = new Client(
+    { name: 'chatee-electron', version: '1.0.0' },
+    { capabilities: { tools: {} } }
+  );
+
+  await client.connect(transport);
+
+  const state: StdioRunnerState = {
+    serverId,
+    command,
+    args,
+    env,
+    cwd: params.cwd,
+    client,
+    transport,
+    startedAt: Date.now(),
+  };
+  stdioRunners.set(serverId, state);
+
+  return state;
+}
+
+async function stopRunner(serverId: string) {
+  const state = stdioRunners.get(serverId);
+  if (!state) return;
+  try {
+    if (state.client) {
+      await state.client.close();
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    if (state.transport?.close) {
+      await state.transport.close();
+    }
+  } catch {
+    // ignore
+  }
+  stdioRunners.delete(serverId);
+}
+
 // 配置存储路径
 const CONFIG_FILE = path.join(app.getPath('userData'), 'backend-config.json');
 
@@ -1200,6 +1305,74 @@ ipcMain.handle('mcp-oauth-open-external', async (_, params: { authorizationUrl: 
     throw error;
   }
 });
+
+// ============================================================================
+// IPC处理程序 - MCP Runner（stdio 本地进程）
+// ============================================================================
+
+ipcMain.handle(
+  'mcp-runner-start',
+  async (_, params: { serverId: string; command: string; args?: string[]; env?: Record<string, string>; cwd?: string }) => {
+    try {
+      await ensureRunnerStarted(params);
+      return { success: true };
+    } catch (error: any) {
+      console.error('[MCP Runner] start failed:', error);
+      return { success: false, error: error?.message || String(error) };
+    }
+  }
+);
+
+ipcMain.handle('mcp-runner-stop', async (_, params: { serverId: string }) => {
+  try {
+    await stopRunner(params.serverId);
+    return { success: true };
+  } catch (error: any) {
+    console.error('[MCP Runner] stop failed:', error);
+    return { success: false, error: error?.message || String(error) };
+  }
+});
+
+ipcMain.handle('mcp-runner-list-tools', async (_, params: { serverId: string; forceRefresh?: boolean }) => {
+  const state = stdioRunners.get(params.serverId);
+  if (!state || !state.client) {
+    throw new Error(`Runner not started for serverId=${params.serverId}`);
+  }
+
+  const ttlMs = 5 * 60 * 1000;
+  const now = Date.now();
+  if (!params.forceRefresh && state.toolsCache && state.toolsCacheAt && now - state.toolsCacheAt < ttlMs) {
+    return { tools: state.toolsCache };
+  }
+
+  const result = await state.client.listTools();
+  const tools = result?.tools || [];
+  state.toolsCache = tools;
+  state.toolsCacheAt = now;
+  return { tools };
+});
+
+ipcMain.handle(
+  'mcp-runner-call-tool',
+  async (
+    _,
+    params: { serverId: string; toolName: string; args: Record<string, any>; timeoutMs?: number }
+  ) => {
+    const state = stdioRunners.get(params.serverId);
+    if (!state || !state.client) {
+      throw new Error(`Runner not started for serverId=${params.serverId}`);
+    }
+
+    const timeoutMs = params.timeoutMs || 60000;
+    const callPromise = state.client.callTool({ name: params.toolName, arguments: params.args });
+    const result = await Promise.race([
+      callPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Tool call timeout')), timeoutMs)),
+    ]);
+
+    return { result: result?.content ?? result, isError: !!result?.isError };
+  }
+);
 
 // IPC处理程序 - Notion OAuth 授权（保留向后兼容，调用通用处理函数）
 ipcMain.handle('notion-oauth-authorize', async (_, authorizationUrl: string) => {

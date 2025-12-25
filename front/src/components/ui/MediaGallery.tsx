@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Download, Play, Volume2, Film, Music, ZoomIn, ChevronUp, ChevronDown } from 'lucide-react';
 import { resolveMediaSrc } from '@/utils/mediaSrc';
@@ -52,6 +52,24 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
   const panelRef = useRef<HTMLDivElement>(null);
 
   const safeMedia = media ?? EMPTY_MEDIA;
+  
+  // 构造稳定的 preloadKey，避免父组件重渲染造成 media 数组引用变化时重复 preload/decode
+  const preloadKey = useMemo(() => {
+    if (!safeMedia || safeMedia.length === 0) return '';
+    const maxPreload = Math.min(safeMedia.length, Math.max(12, maxVisible * 2));
+    const parts: string[] = [];
+    for (let i = 0; i < maxPreload; i++) {
+      const item = safeMedia[i];
+      if (!item) continue;
+      const id = item.url
+        ? `u:${item.url}`
+        : item.data
+          ? `b:${item.mimeType || ''}:${item.data.length}:${item.data.slice(0, 16)}`
+          : `e:${item.mimeType || ''}`;
+      parts.push(`${item.type}:${id}`);
+    }
+    return parts.join('|');
+  }, [safeMedia, maxVisible]);
 
   // 预渲染（预加载+预解码）：缩略图出现时，后台预热"即将打开媒体库"的图片
   // 为避免内存/CPU 压力，仅预热前一小段（可按需调大）
@@ -71,7 +89,7 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
       // fire-and-forget
       void preloadImage(src, { decode: true });
     }
-  }, [safeMedia, maxVisible]);
+  }, [preloadKey, maxVisible]);
 
   // 键盘导航
   useEffect(() => {

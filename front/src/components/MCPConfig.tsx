@@ -32,6 +32,12 @@ import {
   updateMCPServer, 
   deleteMCPServer, 
   MCPServerConfig,
+  getMCPMarketSources,
+  syncMCPMarketSource,
+  searchMCPMarket,
+  installMCPMarketItem,
+  MCPMarketSource,
+  MCPMarketItemSummary,
   discoverMCPOAuth,
   authorizeMCPOAuth,
   registerNotionClient,
@@ -78,6 +84,15 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
   // 已连接的客户端实例
   const [connectedClients, setConnectedClients] = useState<Map<string, MCPClient>>(new Map());
 
+  // 市场（Market）状态
+  const [marketSources, setMarketSources] = useState<MCPMarketSource[]>([]);
+  const [selectedSourceId, setSelectedSourceId] = useState<string>('');
+  const [marketQuery, setMarketQuery] = useState('');
+  const [marketLoading, setMarketLoading] = useState(false);
+  const [marketSyncing, setMarketSyncing] = useState(false);
+  const [marketItems, setMarketItems] = useState<MCPMarketItemSummary[]>([]);
+  const [marketTotal, setMarketTotal] = useState(0);
+
   // 清理连接的辅助函数
   const cleanupConnection = (serverId: string) => {
     const client = connectedClients.get(serverId);
@@ -95,6 +110,89 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
   useEffect(() => {
     loadServers();
   }, []);
+
+  // 加载市场源
+  useEffect(() => {
+    (async () => {
+      try {
+        const sources = await getMCPMarketSources();
+        setMarketSources(sources);
+        if (sources.length > 0) {
+          setSelectedSourceId(sources[0].source_id);
+        }
+      } catch (e) {
+        // 市场 API 不可用不影响主功能
+        console.warn('[MCP Market] Failed to load sources:', e);
+      }
+    })();
+  }, []);
+
+  const handleMarketSync = async () => {
+    if (!selectedSourceId) {
+      toast({ title: '请先选择一个市场源', variant: 'destructive' });
+      return;
+    }
+    setMarketSyncing(true);
+    try {
+      const res = await syncMCPMarketSource(selectedSourceId, true);
+      toast({
+        title: '同步完成',
+        description: `新增 ${res.inserted || 0}，更新 ${res.updated || 0}，总计 ${res.count || 0}`,
+        variant: 'success',
+      });
+    } catch (e: any) {
+      toast({
+        title: '同步失败',
+        description: e?.message || String(e),
+        variant: 'destructive',
+      });
+    } finally {
+      setMarketSyncing(false);
+    }
+  };
+
+  const handleMarketSearch = async () => {
+    setMarketLoading(true);
+    try {
+      const res = await searchMCPMarket({
+        q: marketQuery.trim(),
+        source_id: selectedSourceId || undefined,
+        runtime_type: 'local_stdio',
+        limit: 50,
+        offset: 0,
+      });
+      setMarketItems(res.items || []);
+      setMarketTotal(res.total || 0);
+    } catch (e: any) {
+      toast({
+        title: '搜索失败',
+        description: e?.message || String(e),
+        variant: 'destructive',
+      });
+    } finally {
+      setMarketLoading(false);
+    }
+  };
+
+  const handleMarketInstall = async (item: MCPMarketItemSummary) => {
+    try {
+      const res = await installMCPMarketItem(item.item_id, {
+        name: item.name,
+      });
+      toast({
+        title: '已安装',
+        description: `已创建服务器：${res.server_id}`,
+        variant: 'success',
+      });
+      await loadServers();
+    } catch (e: any) {
+      toast({
+        title: '安装失败',
+        description: e?.message || String(e),
+        variant: 'destructive',
+      });
+    }
+  };
 
   // OAuth 回调现在由后端处理，不再需要前端处理
 
@@ -574,6 +672,37 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
     try {
       console.log(`[MCP Config] Testing connection to ${server.name} (${server.url})`);
       console.log(`[MCP Config] Server metadata:`, JSON.stringify(server.metadata, null, 2));
+
+      // stdio：通过 Electron main 的 MCP runner 测试
+      if (server.type === 'stdio') {
+        if (!isElectron() || !(window as any).electronAPI?.mcpRunnerStart) {
+          throw new Error('stdio MCP 仅支持在 Electron 环境运行');
+        }
+        const stdioCfg = server.ext?.stdio || {};
+        const command = (stdioCfg as any).command || 'npx';
+        const args = (stdioCfg as any).args || [];
+        const env = (stdioCfg as any).env || {};
+        const cwd = (stdioCfg as any).cwd;
+
+        const startRes = await (window as any).electronAPI.mcpRunnerStart({
+          serverId: server.id,
+          command,
+          args,
+          env,
+          cwd,
+        });
+        if (!startRes?.success) {
+          throw new Error(startRes?.error || 'Failed to start stdio runner');
+        }
+
+        setTestResults(prev => new Map(prev).set(server.id, {
+          success: true,
+          message: `stdio runner 启动成功`,
+          connected: true,
+        }));
+
+        return;
+      }
       
       // 检查metadata中的headers
       if (server.metadata?.headers) {
@@ -755,6 +884,97 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
       description="选择公开的 MCP 服务器或添加自定义服务器"
       icon={Plug}
     >
+      {/* MCP 市场 */}
+      <Section
+        title="MCP 市场"
+        description="搜索并一键安装（第一版：优先支持官方 servers 目录的 stdio 服务器）"
+        className="mb-6"
+      >
+        <div className="space-y-3">
+          <div className="flex flex-col md:flex-row gap-2">
+            <div className="flex-1">
+              <InputField
+                label="搜索"
+                inputProps={{
+                  value: marketQuery,
+                  onChange: (e) => setMarketQuery(e.target.value),
+                  placeholder: '例如：@modelcontextprotocol/server-github',
+                }}
+              />
+            </div>
+
+            <div className="min-w-[220px]">
+              <label className="block text-xs font-mono tracking-wide text-mutedToken-foreground mb-1">
+                市场源
+              </label>
+              <Select value={selectedSourceId} onValueChange={setSelectedSourceId}>
+                <SelectTrigger className="input-field">
+                  <SelectValue placeholder="选择市场源" />
+                </SelectTrigger>
+                <SelectContent>
+                  {marketSources.map((s) => (
+                    <SelectItem key={s.source_id} value={s.source_id}>
+                      {s.display_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" onClick={handleMarketSync} disabled={marketSyncing || !selectedSourceId}>
+              {marketSyncing ? '同步中...' : '同步市场源'}
+            </Button>
+            <Button variant="primary" onClick={handleMarketSearch} disabled={marketLoading}>
+              {marketLoading ? '搜索中...' : '搜索'}
+            </Button>
+            <div className="text-xs text-gray-500 dark:text-gray-400">
+              {marketTotal > 0 ? `共 ${marketTotal} 条，展示 ${marketItems.length} 条` : ''}
+            </div>
+          </div>
+
+          {marketItems.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {marketItems.map((item) => (
+                <div
+                  key={item.item_id}
+                  className="bg-white dark:bg-[#363636] border border-gray-200 dark:border-[#505050] rounded-lg p-3"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                        {item.name}
+                      </div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">
+                        {item.description || '—'}
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        <span className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 px-2 py-0.5 rounded">
+                          {item.runtime_type}
+                        </span>
+                        {(item.tags || []).slice(0, 6).map((t) => (
+                          <span
+                            key={t}
+                            className="text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded"
+                          >
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <Button variant="primary" size="sm" onClick={() => handleMarketInstall(item)}>
+                        安装
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </Section>
       {/* 公开 MCP 服务器 */}
       <Section title="公开 MCP 服务器" description="一键连接热门 MCP 服务"  className="mb-6">
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">

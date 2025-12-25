@@ -294,3 +294,75 @@ class MessageRepository:
             if conn:
                 conn.close()
             return 0
+    
+    def delete_after(self, session_id: str, message_id: str) -> int:
+        """
+        删除指定消息之后的所有消息（用于回退功能）
+        
+        Args:
+            session_id: 会话ID
+            message_id: 从此消息之后开始删除（不包含此消息）
+            
+        Returns:
+            删除的消息数量
+        """
+        conn = self.get_connection()
+        if not conn:
+            return 0
+        
+        try:
+            cursor = conn.cursor()
+            # 先获取指定消息的 created_at
+            cursor.execute(
+                "SELECT created_at FROM messages WHERE message_id = %s AND session_id = %s",
+                (message_id, session_id)
+            )
+            row = cursor.fetchone()
+            if not row:
+                cursor.close()
+                conn.close()
+                return 0
+            
+            created_at = row[0]
+            
+            # 删除 created_at 大于指定消息的所有消息
+            cursor.execute(
+                "DELETE FROM messages WHERE session_id = %s AND created_at > %s",
+                (session_id, created_at)
+            )
+            conn.commit()
+            affected = cursor.rowcount
+            cursor.close()
+            conn.close()
+            return affected
+        except Exception as e:
+            print(f"[MessageRepository] Error deleting after: {e}")
+            if conn:
+                conn.close()
+            return 0
+    
+    def find_latest(self, session_id: str) -> Optional[Message]:
+        """获取会话的最新消息"""
+        conn = self.get_connection()
+        if not conn:
+            return None
+        
+        try:
+            import pymysql
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute(
+                "SELECT * FROM messages WHERE session_id = %s ORDER BY created_at DESC LIMIT 1",
+                (session_id,)
+            )
+            row = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if row:
+                return Message.from_db_row(row)
+            return None
+        except Exception as e:
+            print(f"[MessageRepository] Error finding latest: {e}")
+            if conn:
+                conn.close()
+            return None

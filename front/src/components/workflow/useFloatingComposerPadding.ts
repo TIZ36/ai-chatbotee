@@ -10,9 +10,9 @@ type Options = {
 };
 
 export function useFloatingComposerPadding(options?: Options) {
-  const minPadding = options?.minPadding ?? 160;
-  const extraPadding = options?.extraPadding ?? 24;
-  const initialPadding = options?.initialPadding ?? 220;
+  const minPadding = options?.minPadding ?? 120;
+  const extraPadding = options?.extraPadding ?? 20;
+  const initialPadding = options?.initialPadding ?? 140;
 
   const ref = useRef<HTMLDivElement>(null);
   const [padding, setPadding] = useState(initialPadding);

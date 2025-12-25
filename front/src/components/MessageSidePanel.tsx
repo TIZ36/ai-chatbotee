@@ -191,7 +191,7 @@ const renderThinkingWithCitations = (content: string, citations: MCPCitation[]):
   return parts.length > 0 ? <>{parts}</> : content;
 };
 
-/** 思考过程区块组件 */
+/** 思考过程区块组件 - 扁平化设计，虚线边框 */
 const ThinkingBlock: React.FC<{
   content: string;
   index?: number;
@@ -200,16 +200,15 @@ const ThinkingBlock: React.FC<{
   isThinking?: boolean;
   mcpCitations?: MCPCitation[];
 }> = ({ content, index, isExpanded, onToggle, isThinking, mcpCitations = [] }) => (
-  <div className="bg-white dark:bg-[#252525] rounded-lg border border-gray-200 dark:border-[#404040] overflow-hidden">
+  <div className="border-l-2 border-dashed border-purple-300 dark:border-purple-700 pl-3 py-1">
+    {/* 标题行 */}
     <button
       onClick={onToggle}
-      className="w-full px-3 py-2 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-[#2d2d2d] transition-colors"
+      className="w-full flex items-center justify-between hover:bg-purple-50/50 dark:hover:bg-purple-900/10 transition-colors py-1 -ml-1 pl-1 rounded"
     >
       <div className="flex items-center space-x-2">
-        <div className="p-1 bg-purple-100 dark:bg-purple-900/30 rounded">
-          <Lightbulb className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
-        </div>
-        <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
+        <Lightbulb className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400 flex-shrink-0" />
+        <span className="text-xs font-medium text-purple-700 dark:text-purple-300">
           思考过程 {index !== undefined && index > 0 ? `#${index + 1}` : ''}
         </span>
         {mcpCitations.length > 0 && (
@@ -218,34 +217,34 @@ const ThinkingBlock: React.FC<{
           </span>
         )}
         {isThinking && (
-          <div className="flex items-center space-x-1">
-            <div className="w-1.5 h-1.5 bg-purple-500 rounded-full animate-pulse" />
+          <span className="flex items-center space-x-1">
+            <span className="w-1.5 h-1.5 bg-purple-500 rounded-full animate-pulse" />
             <span className="text-[10px] text-purple-500 dark:text-purple-400">思考中...</span>
-          </div>
+          </span>
         )}
       </div>
       {isExpanded ? (
-        <ChevronUp className="w-4 h-4 text-gray-400" />
+        <ChevronUp className="w-3.5 h-3.5 text-gray-400" />
       ) : (
-        <ChevronDown className="w-4 h-4 text-gray-400" />
+        <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
       )}
     </button>
     
     {isExpanded && content && (
-      <div className="px-3 pb-3 border-t border-gray-100 dark:border-[#333]">
-        <div className="mt-2 text-[11px] text-gray-600 dark:text-gray-400 font-mono leading-relaxed whitespace-pre-wrap break-words max-h-60 overflow-y-auto thinking-gradient p-2 rounded">
+      <div className="mt-2 pl-1">
+        <div className="text-[11px] text-gray-600 dark:text-gray-400 font-mono leading-relaxed whitespace-pre-wrap break-words max-h-[500px] overflow-y-auto thinking-gradient bg-purple-50/50 dark:bg-purple-900/10 p-2 rounded border-l border-purple-200 dark:border-purple-700">
           {renderThinkingWithCitations(content, mcpCitations)}
         </div>
         
         {/* 引用列表（如果有） */}
         {mcpCitations.length > 0 && (
-          <div className="mt-2 pt-2 border-t border-gray-100 dark:border-[#333]">
+          <div className="mt-2 pt-2 border-t border-dashed border-purple-200 dark:border-purple-800">
             <div className="text-[10px] text-gray-500 dark:text-gray-400 mb-1">引用的工具:</div>
             <div className="flex flex-wrap gap-1">
               {mcpCitations.map(c => (
                 <span 
                   key={c.index}
-                  className="inline-flex items-center text-[9px] px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded"
+                  className="inline-flex items-center text-[9px] px-1.5 py-0.5 bg-emerald-100/60 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded"
                 >
                   <span className="font-bold mr-1">[{c.index}]</span>
                   {c.mcpServer ? `${c.mcpServer}-` : ''}{c.toolName}
@@ -276,7 +275,7 @@ const formatData = (data: any, maxLength: number = 500): string => {
   return formatted.length > maxLength ? formatted.substring(0, maxLength) + '\n... (数据已截断)' : formatted;
 };
 
-/** MCP 调用区块组件 */
+/** MCP 调用区块组件 - 扁平化设计，虚线边框 */
 const MCPCallBlock: React.FC<{
   mcpServer?: string;
   toolName?: string;
@@ -294,87 +293,79 @@ const MCPCallBlock: React.FC<{
   const displayName = `${mcpServer ? `mcp-${mcpServer}` : 'MCP'}-${toolName || 'tool'}`;
   
   return (
-    <div className="bg-white dark:bg-[#252525] rounded-lg border border-gray-200 dark:border-[#404040] overflow-hidden mcp-call-block" data-citation={citationIndex}>
+    <div className="border-l-2 border-dashed border-emerald-300 dark:border-emerald-700 pl-3 py-1 mcp-call-block" data-citation={citationIndex}>
+      {/* 标题行 */}
       <button
         onClick={onToggle}
-        className="w-full px-3 py-2 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-[#2d2d2d] transition-colors"
+        className="w-full flex items-center justify-between hover:bg-emerald-50/50 dark:hover:bg-emerald-900/10 transition-colors py-1 -ml-1 pl-1 rounded"
       >
         <div className="flex items-center space-x-2 flex-1 min-w-0">
-          <div className="p-1 bg-emerald-100 dark:bg-emerald-900/30 rounded flex-shrink-0">
-            <Plug className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-          </div>
+          <Plug className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
           {/* 引用标识 */}
           {citationLabel && (
-            <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/50 px-1.5 py-0.5 rounded flex-shrink-0">
+            <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100/60 dark:bg-emerald-900/40 px-1 py-0.5 rounded flex-shrink-0">
               {citationLabel}
             </span>
           )}
-          <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">
+          <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300 truncate">
             {displayName}
           </span>
           {status === 'pending' && (
-            <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded flex-shrink-0">
-              等待中
-            </span>
+            <span className="text-[10px] text-gray-500 dark:text-gray-400 flex-shrink-0">等待中</span>
           )}
           {status === 'running' && (
-            <div className="flex items-center space-x-1 flex-shrink-0">
+            <span className="flex items-center space-x-1 flex-shrink-0">
               <Loader className="w-3 h-3 text-emerald-500 animate-spin" />
               <span className="text-[10px] text-emerald-500">执行中</span>
-            </div>
+            </span>
           )}
           {status === 'completed' && (
-            <div className="flex items-center space-x-1 flex-shrink-0">
+            <span className="flex items-center space-x-1 flex-shrink-0">
               <CheckCircle className="w-3 h-3 text-green-500" />
-              <span className="text-[10px] text-green-500">完成</span>
-            </div>
+              <span className="text-[10px] text-green-500">{duration ? `${duration}ms` : '完成'}</span>
+            </span>
           )}
           {status === 'error' && (
-            <div className="flex items-center space-x-1 flex-shrink-0">
+            <span className="flex items-center space-x-1 flex-shrink-0">
               <AlertCircle className="w-3 h-3 text-red-500" />
               <span className="text-[10px] text-red-500">失败</span>
-            </div>
-          )}
-          {duration !== undefined && duration > 0 && (
-            <span className="text-[10px] text-gray-400 flex-shrink-0">{duration}ms</span>
+            </span>
           )}
         </div>
         {isExpanded ? (
-          <ChevronUp className="w-4 h-4 text-gray-400 flex-shrink-0" />
+          <ChevronUp className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
         ) : (
-          <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
+          <ChevronDown className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
         )}
       </button>
       
       {isExpanded && (
-        <div className="px-3 pb-3 border-t border-gray-100 dark:border-[#333] space-y-2">
+        <div className="mt-2 space-y-2 text-[11px]">
           {/* 调用参数 */}
-          <div className="mt-2 p-2 bg-gray-50 dark:bg-[#1e1e1e] rounded border border-gray-200 dark:border-[#333]">
-            <div className="flex items-center space-x-1 mb-1">
-              <Wrench className="w-3 h-3 text-gray-500" />
-              <span className="text-[10px] font-medium text-gray-500 dark:text-gray-400">调用参数</span>
+          <div className="pl-1">
+            <div className="flex items-center space-x-1 mb-1 text-gray-500 dark:text-gray-400">
+              <Wrench className="w-3 h-3" />
+              <span className="text-[10px] font-medium">调用参数</span>
             </div>
-            <div className="text-[10px] text-gray-600 dark:text-gray-400 font-mono whitespace-pre-wrap break-words max-h-48 overflow-y-auto">
-              {call ? formatData(call, 800) : <span className="text-gray-400 italic">无参数</span>}
+            <div className="text-gray-600 dark:text-gray-400 font-mono whitespace-pre-wrap break-words max-h-[300px] overflow-y-auto bg-gray-50/50 dark:bg-gray-900/30 p-2 rounded border-l border-gray-200 dark:border-gray-700">
+              {call ? formatData(call, 2000) : <span className="text-gray-400 italic">无参数</span>}
             </div>
           </div>
           
           {/* 返回结果 */}
-          <div className={`p-2 rounded border ${
-            status === 'error' 
-              ? 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-800/30'
-              : 'bg-emerald-50 dark:bg-emerald-900/10 border-emerald-200 dark:border-emerald-800/30'
-          }`}>
-            <div className="flex items-center space-x-1 mb-1">
-              <ArrowRight className={`w-3 h-3 ${status === 'error' ? 'text-red-500' : 'text-emerald-500'}`} />
-              <span className={`text-[10px] font-medium ${
-                status === 'error' ? 'text-red-700 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'
-              }`}>
-                返回结果
-              </span>
+          <div className="pl-1">
+            <div className={`flex items-center space-x-1 mb-1 ${
+              status === 'error' ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'
+            }`}>
+              <ArrowRight className="w-3 h-3" />
+              <span className="text-[10px] font-medium">返回结果</span>
             </div>
-            <div className="text-[10px] text-gray-600 dark:text-gray-400 font-mono whitespace-pre-wrap break-words max-h-64 overflow-y-auto">
-              {result ? formatData(result, 1000) : (
+            <div className={`font-mono whitespace-pre-wrap break-words max-h-[500px] overflow-y-auto p-2 rounded border-l ${
+              status === 'error' 
+                ? 'bg-red-50/50 dark:bg-red-900/10 border-red-300 dark:border-red-700 text-red-700 dark:text-red-300'
+                : 'bg-emerald-50/50 dark:bg-emerald-900/10 border-emerald-300 dark:border-emerald-700 text-gray-700 dark:text-gray-300'
+            }`}>
+              {result ? formatData(result, 5000) : (
                 status === 'running' ? (
                   <span className="text-emerald-500 italic flex items-center space-x-1">
                     <Loader className="w-3 h-3 animate-spin" />
@@ -473,9 +464,9 @@ const WorkflowBlock: React.FC<{
         {workflowInfo.result && (
           <div className="mt-2 p-2 bg-gray-50 dark:bg-[#1e1e1e] rounded border border-gray-200 dark:border-[#333]">
             <div className="text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1">执行结果:</div>
-            <div className="text-[10px] text-gray-600 dark:text-gray-400 font-mono whitespace-pre-wrap break-words max-h-32 overflow-y-auto">
-              {workflowInfo.result.substring(0, 300)}
-              {workflowInfo.result.length > 300 && '...'}
+            <div className="text-[10px] text-gray-600 dark:text-gray-400 font-mono whitespace-pre-wrap break-words max-h-[400px] overflow-y-auto">
+              {workflowInfo.result.substring(0, 2000)}
+              {workflowInfo.result.length > 2000 && '...'}
             </div>
           </div>
         )}
@@ -501,6 +492,20 @@ export const MessageSidePanel: React.FC<MessageSidePanelProps> = ({
   const buildProcessSteps = (): ProcessStep[] => {
     // 如果有新的 processSteps 数据，直接使用
     if (processSteps && processSteps.length > 0) {
+      // 去重：合并所有思考步骤为一个（避免重复显示）
+      const thinkingSteps = processSteps.filter(s => s.type === 'thinking');
+      const otherSteps = processSteps.filter(s => s.type !== 'thinking');
+      
+      // 如果有多个思考步骤，合并为一个（保留最长的内容）
+      if (thinkingSteps.length > 1) {
+        const mergedThinking = thinkingSteps.reduce((longest, current) => {
+          const currentLen = current.thinking?.length || 0;
+          const longestLen = longest.thinking?.length || 0;
+          return currentLen > longestLen ? current : longest;
+        });
+        return [mergedThinking, ...otherSteps];
+      }
+      
       return processSteps;
     }
 
@@ -656,7 +661,8 @@ export const MessageSidePanel: React.FC<MessageSidePanelProps> = ({
   const panelStyle = messageHeight ? { minHeight: messageHeight } : {};
   // 旧版并排布局会给 messageHeight，从而允许面板填满高度（h-full）。
   // 现在堆叠布局通常没有固定高度，因此需要一个可见的最大高度，否则 h-full 可能为 0。
-  const scrollAreaHeightClass = messageHeight ? 'h-full' : 'max-h-[320px]';
+  // 增加默认高度以显示更多内容
+  const scrollAreaHeightClass = messageHeight ? 'h-full' : 'max-h-[600px]';
 
   return (
     <ScrollArea 

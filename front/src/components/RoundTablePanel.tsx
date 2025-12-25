@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback, useImperativeHandle, forwardRef, useMemo } from 'react';
+import { Virtuoso } from 'react-virtuoso';
 import { 
   Bot, X, Check, Hand, Users, MessageCircle,
   ChevronDown, ChevronUp, Loader, Plus, RotateCw,
@@ -38,6 +39,8 @@ import {
 import { Button } from './ui/Button';
 import { toast } from './ui/use-toast';
 import { floatingComposerContainerClass, floatingComposerInnerClass } from './shared/floatingComposerStyles';
+import { HistoryLoadTop } from './ui/HistoryLoadTop';
+import { useHybridHistoryLoad } from './ui/useHybridHistoryLoad';
 
 // 检测是否为沉默响应
 const isSilentResponse = (content: string): boolean => {
@@ -93,6 +96,9 @@ const RoundTablePanel = forwardRef<RoundTablePanelRef, RoundTablePanelProps>(({
     setMessages,
     appendMessage,
     loadInitial: loadConversationInitial,
+    hasMoreBefore,
+    loadMoreBefore,
+    isLoading: isLoadingHistoryMessages,
   } = useConversation(roundTableAdapter, { pageSize: 50 });
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -133,13 +139,13 @@ const RoundTablePanel = forwardRef<RoundTablePanelRef, RoundTablePanelProps>(({
 
   // 浮岛输入区：动态计算消息列表底部 padding，避免被浮岛遮挡
   const floatingComposerRef = useRef<HTMLDivElement>(null);
-  const [floatingComposerPadding, setFloatingComposerPadding] = useState(180);
+  const [floatingComposerPadding, setFloatingComposerPadding] = useState(140);
   useEffect(() => {
     const el = floatingComposerRef.current;
     if (!el) return;
     const update = () => {
       const h = el.getBoundingClientRect().height || 0;
-      setFloatingComposerPadding(Math.max(140, Math.ceil(h + 24)));
+      setFloatingComposerPadding(Math.max(120, Math.ceil(h + 20)));
     };
     update();
     const RO = (window as any).ResizeObserver as any;
@@ -213,6 +219,13 @@ const RoundTablePanel = forwardRef<RoundTablePanelRef, RoundTablePanelProps>(({
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const messageListRef = useRef<HTMLDivElement | null>(null);
+  const [chatScrollEl, setChatScrollEl] = useState<HTMLDivElement | null>(null);
+  const [virtuosoFirstItemIndex, setVirtuosoFirstItemIndex] = useState(0);
+  const isPrependingHistoryRef = useRef(false);
+  
+  // 滚动状态
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false); // 是否显示跳转到最新消息按钮
 
   const toUnifiedRoundTableMessage = useCallback(
     (m: RoundTableMessage): UnifiedMessage => ({
@@ -363,12 +376,60 @@ const RoundTablePanel = forwardRef<RoundTablePanelRef, RoundTablePanelProps>(({
     }
   }, [refreshTrigger, loadRoundTable]);
   
-  // 自动滚动到底部
-  useEffect(() => {
+  // 滚动到底部
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
     if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      messagesEndRef.current.scrollIntoView({ behavior });
     }
-  }, [messages]);
+  }, []);
+  
+  // 自动滚动到底部（新消息时）
+  useEffect(() => {
+    if (isPrependingHistoryRef.current) return;
+    // 如果用户没有向上滚动太多，则自动滚动到底部
+    if (!showScrollToBottom) {
+      scrollToBottom('smooth');
+    }
+  }, [messages, showScrollToBottom, scrollToBottom]);
+  
+  // 处理消息列表滚动
+  const handleMessageListScroll = useCallback(() => {
+    const container = messageListRef.current;
+    if (!container) return;
+    
+    const scrollTop = container.scrollTop;
+    const scrollHeight = container.scrollHeight;
+    const clientHeight = container.clientHeight;
+    
+    // 当距离底部超过300px（约5条消息的高度）时显示跳转按钮
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    setShowScrollToBottom(distanceFromBottom > 300);
+  }, []);
+
+  const loadMoreHistory = useCallback(async () => {
+    if (isPrependingHistoryRef.current) return 0;
+    isPrependingHistoryRef.current = true;
+    try {
+      return await loadMoreBefore();
+    } finally {
+      isPrependingHistoryRef.current = false;
+    }
+  }, [loadMoreBefore]);
+
+  const historyLoad = useHybridHistoryLoad({
+    enabled: hasMoreBefore,
+    isLoading: isLoadingHistoryMessages || isPrependingHistoryRef.current,
+    loadMore: loadMoreHistory,
+    onPrepend: (added) => setVirtuosoFirstItemIndex((prev) => prev - added),
+  });
+
+  // roundTable 切换时重置锚点
+  useEffect(() => {
+    setVirtuosoFirstItemIndex(0);
+    historyLoad.reset();
+  }, [roundTableId]);
+
+  const computeMessageKey = useCallback((_: number, m: UnifiedMessage) => m.id, []);
   
   type AtSuggestionKind = 'agent' | 'mcp_server' | 'mcp_tool' | 'workflow';
   type AtSuggestionItem = {
@@ -1734,29 +1795,83 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
         {/* 对话区 */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           {/* 消息列表 */}
-          <div className="flex-1 overflow-y-auto hide-scrollbar px-3 py-2 space-y-4" style={{ paddingBottom: floatingComposerPadding }}>
+          <div 
+            ref={(el) => {
+              messageListRef.current = el;
+              setChatScrollEl(el);
+            }}
+            className="flex-1 overflow-y-auto hide-scrollbar px-3 py-2 space-y-2 relative" 
+            style={{ paddingBottom: floatingComposerPadding }}
+            onScroll={(e) => {
+              handleMessageListScroll();
+              const target = e.currentTarget as HTMLDivElement;
+              historyLoad.onScrollTopChange(target.scrollTop);
+            }}
+            onWheel={(e) => {
+              historyLoad.onWheel(e);
+            }}
+          >
+            <HistoryLoadTop
+              visible={historyLoad.isNearTop}
+              hasMore={hasMoreBefore}
+              isLoading={isLoadingHistoryMessages || isPrependingHistoryRef.current}
+              hintMode="hybrid"
+              onLoadMore={() => {
+                void historyLoad.triggerManual();
+              }}
+            />
             {messages.length === 0 ? (
               <div className="text-center text-gray-500 text-sm py-8">
                 开始圆桌会议对话...
               </div>
             ) : (
-              messages.map((message, idx) => (
-                <MessageItem
-                  key={message.id}
-                  message={message}
-                  onSelectResponse={(responseId, agentId, content) => handleSelectResponseAndBroadcast(message.id, responseId, agentId, content)}
-                  streamingResponses={idx === messages.length - 1 ? streamingResponses : undefined}
-                  streamingThinking={idx === messages.length - 1 ? streamingThinking : undefined}
-                  pendingAgents={idx === messages.length - 1 ? pendingResponses : undefined}
-                  onCancelAgent={cancelAgentResponse}
-                  participants={roundTable.participants}
-                  onPreviewImage={(url, mimeType) => setPreviewImage({ url, mimeType })}
-                  onReply={(msg) => setReplyingTo(msg)}
-                  allMessages={messages}
-                />
-              ))
+              <Virtuoso
+                customScrollParent={chatScrollEl || undefined}
+                data={messages}
+                firstItemIndex={virtuosoFirstItemIndex}
+                computeItemKey={computeMessageKey}
+                increaseViewportBy={{ top: 600, bottom: 800 }}
+                itemContent={(idx, message) => {
+                  const isLast = idx === messages.length - 1;
+                  return (
+                    <div className="py-1" data-message-id={message.id}>
+                      <MessageItem
+                        key={message.id}
+                        message={message}
+                        onSelectResponse={(responseId, agentId, content) =>
+                          handleSelectResponseAndBroadcast(message.id, responseId, agentId, content)
+                        }
+                        streamingResponses={isLast ? streamingResponses : undefined}
+                        streamingThinking={isLast ? streamingThinking : undefined}
+                        pendingAgents={isLast ? pendingResponses : undefined}
+                        onCancelAgent={cancelAgentResponse}
+                        participants={roundTable.participants}
+                        onPreviewImage={(url, mimeType) => setPreviewImage({ url, mimeType })}
+                        onReply={(msg) => setReplyingTo(msg)}
+                        allMessages={messages}
+                      />
+                    </div>
+                  );
+                }}
+              />
             )}
             <div ref={messagesEndRef} />
+            
+            {/* 跳转到最新消息按钮（当距离底部较远时显示） */}
+            {showScrollToBottom && (
+              <div className="sticky bottom-4 z-10 flex justify-end pr-2 pointer-events-none">
+                <button
+                  onClick={() => {
+                    scrollToBottom('smooth');
+                    setShowScrollToBottom(false);
+                  }}
+                  className="bg-gray-800/90 hover:bg-gray-700 dark:bg-gray-700/90 dark:hover:bg-gray-600 text-white w-10 h-10 rounded-full shadow-lg flex items-center justify-center transition-all pointer-events-auto hover:scale-110"
+                  title="跳转到最新消息"
+                >
+                  <ChevronDown className="w-5 h-5" />
+                </button>
+              </div>
+            )}
           </div>
           
           {/* 输入区（浮岛悬浮） */}
@@ -1986,7 +2101,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
                   }
                 }}
                   placeholder={isTargetMode ? "🎯 目标式发言：描述你的目标，AI会协作完成..." : "输入消息，使用 @ 提及特定智能体，粘贴图片..."}
-                  className="flex-1 min-h-[44px] max-h-[150px] resize-y px-3 py-2 text-sm bg-transparent text-gray-800 dark:text-[#e0e0e0] placeholder-gray-400 dark:placeholder-[#606060] focus:outline-none"
+                  className="flex-1 min-h-[36px] max-h-[120px] resize-y px-3 py-2 text-sm bg-transparent text-gray-800 dark:text-[#e0e0e0] placeholder-gray-400 dark:placeholder-[#606060] focus:outline-none"
                   disabled={isSending}
                 />
               

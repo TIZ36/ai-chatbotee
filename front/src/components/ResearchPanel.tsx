@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { BookOpen, ChevronLeft, ChevronRight, Download, FileText, FolderOpen, Hand, Info, Link as LinkIcon, PanelLeftClose, PanelLeftOpen, Play, Plus, Search, Upload, Settings, X, Image as ImageIcon } from 'lucide-react';
+import { Virtuoso } from 'react-virtuoso';
 import { createSession, getAgents, getSession, getSessionMessages, saveMessage, updateSessionAvatar, updateSessionLLMConfig, updateSessionSystemPrompt, updateSessionName, type Session } from '../services/sessionApi';
 import { getLLMConfig, getLLMConfigApiKey, getLLMConfigs, type LLMConfigFromDB } from '../services/llmApi';
 import { LLMClient } from '../services/llmClient';
@@ -14,8 +15,11 @@ import { Button } from './ui/Button';
 import { MessageRenderer } from './conversation/MessageRenderer';
 import { useConversation } from '../conversation/useConversation';
 import { createResearchConversationAdapter } from '../conversation/adapters/researchConversation';
+import type { UnifiedMessage } from '../conversation/types';
 import { MessageAvatar, MessageBubbleContainer } from './ui/MessageBubble';
 import { floatingComposerContainerClass, floatingComposerInnerClass } from './shared/floatingComposerStyles';
+import { HistoryLoadTop } from './ui/HistoryLoadTop';
+import { useHybridHistoryLoad } from './ui/useHybridHistoryLoad';
 
 export interface ResearchPanelProps {
   chatSessionId: string | null;
@@ -256,9 +260,15 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
   }>>([]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [chatScrollEl, setChatScrollEl] = useState<HTMLDivElement | null>(null);
+  const [virtuosoFirstItemIndex, setVirtuosoFirstItemIndex] = useState(0);
+  const isPrependingHistoryRef = useRef(false);
+  // 滚动状态
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false); // 是否显示跳转到最新消息按钮
+  
   // 浮岛输入区：动态计算消息区域底部 padding，避免被浮岛遮挡
   const floatingComposerRef = useRef<HTMLDivElement>(null);
-  const [floatingComposerPadding, setFloatingComposerPadding] = useState(180);
+  const [floatingComposerPadding, setFloatingComposerPadding] = useState(140);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dirInputRef = useRef<HTMLInputElement>(null);
   const researcherAvatarInputRef = useRef<HTMLInputElement>(null);
@@ -307,7 +317,7 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
     if (!el) return;
     const update = () => {
       const h = el.getBoundingClientRect().height || 0;
-      setFloatingComposerPadding(Math.max(140, Math.ceil(h + 24)));
+      setFloatingComposerPadding(Math.max(120, Math.ceil(h + 20)));
     };
     update();
     const RO = (window as any).ResizeObserver as any;
@@ -546,12 +556,62 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
     }
   }, [researchSessionId]);
 
-  useEffect(() => {
-    // 保持滚动到底部
+  // 滚动到底部
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
     const el = scrollRef.current;
     if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [documentMarkdown]);
+    if (behavior === 'smooth') {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    } else {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, []);
+  
+  useEffect(() => {
+    // 保持滚动到底部（新消息时）
+    if (isPrependingHistoryRef.current) return;
+    if (!showScrollToBottom) {
+      scrollToBottom('auto');
+    }
+  }, [documentMarkdown, showScrollToBottom, scrollToBottom]);
+  
+  // 处理消息列表滚动
+  const handleMessageListScroll = useCallback(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    
+    const scrollTop = container.scrollTop;
+    const scrollHeight = container.scrollHeight;
+    const clientHeight = container.clientHeight;
+    
+    // 当距离底部超过300px时显示跳转按钮
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    setShowScrollToBottom(distanceFromBottom > 300);
+  }, []);
+
+  const loadMoreHistory = useCallback(async () => {
+    if (isPrependingHistoryRef.current) return 0;
+    isPrependingHistoryRef.current = true;
+    try {
+      return await loadMoreBefore();
+    } finally {
+      isPrependingHistoryRef.current = false;
+    }
+  }, [loadMoreBefore]);
+
+  const historyLoad = useHybridHistoryLoad({
+    enabled: hasMoreMessages,
+    isLoading: isLoadingMessages || isPrependingHistoryRef.current,
+    loadMore: loadMoreHistory,
+    onPrepend: (added) => setVirtuosoFirstItemIndex((prev) => prev - added),
+  });
+
+  useEffect(() => {
+    setVirtuosoFirstItemIndex(0);
+    historyLoad.reset();
+  }, [researchSessionId]);
+
+  const computeUnifiedKey = useCallback((_: number, m: UnifiedMessage) => m.id, []);
 
   const availableAgentsForPicker = useMemo(() => {
     const selected = new Set(selectedAgents.map(a => a.session_id));
@@ -1703,10 +1763,30 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
           }}
         >
           <div
-            ref={scrollRef}
-            className="flex-1 min-h-0 overflow-auto hide-scrollbar px-3 py-2"
+            ref={(el) => {
+              scrollRef.current = el;
+              setChatScrollEl(el);
+            }}
+            className="flex-1 min-h-0 overflow-auto hide-scrollbar px-3 py-2 relative"
             style={{ paddingBottom: floatingComposerPadding }}
+            onScroll={(e) => {
+              handleMessageListScroll();
+              const target = e.currentTarget as HTMLDivElement;
+              historyLoad.onScrollTopChange(target.scrollTop);
+            }}
+            onWheel={(e) => {
+              historyLoad.onWheel(e);
+            }}
           >
+              <HistoryLoadTop
+                visible={historyLoad.isNearTop}
+                hasMore={hasMoreMessages}
+                isLoading={isLoadingMessages || isPrependingHistoryRef.current}
+                hintMode="hybrid"
+                onLoadMore={() => {
+                  void historyLoad.triggerManual();
+                }}
+              />
               {/* Pinned sources strip */}
               {pinnedSources.length > 0 && (
                 <div className="mb-2">
@@ -1750,49 +1830,59 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
                   </div>
                 </div>
               )}
-              <div className="space-y-3">
-                {messages.map((m, idx) => {
-                    const key = m.local_id || `${m.role}-${idx}`;
-                    const isUserMessage = m.role === 'user';
-                    
-                    return (
-                      <div
-                        key={key}
-                        className={`flex items-start space-x-2 ${isUserMessage ? 'flex-row-reverse space-x-reverse' : ''}`}
-                      >
-                        {/* 统一头像组件 */}
-                        <MessageAvatar 
-                          role={m.role as 'user' | 'assistant' | 'system' | 'tool'} 
-                          avatarUrl={researcherAgent?.avatar}
-                          size="sm"
-                        />
-                        
-                        {/* 统一消息气泡容器 */}
-                        <MessageBubbleContainer
-                          role={m.role as 'user' | 'assistant' | 'system' | 'tool'}
-                          className="max-w-[85%]"
-                        >
-                          {isUserMessage ? (
-                            <div className="text-sm whitespace-pre-wrap">{m.content}</div>
-                          ) : (
-                            <MarkdownArticle
-                              content={m.content}
-                              onSplitTask={m.role === 'assistant' ? splitTaskToWindow : undefined}
-                              onAssignTask={
-                                m.role === 'assistant'
-                                  ? (task) => {
-                                      setAssignTask(task);
-                                      setAssignToAgentId(null);
-                                    }
-                                  : undefined
-                              }
-                            />
-                          )}
-                        </MessageBubbleContainer>
-                      </div>
-                    );
-                  })}
-              </div>
+              <Virtuoso
+                customScrollParent={chatScrollEl || undefined}
+                data={unifiedMessages as unknown as UnifiedMessage[]}
+                firstItemIndex={virtuosoFirstItemIndex}
+                computeItemKey={computeUnifiedKey}
+                increaseViewportBy={{ top: 600, bottom: 800 }}
+                itemContent={(_idx, m) => {
+                  const role = m.role as 'user' | 'assistant' | 'system' | 'tool';
+                  const isUserMessage = role === 'user';
+                  return (
+                    <div
+                      className={`py-1 flex items-start space-x-2 ${isUserMessage ? 'flex-row-reverse space-x-reverse' : ''}`}
+                      data-message-id={m.id}
+                    >
+                      <MessageAvatar role={role} avatarUrl={researcherAgent?.avatar} size="sm" />
+                      <MessageBubbleContainer role={role} className="max-w-[85%]">
+                        {isUserMessage ? (
+                          <div className="text-sm whitespace-pre-wrap">{m.content}</div>
+                        ) : (
+                          <MarkdownArticle
+                            content={m.content}
+                            onSplitTask={role === 'assistant' ? splitTaskToWindow : undefined}
+                            onAssignTask={
+                              role === 'assistant'
+                                ? (task) => {
+                                    setAssignTask(task);
+                                    setAssignToAgentId(null);
+                                  }
+                                : undefined
+                            }
+                          />
+                        )}
+                      </MessageBubbleContainer>
+                    </div>
+                  );
+                }}
+              />
+              
+              {/* 跳转到最新消息按钮（当距离底部较远时显示） */}
+              {showScrollToBottom && (
+                <div className="sticky bottom-4 z-10 flex justify-end pr-2 pointer-events-none">
+                  <button
+                    onClick={() => {
+                      scrollToBottom('smooth');
+                      setShowScrollToBottom(false);
+                    }}
+                    className="bg-gray-800/90 hover:bg-gray-700 dark:bg-gray-700/90 dark:hover:bg-gray-600 text-white w-10 h-10 rounded-full shadow-lg flex items-center justify-center transition-all pointer-events-auto hover:scale-110"
+                    title="跳转到最新消息"
+                  >
+                    <ChevronDown className="w-5 h-5" />
+                  </button>
+                </div>
+              )}
             </div>
 
           {/* 输入区（浮岛悬浮） */}
@@ -1954,7 +2044,7 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
                   onClick={() => requestAnimationFrame(updateAutocomplete)}
                   onKeyUp={() => requestAnimationFrame(updateAutocomplete)}
                   placeholder="输入问题…（@ 成员，$ 引用）"
-                  className="flex-1 min-h-[44px] max-h-[140px] resize-y px-3 py-2 text-sm bg-transparent text-gray-800 dark:text-[#e0e0e0] placeholder-gray-400 dark:placeholder-[#606060] focus:outline-none"
+                  className="flex-1 min-h-[36px] max-h-[120px] resize-y px-3 py-2 text-sm bg-transparent text-gray-800 dark:text-[#e0e0e0] placeholder-gray-400 dark:placeholder-[#606060] focus:outline-none"
                   onFocus={() => setIsInputFocused(true)}
                   onBlur={() => setIsInputFocused(false)}
                   onKeyDown={(e) => {
@@ -2175,7 +2265,7 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
 
               {/* Body */}
               <div className="flex-1 min-h-0 overflow-auto p-3">
-                <div className="space-y-3">
+                <div className="space-y-2">
                   {activeWindow.messages.map((m, idx) => (
                     <div key={idx}>
                       <div className="text-[11px] text-gray-500 dark:text-[#a0a0a0] mb-1">
@@ -2195,7 +2285,7 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
                   value={activeWindow.draft}
                   onChange={(e) => updateWindow(activeWindow.id, { draft: e.target.value })}
                   placeholder="追问/补充…（Enter 触发研究，Shift+Enter 换行）"
-                  className="w-full min-h-[44px] max-h-[120px] resize-y px-3 py-2 text-sm rounded-lg bg-gray-50 dark:bg-[#1f1f1f] border border-gray-200 dark:border-[#404040] text-gray-900 dark:text-[#e0e0e0] focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/40"
+                  className="w-full min-h-[36px] max-h-[100px] resize-y px-3 py-2 text-sm rounded-lg bg-gray-50 dark:bg-[#1f1f1f] border border-gray-200 dark:border-[#404040] text-gray-900 dark:text-[#e0e0e0] focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/40"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
