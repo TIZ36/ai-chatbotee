@@ -346,6 +346,17 @@ const AgentsPage: React.FC<AgentsPageProps> = ({ selectedRoundTableId }) => {
           <div className="flex items-center space-x-2">
             {/* 导入智能体 */}
             <button
+              onClick={() => navigate('/role-generator')}
+              className="flex items-center space-x-1 px-3 py-1.5 text-sm text-gray-600 dark:text-[#858585] hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+              title="新建智能体"
+            >
+              <Sparkles className="w-4 h-4 text-purple-500" />
+              <span>新建智能体</span>
+            </button>
+
+            <div className="w-px h-6 bg-gray-200 dark:bg-[#3c3c3c]" />
+
+            <button
               onClick={handleImportAgent}
               className="flex items-center space-x-1 px-3 py-1.5 text-sm text-gray-600 dark:text-[#858585] hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
               title="导入智能体"

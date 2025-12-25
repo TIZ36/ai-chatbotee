@@ -240,8 +240,8 @@ export class MCPClient {
       const baseUrl = this.server.url.replace(/\/mcp\/?$/, ''); // 移除 /mcp 后缀
       const healthUrl = `${baseUrl}/health`;
       
-      // 如果是代理模式，需要通过代理访问
-      const targetUrl = this.isElectron() ? this.buildHealthProxyUrl(healthUrl) : healthUrl;
+      // 始终使用代理访问健康检查接口，以解决跨域问题
+      const targetUrl = this.buildHealthProxyUrl(healthUrl);
       
       console.log(`[MCP] Calling health endpoint: ${targetUrl}`);
       
@@ -694,10 +694,8 @@ export class MCPClient {
       console.log(`[MCP] Calling tool ${name} on ${this.server.name}`);
       console.log(`[MCP] Tool arguments:`, args);
 
-      // 直接发送 HTTP POST 请求到 MCP 服务器
-      const targetUrl = this.isElectron() 
-        ? this.buildProxyUrl(this.server.url)
-        : this.server.url;
+      // 始终通过后端代理发送请求，以解决 CORS 问题并允许后端注入认证头（如 OAuth Token）
+      const targetUrl = this.buildProxyUrl(this.server.url);
 
       const requestBody = {
         jsonrpc: '2.0',

@@ -14,6 +14,7 @@ import { DEFAULT_CLIENT_OPTIONS } from './types';
 import { MCPError, MCPErrorCode } from '../../core/shared/errors';
 import { createLogger, sleep } from '../../core/shared/utils';
 import { eventBus } from '../../core/shared/events';
+import { getBackendUrl } from '../../../utils/backendUrl';
 
 const logger = createLogger('MCPClient');
 
@@ -132,8 +133,13 @@ export class MCPClient {
         '@modelcontextprotocol/sdk/client/streamableHttp.js'
       );
 
-      // 创建 transport
-      this.transport = new StreamableHTTPClientTransport(new URL(this.server.url));
+      // 构建代理 URL（所有环境都使用代理，解决 CORS 问题并允许后端注入认证头）
+      const backendUrl = getBackendUrl();
+      const encodedUrl = encodeURIComponent(this.server.url);
+      const proxyUrl = `${backendUrl}/mcp?url=${encodedUrl}&transportType=streamable-http`;
+
+      // 创建 transport，使用代理 URL
+      this.transport = new StreamableHTTPClientTransport(new URL(proxyUrl));
 
       // 创建 client
       this.client = new Client(

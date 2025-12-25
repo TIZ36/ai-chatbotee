@@ -140,6 +140,11 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
         description: `新增 ${res.inserted || 0}，更新 ${res.updated || 0}，总计 ${res.count || 0}`,
         variant: 'success',
       });
+      // 同步完成后自动触发搜索，显示更新后的内容
+      void handleMarketSearch();
+      // 重新加载市场源以更新最后同步时间
+      const sources = await getMCPMarketSources();
+      setMarketSources(sources);
     } catch (e: any) {
       toast({
         title: '同步失败',
@@ -929,8 +934,15 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
             <Button variant="primary" onClick={handleMarketSearch} disabled={marketLoading}>
               {marketLoading ? '搜索中...' : '搜索'}
             </Button>
-            <div className="text-xs text-gray-500 dark:text-gray-400">
-              {marketTotal > 0 ? `共 ${marketTotal} 条，展示 ${marketItems.length} 条` : ''}
+            <div className="text-xs text-gray-500 dark:text-gray-400 flex flex-col gap-0.5">
+              <div>
+                {marketTotal > 0 ? `共 ${marketTotal} 条，展示 ${marketItems.length} 条` : ''}
+              </div>
+              {selectedSourceId && marketSources.find(s => s.source_id === selectedSourceId)?.last_sync_at && (
+                <div className="text-[10px] opacity-70">
+                  最后同步: {new Date(marketSources.find(s => s.source_id === selectedSourceId)!.last_sync_at! * 1000).toLocaleString()}
+                </div>
+              )}
             </div>
           </div>
 

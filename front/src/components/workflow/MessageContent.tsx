@@ -239,27 +239,24 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
   // NOTE: Thinking content is now displayed in MessageSidePanel, not here.
   // This only shows a simple loading indicator when the assistant is thinking/streaming.
   if (message.role === 'assistant' && (!message.content || message.content.length === 0) && (message.isThinking || message.isStreaming)) {
+    // 如果没有中断按钮，且处于思考/生成状态且没有内容，不返回内容（状态已在外部标题栏显示）
+    if (!abortController) return null;
+    
     return (
-      <div className="flex flex-col items-start py-2">
-        <div className="flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400">
-          <Loader className="w-3.5 h-3.5 animate-spin" />
-          <span>正在生成...</span>
-        </div>
+      <div className="flex flex-col items-start py-1">
         {/* Abort button */}
-        {abortController && (
-          <button
-            onClick={() => {
-              abortController.abort();
-              setAbortController(null);
-              setMessages(prev => prev.filter(msg => msg.id !== message.id));
-              setIsLoading(false);
-            }}
-            className="mt-2 px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-          >
-            <XCircle className="w-3.5 h-3.5 inline mr-1" />
-            中断生成
-          </button>
-        )}
+        <button
+          onClick={() => {
+            abortController.abort();
+            setAbortController(null);
+            setMessages(prev => prev.filter(msg => msg.id !== message.id));
+            setIsLoading(false);
+          }}
+          className="px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors flex items-center"
+        >
+          <XCircle className="w-3.5 h-3.5 mr-1.5" />
+          中断生成
+        </button>
       </div>
     );
   }

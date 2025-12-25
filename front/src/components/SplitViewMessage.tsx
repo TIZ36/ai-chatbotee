@@ -232,23 +232,14 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
         </div>
       )}
 
-      {/* 头像和状态指示器 - 使用统一组件 */}
-      <div className="flex-shrink-0 flex items-center space-x-1.5">
+      {/* 头像 - 移除头像旁边的状态指示器，全部移入过程区域显示 */}
+      <div className="flex-shrink-0">
         <MessageAvatar 
           role={role as MessageRole} 
           toolType={toolType as ToolType} 
           avatarUrl={avatarUrl}
           size="md"
         />
-        {role === 'assistant' && (
-          <MessageStatusIndicator
-            isThinking={isThinking}
-            isStreaming={isStreaming}
-            hasContent={!!content && content.length > 0}
-            currentStep={currentStep}
-            llmProvider={llmProvider}
-          />
-        )}
       </div>
 
       {/* 消息内容区域 */}
@@ -271,12 +262,24 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
                   <span className="text-xs font-medium text-gray-700 dark:text-gray-200 truncate">
                     思考 / 工具 / Workflow 过程
                   </span>
-                  {!hasContent && (
+                  {(isThinking || isStreaming) && (
+                    <div className="flex items-center gap-1 ml-1.5 px-1.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800/30">
+                      <div className="flex space-x-0.5">
+                        <div className="w-1 h-1 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <div className="w-1 h-1 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <div className="w-1 h-1 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </div>
+                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium whitespace-nowrap">
+                        {isThinking ? (llmProvider === 'gemini' ? '深度思考中' : '思考中') : '生成中'}
+                      </span>
+                    </div>
+                  )}
+                  {!hasContent && !isThinking && !isStreaming && (
                     <span className="text-[10px] text-gray-500 dark:text-gray-400 flex-shrink-0">
                       （模型未输出，默认展示）
                     </span>
                   )}
-                  {hasContent && !processExpanded && (
+                  {hasContent && !processExpanded && !isStreaming && (
                     <span className="text-[10px] text-gray-500 dark:text-gray-400 flex-shrink-0">
                       （已输出，默认折叠）
                     </span>

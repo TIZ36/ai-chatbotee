@@ -4457,7 +4457,11 @@ const Workflow: React.FC<WorkflowProps> = ({
                 )}
               </div>
               <div className="flex items-center gap-2 min-w-0">
-                <span className="text-xs font-semibold text-gray-900 dark:text-[#ffffff] leading-tight truncate min-w-0">
+                <span 
+                  className="text-xs font-semibold text-gray-900 dark:text-[#ffffff] leading-tight truncate min-w-0 cursor-pointer hover:text-primary-500 transition-colors"
+                  onClick={() => setShowPersonaPanel(true)}
+                  title="点击切换智能体/会议/研究"
+                >
                   {(() => {
                     const currentSession =
                       sessions.find(s => s.session_id === currentSessionId) ||

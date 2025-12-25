@@ -1536,6 +1536,13 @@ const RoleGeneratorPage: React.FC<RoleGeneratorPageProps> = ({ isEmbedded = fals
         <div className="flex-shrink-0 px-6 py-4 border-b border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d]">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
+              <button 
+                onClick={() => navigate(-1)}
+                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors mr-1"
+                title="返回"
+              >
+                <ChevronDown className="w-5 h-5 rotate-90" />
+              </button>
               <div className="w-10 h-10 rounded-lg bg-[#7c3aed]/10 dark:bg-[#7c3aed]/20 flex items-center justify-center">
                 <Sparkles className="w-5 h-5 text-[#7c3aed]" />
               </div>

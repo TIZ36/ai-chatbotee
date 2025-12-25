@@ -26,6 +26,8 @@ import CrawlerConfigPage from './components/CrawlerConfigPage';
 import RoundTableChat from './components/RoundTableChat';
 import ResearchPanel from './components/ResearchPanel';
 import UserAccessPage from './components/UserAccessPage';
+import AgentsPage from './components/AgentsPage';
+import RoleGeneratorPage from './components/RoleGeneratorPage';
 // 新架构组件
 import SystemStatusPanel from './components/SystemStatusPanel';
 import { getAgents, getSessions, type Session } from './services/sessionApi';
@@ -366,6 +368,20 @@ const App: React.FC = () => {
             isActive={location.pathname === '/workflow-editor'}
           />
 
+          <NavItem
+            to="/agents"
+            icon={<Users className="w-[18px] h-[18px]" strokeWidth={1.5} />}
+            title="智能体管理"
+            isActive={location.pathname === '/agents'}
+          />
+
+          <NavItem
+            to="/role-generator"
+            icon={<Sparkles className="w-[18px] h-[18px]" strokeWidth={1.5} />}
+            title="角色生成器"
+            isActive={location.pathname === '/role-generator'}
+          />
+
         </div>
         
         <div className="flex-1 app-drag" />
@@ -509,8 +525,38 @@ const App: React.FC = () => {
         >
           <DialogContent className="max-w-3xl">
             <DialogHeader>
-              <DialogTitle>选择对话</DialogTitle>
-              <DialogDescription>按类型选择：Agent / Meeting / Research</DialogDescription>
+              <div className="flex items-center justify-between pr-8">
+                <div>
+                  <DialogTitle>选择对话</DialogTitle>
+                  <DialogDescription>按类型选择：Agent / Meeting / Research</DialogDescription>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="h-8"
+                    onClick={() => {
+                      setShowConversationSwitcher(false);
+                      navigate('/agents');
+                    }}
+                  >
+                    <Users className="w-3.5 h-3.5 mr-1.5" />
+                    管理智能体
+                  </Button>
+                  <Button 
+                    variant="primary" 
+                    size="sm" 
+                    className="h-8"
+                    onClick={() => {
+                      setShowConversationSwitcher(false);
+                      navigate('/role-generator');
+                    }}
+                  >
+                    <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+                    新建智能体
+                  </Button>
+                </div>
+              </div>
             </DialogHeader>
 
             <div className="flex items-center gap-2">
@@ -758,6 +804,12 @@ const App: React.FC = () => {
 
                     {/* 用户访问管理页面 */}
                     <Route path="/user-access" element={<UserAccessPage />} />
+
+                    {/* 智能体管理页面 */}
+                    <Route path="/agents" element={<AgentsPage />} />
+
+                    {/* 角色生成器页面 */}
+                    <Route path="/role-generator" element={<RoleGeneratorPage />} />
                   </Routes>
                 </div>
               </div>
