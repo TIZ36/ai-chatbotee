@@ -265,11 +265,11 @@ main() {
         echo "  - http://localhost/"
     fi
     echo ""
-    echo "前端开发服务器: http://localhost:5174"
+    echo "前端开发服务器: http://localhost:5177"
     echo "后端 API: http://localhost:3002"
     echo ""
     echo "注意："
-    echo "1. 确保前端开发服务器运行在 localhost:5174"
+    echo "1. 确保前端开发服务器运行在 localhost:5177"
     echo "2. 确保后端服务运行在 localhost:3002"
     echo "3. 如果使用反向代理，建议在前端 .env 中设置: VITE_BACKEND_URL="
     echo "4. 查看 Nginx 日志: sudo tail -f /var/log/nginx/error.log"

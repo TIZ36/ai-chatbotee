@@ -3,23 +3,11 @@
  * LLM 提供者模块类型定义
  */
 
-import type { MediaItem } from '../../core/shared/types';
+import type { MediaItem, LLMProviderType, MessageRole } from '../../core/shared/types';
 
 // ============================================================================
 // Provider Types - Provider 类型
 // ============================================================================
-
-/**
- * LLM Provider 类型
- */
-export type LLMProviderType =
-  | 'openai'
-  | 'anthropic'
-  | 'gemini'
-  | 'google'
-  | 'ollama'
-  | 'deepseek'
-  | 'local';
 
 /**
  * Provider 配置
@@ -51,11 +39,6 @@ export interface LLMProviderConfig {
 // ============================================================================
 // Message Types - 消息类型
 // ============================================================================
-
-/**
- * 消息角色
- */
-export type MessageRole = 'system' | 'user' | 'assistant' | 'tool';
 
 /**
  * LLM 消息

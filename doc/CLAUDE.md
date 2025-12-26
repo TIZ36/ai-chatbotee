@@ -11,7 +11,7 @@ chatee is a full-stack LLM/MCP workflow management tool with an Electron desktop
 ### Frontend (React + Vite)
 ```bash
 npm install                # Install dependencies
-npm run dev                # Start dev server (port 5174)
+npm run dev                # Start dev server (port 5177)
 npm run build              # Production build
 ```
 
@@ -80,7 +80,7 @@ Frontend (React/TS)          Backend (Flask)
 |------|---------|
 | `backend/config.yaml` | Backend: server port (3002), MySQL, Redis, CORS |
 | `.env` | Frontend API URL (`VITE_API_URL`) |
-| `vite.config.ts` | Dev server port (5174), path alias `@/` → `./src/` |
+| `vite.config.ts` | Dev server port (5177), path alias `@/` → `./src/` |
 | `tailwind.config.js` | Custom colors (primary, success, warning, error), dark mode |
 
 ## Major Components

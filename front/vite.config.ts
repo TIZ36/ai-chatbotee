@@ -11,8 +11,8 @@ export default defineConfig({
   base: './',
   server: {
     host: '0.0.0.0',
-    port: 5174,
-    strictPort: false,
+    port: 5177,
+    strictPort: true,
     watch: {
       // 忽略不需要监视的目录，减少文件监视器数量
       ignored: [

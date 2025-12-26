@@ -28,7 +28,7 @@ export class MediaRenderer {
     this.config = { ...DEFAULT_RENDER_CONFIG, ...config };
     
     // 初始化处理器
-    this.handlers = new Map([
+    this.handlers = new Map<MediaType, IMediaHandler>([
       ['image', new ImageHandler(this.config.image)],
       ['audio', new AudioHandler(this.config.audio)],
       ['video', new VideoHandler(this.config.video)],

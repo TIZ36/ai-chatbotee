@@ -12,7 +12,7 @@
 
 默认端口：
 
-- 前端（Vite dev server）：`5174`
+- 前端（Vite dev server）：`5177`
 - 后端（Flask）：`3002`
 
 ## 2. 目录结构与职责
@@ -37,16 +37,16 @@
 - 创建后端虚拟环境（`backend/venv`）并安装依赖
 - `electron-rebuild` 重建 `node-pty`（原生模块）
 - 编译 Electron 主进程（`npm run build:electron`）
-- 清理旧进程/端口（5174/3002）
+- 清理旧进程/端口（5177/3002）
 - 启动 Flask（后台），探测 `GET /api/llm/configs` 就绪
-- 启动 Vite dev server（后台），探测 `http://localhost:5174` 就绪
+- 启动 Vite dev server（后台），探测 `http://localhost:5177` 就绪
 - 启动 Electron（后台）
 - 日志输出到 `/tmp/backend.log`、`/tmp/vite.log`、`/tmp/electron.log`
 
 ### 3.2 分别启动
 
 - 后端：`cd backend && source venv/bin/activate && python app.py`（`3002`）
-- 前端：`npm run dev`（`5174`）
+- 前端：`npm run dev`（`5177`）
 - Electron：`npm run electron:dev` 或 `./start-electron.sh`
 
 ## 4. 端口与环境变量

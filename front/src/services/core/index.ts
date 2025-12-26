@@ -4,7 +4,9 @@
  */
 
 // Shared
-export * from './shared';
+export * from './shared/errors';
+export * from './shared/events';
+export * from './shared/utils';
 
 // Message (SlowDB)
 export * from './message';

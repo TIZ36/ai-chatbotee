@@ -10,16 +10,18 @@ import json
 
 @dataclass
 class Session:
-    """会话数据模型"""
+    """会lass 会话/Topic数据模型"""
     
     session_id: str
     title: Optional[str] = None
     name: Optional[str] = None
     llm_config_id: Optional[str] = None
-    session_type: str = 'memory'  # temporary, memory, agent
+    session_type: str = 'memory'  # private_chat, topic_general, topic_research, topic_brainstorm, temporary
+    owner_id: Optional[str] = None
     avatar: Optional[str] = None
     system_prompt: Optional[str] = None
     media_output_path: Optional[str] = None
+    ext: Optional[Dict[str, Any]] = None
     role_id: Optional[str] = None
     role_version_id: Optional[str] = None
     role_snapshot: Optional[Dict[str, Any]] = None
@@ -36,15 +38,21 @@ class Session:
         if isinstance(role_snapshot, str):
             role_snapshot = json.loads(role_snapshot)
         
+        ext = row.get('ext')
+        if isinstance(ext, str):
+            ext = json.loads(ext)
+        
         return cls(
             session_id=row['session_id'],
             title=row.get('title'),
             name=row.get('name'),
             llm_config_id=row.get('llm_config_id'),
             session_type=row.get('session_type', 'memory'),
+            owner_id=row.get('owner_id'),
             avatar=row.get('avatar'),
             system_prompt=row.get('system_prompt'),
             media_output_path=row.get('media_output_path'),
+            ext=ext,
             role_id=row.get('role_id'),
             role_version_id=row.get('role_version_id'),
             role_snapshot=role_snapshot,
@@ -63,8 +71,10 @@ class Session:
             'name': self.name,
             'llm_config_id': self.llm_config_id,
             'session_type': self.session_type,
+            'owner_id': self.owner_id,
             'system_prompt': self.system_prompt,
             'media_output_path': self.media_output_path,
+            'ext': self.ext,
             'role_id': self.role_id,
             'role_version_id': self.role_version_id,
             'role_snapshot': self.role_snapshot,
@@ -90,9 +100,11 @@ class Session:
             'name': self.name,
             'llm_config_id': self.llm_config_id,
             'session_type': self.session_type,
+            'owner_id': self.owner_id,
             'avatar': self.avatar,
             'system_prompt': self.system_prompt,
             'media_output_path': self.media_output_path,
+            'ext': json.dumps(self.ext) if self.ext else None,
             'role_id': self.role_id,
             'role_version_id': self.role_version_id,
             'role_snapshot': json.dumps(self.role_snapshot) if self.role_snapshot else None,
@@ -186,21 +198,23 @@ class SessionRepository:
             
             sql = """
             INSERT INTO sessions 
-            (session_id, title, name, llm_config_id, session_type, avatar, 
-             system_prompt, media_output_path, role_id, role_version_id, 
+            (session_id, title, name, llm_config_id, session_type, owner_id, avatar, 
+             system_prompt, media_output_path, ext, role_id, role_version_id, 
              role_snapshot, role_applied_at, creator_ip)
             VALUES (%(session_id)s, %(title)s, %(name)s, %(llm_config_id)s, 
-                    %(session_type)s, %(avatar)s, %(system_prompt)s, 
-                    %(media_output_path)s, %(role_id)s, %(role_version_id)s,
+                    %(session_type)s, %(owner_id)s, %(avatar)s, %(system_prompt)s, 
+                    %(media_output_path)s, %(ext)s, %(role_id)s, %(role_version_id)s,
                     %(role_snapshot)s, %(role_applied_at)s, %(creator_ip)s)
             ON DUPLICATE KEY UPDATE
                 title = VALUES(title),
                 name = VALUES(name),
                 llm_config_id = VALUES(llm_config_id),
                 session_type = VALUES(session_type),
+                owner_id = VALUES(owner_id),
                 avatar = VALUES(avatar),
                 system_prompt = VALUES(system_prompt),
                 media_output_path = VALUES(media_output_path),
+                ext = VALUES(ext),
                 role_id = VALUES(role_id),
                 role_version_id = VALUES(role_version_id),
                 role_snapshot = VALUES(role_snapshot),
@@ -256,6 +270,93 @@ class SessionRepository:
             return True
         except Exception as e:
             print(f"[SessionRepository] Error updating last_message_at: {e}")
+            if conn:
+                conn.close()
+            return False
+    
+    # ==================== 参与者管理 ====================
+    
+    def get_participants(self, session_id: str) -> List[dict]:
+        """获取会话参与者列表"""
+        conn = self.get_connection()
+        if not conn:
+            return []
+        
+        try:
+            import pymysql
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT p.*, s.name as agent_name, s.avatar as agent_avatar, s.system_prompt as agent_prompt
+                FROM session_participants p
+                LEFT JOIN sessions s ON p.participant_id = s.session_id AND p.participant_type = 'agent'
+                WHERE p.session_id = %s
+            """, (session_id,))
+            rows = cursor.fetchall()
+            cursor.close()
+            conn.close()
+            
+            participants = []
+            for row in rows:
+                p = {
+                    'participant_id': row['participant_id'],
+                    'participant_type': row['participant_type'],
+                    'role': row['role'],
+                    'joined_at': row['joined_at'].isoformat() if row.get('joined_at') else None
+                }
+                if row['participant_type'] == 'agent':
+                    p['name'] = row.get('agent_name')
+                    p['avatar'] = row.get('agent_avatar')
+                    p['system_prompt'] = row.get('agent_prompt')
+                participants.append(p)
+            return participants
+        except Exception as e:
+            print(f"[SessionRepository] Error getting participants: {e}")
+            if conn:
+                conn.close()
+            return []
+    
+    def add_participant(self, session_id: str, participant_id: str, 
+                        participant_type: str = 'agent', role: str = 'member') -> bool:
+        """添加参与者"""
+        conn = self.get_connection()
+        if not conn:
+            return False
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO session_participants (session_id, participant_id, participant_type, role)
+                VALUES (%s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE role = VALUES(role)
+            """, (session_id, participant_id, participant_type, role))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"[SessionRepository] Error adding participant: {e}")
+            if conn:
+                conn.close()
+            return False
+    
+    def remove_participant(self, session_id: str, participant_id: str) -> bool:
+        """移除参与者"""
+        conn = self.get_connection()
+        if not conn:
+            return False
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM session_participants WHERE session_id = %s AND participant_id = %s",
+                (session_id, participant_id)
+            )
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"[SessionRepository] Error removing participant: {e}")
             if conn:
                 conn.close()
             return False

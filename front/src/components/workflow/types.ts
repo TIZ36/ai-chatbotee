@@ -96,8 +96,6 @@ export interface Message {
 export interface WorkflowProps {
   sessionId?: string | null;
   onSelectSession?: (sessionId: string) => void;
-  onSelectMeeting?: (roundTableId: string) => void;
-  onSelectResearch?: (researchSessionId: string) => void;
 }
 
 /** 删除目标信息 */

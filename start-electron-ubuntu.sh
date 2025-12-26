@@ -94,7 +94,7 @@ echo "✅ 编译文件检查通过"
 
 # 清理可能存在的旧进程（排除当前脚本）
 echo "🧹 清理旧进程..."
-pkill -f "vite.*5174" 2>/dev/null || true
+fuser -k 5177/tcp 2>/dev/null || true
 # 只杀死 electron 二进制进程，不杀死脚本
 pkill -f "node_modules/.bin/electron" 2>/dev/null || true
 pkill -f "node_modules/electron/dist" 2>/dev/null || true
@@ -112,12 +112,13 @@ echo "   Vite PID: $VITE_PID"
 
 # 等待 Vite 服务器就绪
 echo "⏳ 等待 Vite 服务器启动..."
+echo "⏳ 等待 Vite 服务器启动..."
 counter=0
 max_wait=30
 while [ $counter -lt $max_wait ]; do
-    if curl -s http://localhost:5174 > /dev/null 2>&1; then
+    if curl -s http://localhost:5177 > /dev/null 2>&1; then
         echo ""
-        echo "✅ Vite 服务器已就绪 (http://localhost:5174)"
+        echo "✅ Vite 服务器已就绪 (http://localhost:5177)"
         break
     fi
     if [ $counter -eq $((max_wait - 1)) ]; then
@@ -151,7 +152,7 @@ if [ "$check_vite" = "1" ] && [ "$check_electron" = "1" ]; then
     echo ""
     echo "=========================================="
     echo "✅ 启动成功！"
-    echo "   Vite:     http://localhost:5174"
+    echo "   Vite:     http://localhost:5177"
     echo "   Electron: 窗口应该已打开"
     echo ""
     echo "查看日志:"

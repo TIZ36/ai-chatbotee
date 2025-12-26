@@ -495,7 +495,7 @@ function createWindow() {
   
   if (isDev) {
     // 开发模式：加载Vite开发服务器
-    const viteUrl = 'http://localhost:5174'; // 工作流工具端口
+    const viteUrl = 'http://localhost:5177'; // 工作流工具端口
     console.log(`Loading Vite dev server: ${viteUrl}`);
     
     mainWindow.loadURL(viteUrl).catch((err) => {

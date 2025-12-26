@@ -250,9 +250,6 @@ export const MessageStatusIndicator: React.FC<MessageStatusIndicatorProps> = ({
           <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-primary-400 rounded-full animate-ping opacity-75" />
         </div>
         <div className="flex items-center space-x-1">
-          <span className="text-xs text-primary-600 dark:text-primary-400 font-medium">
-            {llmProvider === 'gemini' ? '深度思考中' : '思考中'}
-          </span>
           <div className="flex space-x-0.5 ml-1">
             <div className="w-1 h-1 bg-primary-500 rounded-full animate-bounce" style={{ animationDelay: '0ms', animationDuration: '1s' }} />
             <div className="w-1 h-1 bg-primary-500 rounded-full animate-bounce" style={{ animationDelay: '200ms', animationDuration: '1s' }} />
@@ -270,9 +267,6 @@ export const MessageStatusIndicator: React.FC<MessageStatusIndicatorProps> = ({
         <div className="relative">
           <Sparkles className="w-4 h-4 text-amber-500 animate-pulse" />
         </div>
-        <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">
-          {llmProvider === 'gemini' ? '生成中，请稍候...' : '处理中...'}
-        </span>
         <div className="flex space-x-0.5">
           <div className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" style={{ animationDelay: '0ms' }} />
           <div className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" style={{ animationDelay: '200ms' }} />
@@ -291,7 +285,6 @@ export const MessageStatusIndicator: React.FC<MessageStatusIndicatorProps> = ({
           <div className="w-1.5 h-1.5 bg-primary-500 rounded-full animate-pulse" style={{ animationDelay: '150ms' }} />
           <div className="w-1.5 h-1.5 bg-primary-500 rounded-full animate-pulse" style={{ animationDelay: '300ms' }} />
         </div>
-        <span className="text-xs text-gray-500 dark:text-[#b0b0b0] font-medium">回答中</span>
       </div>
     );
   }

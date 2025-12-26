@@ -81,6 +81,8 @@ import {
   DEFAULT_GAME_PROFESSIONS,
   SystemPromptEditDialog,
 } from './workflow/dialogs';
+import { TopicConfigDialog, TopicDisplayType } from './workflow/dialogs/TopicConfigDialog';
+import { getParticipants, addParticipant as addSessionParticipant, removeParticipant as removeSessionParticipant, Participant, updateSession } from '../services/sessionApi';
 
 /** 单个过程步骤（用于记录多轮思考和MCP调用） */
 interface WorkflowProps {
@@ -283,6 +285,14 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [headerNewProfessionValue, setHeaderNewProfessionValue] = useState(''); // 新职业名称
   const [headerConfigActiveTab, setHeaderConfigActiveTab] = useState<'basic' | 'skillpacks'>('basic');
   const [isSavingHeaderAsRole, setIsSavingHeaderAsRole] = useState(false);
+  
+  // Topic 配置对话框状态（用于话题/记忆体会话）
+  const [showTopicConfigDialog, setShowTopicConfigDialog] = useState(false);
+  const [topicConfigEditName, setTopicConfigEditName] = useState('');
+  const [topicConfigEditAvatar, setTopicConfigEditAvatar] = useState<string | null>(null);
+  const [topicConfigEditDisplayType, setTopicConfigEditDisplayType] = useState<TopicDisplayType>('chat');
+  const [topicParticipants, setTopicParticipants] = useState<Participant[]>([]);
+  
   const [isEditingSystemPrompt, setIsEditingSystemPrompt] = useState(false); // 是否正在编辑人设
   const [systemPromptDraft, setSystemPromptDraft] = useState(''); // 人设编辑草稿
   const [showModelSelectDialog, setShowModelSelectDialog] = useState(false); // 是否显示模型选择对话框
@@ -4438,13 +4448,34 @@ const Workflow: React.FC<WorkflowProps> = ({
                       }
                     }
                     if (currentSession) {
-                      setHeaderConfigEditName(currentSession.name || '');
-                      setHeaderConfigEditAvatar(currentSession.avatar || null);
-                      setHeaderConfigEditSystemPrompt(currentSession.system_prompt || '');
-                      setHeaderConfigEditMediaOutputPath(currentSession.media_output_path || '');
-                      setHeaderConfigEditLlmConfigId(currentSession.llm_config_id || null);
-                      setHeaderConfigActiveTab('basic');
-                      setShowHeaderConfigDialog(true);
+                      // 根据会话类型显示不同的配置对话框
+                      const sessionType = currentSession.session_type;
+                      if (sessionType === 'memory' || sessionType === 'topic_general') {
+                        // Topic/记忆体会话 - 显示 TopicConfigDialog
+                        setTopicConfigEditName(currentSession.name || currentSession.title || '');
+                        setTopicConfigEditAvatar(currentSession.avatar || null);
+                        // 从 ext 中读取 displayType
+                        const ext = currentSession.ext || {};
+                        setTopicConfigEditDisplayType((ext.displayType as TopicDisplayType) || 'chat');
+                        // 加载参与者
+                        try {
+                          const participants = await getParticipants(currentSessionId);
+                          setTopicParticipants(participants);
+                        } catch (error) {
+                          console.warn('[Workflow] Failed to load topic participants:', error);
+                          setTopicParticipants([]);
+                        }
+                        setShowTopicConfigDialog(true);
+                      } else {
+                        // Agent/普通会话 - 显示 HeaderConfigDialog
+                        setHeaderConfigEditName(currentSession.name || '');
+                        setHeaderConfigEditAvatar(currentSession.avatar || null);
+                        setHeaderConfigEditSystemPrompt(currentSession.system_prompt || '');
+                        setHeaderConfigEditMediaOutputPath(currentSession.media_output_path || '');
+                        setHeaderConfigEditLlmConfigId(currentSession.llm_config_id || null);
+                        setHeaderConfigActiveTab('basic');
+                        setShowHeaderConfigDialog(true);
+                      }
                     }
                   }
                 }}
@@ -4903,131 +4934,93 @@ const Workflow: React.FC<WorkflowProps> = ({
               </div>
             )}
             
-            <div
-               className={`flex-1 relative at-selector-container rounded-xl bg-transparent transition-shadow ${
-                isInputFocused ? 'shadow-lg ring-1 ring-[var(--color-accent)]/20' : 'shadow-sm'
-              }`}
-            >
-              {/* 输入框扩大/缩小按钮 - 输入框内部右上角小箭头 */}
-              {!editingMessageId && (
-                <button
-                  onMouseDown={(e) => {
-                    // Prevent textarea blur so click still toggles expand.
-                    e.preventDefault();
-                  }}
-                  onClick={() => setIsInputExpanded(!isInputExpanded)}
-                  className="absolute top-1.5 right-1.5 z-10 p-0.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors opacity-50 hover:opacity-100"
-                  title={isInputExpanded ? "缩小输入框" : "扩大输入框"}
-                >
-                  <ChevronUp className={`w-3 h-3 transition-transform ${isInputExpanded ? 'rotate-180' : ''}`} />
-                </button>
-              )}
-              
-              {/* 工具 Tag（上方摆放）：帮助 + MCP/Workflow/技能包/附件 + 人设 + Thinking */}
-              <div className="flex items-center justify-between gap-2 px-3 py-2 bg-white/45 dark:bg-[#262626]/45 backdrop-blur-md border-b border-black/5 dark:border-white/10 rounded-t-xl">
-                <div className="flex items-center gap-2 min-w-0 flex-wrap">
-                  {/* 帮助问号图标 */}
-                  <div className="relative flex-shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setShowHelpTooltip(!showHelpTooltip)}
-                      className="w-5 h-5 rounded-full bg-gray-400 hover:bg-gray-500 dark:bg-gray-600 dark:hover:bg-gray-500 text-white flex items-center justify-center transition-colors"
-                      title="查看帮助"
-                    >
-                      <HelpCircle className="w-3 h-3" />
-                    </button>
-                    {/* 帮助提示弹窗 */}
-                    {showHelpTooltip && (
-                      <>
-                        {/* 点击外部区域关闭 */}
-                        <div className="fixed inset-0 z-10" onClick={() => setShowHelpTooltip(false)} />
-                        <div className="absolute bottom-full left-0 mb-2 w-80 p-3 bg-white dark:bg-[#2d2d2d] rounded-lg shadow-lg border border-gray-200 dark:border-[#404040] z-20">
-                          <div className="text-xs text-gray-700 dark:text-[#ffffff] space-y-1">
-                            {!selectedLLMConfig ? (
-                              <p>请先选择 LLM 模型</p>
-                            ) : selectedComponents.length > 0 ? (
-                              <p>
-                                已选择感知组件：<span className="font-medium">{selectedComponents[0].name}</span>。如需更换，请先删除当前组件，然后使用 @ 选择新的组件。
-                              </p>
-                            ) : selectedMcpServerIds.size > 0 ? (
-                              <p>
-                                提示：我可以使用 {totalTools} 个 MCP 工具帮助你完成任务，例如<span className="font-medium">"发布内容"</span>、<span className="font-medium">"查询信息"</span>等。使用 @ 可以选择感知组件。
-                              </p>
-                            ) : (
-                              <p>提示：你可以直接与我对话，我会尽力帮助你。如果需要使用工具，请在 MCP 服务器中选择至少一个服务器，或使用 @ 选择感知组件。</p>
-                            )}
-                          </div>
-                          <button
-                            onClick={() => setShowHelpTooltip(false)}
-                            className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
+            <div className="flex-1 relative at-selector-container">
+              {/* 工具 Tag（气泡/图标样式，依附在输入框上方） */}
+              <div className="absolute -top-8 left-0 flex items-center gap-1.5 flex-wrap">
+                {/* 帮助问号图标 */}
+                <div className="relative flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setShowHelpTooltip(!showHelpTooltip)}
+                    className="w-5 h-5 rounded-full bg-gray-400/80 hover:bg-gray-500 dark:bg-gray-600/80 dark:hover:bg-gray-500 text-white flex items-center justify-center transition-colors shadow-sm"
+                    title="查看帮助"
+                  >
+                    <HelpCircle className="w-3 h-3" />
+                  </button>
+                  {/* 帮助提示弹窗 */}
+                  {showHelpTooltip && (
+                    <>
+                      {/* 点击外部区域关闭 */}
+                      <div className="fixed inset-0 z-10" onClick={() => setShowHelpTooltip(false)} />
+                      <div className="absolute bottom-full left-0 mb-2 w-80 p-3 bg-white dark:bg-[#2d2d2d] rounded-lg shadow-lg border border-gray-200 dark:border-[#404040] z-20">
+                        <div className="text-xs text-gray-700 dark:text-[#ffffff] space-y-1">
+                          {!selectedLLMConfig ? (
+                            <p>请先选择 LLM 模型</p>
+                          ) : selectedComponents.length > 0 ? (
+                            <p>
+                              已选择感知组件：<span className="font-medium">{selectedComponents[0].name}</span>。如需更换，请先删除当前组件，然后使用 @ 选择新的组件。
+                            </p>
+                          ) : selectedMcpServerIds.size > 0 ? (
+                            <p>
+                              提示：我可以使用 {totalTools} 个 MCP 工具帮助你完成任务，例如<span className="font-medium">"发布内容"</span>、<span className="font-medium">"查询信息"</span>等。使用 @ 可以选择感知组件。
+                            </p>
+                          ) : (
+                            <p>提示：你可以直接与我对话，我会尽力帮助你。如果需要使用工具，请在 MCP 服务器中选择至少一个服务器，或使用 @ 选择感知组件。</p>
+                          )}
                         </div>
-                      </>
-                    )}
-                  </div>
-
-                  <ComponentThumbnails
-                    mcpServers={mcpServers}
-                    workflows={workflows}
-                    skillPacks={allSkillPacks}
-                    selectedMcpServerIds={selectedMcpServerIds}
-                    selectedWorkflowIds={selectedWorkflowIds}
-                    selectedSkillPackIds={selectedSkillPackIds}
-                    connectedMcpServerIds={connectedMcpServerIds}
-                    connectingMcpServerIds={connectingServers}
-                    onSelectMCP={handleSelectMCPFromThumbnail}
-                    onDeselectMCP={handleDeselectMCPFromThumbnail}
-                    onConnectMCP={handleConnectServer}
-                    onSelectWorkflow={handleSelectWorkflowFromThumbnail}
-                    onDeselectWorkflow={handleDeselectWorkflowFromThumbnail}
-                    onSelectSkillPack={handleSelectSkillPackFromThumbnail}
-                    onDeselectSkillPack={handleDeselectSkillPackFromThumbnail}
-                    onAttachFile={handleAttachFile}
-                  />
-
-                  {/* 人设按钮 */}
-                  {currentSessionId && (
-                    <button
-                      onClick={() => {
-                        setSystemPromptDraft(currentSystemPrompt || '');
-                        setIsEditingSystemPrompt(true);
-                      }}
-                      className={`flex items-center space-x-1 px-1.5 py-0.5 rounded text-[11px] transition-all ${
-                        currentSystemPrompt
-                          ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 font-medium'
-                          : 'text-gray-400 dark:text-[#808080] hover:text-gray-500 dark:hover:text-gray-400'
-                      }`}
-                      title={currentSystemPrompt ? `人设: ${currentSystemPrompt.length > 50 ? currentSystemPrompt.slice(0, 50) + '...' : currentSystemPrompt}` : '点击设置人设'}
-                    >
-                      <FileText className="w-3 h-3 flex-shrink-0" />
-                      <span>人设</span>
-                    </button>
-                  )}
-
-                  {/* Thinking 模式显示（仅显示，不允许切换） */}
-                  {selectedLLMConfig && (() => {
-                    const enableThinking = selectedLLMConfig.metadata?.enableThinking ?? false;
-                    return (
-                      <div
-                        className={`flex items-center space-x-1 px-1.5 py-0.5 rounded text-[11px] transition-all ${
-                          enableThinking
-                            ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 font-medium'
-                            : 'text-gray-400 dark:text-[#808080]'
-                        }`}
-                        title={enableThinking ? '深度思考模式（在模型配置中启用）' : '普通模式（在模型配置中禁用）'}
-                      >
-                        <Brain className="w-3 h-3" />
-                        <span>{enableThinking ? '深度思考' : '普通'}</span>
-                        {enableThinking && <span className="w-1 h-1 bg-primary-500 rounded-full animate-pulse"></span>}
+                        <button
+                          onClick={() => setShowHelpTooltip(false)}
+                          className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
                       </div>
-                    );
-                  })()}
+                    </>
+                  )}
                 </div>
+
+                <ComponentThumbnails
+                  mcpServers={mcpServers}
+                  workflows={workflows}
+                  skillPacks={allSkillPacks}
+                  selectedMcpServerIds={selectedMcpServerIds}
+                  selectedWorkflowIds={selectedWorkflowIds}
+                  selectedSkillPackIds={selectedSkillPackIds}
+                  connectedMcpServerIds={connectedMcpServerIds}
+                  connectingMcpServerIds={connectingServers}
+                  onSelectMCP={handleSelectMCPFromThumbnail}
+                  onDeselectMCP={handleDeselectMCPFromThumbnail}
+                  onConnectMCP={handleConnectServer}
+                  onSelectWorkflow={handleSelectWorkflowFromThumbnail}
+                  onDeselectWorkflow={handleDeselectWorkflowFromThumbnail}
+                  onSelectSkillPack={handleSelectSkillPackFromThumbnail}
+                  onDeselectSkillPack={handleDeselectSkillPackFromThumbnail}
+                  onAttachFile={handleAttachFile}
+                />
+
+                {/* 人设按钮 */}
+                {currentSessionId && (
+                  <button
+                    onClick={() => {
+                      setSystemPromptDraft(currentSystemPrompt || '');
+                      setIsEditingSystemPrompt(true);
+                    }}
+                    className={`flex items-center space-x-1 px-1.5 py-0.5 rounded-md text-[11px] transition-all shadow-sm ${
+                      currentSystemPrompt
+                        ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 font-medium border border-indigo-200 dark:border-indigo-800'
+                        : 'bg-gray-100/80 dark:bg-[#363636]/80 text-gray-400 dark:text-[#808080] hover:text-gray-500 dark:hover:text-gray-400 border border-gray-200 dark:border-[#404040]'
+                    }`}
+                    title={currentSystemPrompt ? `人设: ${currentSystemPrompt.length > 50 ? currentSystemPrompt.slice(0, 50) + '...' : currentSystemPrompt}` : '点击设置人设'}
+                  >
+                    <FileText className="w-3 h-3 flex-shrink-0" />
+                    <span>人设</span>
+                  </button>
+                )}
               </div>
 
-            <textarea
+              {/* 输入框和右侧按钮容器 */}
+              <div className="flex items-end gap-2">
+                <textarea
                 ref={inputRef}
               value={input}
                 onChange={handleInputChange}
@@ -5163,15 +5156,85 @@ const Workflow: React.FC<WorkflowProps> = ({
                     ? `输入你的任务，我可以使用 ${totalTools} 个工具帮助你完成... (输入 @ 选择感知组件)`
                     : '输入你的问题，我会尽力帮助你... (输入 @ 选择感知组件，输入 / 引用爬虫数据)'
               }
-                className={`flex-1 resize-none w-full transition-all duration-200 bg-transparent border-none focus:outline-none focus:ring-0 text-gray-900 dark:text-[#ffffff] placeholder-gray-400 dark:placeholder-[#808080] px-3 py-2 ${
-                  isInputExpanded 
-                    ? 'min-h-[200px] max-h-[400px]' 
-                    : 'min-h-[36px] max-h-[120px]'
-                }`}
-              style={{ fontSize: '14px', lineHeight: '1.5' }}
-              rows={1}
-              disabled={isLoading || !selectedLLMConfig}
-            />
+                  className={`flex-1 resize-none transition-all duration-300 bg-transparent border-none focus:outline-none focus:ring-0 text-gray-900 dark:text-[#ffffff] placeholder-gray-400 dark:placeholder-[#808080] ${
+                    isInputFocused ? 'px-3 py-3' : 'px-4 py-3 overflow-hidden'
+                  } ${
+                    isInputExpanded 
+                      ? 'min-h-[200px] max-h-[400px]' 
+                      : isInputFocused ? 'min-h-[48px] max-h-[120px]' : 'min-h-[44px] max-h-[44px]'
+                  }`}
+                  style={{ fontSize: '14px', lineHeight: '1.5' }}
+                  rows={1}
+                  disabled={isLoading || !selectedLLMConfig}
+                />
+                
+                {/* 右侧：Token计数 + 模型选择 + 发送按钮 */}
+                <div className="flex items-center gap-1.5 flex-shrink-0 pb-1">
+                  {/* Token计数 */}
+                  <div className="min-w-0">
+                    <TokenCounter selectedLLMConfig={selectedLLMConfig} messages={messages} />
+                  </div>
+
+                  {/* 模型选择显示与按钮 */}
+                  <div className="flex items-center space-x-1">
+                    {selectedLLMConfig && (
+                      <div className="flex items-center space-x-1">
+                        {/* Shortname 显示 */}
+                        <span 
+                          className="text-[10px] text-primary-600 dark:text-primary-400 font-medium cursor-pointer hover:opacity-80 transition-opacity"
+                          onClick={() => setShowModelSelectDialog(true)}
+                        >
+                          {selectedLLMConfig.shortname || selectedLLMConfig.name}
+                        </span>
+
+                        {/* Thinking 状态显示 */}
+                        {(() => {
+                          const enableThinking = selectedLLMConfig.metadata?.enableThinking ?? false;
+                          if (!enableThinking) return null;
+                          return (
+                            <div 
+                              className="flex items-center space-x-1 px-1 py-0.5 rounded-md bg-purple-50 dark:bg-purple-900/20 text-[10px] text-purple-600 dark:text-purple-400 border border-purple-100 dark:border-purple-800/30"
+                              title="深度思考模式已开启"
+                            >
+                              <Brain className="w-2.5 h-2.5" />
+                              <span className="font-medium">Thinking</span>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
+
+                    {/* 模型选择图标按钮 */}
+                    <button
+                      onClick={() => setShowModelSelectDialog(true)}
+                      className={`flex items-center justify-center w-6 h-6 rounded transition-colors ${
+                        selectedLLMConfig
+                          ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 hover:bg-primary-200 dark:hover:bg-primary-900/50'
+                          : 'bg-gray-100 dark:bg-[#363636] text-gray-500 dark:text-[#808080] hover:bg-gray-200 dark:hover:bg-[#404040]'
+                      }`}
+                      title={selectedLLMConfig ? `${selectedLLMConfig.name}${selectedLLMConfig.model ? ` (${selectedLLMConfig.model})` : ''}` : '选择模型'}
+                    >
+                      {selectedLLMConfig ? (
+                        <CheckCircle className="w-3.5 h-3.5" />
+                      ) : (
+                        <Brain className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  </div>
+
+                  {/* 发送按钮 */}
+                  <Button
+                    onClick={handleSend}
+                    disabled={isLoading || (!input.trim() && attachedMedia.length === 0) || !selectedLLMConfig}
+                    variant="primary"
+                    size="sm"
+                    className="gap-1 px-2 py-1 h-7 text-xs flex-shrink-0"
+                  >
+                    {isLoading ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                    <span className="hidden sm:inline">{editingMessageId ? '重发' : '发送'}</span>
+                  </Button>
+                </div>
+              </div>
             {/* 编辑模式提示和取消按钮 */}
             {editingMessageId && (
               <div className="absolute top-2 right-2 flex items-center space-x-2">
@@ -5383,48 +5446,9 @@ const Workflow: React.FC<WorkflowProps> = ({
                 )}
             </div>
           )}
-              
-              {/* 输入框底部：Token 计数 + 模型选择 + 发送按钮（紧凑布局） */}
-              <div className="flex items-center justify-between gap-2 px-2.5 py-1 bg-white/45 dark:bg-[#262626]/45 backdrop-blur-md border-t border-black/5 dark:border-white/10 rounded-b-xl">
-                <div className="min-w-0">
-                  <TokenCounter selectedLLMConfig={selectedLLMConfig} messages={messages} />
-                </div>
-
-                {/* 右侧：模型选择图标按钮 + 发送按钮（紧挨着） */}
-                <div className="flex items-center gap-1.5 flex-shrink-0">
-                  {/* 模型选择图标按钮 */}
-                  <button
-                    onClick={() => setShowModelSelectDialog(true)}
-                    className={`flex items-center justify-center w-6 h-6 rounded transition-colors ${
-                      selectedLLMConfig
-                        ? 'bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 hover:bg-primary-200 dark:hover:bg-primary-900/50'
-                        : 'bg-gray-100 dark:bg-[#363636] text-gray-500 dark:text-[#808080] hover:bg-gray-200 dark:hover:bg-[#404040]'
-                    }`}
-                    title={selectedLLMConfig ? `${selectedLLMConfig.name}${selectedLLMConfig.model ? ` (${selectedLLMConfig.model})` : ''}` : '选择模型'}
-                  >
-                    {selectedLLMConfig ? (
-                      <CheckCircle className="w-3.5 h-3.5" />
-                    ) : (
-                      <Brain className="w-3.5 h-3.5" />
-                    )}
-                  </button>
-
-                  {/* 发送按钮 */}
-                  <Button
-                    onClick={handleSend}
-                    disabled={isLoading || (!input.trim() && attachedMedia.length === 0) || !selectedLLMConfig}
-                    variant="primary"
-                    size="sm"
-                    className="gap-1 px-2 py-1 h-6 text-xs flex-shrink-0"
-                  >
-                    {isLoading ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                    <span className="hidden sm:inline">{editingMessageId ? '重发' : '发送'}</span>
-                  </Button>
-                </div>
-              </div>
             </div>
           </div>
-          </div>
+        </div>
           
           {/* 人设编辑弹窗 */}
           <SystemPromptEditDialog
@@ -5765,6 +5789,85 @@ const Workflow: React.FC<WorkflowProps> = ({
       setEditProfession={setHeaderConfigEditProfession}
     />
 
+    {/* TopicConfigDialog - 话题配置对话框 */}
+    <TopicConfigDialog
+      open={showTopicConfigDialog}
+      onClose={() => setShowTopicConfigDialog(false)}
+      topicId={currentSessionId || ''}
+      topicName={topicConfigEditName}
+      topicAvatar={topicConfigEditAvatar}
+      topicDisplayType={topicConfigEditDisplayType}
+      participants={topicParticipants}
+      editName={topicConfigEditName}
+      setEditName={setTopicConfigEditName}
+      editAvatar={topicConfigEditAvatar}
+      setEditAvatar={setTopicConfigEditAvatar}
+      editDisplayType={topicConfigEditDisplayType}
+      setEditDisplayType={setTopicConfigEditDisplayType}
+      onSave={async () => {
+        if (!currentSessionId) return;
+        try {
+          const promises: Promise<unknown>[] = [];
+          
+          // 更新名称
+          const currentSession = sessions.find(s => s.session_id === currentSessionId) || currentSessionMeta;
+          if (topicConfigEditName !== (currentSession?.name || currentSession?.title || '')) {
+            promises.push(updateSessionName(currentSessionId, topicConfigEditName));
+          }
+          
+          // 更新头像
+          if (topicConfigEditAvatar !== (currentSession?.avatar || null)) {
+            promises.push(updateSessionAvatar(currentSessionId, topicConfigEditAvatar || ''));
+            setCurrentSessionAvatar(topicConfigEditAvatar);
+          }
+          
+          // 更新展示类型 (存储在 ext 字段)
+          const currentExt = currentSession?.ext || {};
+          if (topicConfigEditDisplayType !== (currentExt.displayType || 'chat')) {
+            promises.push(updateSession(currentSessionId, {
+              ext: { ...currentExt, displayType: topicConfigEditDisplayType }
+            }));
+          }
+          
+          await Promise.all(promises);
+          
+          // 刷新会话列表
+          const allSessions = await getSessions();
+          setSessions(allSessions);
+          emitSessionsChanged();
+          
+          setShowTopicConfigDialog(false);
+        } catch (error) {
+          console.error('Failed to save topic config:', error);
+          alert('保存失败，请重试');
+        }
+      }}
+      onAddParticipant={async (agentId: string) => {
+        if (!currentSessionId) return;
+        try {
+          await addSessionParticipant(currentSessionId, agentId, 'agent');
+          // 重新加载参与者
+          const participants = await getParticipants(currentSessionId);
+          setTopicParticipants(participants);
+        } catch (error) {
+          console.error('Failed to add participant:', error);
+          alert('添加参与者失败');
+        }
+      }}
+      onRemoveParticipant={async (participantId: string) => {
+        if (!currentSessionId) return;
+        try {
+          await removeSessionParticipant(currentSessionId, participantId);
+          // 重新加载参与者
+          const participants = await getParticipants(currentSessionId);
+          setTopicParticipants(participants);
+        } catch (error) {
+          console.error('Failed to remove participant:', error);
+          alert('移除参与者失败');
+        }
+      }}
+    />
+
     <ConfirmDialog
       open={deleteSessionTarget !== null}
       onOpenChange={(open) => {
@@ -5857,8 +5960,6 @@ const Workflow: React.FC<WorkflowProps> = ({
       onDeleteMeeting={(id, name) => setDeleteRoundTableTarget({ id, name })}
       onDeleteResearch={(id, name) => setDeleteResearchTarget({ id, name })}
       onShowRoleGenerator={() => setShowRoleGenerator(true)}
-      onShowNewMeetingDialog={() => setShowNewMeetingDialog(true)}
-      onShowNewResearchDialog={() => setShowNewResearchDialog(true)}
     />
 
     {/* 新建 Meeting 对话框 */}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Settings, Trash2, Save, Code } from 'lucide-react';
-import { Settings as SettingsType } from '../services/storage';
+import { GlobalSettings as SettingsType } from '../services/core/shared/types';
 import PageLayout, { Card } from './ui/PageLayout';
 import {
   Dialog,

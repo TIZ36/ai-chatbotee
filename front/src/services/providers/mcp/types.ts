@@ -3,14 +3,11 @@
  * MCP (Model Context Protocol) 模块类型定义
  */
 
+import type { MCPServerType, HealthStatus } from '../../core/shared/types';
+
 // ============================================================================
 // Server Types - 服务器类型
 // ============================================================================
-
-/**
- * MCP 服务器类型
- */
-export type MCPServerType = 'http-stream' | 'http-post' | 'stdio';
 
 /**
  * MCP 服务器配置
@@ -157,11 +154,6 @@ export interface HealthCheckResult {
   error?: Error;
   timestamp: number;
 }
-
-/**
- * 健康状态
- */
-export type HealthStatus = 'healthy' | 'unhealthy' | 'unknown';
 
 // ============================================================================
 // Client Options - 客户端选项

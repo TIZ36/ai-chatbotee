@@ -203,9 +203,16 @@ export interface ThinkingTask {
 // ============================================================================
 
 /**
- * 会话类型
+ * 会话类型 (Topic 类型)
  */
-export type SessionType = 'single' | 'multi' | 'roundtable';
+export type SessionType = 
+  | 'private_chat'       // 私聊
+  | 'topic_general'      // 普通话题/群聊
+  | 'topic_research'     // 研究课题
+  | 'topic_brainstorm'   // 脑暴话题
+  | 'temporary'          // 临时会话
+  | 'memory'             // 记忆片段 (旧)
+  | 'single' | 'multi' | 'roundtable'; // 兼容旧版
 
 /**
  * 会话状态
@@ -213,16 +220,25 @@ export type SessionType = 'single' | 'multi' | 'roundtable';
 export type SessionStatus = 'active' | 'paused' | 'ended';
 
 /**
- * 会话定义
+ * 会话定义 (Topic 详情)
  */
 export interface SessionDefinition {
   id: string;
+  session_id?: string;        // 后端返回的 id
   type: SessionType;
+  session_type?: SessionType; // 后端返回的类型
   name: string;
+  title?: string;             // 后端返回的标题
   description?: string;
-  agents: string[];           // Agent IDs
+  avatar?: string;
+  agents?: string[];          // 参与者 ID 列表
+  participants?: any[];       // 详细参与者信息
+  owner_id?: string;          // 话题所有者
+  ext?: Record<string, any>;  // 扩展配置 (人设、语音等)
   status: SessionStatus;
   createdAt: number;
   updatedAt: number;
+  created_at?: string;        // 后端返回的时间
+  updated_at?: string;
   metadata?: Record<string, unknown>;
 }

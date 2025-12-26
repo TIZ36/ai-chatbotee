@@ -12,7 +12,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
         ref={ref}
         className={cn(
           [
-            'flex min-h-[80px] w-full rounded-md border border-inputToken bg-background px-3 py-2 text-sm text-foreground',
+            'flex min-h-[100px] w-full rounded-sm border border-inputToken bg-background px-4 py-3 text-sm text-foreground',
             'placeholder:text-mutedToken-foreground',
             'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ringToken',
             'disabled:cursor-not-allowed disabled:opacity-50',

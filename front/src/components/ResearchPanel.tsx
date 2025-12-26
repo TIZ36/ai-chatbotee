@@ -899,14 +899,17 @@ const ResearchPanel: React.FC<ResearchPanelProps> = ({
     try {
       const server = mcpServers.find(s => (s.server_id || s.id) === serverId);
       if (!server) throw new Error('Server not found');
-      await mcpManager.connect({
+      await mcpManager.addServer({
         id: serverId,
         name: server.name,
-        transport_type: server.transport_type,
-        api_url: server.api_url,
-        command: server.command,
-        args: server.args,
-        env: server.env,
+        type: server.transport_type || 'http-stream',
+        url: server.api_url || '',
+        enabled: true,
+        metadata: {
+          command: server.command,
+          args: server.args,
+          env: server.env,
+        }
       });
       setConnectedMcpServerIds(prev => new Set([...prev, serverId]));
       setSelectedMcpServerIds(prev => new Set([...prev, serverId]));

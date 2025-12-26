@@ -6,7 +6,7 @@
 
 import React from 'react';
 import { estimate_messages_tokens, get_model_max_tokens } from '../../services/tokenCounter';
-import { LLMConfigFromDB } from '../../services/sessionApi';
+import { LLMConfigFromDB } from '../../services/llmApi';
 import { Message } from './MessageContent';
 
 export interface TokenCounterProps {

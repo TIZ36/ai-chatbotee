@@ -108,6 +108,8 @@ class SessionService:
             existing.role_snapshot = data['role_snapshot']
         if 'role_applied_at' in data:
             existing.role_applied_at = data['role_applied_at']
+        if 'ext' in data:
+            existing.ext = data['ext']
         
         if self.repository.save(existing):
             return existing.to_dict()
@@ -162,6 +164,21 @@ class SessionService:
         """创建记忆体"""
         data['session_type'] = 'memory'
         return self.create_session(data, creator_ip=creator_ip)
+    
+    # ==================== 参与者管理 ====================
+    
+    def get_participants(self, session_id: str) -> List[dict]:
+        """获取会话参与者列表"""
+        return self.repository.get_participants(session_id)
+    
+    def add_participant(self, session_id: str, participant_id: str, 
+                        participant_type: str = 'agent', role: str = 'member') -> bool:
+        """添加参与者到会话"""
+        return self.repository.add_participant(session_id, participant_id, participant_type, role)
+    
+    def remove_participant(self, session_id: str, participant_id: str) -> bool:
+        """从会话移除参与者"""
+        return self.repository.remove_participant(session_id, participant_id)
 
 
 # 全局服务实例

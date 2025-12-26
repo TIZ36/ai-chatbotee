@@ -34,3 +34,6 @@ export type { AddProfessionDialogProps } from './AddProfessionDialog';
 
 export { SystemPromptEditDialog } from './SystemPromptEditDialog';
 export type { SystemPromptEditDialogProps } from './SystemPromptEditDialog';
+
+export { AddParticipantDialog, ResearchTodoConfirmDialog } from './GroupChatDialogs';
+export type { AddParticipantDialogProps, ResearchTodoConfirmDialogProps } from './GroupChatDialogs';

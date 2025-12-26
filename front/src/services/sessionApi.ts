@@ -10,7 +10,7 @@ export interface Session {
   avatar?: string; // base64编码的头像
   system_prompt?: string; // 系统提示词（人设）
   media_output_path?: string; // 媒体输出本地路径（图片/视频/音频）
-  session_type?: 'temporary' | 'memory' | 'agent' | 'research'; // 会话类型：临时会话/记忆体/智能体/研究
+  session_type?: 'temporary' | 'memory' | 'agent' | 'research' | 'topic_general'; // 会话类型：临时会话/记忆体/智能体/研究/话题
   // 角色应用（会话绑定角色版本，用于可复盘）
   role_id?: string | null;
   role_version_id?: string | null;
@@ -18,6 +18,8 @@ export interface Session {
   current_role_version_id?: string | null;
   // 扩展字段（存储 persona 等配置）
   ext?: Record<string, any>;
+  // 技能包（能力集）
+  skill_packs?: any[];
   created_at?: string;
   updated_at?: string;
   last_message_at?: string;
@@ -203,12 +205,30 @@ export async function getAgents(): Promise<Session[]> {
 }
 
 /**
+ * 获取记忆体（话题）列表
+ */
+export async function getMemories(): Promise<Session[]> {
+  try {
+    const response = await fetch(`${API_BASE}/memories`);
+    if (!response.ok) {
+      console.warn(`Failed to fetch memories: ${response.statusText}`);
+      return [];
+    }
+    const data = await response.json();
+    return normalizeSessionList(data.memories || []);
+  } catch (error) {
+    console.warn('Error fetching memories:', error);
+    return [];
+  }
+}
+
+/**
  * 创建新会话
  */
 export async function createSession(
   llm_config_id?: string,
   title?: string,
-  session_type?: 'temporary' | 'memory' | 'agent' | 'research'
+  session_type?: 'temporary' | 'memory' | 'agent' | 'research' | 'topic_general'
 ): Promise<Session> {
   const response = await fetch(`${API_BASE}/sessions`, {
     method: 'POST',
@@ -551,6 +571,23 @@ export async function updateSessionAvatar(session_id: string, avatar: string): P
 }
 
 /**
+ * 通用会话更新函数
+ */
+export async function updateSession(session_id: string, data: Partial<Session>): Promise<Session> {
+  const response = await fetch(`${API_BASE}/sessions/${session_id}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to update session: ${response.statusText}`);
+  }
+  return normalizeSession(await response.json());
+}
+
+/**
  * 更新会话的用户自定义名称
  */
 export async function updateSessionName(session_id: string, name: string): Promise<void> {
@@ -748,4 +785,88 @@ export function importAgentFromFile(): Promise<AgentExportData> {
     
     input.click();
   });
+}
+
+// ==================== 参与者管理 API ====================
+
+export interface Participant {
+  participant_id: string;
+  participant_type: 'user' | 'agent';
+  role: string;
+  name?: string;
+  avatar?: string;
+  system_prompt?: string;
+  joined_at?: string;
+}
+
+/**
+ * 获取会话参与者列表
+ */
+export async function getParticipants(session_id: string): Promise<Participant[]> {
+  try {
+    const response = await fetch(`${API_BASE}/sessions/${session_id}/participants`);
+    if (!response.ok) {
+      console.warn(`Failed to fetch participants: ${response.statusText}`);
+      return [];
+    }
+    const data = await response.json();
+    return data.participants || [];
+  } catch (error) {
+    console.warn('Error fetching participants:', error);
+    return [];
+  }
+}
+
+/**
+ * 添加参与者到会话
+ */
+export async function addParticipant(
+  session_id: string,
+  participant_id: string,
+  participant_type: 'user' | 'agent' = 'agent',
+  role: string = 'member'
+): Promise<boolean> {
+  try {
+    const response = await fetch(`${API_BASE}/sessions/${session_id}/participants`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        participant_id,
+        participant_type,
+        role,
+      }),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || `Failed to add participant: ${response.statusText}`);
+    }
+    return true;
+  } catch (error) {
+    console.error('Error adding participant:', error);
+    throw error;
+  }
+}
+
+/**
+ * 从会话移除参与者
+ */
+export async function removeParticipant(
+  session_id: string,
+  participant_id: string
+): Promise<boolean> {
+  try {
+    const response = await fetch(`${API_BASE}/sessions/${session_id}/participants/${participant_id}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || `Failed to remove participant: ${response.statusText}`);
+    }
+    return true;
+  } catch (error) {
+    console.error('Error removing participant:', error);
+    throw error;
+  }
 }

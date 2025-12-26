@@ -63,21 +63,6 @@ export type MCPServerType = 'http-stream' | 'http-post' | 'stdio';
  */
 export type MessageRole = 'system' | 'user' | 'assistant' | 'tool';
 
-/**
- * 媒体类型
- */
-export type MediaType = 'image' | 'audio' | 'video' | 'text';
-
-/**
- * 媒体项
- */
-export interface MediaItem {
-  type: MediaType;
-  mimeType: string;
-  data?: string; // base64 encoded
-  url?: string;
-}
-
 // ============================================================================
 // Callback Types - 回调类型
 // ============================================================================
@@ -111,14 +96,53 @@ export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'er
  */
 export type HealthStatus = 'healthy' | 'unhealthy' | 'unknown';
 
+// ============================================================================
+// Media Types - 媒体相关类型
+// ============================================================================
+
 /**
- * 任务状态
+ * 媒体类型
  */
-export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type MediaType = 'image' | 'audio' | 'video' | 'text';
+
+/**
+ * 媒体来源
+ */
+export type MediaSource = 'base64' | 'url' | 'blob' | 'file';
+
+/**
+ * 媒体项
+ */
+export interface MediaItem {
+  type: MediaType;
+  mimeType: string;
+  source: MediaSource;
+  data?: string;       // base64 data
+  url?: string;        // URL
+  blob?: Blob;         // Blob object
+  file?: File;         // File object
+  
+  // 元数据
+  width?: number;
+  height?: number;
+  duration?: number;   // 音频/视频时长（秒）
+  size?: number;       // 文件大小（字节）
+  filename?: string;
+}
 
 // ============================================================================
 // Config Types - 配置类型
 // ============================================================================
+
+/**
+ * 全局设置
+ */
+export interface GlobalSettings {
+  theme?: 'light' | 'dark' | 'system';
+  language?: string;
+  fontSize?: number;
+  [key: string]: any;
+}
 
 /**
  * 重试配置

@@ -10,11 +10,13 @@ const API_BASE_URL = `${getBackendUrl()}/api/llm`;
 export interface LLMConfigFromDB {
   config_id: string;
   name: string;
+  shortname?: string;
   provider: 'openai' | 'anthropic' | 'local' | 'custom' | 'ollama' | 'gemini';
   api_url?: string;
   model?: string;
   tags?: string[];
   enabled: boolean;
+  is_default?: boolean;
   description?: string;
   metadata?: Record<string, any>;
   max_tokens?: number; // 模型的最大 token 限制（从后端获取）
@@ -25,6 +27,7 @@ export interface LLMConfigFromDB {
 export interface CreateLLMConfigRequest {
   config_id?: string;
   name: string;
+  shortname?: string;
   provider: 'openai' | 'anthropic' | 'local' | 'custom' | 'ollama' | 'gemini';
   api_key?: string;
   api_url?: string;

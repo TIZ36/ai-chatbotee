@@ -12,7 +12,7 @@
     "rebuild:electron": "electron-rebuild -f -w node-pty",
     "postinstall": "electron-rebuild -f -w node-pty 2>&1 || echo '⚠️  electron-rebuild failed (OK for mobile builds, node-pty only needed for Electron terminal)'",
     "electron": "npm run build:electron && NODE_ENV=development electron .",
-    "electron:dev": "concurrently -k -s first \"cd front && vite\" \"wait-on http://localhost:5174 && npm run build:electron && NODE_ENV=development electron .\"",
+    "electron:dev": "concurrently -k -s first \"cd front && vite\" \"wait-on http://localhost:5177 && npm run build:electron && NODE_ENV=development electron .\"",
     "build:all": "npm run build && electron-builder"
   },
   "dependencies": {

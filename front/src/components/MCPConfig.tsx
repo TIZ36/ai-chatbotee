@@ -936,7 +936,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
             </Button>
             <div className="text-xs text-gray-500 dark:text-gray-400 flex flex-col gap-0.5">
               <div>
-                {marketTotal > 0 ? `共 ${marketTotal} 条，展示 ${marketItems.length} 条` : ''}
+              {marketTotal > 0 ? `共 ${marketTotal} 条，展示 ${marketItems.length} 条` : ''}
               </div>
               {selectedSourceId && marketSources.find(s => s.source_id === selectedSourceId)?.last_sync_at && (
                 <div className="text-[10px] opacity-70">

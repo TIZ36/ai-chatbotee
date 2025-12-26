@@ -58,6 +58,12 @@ fi
 
 # 编译 Electron 主进程代码
 echo "编译 Electron 主进程代码..."
+# 清理旧进程
+echo "🧹 清理旧进程..."
+fuser -k 5177/tcp 2>/dev/null || true
+pkill -f "node_modules/.bin/electron" 2>/dev/null || true
+pkill -f "node_modules/electron/dist" 2>/dev/null || true
+sleep 1
 npm run build:electron
 if [ $? -ne 0 ]; then
     echo "错误: 编译 Electron 代码失败"
@@ -97,7 +103,7 @@ else
     # 等待 Vite 服务器就绪
     echo "等待 Vite 服务器就绪..."
     for i in {1..30}; do
-        if curl -s http://localhost:5174 > /dev/null 2>&1; then
+        if curl -s http://localhost:5177 > /dev/null 2>&1; then
             echo "✅ Vite 服务器已就绪"
             break
         fi

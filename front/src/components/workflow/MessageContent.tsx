@@ -98,6 +98,8 @@ export interface Message {
   toolCallSignatures?: Record<string, string>;
   mcpdetail?: any;
   processSteps?: ProcessStep[];
+  avatarUrl?: string; // Add avatarUrl for assistant messages
+  agentName?: string; // Add agentName for assistant messages
 }
 
 export interface MessageContentProps {
@@ -245,18 +247,18 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
     return (
       <div className="flex flex-col items-start py-1">
         {/* Abort button */}
-        <button
-          onClick={() => {
-            abortController.abort();
-            setAbortController(null);
-            setMessages(prev => prev.filter(msg => msg.id !== message.id));
-            setIsLoading(false);
-          }}
+          <button
+            onClick={() => {
+              abortController.abort();
+              setAbortController(null);
+              setMessages(prev => prev.filter(msg => msg.id !== message.id));
+              setIsLoading(false);
+            }}
           className="px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors flex items-center"
-        >
+          >
           <XCircle className="w-3.5 h-3.5 mr-1.5" />
-          中断生成
-        </button>
+            中断生成
+          </button>
       </div>
     );
   }

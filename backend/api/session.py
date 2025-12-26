@@ -134,7 +134,7 @@ def get_memories():
         service = get_session_service()
         include_avatar = request.args.get('include_avatar', 'false').lower() == 'true'
         memories = service.get_memories(include_avatar=include_avatar)
-        return jsonify(memories)
+        return jsonify({'memories': memories})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -150,5 +150,52 @@ def create_memory():
         return jsonify(memory), 201
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ==================== 参与者管理路由 ====================
+
+@session_bp.route('/<session_id>/participants', methods=['GET'])
+def get_participants(session_id):
+    """获取会话参与者列表"""
+    try:
+        service = get_session_service()
+        participants = service.get_participants(session_id)
+        return jsonify({'participants': participants})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@session_bp.route('/<session_id>/participants', methods=['POST'])
+def add_participant(session_id):
+    """添加参与者到会话"""
+    try:
+        service = get_session_service()
+        data = request.get_json()
+        participant_id = data.get('participant_id')
+        participant_type = data.get('participant_type', 'agent')
+        role = data.get('role', 'member')
+        
+        if not participant_id:
+            return jsonify({'error': 'participant_id is required'}), 400
+        
+        success = service.add_participant(session_id, participant_id, participant_type, role)
+        if success:
+            return jsonify({'success': True})
+        return jsonify({'error': 'Failed to add participant'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@session_bp.route('/<session_id>/participants/<participant_id>', methods=['DELETE'])
+def remove_participant(session_id, participant_id):
+    """从会话移除参与者"""
+    try:
+        service = get_session_service()
+        success = service.remove_participant(session_id, participant_id)
+        if success:
+            return jsonify({'success': True})
+        return jsonify({'error': 'Failed to remove participant'}), 500
     except Exception as e:
         return jsonify({'error': str(e)}), 500

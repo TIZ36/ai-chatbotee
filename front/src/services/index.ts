@@ -11,16 +11,50 @@
  */
 
 // Core Layer
-export * from './core';
+export {
+  // Shared
+  eventBus,
+  on,
+  once,
+  emit,
+  // Types
+  type MediaType,
+  type MediaItem,
+  // Message (SlowDB)
+  MessageStore,
+  getMessageStore,
+  // Context
+  TextContextEngine,
+  // Media
+  MediaRenderer,
+  getMediaRenderer,
+  // Scheduler
+  getScheduler,
+} from './core';
 
 // Provider Layer
-export * from './providers';
+export {
+  // LLM
+  createProvider,
+  createProviderAuto,
+  // MCP
+  ConnectionPool,
+  MCPClient,
+} from './providers';
 
 // Workflow Layer
-export * from './workflow';
+export {
+  WorkflowPool,
+  WorkflowExecutor,
+} from './workflow';
 
 // Session Layer
-export * from './session';
+export {
+  Agent,
+  Session,
+} from './session';
 
 // Apps Layer
-export * from './apps';
+export {
+  RoundTableOrchestrator,
+} from './apps';

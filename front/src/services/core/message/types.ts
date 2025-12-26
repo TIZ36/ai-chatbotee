@@ -14,17 +14,26 @@ import type { MessageRole, MediaItem } from '../shared/types';
  */
 export interface Message {
   id: string;
+  message_id?: string;        // 后端返回的 id
   sessionId: string;
+  session_id?: string;        // 后端返回的 sessionId
   role: MessageRole;
+  sender_id?: string;         // 发送者 ID (Agent ID 或 User ID)
+  sender_type?: 'user' | 'agent' | 'system'; // 发送者类型
   content: string;
+  thinking?: string;
   timestamp: number;
+  created_at?: string;        // 后端返回的时间
   
   // 可选字段
   toolCallId?: string;
   toolCalls?: ToolCall[];
+  tool_calls?: any[];         // 后端返回的工具调用
   media?: MediaItem[];
-  thinking?: string;
+  mentions?: string[];        // 被 @ 的参与者
+  reply_to_message_id?: string; // 回复的消息 ID
   metadata?: MessageMetadata;
+  ext?: any;                  // 扩展字段
 }
 
 /**
@@ -57,11 +66,15 @@ export interface MessageMetadata {
 export interface CreateMessageInput {
   sessionId: string;
   role: MessageRole;
+  sender_id?: string;
+  sender_type?: 'user' | 'agent' | 'system';
   content: string;
   toolCallId?: string;
   toolCalls?: ToolCall[];
   media?: MediaItem[];
   thinking?: string;
+  mentions?: string[];
+  reply_to_message_id?: string;
   metadata?: MessageMetadata;
 }
 

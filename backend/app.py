@@ -328,16 +328,45 @@ def _role_version_id_now() -> str:
     return f"rv-{int(time.time() * 1000)}"
 
 
+def _get_session_skill_packs_list(cursor, session_id: str) -> list:
+    """获取会话的技能包列表（内部使用，不返回 Response）"""
+    cursor.execute("""
+        SELECT sp.skill_pack_id, sp.name, sp.summary, sp.source_session_id,
+               sp.created_at, sp.updated_at,
+               spa.assignment_id, spa.target_type, spa.created_at as assigned_at
+        FROM skill_packs sp
+        INNER JOIN skill_pack_assignments spa ON sp.skill_pack_id = spa.skill_pack_id
+        WHERE spa.target_session_id = %s
+        ORDER BY spa.created_at DESC
+    """, (session_id,))
+    
+    skill_packs = cursor.fetchall()
+    for sp in skill_packs:
+        if sp.get('created_at'):
+            sp['created_at'] = sp['created_at'].isoformat()
+        if sp.get('updated_at'):
+            sp['updated_at'] = sp['updated_at'].isoformat()
+        if sp.get('assigned_at'):
+            sp['assigned_at'] = sp['assigned_at'].isoformat()
+    return skill_packs
+
+
 def _get_session_row(cursor, session_id: str) -> Optional[dict]:
     cursor.execute(
         """
-        SELECT session_id, session_type, title, name, llm_config_id, avatar, system_prompt, updated_at
+        SELECT session_id, session_type, title, name, llm_config_id, avatar, system_prompt, ext, updated_at
         FROM sessions
         WHERE session_id = %s
         """,
         (session_id,),
     )
-    return cursor.fetchone()
+    row = cursor.fetchone()
+    if row and row.get('ext'):
+        try:
+            row['ext'] = json.loads(row['ext']) if isinstance(row['ext'], str) else row['ext']
+        except:
+            row['ext'] = {}
+    return row
 
 
 def _ensure_role_current_version(conn, role_id: str) -> str:
@@ -3332,7 +3361,7 @@ def list_llm_configs():
                 return jsonify({'configs': [], 'total': 0, 'warning': 'Table llm_configs does not exist'})
             
             cursor.execute("""
-                SELECT config_id, name, provider, api_url, model, tags, enabled, 
+                SELECT config_id, name, shortname, provider, api_url, model, tags, enabled, 
                        description, metadata, created_at, updated_at
                 FROM llm_configs
                 ORDER BY created_at DESC
@@ -3401,11 +3430,12 @@ def create_llm_config():
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO llm_configs 
-            (config_id, name, provider, api_key, api_url, model, tags, enabled, description, metadata)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (config_id, name, shortname, provider, api_key, api_url, model, tags, enabled, description, metadata)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             config_id,
             name,
+            data.get('shortname'),
             provider,
             data.get('api_key'),
             data.get('api_url'),
@@ -3437,7 +3467,7 @@ def get_llm_config(config_id):
         
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT config_id, name, provider, api_url, model, tags, enabled, 
+            SELECT config_id, name, shortname, provider, api_url, model, tags, enabled, 
                    description, metadata, created_at, updated_at
             FROM llm_configs
             WHERE config_id = %s
@@ -3516,6 +3546,9 @@ def update_llm_config(config_id):
         if 'name' in data:
             updates.append('name = %s')
             values.append(data['name'])
+        if 'shortname' in data:
+            updates.append('shortname = %s')
+            values.append(data['shortname'])
         if 'provider' in data:
             updates.append('provider = %s')
             values.append(data['provider'])
@@ -3594,7 +3627,7 @@ def export_llm_config(config_id):
         
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         cursor.execute("""
-            SELECT config_id, name, provider, api_key, api_url, model, 
+            SELECT config_id, name, shortname, provider, api_key, api_url, model, 
                    tags, enabled, description, metadata, created_at
             FROM llm_configs WHERE config_id = %s
         """, (config_id,))
@@ -3651,7 +3684,7 @@ def export_all_llm_configs():
         
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         cursor.execute("""
-            SELECT config_id, name, provider, api_key, api_url, model, 
+            SELECT config_id, name, shortname, provider, api_key, api_url, model, 
                    tags, enabled, description, metadata, created_at
             FROM llm_configs ORDER BY created_at DESC
         """)
@@ -3758,11 +3791,12 @@ def import_llm_configs():
             
             cursor.execute("""
                 INSERT INTO llm_configs 
-                (config_id, name, provider, api_key, api_url, model, tags, enabled, description, metadata)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                (config_id, name, shortname, provider, api_key, api_url, model, tags, enabled, description, metadata)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 new_config_id,
                 config_name,
+                config.get('shortname'),
                 config.get('provider'),
                 config.get('api_key'),
                 config.get('api_url'),
@@ -3813,6 +3847,20 @@ def init_services():
         print(f"Warning: Redis initialization failed: {redis_error}")
         print("Continuing without Redis support...")
     
+    # 初始化 TopicService 和 AgentActorManager
+    try:
+        from database import get_mysql_connection, get_redis_client
+        from services.topic_service import init_topic_service
+        from services.agent_actor import AgentActorManager
+        
+        init_topic_service(get_mysql_connection, get_redis_client())
+        AgentActorManager.get_instance() # 触发单例初始化
+        print("[Services] TopicService and AgentActorManager initialized")
+    except Exception as e:
+        print(f"[Services] Error initializing Topic/Actor services: {e}")
+        import traceback
+        traceback.print_exc()
+
     # 注册新架构的 API 路由
     try:
         from database import get_mysql_connection
@@ -4096,11 +4144,62 @@ def delete_workflow(workflow_id):
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+# ==================== Topic 参与者管理 API ====================
+
+@app.route('/api/topics/<session_id>/participants', methods=['GET', 'OPTIONS'])
+def list_topic_participants(session_id):
+    """获取 Topic 参与者列表"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    try:
+        from services.topic_service import get_topic_service
+        participants = get_topic_service().get_participants(session_id)
+        return jsonify({'participants': participants})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/topics/<session_id>/participants', methods=['POST', 'OPTIONS'])
+def add_topic_participant(session_id):
+    """添加参与者到 Topic"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    try:
+        from services.topic_service import get_topic_service
+        from services.agent_actor import activate_agent
+        data = request.json
+        participant_id = data.get('participant_id')
+        p_type = data.get('participant_type', 'agent')
+        role = data.get('role', 'member')
+        
+        if not participant_id:
+            return jsonify({'error': 'participant_id is required'}), 400
+            
+        success = get_topic_service().add_participant(session_id, participant_id, p_type, role)
+        if success and p_type == 'agent':
+            # 激活该 Agent 的 Actor 并订阅该 Topic
+            activate_agent(participant_id, session_id)
+            
+        return jsonify({'success': success})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/topics/<session_id>/participants/<participant_id>', methods=['DELETE', 'OPTIONS'])
+def remove_topic_participant(session_id, participant_id):
+    """从 Topic 移除参与者"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    try:
+        from services.topic_service import get_topic_service
+        success = get_topic_service().remove_participant(session_id, participant_id)
+        return jsonify({'success': success})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # ==================== 会话和消息管理 API ====================
 
 @app.route('/api/sessions', methods=['GET', 'OPTIONS'])
 def list_sessions():
-    """获取会话列表"""
+    """获取 Topic 列表 (兼容旧 sessions 接口)"""
     if request.method == 'OPTIONS':
         return handle_cors_preflight()
     
@@ -4114,227 +4213,79 @@ def list_sessions():
         try:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             
-            # 获取会话列表，按最后消息时间排序
-            # 同时获取第一条用户消息作为缩略（如果没有名字）
+            # 获取 Topic 列表
+            # 这里的 session_type 已经包含了新的类型
             cursor.execute("""
                 SELECT 
-                    s.session_id,
-                    s.title,
-                    s.name,
-                    s.llm_config_id,
-                    s.avatar,
-                    s.system_prompt,
-                    s.media_output_path,
-                    s.session_type,
-                    s.role_id,
-                    s.role_version_id,
-                    s.created_at,
-                    s.updated_at,
-                    s.last_message_at,
-                    COUNT(m.id) as message_count,
+                    s.session_id, s.title, s.name, s.llm_config_id, s.avatar, 
+                    s.system_prompt, s.session_type, s.owner_id, s.ext,
+                    s.created_at, s.updated_at, s.last_message_at,
+                    (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.session_id) as message_count,
                     (SELECT content FROM messages 
-                     WHERE session_id = s.session_id 
-                     AND role = 'user' 
-                     ORDER BY created_at ASC 
-                     LIMIT 1) as first_user_message
+                     WHERE session_id = s.session_id AND role = 'user' 
+                     ORDER BY created_at ASC LIMIT 1) as first_user_message
                 FROM sessions s
-                LEFT JOIN messages m ON s.session_id = m.session_id
-                WHERE s.session_type != 'temporary' OR s.session_type IS NULL
-                GROUP BY s.session_id
-                ORDER BY COALESCE(s.last_message_at, s.updated_at, s.created_at) DESC, s.created_at DESC
+                WHERE s.session_type != 'temporary' AND s.session_type NOT LIKE 'agent%'
+                ORDER BY COALESCE(s.last_message_at, s.updated_at, s.created_at) DESC
                 LIMIT 300
             """)
             
+            rows = cursor.fetchall()
             sessions = []
-            for row in cursor.fetchall():
-                # 获取第一条用户消息作为缩略（如果没有名字）
+            for row in rows:
                 first_message = row.get('first_user_message', '') or ''
-                preview_text = ''
-                if first_message:
-                    # 取前30个字符作为缩略
-                    preview_text = first_message[:30].replace('\n', ' ').strip()
-                    if len(first_message) > 30:
-                        preview_text += '...'
+                preview_text = (first_message[:30] + '...') if len(first_message) > 30 else first_message
                 
-                session = {
+                # 解析 ext
+                ext = row.get('ext')
+                if isinstance(ext, str):
+                    try: ext = json.loads(ext)
+                    except: ext = {}
+
+                sessions.append({
                     'session_id': row['session_id'],
                     'title': row['title'],
-                    'name': row.get('name'),  # 用户自定义名称
+                    'name': row.get('name'),
                     'llm_config_id': row['llm_config_id'],
                     'avatar': row['avatar'],
-                    'system_prompt': row.get('system_prompt'),  # 人设
-                    'media_output_path': row.get('media_output_path'),  # 多媒体保存地址
-                    'session_type': row.get('session_type', 'memory'),  # 会话类型
-                    'role_id': row.get('role_id'),
-                    'role_version_id': row.get('role_version_id'),
+                    'session_type': row.get('session_type', 'topic_general'),
+                    'owner_id': row.get('owner_id'),
+                    'ext': ext,
                     'created_at': row['created_at'].isoformat() if row['created_at'] else None,
                     'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
                     'last_message_at': row['last_message_at'].isoformat() if row['last_message_at'] else None,
                     'message_count': row['message_count'] or 0,
-                    'preview_text': preview_text,  # 第一条用户消息的缩略
-                }
-                sessions.append(session)
+                    'preview_text': preview_text.replace('\n', ' ').strip(),
+                })
             
             return jsonify({'sessions': sessions, 'total': len(sessions)})
             
         finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
+            if cursor: cursor.close()
+            if conn: conn.close()
                 
     except Exception as e:
-        print(f"[Session API] Error listing sessions: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'sessions': [], 'total': 0, 'error': str(e)}), 500
+        print(f"[Topic API] Error listing topics: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/sessions', methods=['POST', 'OPTIONS'])
 def create_session():
-    """创建新会话"""
+    """创建新 Topic"""
     if request.method == 'OPTIONS':
         return handle_cors_preflight()
     
     try:
-        from database import get_mysql_connection
-        conn = get_mysql_connection()
-        if not conn:
-            return jsonify({'error': 'MySQL not available'}), 503
-        
+        from services.topic_service import get_topic_service
         data = request.json
-        session_id = data.get('session_id') or f'session-{int(time.time() * 1000)}'
-        title = data.get('title')
-        name = data.get('name')
-        avatar = data.get('avatar')
-        media_output_path = data.get('media_output_path')
-        llm_config_id = data.get('llm_config_id')
-        session_type = data.get('session_type', 'memory')  # 默认为记忆体
-
-        # 从角色创建会话（版本锁定）
-        source_role_id = data.get('source_role_id')
-        source_role_version_id = data.get('source_role_version_id')
-        system_prompt = data.get('system_prompt')
-        role_id = None
-        role_version_id = None
-        role_snapshot = None
-        role_applied_at = None
+        owner_id = get_client_ip() # 暂时用 IP 作为 User ID
         
-        cursor = None
-        try:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-
-            if source_role_id:
-                role_id = source_role_id
-                if not source_role_version_id:
-                    role_version_id = _ensure_role_current_version(conn, role_id)
-                else:
-                    role_version_id = source_role_version_id
-
-                role_version = _get_role_version(conn, role_id, role_version_id)
-                if not role_version:
-                    # 兼容：版本缺失时回退到当前角色快照
-                    role_version_id = _ensure_role_current_version(conn, role_id)
-                    role_version = _get_role_version(conn, role_id, role_version_id)
-
-                if role_version:
-                    system_prompt = role_version.get('system_prompt')
-                    # 如果未指定头像，则默认继承角色头像（让“从角色开始”更有感知）
-                    if not avatar:
-                        avatar = role_version.get('avatar')
-                    # 如果未指定 llm_config_id，则默认继承角色
-                    if not llm_config_id:
-                        llm_config_id = role_version.get('llm_config_id')
-                    role_snapshot = {
-                        'role_id': role_id,
-                        'role_version_id': role_version_id,
-                        'name': role_version.get('name'),
-                        'avatar': role_version.get('avatar'),
-                        'llm_config_id': role_version.get('llm_config_id'),
-                        'system_prompt': role_version.get('system_prompt'),
-                        'created_at': role_version.get('created_at').isoformat() if role_version.get('created_at') else None,
-                    }
-                    role_applied_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-            # 获取客户端IP（如果是agent类型，需要记录创建者IP）
-            creator_ip = None
-            if session_type == 'agent':
-                creator_ip = get_client_ip()
-
-            cursor.execute(
-                """
-                INSERT INTO sessions
-                  (session_id, title, name, avatar, system_prompt, media_output_path, llm_config_id, session_type,
-                   role_id, role_version_id, role_snapshot, role_applied_at, creator_ip)
-                VALUES
-                  (%s, %s, %s, %s, %s, %s, %s, %s,
-                   %s, %s, %s, %s, %s)
-                """,
-                (
-                    session_id,
-                    title,
-                    name,
-                    avatar,
-                    system_prompt,
-                    media_output_path,
-                    llm_config_id,
-                    session_type,
-                    role_id,
-                    role_version_id,
-                    json.dumps(role_snapshot, ensure_ascii=False) if role_snapshot else None,
-                    role_applied_at,
-                    creator_ip,
-                ),
-            )
-            conn.commit()
-
-            # 如果创建的是角色（agent），确保存在 current 版本，并同步到user_agent_access表
-            current_role_version_id = None
-            if session_type == 'agent':
-                try:
-                    current_role_version_id = _ensure_role_current_version(conn, session_id)
-                    # 同步到user_agent_access表（加速查询）
-                    cursor.execute("""
-                        INSERT INTO user_agent_access (ip_address, agent_session_id, access_type)
-                        VALUES (%s, %s, 'creator')
-                        ON DUPLICATE KEY UPDATE access_type = 'creator'
-                    """, (creator_ip, session_id))
-                    conn.commit()
-                except Exception as e:
-                    print(f"[RoleVersion] Failed to bootstrap role version for new agent {session_id}: {e}")
-            
-            # 获取创建的会话信息
-            cursor.execute("""
-                SELECT session_id, title, name, llm_config_id, avatar, system_prompt, media_output_path, session_type, role_id, role_version_id, created_at, updated_at
-                FROM sessions
-                WHERE session_id = %s
-            """, (session_id,))
-            session = cursor.fetchone()
-            
-            return jsonify({
-                'session_id': session['session_id'],
-                'title': session.get('title'),
-                'name': session.get('name'),
-                'llm_config_id': session.get('llm_config_id'),
-                'avatar': session.get('avatar'),
-                'system_prompt': session.get('system_prompt'),
-                'media_output_path': session.get('media_output_path'),
-                'session_type': session.get('session_type', 'memory'),
-                'role_id': session.get('role_id'),
-                'role_version_id': session.get('role_version_id'),
-                'current_role_version_id': current_role_version_id,
-                'created_at': session.get('created_at').isoformat() if session.get('created_at') else None,
-                'updated_at': session.get('updated_at').isoformat() if session.get('updated_at') else None,
-                'message': 'Session created successfully'
-            }), 201
-            
-        finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
+        # 使用 TopicService 创建
+        topic = get_topic_service().create_topic(data, owner_id, creator_ip=owner_id)
+        
+        return jsonify(topic), 201
                 
     except Exception as e:
-        print(f"[Session API] Error creating session: {e}")
+        print(f"[Topic API] Error creating topic: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
@@ -4403,6 +4354,7 @@ def get_session(session_id):
                     s.llm_config_id,
                     s.avatar,
                     s.system_prompt,
+                    s.ext,
                     s.session_type,
                     s.role_id,
                     s.role_version_id,
@@ -4420,6 +4372,16 @@ def get_session(session_id):
             if not row:
                 return jsonify({'error': 'Session not found'}), 404
             
+            # 处理 ext 字段
+            ext_data = row.get('ext')
+            if ext_data and isinstance(ext_data, str):
+                try:
+                    ext_data = json.loads(ext_data)
+                except:
+                    ext_data = {}
+            elif ext_data is None:
+                ext_data = {}
+
             session = {
                 'session_id': row['session_id'],
                 'title': row['title'],
@@ -4427,6 +4389,7 @@ def get_session(session_id):
                 'llm_config_id': row['llm_config_id'],
                 'avatar': row['avatar'],
                 'system_prompt': row['system_prompt'],
+                'ext': ext_data,
                 'session_type': row.get('session_type', 'memory'),  # 会话类型
                 'role_id': row.get('role_id'),
                 'role_version_id': row.get('role_version_id'),
@@ -4434,6 +4397,7 @@ def get_session(session_id):
                 'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
                 'last_message_at': row['last_message_at'].isoformat() if row['last_message_at'] else None,
                 'message_count': row['message_count'] or 0,
+                'skill_packs': _get_session_skill_packs_list(cursor, session_id)
             }
             
             return jsonify(session)
@@ -5036,160 +5000,42 @@ def recalculate_acc_tokens_after_message(session_id: str, after_message_id: str,
         import traceback
         traceback.print_exc()
 
+@app.route('/api/topics/<session_id>/messages', methods=['POST', 'OPTIONS'])
 @app.route('/api/sessions/<session_id>/messages', methods=['POST', 'OPTIONS'])
 def save_message(session_id):
-    """保存消息到会话"""
+    """保存消息并触发 Topic 通知 (统一 Topic 接口)"""
     if request.method == 'OPTIONS':
         return handle_cors_preflight()
     
     try:
-        from database import get_mysql_connection
-        from token_counter import estimate_tokens
-        conn = get_mysql_connection()
-        if not conn:
-            return jsonify({'error': 'MySQL not available'}), 503
-        
+        from services.topic_service import get_topic_service
         data = request.json
-        message_id = data.get('message_id') or f'msg-{int(time.time() * 1000)}'
+        sender_id = data.get('sender_id') or get_client_ip()
+        sender_type = data.get('sender_type', 'user')
         role = data.get('role', 'user')
         content = data.get('content', '')
-        thinking = data.get('thinking')
-        tool_calls = data.get('tool_calls')
-        model = data.get('model', 'gpt-4')  # 用于估算 token
-        acc_token_override = data.get('acc_token')  # 可选：手动指定累积 token（用于总结消息等特殊情况）
-        ext = data.get('ext')  # 扩展数据：如 Gemini 的 thoughtSignature、模型信息等
+        mentions = data.get('mentions', [])
+        ext = data.get('ext', {})
         
-        # 估算当前消息的 token 数量
-        current_message_tokens = estimate_tokens(content, model)
-        if thinking:
-            current_message_tokens += estimate_tokens(thinking, model)
+        # 使用 TopicService 发送消息
+        # 内部会处理数据库持久化和 Redis Pub/Sub 发布
+        msg = get_topic_service().send_message(
+            topic_id=session_id,
+            sender_id=sender_id,
+            sender_type=sender_type,
+            content=content,
+            role=role,
+            mentions=mentions,
+            ext=ext
+        )
         
-        cursor = None
-        try:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            
-            # 如果指定了 acc_token_override（如总结消息），直接使用
-            if acc_token_override is not None:
-                cumulative_token_count = acc_token_override
-            else:
-                # 获取上一条消息的累积 token（用于计算累积 token）
-                # 优先使用 acc_token，如果没有则使用 token_count（兼容旧数据）
-                cursor.execute("""
-                    SELECT COALESCE(acc_token, token_count, 0) as prev_acc_token
-                    FROM messages 
-                    WHERE session_id = %s 
-                    ORDER BY created_at DESC 
-                    LIMIT 1
-                """, (session_id,))
-                
-                previous_acc_token = 0
-                prev_row = cursor.fetchone()
-                if prev_row and prev_row.get('prev_acc_token'):
-                    previous_acc_token = prev_row['prev_acc_token'] or 0
-                
-                # 计算累积 token：上一条消息的累积 token + 当前消息的 token
-                cumulative_token_count = previous_acc_token + current_message_tokens
-            
-            # 保存消息（保存当前消息的 token 到 token_count，累积 token 到 acc_token）
-            cursor.execute("""
-                INSERT INTO messages (message_id, session_id, role, content, thinking, tool_calls, token_count, acc_token, ext)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
-                message_id,
-                session_id,
-                role,
-                content,
-                thinking,
-                json.dumps(tool_calls) if tool_calls else None,
-                current_message_tokens,  # token_count 保存当前消息的 token
-                cumulative_token_count,  # acc_token 保存累积 token
-                json.dumps(ext) if ext else None  # ext 保存扩展数据
-            ))
-            
-            # 更新会话的最后消息时间
-            cursor.execute("""
-                UPDATE sessions 
-                SET last_message_at = NOW(), updated_at = NOW()
-                WHERE session_id = %s
-            """, (session_id,))
-            
-            # 如果会话没有标题，自动生成一个（基于第一条用户消息）
-            if role == 'user' and content:
-                cursor.execute("""
-                    SELECT title FROM sessions WHERE session_id = %s
-                """, (session_id,))
-                row = cursor.fetchone()
-                if row and not row.get('title'):
-                    # 生成标题（取前50个字符）
-                    title = content[:50].strip()
-                    if len(content) > 50:
-                        title += '...'
-                    cursor.execute("""
-                        UPDATE sessions SET title = %s WHERE session_id = %s
-                    """, (title, session_id))
-            
-            # 如果保存的是总结消息，需要重新计算后续消息的 acc_token（在提交前）
-            if role == 'system' and content.startswith('__SUMMARY__'):
-                # 重新计算总结后所有消息的 acc_token
-                recalculate_acc_tokens_after_message(session_id, message_id, cursor)
-            
-            conn.commit()
-            
-            # 更新Redis缓存（先存DB再更新缓存）
-            try:
-                from database import get_redis_client
-                redis_client = get_redis_client()
-                if redis_client:
-                    cache_key = f"messages:session:{session_id}"
-                    
-                    # 构建消息对象
-                    message_data = {
-                        'message_id': message_id,
-                        'session_id': session_id,
-                        'role': role,
-                        'content': content,
-                        'thinking': thinking,
-                        'tool_calls': tool_calls,
-                        'token_count': current_message_tokens,
-                        'ext': ext,
-                        'created_at': datetime.now().isoformat(),
-                    }
-                    
-                    # 计算score（使用message_id的数字部分）
-                    try:
-                        score = int(message_id.split('-')[-1]) if '-' in message_id else hash(message_id)
-                    except (ValueError, AttributeError):
-                        score = hash(message_id)
-                    
-                    # 添加到zset
-                    message_json = json.dumps(message_data, ensure_ascii=False)
-                    # Redis zadd: 新版本使用字典，旧版本使用位置参数
-                    try:
-                        redis_client.zadd(cache_key, {message_json: score})
-                    except TypeError:
-                        # 兼容旧版本Redis
-                        redis_client.zadd(cache_key, score, message_json)
-                    redis_client.expire(cache_key, 7 * 24 * 3600)  # 7天过期
-                    
-                    print(f"[Message Cache] Updated Redis cache for message {message_id}")
-            except Exception as cache_error:
-                # 缓存更新失败不影响主流程
-                print(f"[Message Cache] Warning: Failed to update Redis cache: {cache_error}")
-            
-            return jsonify({
-                'message_id': message_id,
-                'token_count': cumulative_token_count,  # 返回累积 token
-                'message': 'Message saved successfully'
-            }), 201
-            
-        finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
+        if msg:
+            return jsonify(msg), 201
+        else:
+            return jsonify({'error': 'Failed to save message'}), 500
                 
     except Exception as e:
-        print(f"[Session API] Error saving message: {e}")
+        print(f"[Message API] Error saving message: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
@@ -6640,12 +6486,22 @@ def upgrade_to_agent(session_id):
             
             # 获取更新后的会话信息
             cursor.execute("""
-                SELECT session_id, title, name, llm_config_id, avatar, system_prompt, session_type, created_at, updated_at
+                SELECT session_id, title, name, llm_config_id, avatar, system_prompt, ext, session_type, created_at, updated_at
                 FROM sessions
                 WHERE session_id = %s
             """, (session_id,))
             updated_session = cursor.fetchone()
             
+            # 处理 ext 字段
+            ext_data = updated_session.get('ext')
+            if ext_data and isinstance(ext_data, str):
+                try:
+                    ext_data = json.loads(ext_data)
+                except:
+                    ext_data = {}
+            elif ext_data is None:
+                ext_data = {}
+
             return jsonify({
                 'session_id': updated_session['session_id'],
                 'title': updated_session.get('title'),
@@ -6653,10 +6509,12 @@ def upgrade_to_agent(session_id):
                 'llm_config_id': updated_session.get('llm_config_id'),
                 'avatar': updated_session.get('avatar'),
                 'system_prompt': updated_session.get('system_prompt'),
+                'ext': ext_data,
                 'session_type': updated_session.get('session_type', 'agent'),
                 'current_role_version_id': current_version_id,
                 'created_at': updated_session.get('created_at').isoformat() if updated_session.get('created_at') else None,
                 'updated_at': updated_session.get('updated_at').isoformat() if updated_session.get('updated_at') else None,
+                'skill_packs': _get_session_skill_packs_list(cursor, session_id),
                 'message': 'Upgraded to agent successfully'
             }), 200
             
@@ -7207,7 +7065,8 @@ def list_agents():
                             s.name,
                             s.llm_config_id,
                             s.avatar,
-                            NULL as system_prompt,
+                            s.system_prompt,
+                            s.ext,
                             s.session_type,
                             rv.version_id as current_role_version_id,
                             s.created_at,
@@ -7228,7 +7087,8 @@ def list_agents():
                             s.name,
                             s.llm_config_id,
                             s.avatar,
-                            NULL as system_prompt,
+                            s.system_prompt,
+                            s.ext,
                             s.session_type,
                             NULL as current_role_version_id,
                             s.created_at,
@@ -7249,7 +7109,8 @@ def list_agents():
                             s.name,
                             s.llm_config_id,
                             s.avatar,
-                            NULL as system_prompt,
+                            s.system_prompt,
+                            s.ext,
                             s.session_type,
                             rv.version_id as current_role_version_id,
                             s.created_at,
@@ -7271,7 +7132,8 @@ def list_agents():
                             s.name,
                             s.llm_config_id,
                             s.avatar,
-                            NULL as system_prompt,
+                            s.system_prompt,
+                            s.ext,
                             s.session_type,
                             NULL as current_role_version_id,
                             s.created_at,
@@ -7285,7 +7147,18 @@ def list_agents():
                     """, (client_ip,))
             
             agents = []
-            for row in cursor.fetchall():
+            rows = cursor.fetchall()
+            for row in rows:
+                # 处理 ext 字段
+                ext_data = row.get('ext')
+                if ext_data and isinstance(ext_data, str):
+                    try:
+                        ext_data = json.loads(ext_data)
+                    except:
+                        ext_data = {}
+                elif ext_data is None:
+                    ext_data = {}
+
                 agent = {
                     'session_id': row['session_id'],
                     'title': row['title'],
@@ -7293,12 +7166,14 @@ def list_agents():
                     'llm_config_id': row['llm_config_id'],
                     'avatar': row['avatar'],
                     'system_prompt': row.get('system_prompt'),
+                    'ext': ext_data,
                     'session_type': row.get('session_type', 'agent'),
                     'current_role_version_id': row.get('current_role_version_id'),
                     'created_at': row['created_at'].isoformat() if row['created_at'] else None,
                     'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
                     'last_message_at': row['last_message_at'].isoformat() if row['last_message_at'] else None,
                     'message_count': row['message_count'] or 0,
+                    'skill_packs': _get_session_skill_packs_list(cursor, row['session_id'])
                 }
                 agents.append(agent)
             
@@ -11250,381 +11125,35 @@ def crawler_modules_search():
             conn.close()
         return jsonify({'error': str(e)}), 500
 
-# ==================== 圆桌会议 API ====================
-
-@app.route('/api/round-tables', methods=['GET', 'OPTIONS'])
-def list_round_tables():
-    """获取圆桌会议列表"""
-    if request.method == 'OPTIONS':
-        return handle_cors_preflight()
+if __name__ == '__main__':
+    # 配置日志
+    import logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
     
-    try:
-        from database import get_mysql_connection
-        conn = get_mysql_connection()
-        if not conn:
-            return jsonify({'round_tables': [], 'error': 'MySQL not available'}), 503
-        
-        cursor = None
-        try:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            
-            # 获取所有圆桌会议，包含参与者数量
-            cursor.execute("""
-                SELECT 
-                    rt.round_table_id,
-                    rt.name,
-                    rt.status,
-                    rt.created_at,
-                    rt.updated_at,
-                    COUNT(DISTINCT CASE WHEN rtp.left_at IS NULL THEN rtp.session_id END) as participant_count
-                FROM round_tables rt
-                LEFT JOIN round_table_participants rtp ON rt.round_table_id = rtp.round_table_id
-                GROUP BY rt.round_table_id
-                ORDER BY rt.updated_at DESC, rt.created_at DESC
-            """)
-            
-            round_tables = []
-            for row in cursor.fetchall():
-                round_tables.append({
-                    'round_table_id': row['round_table_id'],
-                    'name': row['name'],
-                    'status': row['status'],
-                    'participant_count': row['participant_count'] or 0,
-                    'created_at': row['created_at'].isoformat() if row['created_at'] else None,
-                    'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
-                })
-            
-            return jsonify({'round_tables': round_tables})
-            
-        finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
-                
-    except Exception as e:
-        print(f"[Round Table API] Error listing round tables: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'round_tables': [], 'error': str(e)}), 500
-
-@app.route('/api/round-tables', methods=['POST', 'OPTIONS'])
-def create_round_table():
-    """创建圆桌会议"""
-    if request.method == 'OPTIONS':
-        return handle_cors_preflight()
+    # 初始化服务
+    from database import init_mysql, init_redis
+    init_services()
     
-    try:
-        from database import get_mysql_connection
-        import uuid
-        
-        data = request.get_json() or {}
-        name = data.get('name', f'圆桌会议_{datetime.now().strftime("%Y%m%d_%H%M%S")}')
-        
-        conn = get_mysql_connection()
-        if not conn:
-            return jsonify({'error': 'MySQL not available'}), 503
-        
-        cursor = None
-        try:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            
-            round_table_id = str(uuid.uuid4())
-            
-            cursor.execute("""
-                INSERT INTO round_tables (round_table_id, name, status)
-                VALUES (%s, %s, 'active')
-            """, (round_table_id, name))
-            
-            conn.commit()
-            
-            return jsonify({
-                'round_table_id': round_table_id,
-                'name': name,
-                'status': 'active',
-                'participant_count': 0,
-                'created_at': datetime.now().isoformat(),
-            }), 201
-            
-        finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
-                
-    except Exception as e:
-        print(f"[Round Table API] Error creating round table: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/round-tables/<round_table_id>', methods=['GET', 'OPTIONS'])
-def get_round_table(round_table_id):
-    """获取圆桌会议详情"""
-    if request.method == 'OPTIONS':
-        return handle_cors_preflight()
+    port = config.get('server', {}).get('port', 3001)
+    debug = config.get('server', {}).get('debug', False)
     
-    try:
-        from database import get_mysql_connection
-        conn = get_mysql_connection()
-        if not conn:
-            return jsonify({'error': 'MySQL not available'}), 503
-        
-        cursor = None
-        try:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            
-            # 获取圆桌会议基本信息
-            cursor.execute("""
-                SELECT round_table_id, name, status, created_at, updated_at
-                FROM round_tables
-                WHERE round_table_id = %s
-            """, (round_table_id,))
-            
-            round_table = cursor.fetchone()
-            if not round_table:
-                return jsonify({'error': 'Round table not found'}), 404
-            
-            # 获取当前参与者（未离开的）
-            cursor.execute("""
-                SELECT 
-                    rtp.session_id,
-                    rtp.joined_at,
-                    rtp.custom_llm_config_id,
-                    rtp.custom_system_prompt,
-                    s.name as agent_name,
-                    s.title as agent_title,
-                    s.avatar,
-                    s.system_prompt as default_system_prompt,
-                    s.llm_config_id as default_llm_config_id,
-                    s.media_output_path as agent_media_output_path
-                FROM round_table_participants rtp
-                JOIN sessions s ON rtp.session_id = s.session_id
-                WHERE rtp.round_table_id = %s AND rtp.left_at IS NULL
-                ORDER BY rtp.joined_at ASC
-            """, (round_table_id,))
-            
-            participants = []
-            for row in cursor.fetchall():
-                participants.append({
-                    'session_id': row['session_id'],
-                    'name': row['agent_name'] or row['agent_title'] or row['session_id'][:8],
-                    'avatar': row['avatar'],
-                    'joined_at': row['joined_at'].isoformat() if row['joined_at'] else None,
-                    'llm_config_id': row['custom_llm_config_id'] or row['default_llm_config_id'],
-                    'system_prompt': row['custom_system_prompt'] or row['default_system_prompt'],
-                    'custom_llm_config_id': row['custom_llm_config_id'],
-                    'custom_system_prompt': row['custom_system_prompt'],
-                    'media_output_path': row.get('agent_media_output_path'),  # 从 sessions 表读取（agent 级别）
-                })
-            
-            return jsonify({
-                'round_table_id': round_table['round_table_id'],
-                'name': round_table['name'],
-                'status': round_table['status'],
-                'participants': participants,
-                'participant_count': len(participants),
-                'created_at': round_table['created_at'].isoformat() if round_table['created_at'] else None,
-                'updated_at': round_table['updated_at'].isoformat() if round_table['updated_at'] else None,
-            })
-            
-        finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
-                
-    except Exception as e:
-        print(f"[Round Table API] Error getting round table: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/round-tables/<round_table_id>', methods=['PUT', 'OPTIONS'])
-def update_round_table(round_table_id):
-    """更新圆桌会议（名称、状态）"""
-    if request.method == 'OPTIONS':
-        return handle_cors_preflight()
+    print(f"Starting Flask server on http://0.0.0.0:{port}")
+    print(f"Debug mode: {debug}")
+    print()
     
-    try:
-        from database import get_mysql_connection
-        
-        data = request.get_json() or {}
-        
-        conn = get_mysql_connection()
-        if not conn:
-            return jsonify({'error': 'MySQL not available'}), 503
-        
-        cursor = None
-        try:
-            cursor = conn.cursor()
-            
-            updates = []
-            params = []
-            
-            if 'name' in data:
-                updates.append('name = %s')
-                params.append(data['name'])
-            
-            if 'status' in data:
-                if data['status'] not in ['active', 'closed']:
-                    return jsonify({'error': 'Invalid status'}), 400
-                updates.append('status = %s')
-                params.append(data['status'])
-            
-            if not updates:
-                return jsonify({'error': 'No fields to update'}), 400
-            
-            params.append(round_table_id)
-            
-            cursor.execute(f"""
-                UPDATE round_tables
-                SET {', '.join(updates)}
-                WHERE round_table_id = %s
-            """, params)
-            
-            conn.commit()
-            
-            if cursor.rowcount == 0:
-                return jsonify({'error': 'Round table not found'}), 404
-            
-            return jsonify({'message': 'Round table updated'})
-            
-        finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
-                
-    except Exception as e:
-        print(f"[Round Table API] Error updating round table: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/round-tables/<round_table_id>', methods=['DELETE', 'OPTIONS'])
-def delete_round_table(round_table_id):
-    """删除圆桌会议"""
-    if request.method == 'OPTIONS':
-        return handle_cors_preflight()
+    # 打印所有注册的路由（用于调试）
+    if debug:
+        print("Registered routes:")
+        for rule in app.url_map.iter_rules():
+            if '/api/mcp/oauth' in rule.rule or '/mcp' in rule.rule:
+                print(f"  {rule.methods} {rule.rule}")
+    print()
     
-    try:
-        from database import get_mysql_connection
-        conn = get_mysql_connection()
-        if not conn:
-            return jsonify({'error': 'MySQL not available'}), 503
-        
-        cursor = None
-        try:
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                DELETE FROM round_tables WHERE round_table_id = %s
-            """, (round_table_id,))
-            
-            conn.commit()
-            
-            if cursor.rowcount == 0:
-                return jsonify({'error': 'Round table not found'}), 404
-            
-            return jsonify({'message': 'Round table deleted'})
-            
-        finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
-                
-    except Exception as e:
-        print(f"[Round Table API] Error deleting round table: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/round-tables/<round_table_id>/participants', methods=['POST', 'OPTIONS'])
-def add_round_table_participant(round_table_id):
-    """添加智能体到圆桌会议"""
-    if request.method == 'OPTIONS':
-        return handle_cors_preflight()
-    
-    try:
-        from database import get_mysql_connection
-        
-        data = request.get_json() or {}
-        session_id = data.get('session_id')
-        
-        if not session_id:
-            return jsonify({'error': 'session_id is required'}), 400
-        
-        conn = get_mysql_connection()
-        if not conn:
-            return jsonify({'error': 'MySQL not available'}), 503
-        
-        cursor = None
-        try:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            
-            # 检查圆桌会议是否存在
-            cursor.execute("""
-                SELECT status FROM round_tables WHERE round_table_id = %s
-            """, (round_table_id,))
-            
-            round_table = cursor.fetchone()
-            if not round_table:
-                return jsonify({'error': 'Round table not found'}), 404
-            
-            if round_table['status'] == 'closed':
-                return jsonify({'error': 'Round table is closed'}), 400
-            
-            # 检查智能体是否存在
-            cursor.execute("""
-                SELECT session_id, name, title, avatar, system_prompt, llm_config_id
-                FROM sessions WHERE session_id = %s
-            """, (session_id,))
-            
-            agent = cursor.fetchone()
-            if not agent:
-                return jsonify({'error': 'Agent not found'}), 404
-            
-            # 检查是否已经在会议中
-            cursor.execute("""
-                SELECT id FROM round_table_participants
-                WHERE round_table_id = %s AND session_id = %s AND left_at IS NULL
-            """, (round_table_id, session_id))
-            
-            if cursor.fetchone():
-                return jsonify({'error': 'Agent already in round table'}), 400
-            
-            # 添加参与者
-            cursor.execute("""
-                INSERT INTO round_table_participants (round_table_id, session_id)
-                VALUES (%s, %s)
-            """, (round_table_id, session_id))
-            
-            conn.commit()
-            
-            return jsonify({
-                'message': 'Agent added to round table',
-                'participant': {
-                    'session_id': session_id,
-                    'name': agent['name'] or agent['title'] or session_id[:8],
-                    'avatar': agent['avatar'],
-                    'system_prompt': agent['system_prompt'],
-                    'llm_config_id': agent['llm_config_id'],
-                }
-            }), 201
-            
-        finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
-                
-    except Exception as e:
-        print(f"[Round Table API] Error adding participant: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+    app.run(host='0.0.0.0', port=port, debug=debug)
 
 @app.route('/api/round-tables/<round_table_id>/participants/<session_id>', methods=['DELETE', 'OPTIONS'])
 def remove_round_table_participant(round_table_id, session_id):
@@ -11959,6 +11488,15 @@ def send_round_table_message(round_table_id):
             
             conn.commit()
             
+            # --- 核心更新: 触发 Agent Actor ---
+            if sender_type == 'user' and not is_temporary:
+                try:
+                    from services.agent_actor import get_agent_actor
+                    # 这里不需要阻塞等待，直接发布到 Redis
+                    get_agent_actor().handle_new_message(session_id, message_id)
+                except Exception as e:
+                    print(f"[AgentActor] Failed to notify: {e}")
+            
             # 如果是 agent 发送的消息，获取 agent 信息
             agent_name = None
             agent_avatar = None
@@ -12138,113 +11676,3 @@ def select_round_table_response(round_table_id, response_id):
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/round-tables/save-media', methods=['POST', 'OPTIONS'])
-def save_round_table_media():
-    """保存媒体文件到本地路径"""
-    if request.method == 'OPTIONS':
-        return handle_cors_preflight()
-    
-    try:
-        import base64
-        import os
-        from datetime import datetime
-        
-        data = request.get_json() or {}
-        
-        media_data = data.get('media_data')  # base64 编码的媒体数据
-        mime_type = data.get('mime_type', 'image/png')
-        output_path = data.get('output_path')  # 输出目录
-        filename = data.get('filename')  # 可选的自定义文件名
-        
-        if not media_data:
-            return jsonify({'error': 'media_data is required'}), 400
-        if not output_path:
-            return jsonify({'error': 'output_path is required'}), 400
-        
-        # 确保输出目录存在
-        try:
-            os.makedirs(output_path, exist_ok=True)
-        except Exception as e:
-            return jsonify({'error': f'Failed to create output directory: {str(e)}'}), 400
-        
-        # 生成文件名
-        ext = '.png'
-        if 'jpeg' in mime_type or 'jpg' in mime_type:
-            ext = '.jpg'
-        elif 'gif' in mime_type:
-            ext = '.gif'
-        elif 'webp' in mime_type:
-            ext = '.webp'
-        elif 'mp4' in mime_type:
-            ext = '.mp4'
-        elif 'webm' in mime_type:
-            ext = '.webm'
-        elif 'mp3' in mime_type:
-            ext = '.mp3'
-        elif 'wav' in mime_type:
-            ext = '.wav'
-        
-        if not filename:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
-            filename = f"generated_{timestamp}{ext}"
-        elif not filename.endswith(ext):
-            filename = f"{filename}{ext}"
-        
-        # 完整的文件路径
-        full_path = os.path.join(output_path, filename)
-        
-        # 解码并保存
-        try:
-            media_bytes = base64.b64decode(media_data)
-            with open(full_path, 'wb') as f:
-                f.write(media_bytes)
-        except Exception as e:
-            return jsonify({'error': f'Failed to save file: {str(e)}'}), 500
-        
-        print(f"[Round Table API] Saved media to: {full_path} ({len(media_bytes)} bytes)")
-        
-        return jsonify({
-            'success': True,
-            'file_path': full_path,
-            'filename': filename,
-            'size': len(media_bytes),
-        })
-        
-    except Exception as e:
-        print(f"[Round Table API] Error saving media: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-
-if __name__ == '__main__':
-    # 配置日志
-    import logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    
-    # 初始化服务
-    from database import init_mysql, init_redis
-    init_services()
-    
-    port = config.get('server', {}).get('port', 3001)
-    debug = config.get('server', {}).get('debug', False)
-    
-    print(f"Starting Flask server on http://0.0.0.0:{port}")
-    print(f"Debug mode: {debug}")
-    print()
-    
-    # 打印所有注册的路由（用于调试）
-    if debug:
-        print("Registered routes:")
-        for rule in app.url_map.iter_rules():
-            if '/api/mcp/oauth' in rule.rule or '/mcp' in rule.rule:
-                print(f"  {rule.methods} {rule.rule}")
-    print()
-    
-    app.run(host='0.0.0.0', port=port, debug=debug)

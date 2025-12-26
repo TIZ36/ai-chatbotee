@@ -1082,7 +1082,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
         await sendMessage(roundTableId, {
           content: cleanContent || (raiseHandMedia && raiseHandMedia.length > 0 ? '[生成了图片]' : ''),
           sender_type: 'agent',
-          sender_agent_id: agentId,
+          sender_id: agentId,
           is_raise_hand: true,
           media: raiseHandMedia,
         });
@@ -1349,7 +1349,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
         const agentMessage = await sendMessage(roundTableId, {
           content: finalContent,
           sender_type: 'agent',
-          sender_agent_id: agentId,
+          sender_id: agentId,
           mentions, // 已过滤掉自己
           is_raise_hand: isRaiseHand,
           media: responseMedia,
@@ -1492,6 +1492,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
       const userMessage = await sendMessage(roundTableId, {
         content,
         sender_type: 'user',
+        sender_id: 'user', // 后端会根据 token 自动识别真实用户ID，前端传 'user' 即可
         mentions,
         media: currentMedia.length > 0 ? currentMedia : undefined,
         reply_to_message_id: replyingTo?.id, // 引用消息ID
@@ -1548,7 +1549,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
         const agentMessage = await sendMessage(roundTableId, {
           content,
           sender_type: 'agent',
-          sender_agent_id: agentId,
+          sender_id: agentId,
           mentions,
         });
         
@@ -1612,6 +1613,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
       await sendMessage(roundTableId, {
         content: `${participant.name} 已离开圆桌会议`,
         sender_type: 'system',
+        sender_id: 'system',
       });
       await loadConversationInitial({ force: true });
       toast({ title: '已移出圆桌会议', variant: 'success' });
@@ -1646,6 +1648,7 @@ ${mcpServersDescription}${workflowsDescription}${senderType === 'agent' ? `\n【
       await sendMessage(roundTableId, {
         content: `${agent.name || agent.title || '智能体'} 已加入圆桌会议`,
         sender_type: 'system',
+        sender_id: 'system',
       });
       await loadConversationInitial({ force: true });
 

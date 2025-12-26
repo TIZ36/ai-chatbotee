@@ -294,6 +294,7 @@ const LLMConfigPanel: React.FC = () => {
       // 重置表单
     setNewConfig({
         name: '',
+        shortname: '',
       provider: 'openai',
         api_key: '',
         api_url: '',
@@ -324,6 +325,7 @@ const LLMConfigPanel: React.FC = () => {
     // 构建更新数据，如果api_key为空字符串，则不包含在更新数据中（后端会保留原有值）
     const updateData: Partial<CreateLLMConfigRequest> = {
       name: newConfig.name,
+      shortname: newConfig.shortname,
       provider: newConfig.provider,
       api_url: newConfig.api_url,
       model: newConfig.model,
@@ -345,6 +347,7 @@ const LLMConfigPanel: React.FC = () => {
       // 重置表单
     setNewConfig({
         name: '',
+        shortname: '',
       provider: 'openai',
         api_key: '',
         api_url: '',
@@ -383,6 +386,7 @@ const LLMConfigPanel: React.FC = () => {
   const handleEditConfig = async (config: LLMConfigFromDB) => {
     setNewConfig({
       name: config.name,
+      shortname: config.shortname || '',
       provider: config.provider,
       api_key: '', // 初始为空，用户可以通过点击眼睛图标查看
       api_url: config.api_url,
@@ -647,6 +651,17 @@ const LLMConfigPanel: React.FC = () => {
                   value: newConfig.name || '',
                   onChange: (e) => setNewConfig({ ...newConfig, name: e.target.value }),
                   placeholder: "例如: OpenAI GPT-4",
+                }}
+              />
+
+              <InputField
+                label="短名称 (Shortname)"
+                inputProps={{
+                  id: "config-shortname",
+                  type: "text",
+                  value: newConfig.shortname || '',
+                  onChange: (e) => setNewConfig({ ...newConfig, shortname: e.target.value }),
+                  placeholder: "例如: GPT4",
                 }}
               />
 

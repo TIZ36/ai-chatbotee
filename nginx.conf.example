@@ -16,7 +16,7 @@ server {
 
     # 前端静态文件（Vite 开发服务器或构建后的文件）
     location / {
-        proxy_pass http://localhost:5174;
+        proxy_pass http://localhost:5177;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';

@@ -28,7 +28,7 @@ export class TextContextEngine {
     this.config = { ...DEFAULT_CONTEXT_CONFIG, ...config };
     
     // 初始化策略
-    this.strategies = new Map([
+    this.strategies = new Map<ContextStrategyType, IContextStrategy>([
       ['sliding_window', new SlidingWindowStrategy()],
       ['summary', new SummaryStrategy()],
       ['rag', new RAGStrategy()],

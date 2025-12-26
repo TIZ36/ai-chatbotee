@@ -67,61 +67,61 @@ export interface RoundTableDetail extends RoundTable {
 // ==================== API 函数 ====================
 
 /**
- * 获取圆桌会议列表
+ * 获取圆桌会议列表 (Topic 列表)
  */
 export async function getRoundTables(): Promise<RoundTable[]> {
   try {
-    const response = await fetch(`${API_BASE}/round-tables`);
+    const response = await fetch(`${API_BASE}/topics`);
     if (!response.ok) {
-      console.warn(`Failed to fetch round tables: ${response.statusText}`);
+      console.warn(`Failed to fetch topics: ${response.statusText}`);
       return [];
     }
     const data = await response.json();
-    return data.round_tables || [];
+    return data.sessions || data.topics || [];
   } catch (error) {
-    console.warn('Error fetching round tables:', error);
+    console.warn('Error fetching topics:', error);
     return [];
   }
 }
 
 /**
- * 创建圆桌会议
+ * 创建圆桌会议 (Topic)
  */
-export async function createRoundTable(name?: string): Promise<RoundTable> {
-  const response = await fetch(`${API_BASE}/round-tables`, {
+export async function createRoundTable(name?: string, roundTableId?: string): Promise<RoundTable> {
+  const response = await fetch(`${API_BASE}/topics`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, session_id: roundTableId, session_type: 'topic_general' }),
   });
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
-    throw new Error(error.error || `Failed to create round table: ${response.statusText}`);
+    throw new Error(error.error || `Failed to create topic: ${response.statusText}`);
   }
   return await response.json();
 }
 
 /**
- * 获取圆桌会议详情
+ * 获取圆桌会议详情 (Topic 详情)
  */
 export async function getRoundTable(roundTableId: string): Promise<RoundTableDetail> {
-  const response = await fetch(`${API_BASE}/round-tables/${roundTableId}`);
+  const response = await fetch(`${API_BASE}/topics/${roundTableId}`);
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
-    throw new Error(error.error || `Failed to fetch round table: ${response.statusText}`);
+    throw new Error(error.error || `Failed to fetch topic: ${response.statusText}`);
   }
   return await response.json();
 }
 
 /**
- * 更新圆桌会议
+ * 更新圆桌会议 (Topic)
  */
 export async function updateRoundTable(
   roundTableId: string, 
   updates: { name?: string; status?: 'active' | 'closed' }
 ): Promise<void> {
-  const response = await fetch(`${API_BASE}/round-tables/${roundTableId}`, {
+  const response = await fetch(`${API_BASE}/sessions/${roundTableId}`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
@@ -130,36 +130,40 @@ export async function updateRoundTable(
   });
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
-    throw new Error(error.error || `Failed to update round table: ${response.statusText}`);
+    throw new Error(error.error || `Failed to update session: ${response.statusText}`);
   }
 }
 
 /**
- * 删除圆桌会议
+ * 删除圆桌会议 (Topic)
  */
 export async function deleteRoundTable(roundTableId: string): Promise<void> {
-  const response = await fetch(`${API_BASE}/round-tables/${roundTableId}`, {
+  const response = await fetch(`${API_BASE}/sessions/${roundTableId}`, {
     method: 'DELETE',
   });
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
-    throw new Error(error.error || `Failed to delete round table: ${response.statusText}`);
+    throw new Error(error.error || `Failed to delete session: ${response.statusText}`);
   }
 }
 
 /**
- * 添加智能体到圆桌会议
+ * 添加参与者到 Topic
  */
 export async function addParticipant(
   roundTableId: string,
-  sessionId: string
-): Promise<{ participant: RoundTableParticipant }> {
-  const response = await fetch(`${API_BASE}/round-tables/${roundTableId}/participants`, {
+  participantId: string,
+  participantType: 'agent' | 'user' = 'agent'
+): Promise<{ success: boolean }> {
+  const response = await fetch(`${API_BASE}/topics/${roundTableId}/participants`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ session_id: sessionId }),
+    body: JSON.stringify({ 
+      participant_id: participantId, 
+      participant_type: participantType 
+    }),
   });
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
@@ -169,14 +173,14 @@ export async function addParticipant(
 }
 
 /**
- * 从圆桌会议移除智能体
+ * 从 Topic 移除参与者
  */
 export async function removeParticipant(
   roundTableId: string,
-  sessionId: string
+  participantId: string
 ): Promise<void> {
   const response = await fetch(
-    `${API_BASE}/round-tables/${roundTableId}/participants/${sessionId}`,
+    `${API_BASE}/topics/${roundTableId}/participants/${participantId}`,
     { method: 'DELETE' }
   );
   if (!response.ok) {
@@ -190,15 +194,15 @@ export async function removeParticipant(
  */
 export async function updateParticipant(
   roundTableId: string,
-  sessionId: string,
+  participantId: string,
   updates: {
+    role?: string;
     custom_llm_config_id?: string | null;
     custom_system_prompt?: string | null;
-    media_output_path?: string | null;
   }
 ): Promise<void> {
   const response = await fetch(
-    `${API_BASE}/round-tables/${roundTableId}/participants/${sessionId}`,
+    `${API_BASE}/topics/${roundTableId}/participants/${participantId}`,
     {
       method: 'PUT',
       headers: {
@@ -214,32 +218,7 @@ export async function updateParticipant(
 }
 
 /**
- * 保存媒体文件到本地
- */
-export async function saveMediaToLocal(params: {
-  media_data: string;  // base64 编码的媒体数据
-  mime_type: string;
-  output_path: string;
-  filename?: string;
-}): Promise<{ success: boolean; file_path: string; filename: string; size: number }> {
-  const response = await fetch(`${API_BASE}/round-tables/save-media`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(params),
-  });
-  
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.error || `Failed to save media: ${response.statusText}`);
-  }
-  
-  return response.json();
-}
-
-/**
- * 获取圆桌会议消息
+ * 获取 Topic 消息
  */
 export async function getRoundTableMessages(
   roundTableId: string,
@@ -254,13 +233,14 @@ export async function getRoundTableMessages(
 }> {
   try {
     const response = await fetch(
-      `${API_BASE}/round-tables/${roundTableId}/messages?page=${page}&page_size=${pageSize}`
+      `${API_BASE}/sessions/${roundTableId}/messages?page=${page}&page_size=${pageSize}`
     );
     if (!response.ok) {
       console.warn(`Failed to fetch messages: ${response.statusText}`);
       return { messages: [], total: 0, page, page_size: pageSize, total_pages: 0 };
     }
-    return await response.json();
+    const data = await response.json();
+    return data;
   } catch (error) {
     console.warn('Error fetching messages:', error);
     return { messages: [], total: 0, page, page_size: pageSize, total_pages: 0 };
@@ -268,21 +248,20 @@ export async function getRoundTableMessages(
 }
 
 /**
- * 发送圆桌会议消息
+ * 发送 Topic 消息
  */
 export async function sendMessage(
   roundTableId: string,
   message: {
     content: string;
+    sender_id: string;
     sender_type?: 'user' | 'agent' | 'system';
-    sender_agent_id?: string;
     mentions?: string[];
-    is_raise_hand?: boolean;
-    media?: Array<{ type: string; mimeType: string; data: string }>;  // 媒体内容
-    reply_to_message_id?: string;  // 引用消息ID
+    reply_to_message_id?: string;
+    media?: any[];
   }
 ): Promise<RoundTableMessage> {
-  const response = await fetch(`${API_BASE}/round-tables/${roundTableId}/messages`, {
+  const response = await fetch(`${API_BASE}/topics/${roundTableId}/messages`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -293,8 +272,7 @@ export async function sendMessage(
     const error = await response.json().catch(() => ({}));
     throw new Error(error.error || `Failed to send message: ${response.statusText}`);
   }
-  const data = await response.json();
-  return { ...data, responses: [] };
+  return await response.json();
 }
 
 /**

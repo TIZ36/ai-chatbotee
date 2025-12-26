@@ -129,6 +129,27 @@ def create_tables():
     try:
         cursor = conn.cursor()
         
+        # ==================== 辅助函数：确保列存在 ====================
+        def _ensure_column(table: str, column: str, ddl: str, log_name: str):
+            try:
+                cursor.execute(f"""
+                    SELECT COUNT(*)
+                    FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = %s
+                      AND COLUMN_NAME = %s
+                """, (table, column))
+                exists = cursor.fetchone()[0] > 0
+                if exists:
+                    print(f"  ✓ Column '{log_name}' already exists in '{table}'")
+                    return
+                print(f"  → Adding '{log_name}' column to '{table}' table...")
+                cursor.execute(ddl)
+                conn.commit()
+                print(f"  ✓ Column '{log_name}' added to '{table}' table")
+            except Exception as e:
+                print(f"  ⚠️ Warning: Failed to add '{log_name}' column to {table}: {e}")
+        
         # 下载相关表已移除（工作流工具不需要）
         # LLM配置表
         create_llm_configs_table = """
@@ -136,6 +157,7 @@ def create_tables():
             `id` INT AUTO_INCREMENT PRIMARY KEY,
             `config_id` VARCHAR(100) NOT NULL UNIQUE COMMENT '配置ID',
             `name` VARCHAR(255) NOT NULL COMMENT '配置名称',
+            `shortname` VARCHAR(50) DEFAULT NULL COMMENT '短名称',
             `provider` VARCHAR(50) NOT NULL COMMENT '提供商: openai, anthropic, ollama, local, custom',
             `api_key` TEXT DEFAULT NULL COMMENT 'API密钥',
             `api_url` TEXT DEFAULT NULL COMMENT 'API地址',
@@ -155,6 +177,18 @@ def create_tables():
         
         cursor.execute(create_llm_configs_table)
         print("✓ Table 'llm_configs' created/verified successfully")
+
+        # 迁移：为 llm_configs 添加 shortname 列（如果不存在）
+        _ensure_column(
+            'llm_configs',
+            'shortname',
+            """
+                ALTER TABLE `llm_configs`
+                ADD COLUMN `shortname` VARCHAR(50) DEFAULT NULL COMMENT '短名称'
+                AFTER `name`
+            """,
+            'shortname',
+        )
         
         # MCP服务器配置表
         create_mcp_servers_table = """
@@ -348,18 +382,49 @@ def create_tables():
             `name` VARCHAR(255) DEFAULT NULL COMMENT '用户自定义会话名称',
             `llm_config_id` VARCHAR(100) DEFAULT NULL COMMENT '使用的LLM配置ID',
             `avatar` MEDIUMTEXT DEFAULT NULL COMMENT '机器人头像（base64编码）',
+            `session_type` VARCHAR(50) DEFAULT 'memory' COMMENT '会话类型：private_chat, topic_general, topic_research, topic_brainstorm, temporary',
+            `owner_id` VARCHAR(100) DEFAULT NULL COMMENT '所有者（创建者）ID',
+            `ext` JSON DEFAULT NULL COMMENT '扩展配置',
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
             `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
             `last_message_at` DATETIME DEFAULT NULL COMMENT '最后消息时间',
             INDEX `idx_session_id` (`session_id`),
             INDEX `idx_llm_config_id` (`llm_config_id`),
+            INDEX `idx_session_type` (`session_type`),
             INDEX `idx_created_at` (`created_at`),
             INDEX `idx_last_message_at` (`last_message_at`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会话表';
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会话/Topic表';
         """
         
         cursor.execute(create_sessions_table)
         print("✓ Table 'sessions' created/verified successfully")
+
+        # 迁移：确保 sessions 表拥有必要的列
+        _ensure_column('sessions', 'session_type', 
+                      "ALTER TABLE `sessions` ADD COLUMN `session_type` VARCHAR(50) DEFAULT 'memory' AFTER `avatar` ", 'session_type')
+        _ensure_column('sessions', 'owner_id', 
+                      "ALTER TABLE `sessions` ADD COLUMN `owner_id` VARCHAR(100) DEFAULT NULL AFTER `session_type` ", 'owner_id')
+        _ensure_column('sessions', 'ext', 
+                      "ALTER TABLE `sessions` ADD COLUMN `ext` JSON DEFAULT NULL AFTER `owner_id` ", 'ext')
+        
+        # 会话参与者表 (取代旧的 round_table_participants)
+        create_session_participants_table = """
+        CREATE TABLE IF NOT EXISTS `session_participants` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `session_id` VARCHAR(100) NOT NULL COMMENT '会话/Topic ID',
+            `participant_id` VARCHAR(100) NOT NULL COMMENT '参与者ID (Agent Session ID 或 User ID)',
+            `participant_type` VARCHAR(20) DEFAULT 'agent' COMMENT '参与者类型：user, agent',
+            `role` VARCHAR(20) DEFAULT 'member' COMMENT '角色：owner, member',
+            `joined_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '加入时间',
+            `ext` JSON DEFAULT NULL COMMENT '参与者特定配置',
+            UNIQUE KEY `uk_session_participant` (`session_id`, `participant_id`),
+            INDEX `idx_session_id` (`session_id`),
+            INDEX `idx_participant_id` (`participant_id`),
+            FOREIGN KEY (`session_id`) REFERENCES `sessions`(`session_id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会话参与者表';
+        """
+        cursor.execute(create_session_participants_table)
+        print("✓ Table 'session_participants' created/verified successfully")
         
         # 迁移：为已存在的表添加 name 列（如果不存在）
         try:
@@ -494,32 +559,6 @@ def create_tables():
         except Exception as e:
             print(f"  ⚠️ Warning: Failed to add 'media_output_path' column to sessions: {e}")
 
-        # ==================== 角色（智能体）应用信息（会话绑定角色版本） ====================
-        # 说明：
-        # - role_id: 应用的角色（对应 sessions.session_id，session_type='agent'）
-        # - role_version_id: 会话锁定的角色版本ID（用于可复盘/可回放）
-        # - role_snapshot: 应用时的角色快照（审计/回放辅助）
-        # - role_applied_at: 应用时间
-        def _ensure_column(table: str, column: str, ddl: str, log_name: str):
-            try:
-                cursor.execute(f"""
-                    SELECT COUNT(*)
-                    FROM information_schema.COLUMNS
-                    WHERE TABLE_SCHEMA = DATABASE()
-                      AND TABLE_NAME = %s
-                      AND COLUMN_NAME = %s
-                """, (table, column))
-                exists = cursor.fetchone()[0] > 0
-                if exists:
-                    print(f"  ✓ Column '{log_name}' already exists in '{table}'")
-                    return
-                print(f"  → Adding '{log_name}' column to '{table}' table...")
-                cursor.execute(ddl)
-                conn.commit()
-                print(f"  ✓ Column '{log_name}' added to '{table}' table")
-            except Exception as e:
-                print(f"  ⚠️ Warning: Failed to add '{log_name}' column to {table}: {e}")
-
         # ==================== 消息执行记录扩展（存过程日志与原始结构化结果） ====================
         # 说明：
         # - logs: 过程日志数组（JSON 字符串），用于前端“会话扩展面板”回放
@@ -594,6 +633,17 @@ def create_tables():
                 AFTER `role_applied_at`
             """,
             'creator_ip',
+        )
+
+        _ensure_column(
+            'sessions',
+            'ext',
+            """
+                ALTER TABLE `sessions`
+                ADD COLUMN `ext` JSON DEFAULT NULL COMMENT '扩展配置（存储 persona 等）'
+                AFTER `creator_ip`
+            """,
+            'ext',
         )
         
         # ==================== 用户访问表（User Access） ====================
@@ -726,13 +776,22 @@ def create_tables():
             `message_id` VARCHAR(100) NOT NULL UNIQUE COMMENT '消息ID',
             `session_id` VARCHAR(100) NOT NULL COMMENT '会话ID',
             `role` VARCHAR(20) NOT NULL COMMENT '角色: user, assistant, system, tool',
-            `content` TEXT NOT NULL COMMENT '消息内容',
-            `thinking` TEXT DEFAULT NULL COMMENT '思考过程（用于o1等思考模型）',
+            `sender_id` VARCHAR(100) DEFAULT NULL COMMENT '发送者ID (Agent ID 或 User ID)',
+            `sender_type` VARCHAR(20) DEFAULT 'user' COMMENT '发送者类型：user, agent, system',
+            `content` LONGTEXT NOT NULL COMMENT '消息内容',
+            `thinking` TEXT DEFAULT NULL COMMENT '思考过程',
             `tool_calls` JSON DEFAULT NULL COMMENT '工具调用信息',
-            `token_count` INT DEFAULT NULL COMMENT 'Token数量（估算）',
+            `mentions` JSON DEFAULT NULL COMMENT '被@的参与者列表',
+            `reply_to_message_id` VARCHAR(100) DEFAULT NULL COMMENT '回复的消息ID',
+            `is_raise_hand` TINYINT(1) DEFAULT 0 COMMENT '是否举手',
+            `token_count` INT DEFAULT NULL COMMENT 'Token数量',
+            `acc_token` INT DEFAULT NULL COMMENT '累积Token',
+            `ext` JSON DEFAULT NULL COMMENT '扩展数据',
+            `mcpdetail` LONGTEXT DEFAULT NULL COMMENT 'MCP执行详情',
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
             INDEX `idx_message_id` (`message_id`),
             INDEX `idx_session_id` (`session_id`),
+            INDEX `idx_sender_id` (`sender_id`),
             INDEX `idx_created_at` (`created_at`),
             INDEX `idx_session_created` (`session_id`, `created_at`),
             FOREIGN KEY (`session_id`) REFERENCES `sessions`(`session_id`) ON DELETE CASCADE
@@ -741,6 +800,13 @@ def create_tables():
         
         cursor.execute(create_messages_table)
         print("✓ Table 'messages' created/verified successfully")
+
+        # 迁移：为 messages 表添加新列
+        _ensure_column('messages', 'sender_id', "ALTER TABLE `messages` ADD COLUMN `sender_id` VARCHAR(100) DEFAULT NULL AFTER `role` ", 'sender_id')
+        _ensure_column('messages', 'sender_type', "ALTER TABLE `messages` ADD COLUMN `sender_type` VARCHAR(20) DEFAULT 'user' AFTER `sender_id` ", 'sender_type')
+        _ensure_column('messages', 'mentions', "ALTER TABLE `messages` ADD COLUMN `mentions` JSON DEFAULT NULL AFTER `tool_calls` ", 'mentions')
+        _ensure_column('messages', 'reply_to_message_id', "ALTER TABLE `messages` ADD COLUMN `reply_to_message_id` VARCHAR(100) DEFAULT NULL AFTER `mentions` ", 'reply_to_message_id')
+        _ensure_column('messages', 'is_raise_hand', "ALTER TABLE `messages` ADD COLUMN `is_raise_hand` TINYINT(1) DEFAULT 0 AFTER `reply_to_message_id` ", 'is_raise_hand')
         
         # 迁移：为已存在的表添加 acc_token 列（如果不存在）
         try:

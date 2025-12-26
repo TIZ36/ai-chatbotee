@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
-import { Brain, Plug, Workflow as WorkflowIcon, Settings, Code, Terminal, MessageCircle, Globe, Sparkles, Bot, Users, BookOpen, Shield, Activity } from 'lucide-react';
+import { Brain, Plug, Workflow as WorkflowIcon, Settings, Code, Terminal, MessageCircle, Globe, Sparkles, Bot, Users, BookOpen, Shield, Activity, Plus, FolderOpen } from 'lucide-react';
 import appLogoDark from '../assets/app_logo_dark.png';
 import appLogoLight from '../assets/app_logo_light.png';
 import { Button } from './components/ui/Button';
@@ -23,15 +23,13 @@ import MCPConfig from './components/MCPConfig';
 import WorkflowEditor from './components/WorkflowEditor';
 import Workflow from './components/Workflow';
 import CrawlerConfigPage from './components/CrawlerConfigPage';
-import RoundTableChat from './components/RoundTableChat';
-import ResearchPanel from './components/ResearchPanel';
 import UserAccessPage from './components/UserAccessPage';
 import AgentsPage from './components/AgentsPage';
-import RoleGeneratorPage from './components/RoleGeneratorPage';
 // 新架构组件
 import SystemStatusPanel from './components/SystemStatusPanel';
-import { getAgents, getSessions, type Session } from './services/sessionApi';
+import { getAgents, getMemories, createSession, type Session } from './services/sessionApi';
 import { getRoundTables, type RoundTable } from './services/roundTableApi';
+import { toast } from './components/ui/use-toast';
 
 // 导航项组件 - 带动画和tooltip
 interface NavItemProps {
@@ -91,8 +89,10 @@ const App: React.FC = () => {
   const terminalExecuteCommandRef = React.useRef<((command: string) => void) | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(() => {
     // 从 localStorage 恢复上次选择的会话
-    const saved = localStorage.getItem('selected_session_id');
-    return saved || 'temporary-session';
+    const saved = localStorage.getItem('chatee_last_open_chat');
+    // 兼容旧的 key
+    const legacy = localStorage.getItem('selected_session_id');
+    return saved || legacy || 'temporary-session';
   });
   const [settings, setSettings] = useState<Settings>(() => {
     const saved = localStorage.getItem('settings');
@@ -144,10 +144,14 @@ const App: React.FC = () => {
     loadBackendUrl();
   }, []);
 
-  // 保存选中的会话ID
+  // 保存选中的会话ID（用于重启后恢复）
   useEffect(() => {
     if (selectedSessionId) {
-      localStorage.setItem('selected_session_id', selectedSessionId);
+      localStorage.setItem('chatee_last_open_chat', selectedSessionId);
+      // 清理旧的 key（如果存在）
+      if (localStorage.getItem('selected_session_id')) {
+        localStorage.removeItem('selected_session_id');
+      }
     }
   }, [selectedSessionId]);
 
@@ -175,44 +179,11 @@ const App: React.FC = () => {
   };
 
   const handleSelectSession = (sessionId: string) => {
-    // 选中人设（会话）时，回到普通会话模式
-    setIsRoundTableMode(false);
-    setIsResearchMode(false);
     setSelectedSessionId(sessionId);
     // 如果当前不在聊天页面，导航到聊天页面
     if (location.pathname !== '/') {
       navigate('/');
     }
-  };
-
-  const handleSelectMeeting = (roundTableId: string) => {
-    setIsResearchMode(false);
-    setIsRoundTableMode(true);
-    setCurrentRoundTableId(roundTableId);
-    if (location.pathname !== '/') navigate('/');
-  };
-
-  const handleSelectResearch = (researchSessionId: string) => {
-    setIsRoundTableMode(false);
-    setIsResearchMode(true);
-    setCurrentResearchSessionId(researchSessionId);
-    if (location.pathname !== '/') navigate('/');
-  };
-
-  // 配置会话（打开配置对话框）
-  const handleConfigSession = (sessionId: string) => {
-    setSelectedSessionId(sessionId);
-    // 导航到聊天页面并触发配置对话框
-    if (location.pathname !== '/') {
-      navigate(`/?config=${sessionId}`);
-    } else {
-      // 如果已经在聊天页面，通过URL参数触发
-      navigate(`/?config=${sessionId}`, { replace: true });
-    }
-  };
-
-  const handleNewSession = () => {
-    // 新会话创建后的回调
   };
 
   // 判断是否显示terminal独占页面
@@ -221,23 +192,15 @@ const App: React.FC = () => {
   // 判断是否为聊天页面
   const isChatPage = location.pathname === '/';
   
-  // 圆桌模式状态
-  const [isRoundTableMode, setIsRoundTableMode] = useState(false);
-  const [currentRoundTableId, setCurrentRoundTableId] = useState<string | null>(null);
-  const [participantRefreshKey, setParticipantRefreshKey] = useState(0);
-  
-  // Research 模式状态
-  const [isResearchMode, setIsResearchMode] = useState(false);
-  const [currentResearchSessionId, setCurrentResearchSessionId] = useState<string | null>(null);
   const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 
-  // 全局“切换对话”弹窗（Agent / Meeting / Research）
+  // 全局"切换对话"弹窗（Agent / Topic）
   const [showConversationSwitcher, setShowConversationSwitcher] = useState(false);
   const [switcherSearch, setSwitcherSearch] = useState('');
   const [isLoadingSwitcher, setIsLoadingSwitcher] = useState(false);
   const [switcherAgents, setSwitcherAgents] = useState<Session[]>([]);
-  const [switcherMeetings, setSwitcherMeetings] = useState<RoundTable[]>([]);
-  const [switcherResearchSessions, setSwitcherResearchSessions] = useState<Session[]>([]);
+  const [switcherTopics, setSwitcherTopics] = useState<Session[]>([]);
+  const [isCreatingTopic, setIsCreatingTopic] = useState(false);
 
   useEffect(() => {
     if (!showConversationSwitcher) return;
@@ -245,21 +208,14 @@ const App: React.FC = () => {
     (async () => {
       try {
         setIsLoadingSwitcher(true);
-        const [agents, meetings, allSessions] = await Promise.all([
-          getAgents(),
-          getRoundTables(),
-          getSessions(),
-        ]);
+        const [agents, topics] = await Promise.all([getAgents(), getMemories()]);
         if (canceled) return;
         setSwitcherAgents(agents || []);
-        setSwitcherMeetings(meetings || []);
-        const researchSessions = (allSessions || []).filter((s) => s.session_type === 'research');
-        setSwitcherResearchSessions(researchSessions);
+        setSwitcherTopics(topics || []);
       } catch (e) {
         if (canceled) return;
         setSwitcherAgents([]);
-        setSwitcherMeetings([]);
-        setSwitcherResearchSessions([]);
+        setSwitcherTopics([]);
       } finally {
         if (!canceled) setIsLoadingSwitcher(false);
       }
@@ -269,61 +225,32 @@ const App: React.FC = () => {
     };
   }, [showConversationSwitcher]);
 
+  // 创建新话题
+  const handleCreateTopic = async () => {
+    try {
+      setIsCreatingTopic(true);
+      const newSession = await createSession(undefined, undefined, 'memory');
+      setShowConversationSwitcher(false);
+      handleSelectSession(newSession.session_id);
+      toast({
+        title: '话题已创建',
+        description: '新话题已创建，开始对话吧！',
+        variant: 'success',
+      });
+    } catch (error) {
+      console.error('[App] Failed to create topic:', error);
+      toast({
+        title: '创建话题失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
+    } finally {
+      setIsCreatingTopic(false);
+    }
+  };
+
   // 左侧边栏显示状态
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-
-  const handleToggleRoundTable = async () => {
-    if (!isRoundTableMode) {
-      // 切换到圆桌模式，但不自动创建新圆桌
-      // 用户可以在圆桌界面选择已有圆桌或手动创建新圆桌
-      setIsRoundTableMode(true);
-      setIsResearchMode(false);
-    } else {
-      // 退出圆桌模式
-      setIsRoundTableMode(false);
-      // 保留当前圆桌ID，下次进入时可以继续
-      // setCurrentRoundTableId(null);
-    }
-  };
-  
-  const handleToggleResearch = () => {
-    setIsResearchMode(prev => {
-      const next = !prev;
-      if (next) {
-        // 进入 Research 模式时，退出圆桌模式
-        setIsRoundTableMode(false);
-      }
-      return next;
-    });
-  };
-
-  const handleAddToRoundTable = async (sessionId: string) => {
-    // 添加到圆桌会议的逻辑
-    if (!currentRoundTableId) {
-      // 如果没有当前圆桌会议，创建一个新的
-      try {
-        const { createRoundTable, addParticipant } = await import('./services/roundTableApi');
-        const newTable = await createRoundTable();
-        setCurrentRoundTableId(newTable.round_table_id);
-        // 添加参与者
-        await addParticipant(newTable.round_table_id, sessionId);
-        // 触发参与者列表刷新
-        setParticipantRefreshKey(prev => prev + 1);
-      } catch (error) {
-        console.error('Failed to add to round table:', error);
-      }
-    } else {
-      // 添加参与者到现有圆桌会议
-      try {
-        const { addParticipant } = await import('./services/roundTableApi');
-        await addParticipant(currentRoundTableId, sessionId);
-        // 触发参与者列表刷新
-        setParticipantRefreshKey(prev => prev + 1);
-      } catch (error) {
-        console.error('Failed to add participant:', error);
-      }
-    }
-  };
 
   return (
     <div className="h-screen bg-gradient-to-br from-gray-100 via-gray-50 to-gray-100 dark:from-[#0f0f0f] dark:via-[#141414] dark:to-[#0f0f0f] flex flex-col transition-colors duration-200 overflow-hidden">
@@ -373,13 +300,6 @@ const App: React.FC = () => {
             icon={<Users className="w-[18px] h-[18px]" strokeWidth={1.5} />}
             title="智能体管理"
             isActive={location.pathname === '/agents'}
-          />
-
-          <NavItem
-            to="/role-generator"
-            icon={<Sparkles className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-            title="角色生成器"
-            isActive={location.pathname === '/role-generator'}
           />
 
         </div>
@@ -506,7 +426,7 @@ const App: React.FC = () => {
                 onClick={() => {
                   setShowConversationSwitcher(true);
                 }}
-                title="切换对话（Agent / Meeting / Research）"
+                title="切换对话（智能体 / 话题）"
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>切换</span>
@@ -515,7 +435,7 @@ const App: React.FC = () => {
           </div>
         </header>
 
-        {/* 全局切换对话弹窗（在 Meeting/Research/Agent 模式都可用） */}
+        {/* 全局切换对话弹窗（Agent / Topic） */}
         <Dialog
           open={showConversationSwitcher}
           onOpenChange={(open) => {
@@ -528,20 +448,18 @@ const App: React.FC = () => {
               <div className="flex items-center justify-between pr-8">
                 <div>
                   <DialogTitle>选择对话</DialogTitle>
-                  <DialogDescription>按类型选择：Agent / Meeting / Research</DialogDescription>
+                  <DialogDescription>选择智能体或话题开始对话</DialogDescription>
                 </div>
                 <div className="flex items-center gap-2">
                   <Button 
                     variant="outline" 
                     size="sm" 
                     className="h-8"
-                    onClick={() => {
-                      setShowConversationSwitcher(false);
-                      navigate('/agents');
-                    }}
+                    onClick={handleCreateTopic}
+                    disabled={isCreatingTopic}
                   >
-                    <Users className="w-3.5 h-3.5 mr-1.5" />
-                    管理智能体
+                    <Plus className="w-3.5 h-3.5 mr-1.5" />
+                    {isCreatingTopic ? '创建中...' : '新建话题'}
                   </Button>
                   <Button 
                     variant="primary" 
@@ -549,7 +467,7 @@ const App: React.FC = () => {
                     className="h-8"
                     onClick={() => {
                       setShowConversationSwitcher(false);
-                      navigate('/role-generator');
+                      navigate('/agents', { state: { openGenerator: true } });
                     }}
                   >
                     <Sparkles className="w-3.5 h-3.5 mr-1.5" />
@@ -563,32 +481,63 @@ const App: React.FC = () => {
               <Input
                 value={switcherSearch}
                 onChange={(e) => setSwitcherSearch(e.target.value)}
-                placeholder="搜索 agent / meeting / research..."
+                placeholder="搜索智能体或话题..."
                 className="h-9"
               />
             </div>
 
             <ScrollArea className="h-[60vh] pr-2">
               <div className="space-y-4 py-2">
-                {/* Agent */}
-                <div>
-                  <div className="text-xs font-semibold text-gray-700 dark:text-gray-200 px-1 mb-1">Agent</div>
-                  <div className="space-y-1">
-                    {(!switcherSearch.trim() || '临时会话'.includes(switcherSearch.trim())) && (
+                {/* 临时会话 */}
+                {(!switcherSearch.trim() || '临时会话'.includes(switcherSearch.trim())) && (
+                  <div>
+                    <div className="text-xs font-semibold text-gray-700 dark:text-gray-200 px-1 mb-1 flex items-center gap-1.5">
+                      <MessageCircle className="w-3.5 h-3.5" />
+                      快速开始
+                    </div>
+                    <div className="space-y-1">
                       <DataListItem
                         id="temporary-session"
                         title="临时会话"
-                        description="不保存历史"
+                        description="不保存历史记录，适合快速提问"
                         icon={MessageCircle}
-                        isSelected={selectedSessionId === 'temporary-session' && !isRoundTableMode && !isResearchMode}
+                        isSelected={selectedSessionId === 'temporary-session'}
                         onClick={() => {
                           setShowConversationSwitcher(false);
                           handleSelectSession('temporary-session');
                         }}
                       />
-                    )}
+                    </div>
+                  </div>
+                )}
+
+                {/* 智能体 */}
+                <div>
+                  <div className="text-xs font-semibold text-gray-700 dark:text-gray-200 px-1 mb-1 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Bot className="w-3.5 h-3.5" />
+                      智能体
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-xs"
+                      onClick={() => {
+                        setShowConversationSwitcher(false);
+                        navigate('/agents');
+                      }}
+                    >
+                      <Users className="w-3 h-3 mr-1" />
+                      管理
+                    </Button>
+                  </div>
+                  <div className="space-y-1">
                     {isLoadingSwitcher ? (
                       <div className="text-xs text-gray-500 dark:text-[#808080] px-1 py-2">加载中...</div>
+                    ) : switcherAgents.length === 0 ? (
+                      <div className="text-xs text-gray-500 dark:text-[#808080] px-1 py-3 text-center">
+                        暂无智能体，点击右上角「新建智能体」创建
+                      </div>
                     ) : (
                       switcherAgents
                         .filter((a) => {
@@ -609,7 +558,7 @@ const App: React.FC = () => {
                                 : `${a.message_count || 0} 条消息 · ${a.last_message_at ? new Date(a.last_message_at).toLocaleDateString() : '无记录'}`
                             }
                             avatar={a.avatar || undefined}
-                            isSelected={!isRoundTableMode && !isResearchMode && selectedSessionId === a.session_id}
+                            isSelected={selectedSessionId === a.session_id}
                             onClick={() => {
                               setShowConversationSwitcher(false);
                               handleSelectSession(a.session_id);
@@ -620,71 +569,41 @@ const App: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Meeting */}
+                {/* 话题（记忆体） */}
                 <div>
-                  <div className="text-xs font-semibold text-gray-700 dark:text-gray-200 px-1 mb-1">Meeting</div>
-                  <div className="space-y-1">
-                    {isLoadingSwitcher ? (
-                      <div className="text-xs text-gray-500 dark:text-[#808080] px-1 py-2">加载中...</div>
-                    ) : (
-                      switcherMeetings
-                        .filter((m) => {
-                          const q = switcherSearch.trim().toLowerCase();
-                          if (!q) return true;
-                          return (m.name || '').toLowerCase().includes(q);
-                        })
-                        .map((m) => (
-                          <DataListItem
-                            key={m.round_table_id}
-                            id={m.round_table_id}
-                            title={m.name || `会议 ${m.round_table_id.slice(0, 8)}`}
-                            description={`${m.participant_count} 人 · ${m.status === 'active' ? '进行中' : '已关闭'}`}
-                            icon={Users}
-                            isSelected={isRoundTableMode && currentRoundTableId === m.round_table_id}
-                            onClick={() => {
-                              setShowConversationSwitcher(false);
-                              handleSelectMeeting(m.round_table_id);
-                            }}
-                          />
-                        ))
-                    )}
-                    {!isLoadingSwitcher && switcherMeetings.length === 0 && (
-                      <div className="text-xs text-gray-500 dark:text-[#808080] px-1 py-2">暂无会议</div>
-                    )}
+                  <div className="text-xs font-semibold text-gray-700 dark:text-gray-200 px-1 mb-1 flex items-center gap-1.5">
+                    <FolderOpen className="w-3.5 h-3.5" />
+                    话题
                   </div>
-                </div>
-
-                {/* Research */}
-                <div>
-                  <div className="text-xs font-semibold text-gray-700 dark:text-gray-200 px-1 mb-1">Research</div>
                   <div className="space-y-1">
                     {isLoadingSwitcher ? (
                       <div className="text-xs text-gray-500 dark:text-[#808080] px-1 py-2">加载中...</div>
+                    ) : switcherTopics.length === 0 ? (
+                      <div className="text-xs text-gray-500 dark:text-[#808080] px-1 py-3 text-center">
+                        暂无话题，点击右上角「新建话题」创建
+                      </div>
                     ) : (
-                      switcherResearchSessions
-                        .filter((s) => {
+                      switcherTopics
+                        .filter((t) => {
                           const q = switcherSearch.trim().toLowerCase();
                           if (!q) return true;
-                          const name = (s.name || s.title || s.session_id).toLowerCase();
+                          const name = (t.name || t.title || t.preview_text || t.session_id).toLowerCase();
                           return name.includes(q);
                         })
-                        .map((s) => (
+                        .map((t) => (
                           <DataListItem
-                            key={s.session_id}
-                            id={s.session_id}
-                            title={s.name || s.title || `Research ${s.session_id.slice(0, 8)}`}
-                            description="研究资料与检索"
-                            icon={BookOpen}
-                            isSelected={isResearchMode && currentResearchSessionId === s.session_id}
+                            key={t.session_id}
+                            id={t.session_id}
+                            title={t.name || t.title || t.preview_text || `话题 ${t.session_id.slice(0, 8)}`}
+                            description={`${t.message_count || 0} 条消息 · ${t.last_message_at ? new Date(t.last_message_at).toLocaleDateString() : '无记录'}`}
+                            icon={FolderOpen}
+                            isSelected={selectedSessionId === t.session_id}
                             onClick={() => {
                               setShowConversationSwitcher(false);
-                              handleSelectResearch(s.session_id);
+                              handleSelectSession(t.session_id);
                             }}
                           />
                         ))
-                    )}
-                    {!isLoadingSwitcher && switcherResearchSessions.length === 0 && (
-                      <div className="text-xs text-gray-500 dark:text-[#808080] px-1 py-2">暂无 Research 会话</div>
                     )}
                   </div>
                 </div>
@@ -728,30 +647,13 @@ const App: React.FC = () => {
           <div className="relative flex flex-1 min-h-0 min-w-0 p-0">
             <div className="flex-1 relative overflow-hidden">
               <div
-                key={`${isResearchMode ? 'research' : isRoundTableMode ? 'roundtable' : 'chat'}-${selectedSessionId}-${participantRefreshKey}`}
+                key={`chat-${selectedSessionId}`}
                 className="h-full fade-in"
               >
-                {isResearchMode ? (
-                  <ResearchPanel
-                    chatSessionId={selectedSessionId}
-                    researchSessionId={currentResearchSessionId}
-                    onResearchSessionChange={setCurrentResearchSessionId}
-                    onExit={() => setIsResearchMode(false)}
-                  />
-                ) : isRoundTableMode ? (
-                  <RoundTableChat
-                    roundTableId={currentRoundTableId}
-                    onRoundTableChange={setCurrentRoundTableId}
-                    refreshKey={participantRefreshKey}
-                  />
-                ) : (
                   <Workflow
                     sessionId={selectedSessionId}
                     onSelectSession={handleSelectSession}
-                    onSelectMeeting={handleSelectMeeting}
-                    onSelectResearch={handleSelectResearch}
                   />
-                )}
               </div>
             </div>
           </div>
@@ -769,8 +671,6 @@ const App: React.FC = () => {
                         <Workflow
                           sessionId={selectedSessionId}
                           onSelectSession={handleSelectSession}
-                          onSelectMeeting={handleSelectMeeting}
-                          onSelectResearch={handleSelectResearch}
                         />
                       }
                     />
@@ -807,9 +707,6 @@ const App: React.FC = () => {
 
                     {/* 智能体管理页面 */}
                     <Route path="/agents" element={<AgentsPage />} />
-
-                    {/* 角色生成器页面 */}
-                    <Route path="/role-generator" element={<RoleGeneratorPage />} />
                   </Routes>
                 </div>
               </div>
