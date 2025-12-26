@@ -128,11 +128,18 @@ const LLMConfigPanel: React.FC = () => {
   const getProviderLogo = (config: LLMConfigFromDB) => {
     const customLogo = config.metadata?.providerLogo;
     if (customLogo) {
+      const posX = config.metadata?.logoPositionX ?? 50;
+      const posY = config.metadata?.logoPositionY ?? 50;
+      const scale = (config.metadata?.logoScale ?? 100) / 100;
       return (
         <img 
           src={customLogo} 
           alt={config.provider} 
           className="w-full h-full object-cover rounded"
+          style={{ 
+            objectPosition: `${posX}% ${posY}%`,
+            transform: `scale(${scale})`,
+          }}
         />
       );
     }
@@ -147,11 +154,18 @@ const LLMConfigPanel: React.FC = () => {
     // Find first config with custom logo
     const configWithLogo = configs.find(c => c.metadata?.providerLogo);
     if (configWithLogo?.metadata?.providerLogo) {
+      const posX = configWithLogo.metadata?.logoPositionX ?? 50;
+      const posY = configWithLogo.metadata?.logoPositionY ?? 50;
+      const scale = (configWithLogo.metadata?.logoScale ?? 100) / 100;
       return (
         <img 
           src={configWithLogo.metadata.providerLogo} 
           alt={provider} 
           className="w-full h-full object-cover rounded-lg"
+          style={{ 
+            objectPosition: `${posX}% ${posY}%`,
+            transform: `scale(${scale})`,
+          }}
         />
       );
     }
@@ -720,10 +734,10 @@ const LLMConfigPanel: React.FC = () => {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 供应商 Logo <span className="text-xs text-gray-500 font-normal">(可选，≤500KB)</span>
               </label>
-              <div className="flex items-center space-x-3">
+              <div className="flex items-start space-x-3">
                 {/* Logo 预览 */}
                 <div 
-                  className="w-12 h-12 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600 flex items-center justify-center overflow-hidden bg-gray-50 dark:bg-[#363636]"
+                  className="w-12 h-12 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600 flex items-center justify-center overflow-hidden bg-gray-50 dark:bg-[#363636] flex-shrink-0"
                   style={{ 
                     backgroundColor: newConfig.metadata?.providerLogo 
                       ? 'transparent' 
@@ -735,6 +749,10 @@ const LLMConfigPanel: React.FC = () => {
                       src={newConfig.metadata.providerLogo} 
                       alt="Provider logo" 
                       className="w-full h-full object-cover"
+                      style={{ 
+                        objectPosition: `${newConfig.metadata?.logoPositionX ?? 50}% ${newConfig.metadata?.logoPositionY ?? 50}%`,
+                        transform: `scale(${(newConfig.metadata?.logoScale ?? 100) / 100})`,
+                      }}
                     />
                   ) : (
                     <span className="text-xl text-white">
@@ -743,32 +761,95 @@ const LLMConfigPanel: React.FC = () => {
                   )}
                 </div>
                 
-                {/* 上传/移除按钮 */}
-                <div className="flex flex-col space-y-1">
-                  <input
-                    ref={logoInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={handleLogoUpload}
-                    className="hidden"
-                    id="logo-upload"
-                  />
-                  <label
-                    htmlFor="logo-upload"
-                    className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-[#404040] hover:bg-gray-200 dark:hover:bg-[#4a4a4a] rounded-lg cursor-pointer transition-colors"
-                  >
-                    <Camera className="w-3.5 h-3.5" />
-                    <span>上传 Logo</span>
-                  </label>
-                  {newConfig.metadata?.providerLogo && (
-                    <button
-                      type="button"
-                      onClick={handleRemoveLogo}
-                      className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                {/* 上传/移除按钮 + 位置调整 */}
+                <div className="flex flex-col space-y-2 flex-1">
+                  <div className="flex items-center space-x-2">
+                    <input
+                      ref={logoInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleLogoUpload}
+                      className="hidden"
+                      id="logo-upload"
+                    />
+                    <label
+                      htmlFor="logo-upload"
+                      className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-[#404040] hover:bg-gray-200 dark:hover:bg-[#4a4a4a] rounded-lg cursor-pointer transition-colors"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>移除</span>
-                    </button>
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>上传 Logo</span>
+                    </label>
+                    {newConfig.metadata?.providerLogo && (
+                      <button
+                        type="button"
+                        onClick={handleRemoveLogo}
+                        className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>移除</span>
+                      </button>
+                    )}
+                  </div>
+                  
+                  {/* Logo 位置和缩放调整 - 仅在有 logo 时显示 */}
+                  {newConfig.metadata?.providerLogo && (
+                    <div className="space-y-1.5 pt-1">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-[10px] text-gray-500 dark:text-gray-400 w-6">水平</span>
+                        <input
+                          type="range"
+                          min="0"
+                          max="100"
+                          value={newConfig.metadata?.logoPositionX ?? 50}
+                          onChange={(e) => setNewConfig(prev => ({
+                            ...prev,
+                            metadata: {
+                              ...prev.metadata,
+                              logoPositionX: parseInt(e.target.value),
+                            },
+                          }))}
+                          className="flex-1 h-1 bg-gray-200 dark:bg-gray-600 rounded-lg appearance-none cursor-pointer accent-primary-500"
+                        />
+                        <span className="text-[10px] text-gray-400 w-6 text-right">{newConfig.metadata?.logoPositionX ?? 50}%</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <span className="text-[10px] text-gray-500 dark:text-gray-400 w-6">垂直</span>
+                        <input
+                          type="range"
+                          min="0"
+                          max="100"
+                          value={newConfig.metadata?.logoPositionY ?? 50}
+                          onChange={(e) => setNewConfig(prev => ({
+                            ...prev,
+                            metadata: {
+                              ...prev.metadata,
+                              logoPositionY: parseInt(e.target.value),
+                            },
+                          }))}
+                          className="flex-1 h-1 bg-gray-200 dark:bg-gray-600 rounded-lg appearance-none cursor-pointer accent-primary-500"
+                        />
+                        <span className="text-[10px] text-gray-400 w-6 text-right">{newConfig.metadata?.logoPositionY ?? 50}%</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <span className="text-[10px] text-gray-500 dark:text-gray-400 w-6">缩放</span>
+                        <input
+                          type="range"
+                          min="50"
+                          max="200"
+                          step="5"
+                          value={newConfig.metadata?.logoScale ?? 100}
+                          onChange={(e) => setNewConfig(prev => ({
+                            ...prev,
+                            metadata: {
+                              ...prev.metadata,
+                              logoScale: parseInt(e.target.value),
+                            },
+                          }))}
+                          className="flex-1 h-1 bg-gray-200 dark:bg-gray-600 rounded-lg appearance-none cursor-pointer accent-primary-500"
+                        />
+                        <span className="text-[10px] text-gray-400 w-8 text-right">{newConfig.metadata?.logoScale ?? 100}%</span>
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
@@ -1216,6 +1297,10 @@ const LLMConfigPanel: React.FC = () => {
                                         src={config.metadata.providerLogo} 
                                         alt="" 
                                         className="w-full h-full object-cover"
+                                        style={{ 
+                                          objectPosition: `${config.metadata?.logoPositionX ?? 50}% ${config.metadata?.logoPositionY ?? 50}%`,
+                                          transform: `scale(${(config.metadata?.logoScale ?? 100) / 100})`,
+                                        }}
                                       />
                                     </div>
                                   )}

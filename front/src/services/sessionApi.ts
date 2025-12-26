@@ -371,7 +371,8 @@ export async function saveMessage(
       workflowName?: string;
       workflowStatus?: 'pending' | 'running' | 'completed' | 'error';
       acc_token?: number; // 可选：手动指定累积 token（用于总结消息等特殊情况）
-      ext?: MessageExt; // 扩展数据（如 Gemini 的 thoughtSignature）
+      mentions?: string[]; // 提及的用户或智能体 ID 列表
+      ext?: MessageExt; // 扩展数据（如 Gemini 的 thoughtSignature, 或选中的工具ID）
     }
 ): Promise<{ message_id: string; token_count: number }> {
   // 如果是工具消息（感知组件），将工作流信息存储在 tool_calls 中

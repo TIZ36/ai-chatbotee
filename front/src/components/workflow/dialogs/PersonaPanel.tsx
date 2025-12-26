@@ -24,6 +24,7 @@ export interface PersonaPanelProps {
   personaAgents: Session[];
   personaMeetings: RoundTable[];
   personaResearchSessions: Session[];
+  personaTopics: Session[];
   isTemporarySession: boolean;
   currentSessionId: string | null;
   temporarySessionId: string;
@@ -45,6 +46,7 @@ export const PersonaPanel: React.FC<PersonaPanelProps> = ({
   personaAgents,
   personaMeetings,
   personaResearchSessions,
+  personaTopics,
   isTemporarySession,
   currentSessionId,
   temporarySessionId,
@@ -89,12 +91,12 @@ export const PersonaPanel: React.FC<PersonaPanelProps> = ({
           </Button>
         </div>
 
-        <ScrollArea className="h-[60vh] pr-2">
-          <div className="space-y-4 py-2">
+        <ScrollArea className="h-[60vh] pr-2 w-full">
+          <div className="space-y-4 py-2 w-full min-w-0">
             {/* 智能体/会话列表 */}
-            <div>
+            <div className="w-full">
               <div className="text-xs font-semibold text-gray-700 dark:text-gray-200 px-1 mb-1">所有会话</div>
-              <div className="space-y-1">
+              <div className="space-y-1 w-full">
                 {('临时会话'.includes(personaSearch.trim()) || !personaSearch.trim()) && (
                   <DataListItem
                     id="temporary-session"
@@ -108,7 +110,7 @@ export const PersonaPanel: React.FC<PersonaPanelProps> = ({
                 {isLoadingPersonaList ? (
                   <div className="text-xs text-gray-500 dark:text-[#808080] px-1 py-2">加载中...</div>
                 ) : (
-                  <>
+                  <div className="space-y-1 w-full">
                     {/* 合并显示 Agent 和 Meeting */}
                     {personaAgents
                       .filter((a) => {
@@ -156,7 +158,30 @@ export const PersonaPanel: React.FC<PersonaPanelProps> = ({
                         />
                       ))
                     }
-                  </>
+                    {personaTopics
+                      .filter((t) => {
+                        const q = personaSearch.trim().toLowerCase();
+                        if (!q) return true;
+                        const name = (t.name || t.title || t.preview_text || t.session_id).toLowerCase();
+                        return name.includes(q);
+                      })
+                      .map((t) => (
+                        <DataListItem
+                          key={t.session_id}
+                          id={t.session_id}
+                          title={t.name || t.title || t.preview_text || `话题 ${t.session_id.slice(0, 8)}`}
+                          description={`话题 · ${t.message_count || 0} 条消息`}
+                          icon={BookOpen}
+                          isSelected={!isTemporarySession && currentSessionId === t.session_id}
+                          onClick={() => onSwitchSession(t.session_id)}
+                          onDelete={(e) => {
+                            e.stopPropagation();
+                            onDeleteAgent(t.session_id, t.name || t.title || `话题 ${t.session_id.slice(0, 8)}`);
+                          }}
+                        />
+                      ))
+                    }
+                  </div>
                 )}
               </div>
             </div>

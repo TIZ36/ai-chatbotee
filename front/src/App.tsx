@@ -27,9 +27,10 @@ import UserAccessPage from './components/UserAccessPage';
 import AgentsPage from './components/AgentsPage';
 // 新架构组件
 import SystemStatusPanel from './components/SystemStatusPanel';
-import { getAgents, getMemories, createSession, type Session } from './services/sessionApi';
+import { getAgents, getMemories, createSession, deleteSession, type Session } from './services/sessionApi';
 import { getRoundTables, type RoundTable } from './services/roundTableApi';
 import { toast } from './components/ui/use-toast';
+import { ConfirmDialog } from './components/ui/ConfirmDialog';
 
 // 导航项组件 - 带动画和tooltip
 interface NavItemProps {
@@ -201,29 +202,62 @@ const App: React.FC = () => {
   const [switcherAgents, setSwitcherAgents] = useState<Session[]>([]);
   const [switcherTopics, setSwitcherTopics] = useState<Session[]>([]);
   const [isCreatingTopic, setIsCreatingTopic] = useState(false);
+  const [deleteSessionTarget, setDeleteSessionTarget] = useState<Session | null>(null);
+
+  const loadSwitcherData = async () => {
+    try {
+      setIsLoadingSwitcher(true);
+      const [agents, topics] = await Promise.all([getAgents(), getMemories()]);
+      setSwitcherAgents(agents || []);
+      setSwitcherTopics(topics || []);
+    } catch (e) {
+      setSwitcherAgents([]);
+      setSwitcherTopics([]);
+    } finally {
+      setIsLoadingSwitcher(false);
+    }
+  };
 
   useEffect(() => {
     if (!showConversationSwitcher) return;
-    let canceled = false;
-    (async () => {
-      try {
-        setIsLoadingSwitcher(true);
-        const [agents, topics] = await Promise.all([getAgents(), getMemories()]);
-        if (canceled) return;
-        setSwitcherAgents(agents || []);
-        setSwitcherTopics(topics || []);
-      } catch (e) {
-        if (canceled) return;
-        setSwitcherAgents([]);
-        setSwitcherTopics([]);
-      } finally {
-        if (!canceled) setIsLoadingSwitcher(false);
-      }
-    })();
-    return () => {
-      canceled = true;
-    };
+    loadSwitcherData();
   }, [showConversationSwitcher]);
+
+  // 处理删除会话
+  const handleDeleteSessionConfirm = async (session: Session, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDeleteSessionTarget(session);
+  };
+
+  const performDeleteSession = async () => {
+    if (!deleteSessionTarget) return;
+    const { session_id, name, title } = deleteSessionTarget;
+    try {
+      await deleteSession(session_id);
+      toast({
+        title: '已删除',
+        description: `「${name || title || '会话'}」已成功删除`,
+        variant: 'success',
+      });
+      
+      // 如果删除的是当前选中的会话，切换到临时会话
+      if (selectedSessionId === session_id) {
+        handleSelectSession('temporary-session');
+      }
+      
+      // 刷新列表
+      await loadSwitcherData();
+    } catch (error) {
+      console.error('[App] Failed to delete session:', error);
+      toast({
+        title: '删除失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
+    } finally {
+      setDeleteSessionTarget(null);
+    }
+  };
 
   // 创建新话题
   const handleCreateTopic = async () => {
@@ -486,16 +520,16 @@ const App: React.FC = () => {
               />
             </div>
 
-            <ScrollArea className="h-[60vh] pr-2">
-              <div className="space-y-4 py-2">
+            <ScrollArea className="h-[60vh] pr-2 w-full">
+              <div className="space-y-4 py-2 w-full min-w-0">
                 {/* 临时会话 */}
                 {(!switcherSearch.trim() || '临时会话'.includes(switcherSearch.trim())) && (
-                  <div>
+                  <div className="w-full">
                     <div className="text-xs font-semibold text-gray-700 dark:text-gray-200 px-1 mb-1 flex items-center gap-1.5">
                       <MessageCircle className="w-3.5 h-3.5" />
                       快速开始
                     </div>
-                    <div className="space-y-1">
+                    <div className="space-y-1 w-full">
                       <DataListItem
                         id="temporary-session"
                         title="临时会话"
@@ -512,7 +546,7 @@ const App: React.FC = () => {
                 )}
 
                 {/* 智能体 */}
-                <div>
+                <div className="w-full">
                   <div className="text-xs font-semibold text-gray-700 dark:text-gray-200 px-1 mb-1 flex items-center justify-between">
                     <span className="flex items-center gap-1.5">
                       <Bot className="w-3.5 h-3.5" />
@@ -531,7 +565,7 @@ const App: React.FC = () => {
                       管理
                     </Button>
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-1 w-full">
                     {isLoadingSwitcher ? (
                       <div className="text-xs text-gray-500 dark:text-[#808080] px-1 py-2">加载中...</div>
                     ) : switcherAgents.length === 0 ? (
@@ -563,6 +597,7 @@ const App: React.FC = () => {
                               setShowConversationSwitcher(false);
                               handleSelectSession(a.session_id);
                             }}
+                            onDelete={(e) => handleDeleteSessionConfirm(a, e)}
                           />
                         ))
                     )}
@@ -570,12 +605,12 @@ const App: React.FC = () => {
                 </div>
 
                 {/* 话题（记忆体） */}
-                <div>
+                <div className="w-full">
                   <div className="text-xs font-semibold text-gray-700 dark:text-gray-200 px-1 mb-1 flex items-center gap-1.5">
                     <FolderOpen className="w-3.5 h-3.5" />
                     话题
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-1 w-full">
                     {isLoadingSwitcher ? (
                       <div className="text-xs text-gray-500 dark:text-[#808080] px-1 py-2">加载中...</div>
                     ) : switcherTopics.length === 0 ? (
@@ -602,6 +637,7 @@ const App: React.FC = () => {
                               setShowConversationSwitcher(false);
                               handleSelectSession(t.session_id);
                             }}
+                            onDelete={(e) => handleDeleteSessionConfirm(t, e)}
                           />
                         ))
                     )}
@@ -733,6 +769,17 @@ const App: React.FC = () => {
         </main>
       </div>
       </div>
+
+      <ConfirmDialog
+        open={deleteSessionTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteSessionTarget(null);
+        }}
+        title="删除确认"
+        description={`您确定要删除「${deleteSessionTarget?.name || deleteSessionTarget?.title || '该会话'}」吗？此操作不可撤销，所有历史消息都将丢失。`}
+        variant="destructive"
+        onConfirm={performDeleteSession}
+      />
     </div>
   );
 };

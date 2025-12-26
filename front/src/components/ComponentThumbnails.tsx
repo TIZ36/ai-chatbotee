@@ -84,7 +84,7 @@ const ComponentThumbnails: React.FC<ComponentThumbnailsProps> = ({
     <>
       {/* MCP 缩略图标 - Tag样式 - 始终显示 */}
       {(
-        <div className="relative" ref={mcpRef}>
+        <div className="relative flex-shrink-0" ref={mcpRef}>
           <button
             onClick={() => {
               setShowMCPList(!showMCPList);
@@ -220,7 +220,7 @@ const ComponentThumbnails: React.FC<ComponentThumbnailsProps> = ({
 
       {/* Workflow 缩略图标 - Tag样式 - 始终显示 */}
       {(
-        <div className="relative" ref={workflowRef}>
+        <div className="relative flex-shrink-0" ref={workflowRef}>
           <button
             onClick={() => {
               setShowWorkflowList(!showWorkflowList);
@@ -320,7 +320,7 @@ const ComponentThumbnails: React.FC<ComponentThumbnailsProps> = ({
 
       {/* 技能包 缩略图标 - Tag样式 - 始终显示 */}
       {(
-        <div className="relative" ref={skillPackRef}>
+        <div className="relative flex-shrink-0" ref={skillPackRef}>
           <button
             onClick={() => {
               setShowSkillPackList(!showSkillPackList);
@@ -427,7 +427,7 @@ const ComponentThumbnails: React.FC<ComponentThumbnailsProps> = ({
       )}
 
       {/* 附件上传按钮 - Tag样式 */}
-      <label className="cursor-pointer flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] transition-all text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300" title="上传图片或视频">
+      <label className="cursor-pointer flex-shrink-0 flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] transition-all text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300" title="上传图片或视频">
         <Paperclip className="w-3.5 h-3.5 flex-shrink-0" />
         <input
           type="file"

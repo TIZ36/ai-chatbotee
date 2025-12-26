@@ -4147,6 +4147,7 @@ def delete_workflow(workflow_id):
 # ==================== Topic 参与者管理 API ====================
 
 @app.route('/api/topics/<session_id>/participants', methods=['GET', 'OPTIONS'])
+@app.route('/api/sessions/<session_id>/participants', methods=['GET', 'OPTIONS'])
 def list_topic_participants(session_id):
     """获取 Topic 参与者列表"""
     if request.method == 'OPTIONS':
@@ -4159,6 +4160,7 @@ def list_topic_participants(session_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/topics/<session_id>/participants', methods=['POST', 'OPTIONS'])
+@app.route('/api/sessions/<session_id>/participants', methods=['POST', 'OPTIONS'])
 def add_topic_participant(session_id):
     """添加参与者到 Topic"""
     if request.method == 'OPTIONS':
@@ -4184,6 +4186,7 @@ def add_topic_participant(session_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/topics/<session_id>/participants/<participant_id>', methods=['DELETE', 'OPTIONS'])
+@app.route('/api/sessions/<session_id>/participants/<participant_id>', methods=['DELETE', 'OPTIONS'])
 def remove_topic_participant(session_id, participant_id):
     """从 Topic 移除参与者"""
     if request.method == 'OPTIONS':
@@ -4196,6 +4199,63 @@ def remove_topic_participant(session_id, participant_id):
         return jsonify({'error': str(e)}), 500
 
 # ==================== 会话和消息管理 API ====================
+
+@app.route('/api/topics/<session_id>/stream', methods=['GET'])
+@app.route('/api/sessions/<session_id>/stream', methods=['GET'])
+def stream_topic_events(session_id):
+    """订阅 Topic 事件流 (SSE)"""
+    from database import get_redis_client
+    from flask import stream_with_context
+    redis_client = get_redis_client()
+    if not redis_client:
+        return jsonify({'error': 'Redis not available'}), 503
+
+    def generate():
+        pubsub = redis_client.pubsub()
+        channel = f"topic:{session_id}"
+        pubsub.subscribe(channel)
+        print(f"[Topic Stream] Client subscribed to {channel}")
+        
+        try:
+            # 发送初始连接成功消息，确保连接建立
+            yield f"data: {json.dumps({'type': 'connected', 'topic_id': session_id})}\n\n"
+            # 心跳：防止 SSE 在中间层（Electron/代理/WSGI）被判定为 idle 而断开
+            last_ping = time.time()
+            while True:
+                message = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if message and message.get('type') == 'message':
+                    data = message.get('data')
+                    if isinstance(data, bytes):
+                        data = data.decode('utf-8', errors='ignore')
+                    # 确保符合 SSE 格式（只发送 data 行）
+                    yield f"data: {data}\n\n"
+                else:
+                    # 无消息时定时发送 SSE 注释行作为心跳（客户端会忽略）
+                    now = time.time()
+                    if now - last_ping >= 15:
+                        yield ": ping\n\n"
+                        last_ping = now
+                # 轻微 sleep，避免空转占用 CPU
+                time.sleep(0.05)
+        except Exception as e:
+            print(f"[Topic Stream] Error for {session_id}: {e}")
+        finally:
+            try:
+                pubsub.unsubscribe(channel)
+                pubsub.close()
+            except:
+                pass
+            print(f"[Topic Stream] Client disconnected from {channel}")
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no'  # 禁用 Nginx 缓存
+        }
+    )
 
 @app.route('/api/sessions', methods=['GET', 'OPTIONS'])
 def list_sessions():
@@ -5026,10 +5086,21 @@ def save_message(session_id):
             content=content,
             role=role,
             mentions=mentions,
-            ext=ext
+            ext=ext,
+            message_id=data.get('message_id')
         )
         
         if msg:
+            # 确保话题中的所有智能体都处于激活状态 (Actor 模型)
+            try:
+                from services.agent_actor import activate_agent
+                participants = get_topic_service().get_participants(session_id)
+                for p in participants:
+                    if p.get('participant_type') == 'agent':
+                        activate_agent(p['participant_id'], session_id)
+            except Exception as e:
+                print(f"[Message API] Warning: Failed to auto-activate agents: {e}")
+
             return jsonify(msg), 201
         else:
             return jsonify({'error': 'Failed to save message'}), 500
@@ -7190,6 +7261,101 @@ def list_agents():
         import traceback
         traceback.print_exc()
         return jsonify({'agents': [], 'total': 0, 'error': str(e)}), 500
+
+
+@app.route('/api/memories', methods=['GET', 'OPTIONS'])
+def list_memories():
+    """获取记忆体/话题列表"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'memories': [], 'total': 0, 'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 获取客户端IP
+            client_ip = get_client_ip()
+            is_owner = is_owner_ip(client_ip)
+            
+            # 如果不是拥有者，检查用户是否在访问列表中
+            if not is_owner:
+                cursor.execute("""
+                    SELECT is_enabled FROM user_access WHERE ip_address = %s
+                """, (client_ip,))
+                user_access = cursor.fetchone()
+                if not user_access or not user_access['is_enabled']:
+                    return jsonify({'memories': [], 'total': 0, 'error': '访问被拒绝'}), 403
+            
+            # 查询 session_type = 'memory' 的会话（话题）
+            cursor.execute("""
+                SELECT 
+                    s.session_id,
+                    s.title,
+                    s.name,
+                    s.llm_config_id,
+                    s.avatar,
+                    s.system_prompt,
+                    s.ext,
+                    s.session_type,
+                    s.created_at,
+                    s.updated_at,
+                    s.last_message_at,
+                    (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.session_id) as message_count,
+                    (SELECT content FROM messages m WHERE m.session_id = s.session_id AND m.role = 'user' ORDER BY m.created_at ASC LIMIT 1) as first_user_message
+                FROM sessions s
+                WHERE s.session_type = 'memory'
+                ORDER BY COALESCE(s.last_message_at, s.updated_at, s.created_at) DESC
+            """)
+            
+            rows = cursor.fetchall()
+            memories = []
+            for row in rows:
+                first_message = row.get('first_user_message', '') or ''
+                preview_text = (first_message[:30] + '...') if len(first_message) > 30 else first_message
+                
+                # 解析 ext
+                ext = row.get('ext')
+                if isinstance(ext, str):
+                    try:
+                        ext = json.loads(ext)
+                    except:
+                        ext = {}
+                
+                memories.append({
+                    'session_id': row['session_id'],
+                    'title': row['title'],
+                    'name': row.get('name'),
+                    'llm_config_id': row['llm_config_id'],
+                    'avatar': row['avatar'],
+                    'system_prompt': row.get('system_prompt'),
+                    'ext': ext,
+                    'session_type': row.get('session_type', 'memory'),
+                    'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+                    'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
+                    'last_message_at': row['last_message_at'].isoformat() if row['last_message_at'] else None,
+                    'message_count': row['message_count'] or 0,
+                    'preview_text': preview_text.replace('\n', ' ').strip() if preview_text else '',
+                })
+            
+            return jsonify({'memories': memories, 'total': len(memories)})
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Memory API] Error listing memories: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'memories': [], 'total': 0, 'error': str(e)}), 500
 
 
 @app.route('/api/role-generator/dimension-options', methods=['GET', 'OPTIONS'])

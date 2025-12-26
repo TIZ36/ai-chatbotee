@@ -5,6 +5,8 @@ LLM 服务层
 
 from typing import List, Optional, Dict, Any
 import uuid
+import requests
+import json
 
 from models.llm_config import LLMConfig, LLMConfigRepository
 
@@ -158,6 +160,149 @@ class LLMService:
             更新后的配置
         """
         return self.update_config(config_id, {'enabled': enabled})
+
+    def chat_completion(self, config_id: str, messages: List[dict], stream: bool = False) -> dict:
+        """
+        执行聊天补全
+        
+        Args:
+            config_id: 配置 ID
+            messages: 消息列表
+            stream: 是否使用流式
+            
+        Returns:
+            响应内容
+        """
+        config = self.get_config(config_id, include_api_key=True)
+        if not config:
+            raise ValueError(f"LLM config not found: {config_id}")
+            
+        provider = config['provider']
+        api_key = config['api_key']
+        api_url = config.get('api_url') or ''
+        model_name = config.get('model')
+        
+        if provider == 'openai':
+            default_url = 'https://api.openai.com/v1/chat/completions'
+            if not api_url:
+                api_url = default_url
+            elif '/chat/completions' not in api_url:
+                base_url = api_url.rstrip('/')
+                if base_url.endswith('/v1'):
+                    api_url = f"{base_url}/chat/completions"
+                else:
+                    api_url = f"{base_url}/v1/chat/completions"
+            
+            response = requests.post(
+                api_url,
+                headers={
+                    'Content-Type': 'application/json',
+                    'Authorization': f'Bearer {api_key}',
+                },
+                json={
+                    'model': model_name,
+                    'messages': messages,
+                    'stream': stream,
+                },
+                timeout=60
+            )
+            
+            if response.status_code != 200:
+                raise RuntimeError(f"OpenAI API error: {response.text}")
+                
+            data = response.json()
+            return {
+                'content': data['choices'][0]['message']['content'],
+                'raw': data
+            }
+            
+        elif provider == 'ollama':
+            # Ollama 默认地址
+            if not api_url:
+                api_url = 'http://localhost:11434/api/chat'
+            elif not api_url.endswith('/api/chat'):
+                api_url = f"{api_url.rstrip('/')}/api/chat"
+                
+            response = requests.post(
+                api_url,
+                json={
+                    'model': model_name,
+                    'messages': messages,
+                    'stream': False, # 暂时只支持非流式
+                },
+                timeout=60
+            )
+            
+            if response.status_code != 200:
+                raise RuntimeError(f"Ollama API error: {response.text}")
+                
+            data = response.json()
+            return {
+                'content': data['message']['content'],
+                'raw': data
+            }
+        elif provider == 'anthropic':
+            # Anthropic API
+            target_url = api_url or 'https://api.anthropic.com/v1/messages'
+            headers = {
+                'Content-Type': 'application/json',
+                'x-api-key': api_key,
+                'anthropic-version': '2023-06-01'
+            }
+            
+            # 转换消息格式
+            system_msg = next((m['content'] for m in messages if m['role'] == 'system'), None)
+            user_msgs = [m for m in messages if m['role'] != 'system']
+            
+            payload = {
+                'model': model_name,
+                'messages': user_msgs,
+                'max_tokens': 4096,
+            }
+            if system_msg:
+                payload['system'] = system_msg
+                
+            response = requests.post(target_url, headers=headers, json=payload, timeout=60)
+            if response.status_code != 200:
+                raise RuntimeError(f"Anthropic API error: {response.text}")
+                
+            data = response.json()
+            return {
+                'content': data['content'][0]['text'],
+                'raw': data
+            }
+        elif provider in ('google', 'gemini'):
+            # Gemini API
+            api_key_param = f"?key={api_key}"
+            target_url = api_url or f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent{api_key_param}"
+            if api_key and 'key=' not in target_url:
+                target_url += api_key_param
+                
+            # 转换消息格式
+            contents = []
+            system_instruction = None
+            for m in messages:
+                if m['role'] == 'system':
+                    system_instruction = {'parts': [{'text': m['content']}]}
+                else:
+                    role = 'user' if m['role'] == 'user' else 'model'
+                    contents.append({'role': role, 'parts': [{'text': m['content']}]})
+            
+            payload = {'contents': contents}
+            if system_instruction:
+                payload['system_instruction'] = system_instruction
+                
+            response = requests.post(target_url, json=payload, timeout=60)
+            if response.status_code != 200:
+                raise RuntimeError(f"Google API error: {response.text}")
+                
+            data = response.json()
+            return {
+                'content': data['candidates'][0]['content']['parts'][0]['text'],
+                'raw': data
+            }
+        else:
+            raise NotImplementedError(f"Provider {provider} not supported for backend chat yet")
 
 
 # 全局服务实例（延迟初始化）

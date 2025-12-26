@@ -69,6 +69,9 @@ export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
+  // Topic/多Agent消息元信息（可选）
+  sender_id?: string;
+  sender_type?: 'user' | 'agent' | 'system';
   thinking?: string;
   toolCalls?: Array<{ name: string; arguments: any; result?: any }> | {
     isSystemPrompt?: boolean;
@@ -100,6 +103,7 @@ export interface Message {
   processSteps?: ProcessStep[];
   avatarUrl?: string; // Add avatarUrl for assistant messages
   agentName?: string; // Add agentName for assistant messages
+  ext?: any; // 扩展字段（用于 reaction/引用等装饰）
 }
 
 export interface MessageContentProps {
@@ -239,28 +243,11 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
 
   // Thinking/generating placeholder (when content is empty and processing)
   // NOTE: Thinking content is now displayed in MessageSidePanel, not here.
+  // The abort button has been moved to the input box area (replaces send button when loading).
   // This only shows a simple loading indicator when the assistant is thinking/streaming.
   if (message.role === 'assistant' && (!message.content || message.content.length === 0) && (message.isThinking || message.isStreaming)) {
-    // 如果没有中断按钮，且处于思考/生成状态且没有内容，不返回内容（状态已在外部标题栏显示）
-    if (!abortController) return null;
-    
-    return (
-      <div className="flex flex-col items-start py-1">
-        {/* Abort button */}
-          <button
-            onClick={() => {
-              abortController.abort();
-              setAbortController(null);
-              setMessages(prev => prev.filter(msg => msg.id !== message.id));
-              setIsLoading(false);
-            }}
-          className="px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors flex items-center"
-          >
-          <XCircle className="w-3.5 h-3.5 mr-1.5" />
-            中断生成
-          </button>
-      </div>
-    );
+    // 处于思考/生成状态且没有内容，不显示任何内容（状态已在输入框和侧边栏显示）
+    return null;
   }
   
   // Error message (with special styling)
@@ -627,6 +614,25 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
     <div>
       {/* Multimodal content display */}
       {renderMedia()}
+
+      {/* Reactions (decorations) - e.g. likes */}
+      {(() => {
+        const likes = message?.ext?.reactions?.likes;
+        if (!Array.isArray(likes) || likes.length === 0) return null;
+        const title = likes
+          .map((l: any) => l?.from_agent_name || l?.from_agent_id)
+          .filter(Boolean)
+          .join('、');
+        return (
+          <div
+            className="mt-1 inline-flex items-center gap-1 rounded-full bg-gray-100 dark:bg-[#2d2d2d] px-2 py-0.5 text-[11px] text-gray-700 dark:text-[#d0d0d0]"
+            title={title ? `点赞：${title}` : '点赞'}
+          >
+            <span aria-hidden>👍</span>
+            <span>{likes.length}</span>
+          </div>
+        );
+      })()}
       
       {/* AI assistant messages use Markdown rendering */}
       {message.role === 'assistant' ? (
@@ -864,12 +870,15 @@ const arePropsEqual = (
     pm.id === nm.id &&
     pm.content === nm.content &&
     pm.role === nm.role &&
+    pm.sender_id === nm.sender_id &&
+    pm.sender_type === nm.sender_type &&
     pm.thinking === nm.thinking &&
     pm.isStreaming === nm.isStreaming &&
     pm.isThinking === nm.isThinking &&
     pm.currentStep === nm.currentStep &&
     pm.workflowStatus === nm.workflowStatus &&
     pm.media === nm.media &&
+    pm.ext === nm.ext &&
     prevProps.prevMessageContent === nextProps.prevMessageContent &&
     prevProps.collapsedThinking === nextProps.collapsedThinking
   );

@@ -154,11 +154,22 @@ class SessionService:
     # ==================== Memory 相关 ====================
     
     def get_memories(self, include_avatar: bool = False) -> List[dict]:
-        """获取记忆体列表"""
-        return self.get_sessions(
+        """获取记忆体列表（包含普通话题）"""
+        # 同时获取 memory 和 topic_general 类型的会话
+        memories = self.repository.find_all(
             session_type='memory',
             include_avatar=include_avatar
         )
+        topics = self.repository.find_all(
+            session_type='topic_general',
+            include_avatar=include_avatar
+        )
+        
+        all_items = memories + topics
+        # 按最后更新时间排序
+        all_items.sort(key=lambda x: x.last_message_at or x.created_at or '', reverse=True)
+        
+        return [item.to_dict(include_avatar=include_avatar) for item in all_items]
     
     def create_memory(self, data: dict, creator_ip: str = None) -> dict:
         """创建记忆体"""

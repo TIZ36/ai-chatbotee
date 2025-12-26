@@ -50,10 +50,10 @@ export const TokenCounter: React.FC<TokenCounterProps> = ({
 
   return (
     <span
-      className={`text-[11px] truncate ${colorClass}`}
+      className={`text-[10px] truncate ${colorClass}`}
       title={`${currentTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens`}
     >
-      {currentTokens.toLocaleString()} / {maxTokens.toLocaleString()} tokens
+      {currentTokens.toLocaleString()} / {maxTokens.toLocaleString()}
     </span>
   );
 };

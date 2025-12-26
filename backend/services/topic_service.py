@@ -141,6 +141,15 @@ class TopicService:
             if p_type == 'agent':
                 self._publish_event(topic_id, 'agent_joined', {'agent_id': participant_id})
             
+            # 通知所有参与者：参与者列表已更新（发送完整列表，便于各 actor 收敛决策）
+            try:
+                participants = self.get_participants(topic_id)
+                self._publish_event(topic_id, 'topic_participants_updated', {
+                    'participants': participants
+                })
+            except Exception as e:
+                print(f"[TopicService] Error publishing participants updated: {e}")
+            
             return True
         except Exception as e:
             print(f"[TopicService] Error adding participant: {e}")
@@ -162,6 +171,14 @@ class TopicService:
             conn.close()
             
             self._publish_event(topic_id, 'participant_left', {'participant_id': participant_id})
+            # 通知所有参与者：参与者列表已更新
+            try:
+                participants = self.get_participants(topic_id)
+                self._publish_event(topic_id, 'topic_participants_updated', {
+                    'participants': participants
+                })
+            except Exception as e:
+                print(f"[TopicService] Error publishing participants updated: {e}")
             return True
         except Exception as e:
             print(f"[TopicService] Error removing participant: {e}")
@@ -172,11 +189,11 @@ class TopicService:
 
     def send_message(self, topic_id: str, sender_id: str, sender_type: str, 
                     content: str, role: str = 'user', mentions: List[str] = None,
-                    ext: dict = None) -> Optional[dict]:
+                    ext: dict = None, message_id: str = None) -> Optional[dict]:
         """在 Topic 中发送消息，并触发 Redis 通知"""
         # 1. 保存消息到数据库
         # 注意：这里需要 message_service 的逻辑，暂且简化实现
-        msg_id = f"msg_{uuid.uuid4().hex[:8]}"
+        msg_id = message_id or f"msg_{uuid.uuid4().hex[:8]}"
         
         conn = self.get_connection()
         if not conn: return None
@@ -213,7 +230,8 @@ class TopicService:
                 'role': role,
                 'content': content,
                 'mentions': mentions,
-                'timestamp': time.time()
+                'timestamp': time.time(),
+                'ext': ext
             }
             
             self._publish_event(topic_id, 'new_message', message_data)

@@ -89,14 +89,41 @@ export const DataListItem: React.FC<DataListItemProps> = ({
       active={isSelected || isActive}
       onClick={handleClick}
       disabled={disabled}
-      className={cn(className)}
+      className={cn('w-full group', className)}
     >
-      <div className="flex items-center justify-between w-full gap-3">
-        {/* 左侧内容 */}
+      <div className="flex items-center gap-3 w-full">
+        {/* 左侧操作按钮 */}
+        {(onDelete || onEdit || actions) && (
+          <div className="flex items-center gap-1 flex-shrink-0">
+            {onDelete && (
+              <IconButton
+                icon={Trash2}
+                label="删除"
+                onClick={handleDelete}
+                variant="ghost"
+                size="icon"
+                className="w-7 h-7 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+              />
+            )}
+            {onEdit && (
+              <IconButton
+                icon={Edit2}
+                label="编辑"
+                onClick={handleEdit}
+                variant="ghost"
+                size="icon"
+                className="w-7 h-7"
+              />
+            )}
+            {actions}
+          </div>
+        )}
+
+        {/* 内容区域 */}
         <div className="flex items-center gap-3 flex-1 min-w-0">
           {/* 头像/图标 */}
           {avatar && (
-            <div className="flex-shrink-0 w-10 h-10 rounded-full overflow-hidden bg-mutedToken flex items-center justify-center">
+            <div className="flex-shrink-0 w-8 h-8 rounded-full overflow-hidden bg-mutedToken flex items-center justify-center">
               {typeof avatar === 'string' ? (
                 <img src={avatar} alt={title} className="w-full h-full object-cover" />
               ) : (
@@ -105,49 +132,24 @@ export const DataListItem: React.FC<DataListItemProps> = ({
             </div>
           )}
           {Icon && !avatar && (
-            <div className="flex-shrink-0 w-10 h-10 rounded-full bg-mutedToken flex items-center justify-center">
-              <Icon className="w-5 h-5 text-mutedToken-foreground" />
+            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-mutedToken flex items-center justify-center">
+              <Icon className="w-4 h-4 text-mutedToken-foreground" />
             </div>
           )}
 
           {/* 文本内容 */}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <div className="font-medium text-sm truncate">{title}</div>
+              <div className="font-medium text-sm truncate select-text">{title}</div>
               {badge}
             </div>
             {description && (
-              <div className="text-xs text-mutedToken-foreground truncate mt-0.5">
+              <div className="text-xs text-mutedToken-foreground truncate mt-0.5 select-text">
                 {description}
               </div>
             )}
           </div>
         </div>
-
-        {/* 右侧操作 */}
-        {(onDelete || onEdit || actions) && (
-          <div className="flex items-center gap-1 flex-shrink-0">
-            {onEdit && (
-              <IconButton
-                icon={Edit2}
-                label="编辑"
-                onClick={handleEdit}
-                variant="ghost"
-                size="icon"
-              />
-            )}
-            {onDelete && (
-              <IconButton
-                icon={Trash2}
-                label="删除"
-                onClick={handleDelete}
-                variant="ghost"
-                size="icon"
-              />
-            )}
-            {actions}
-          </div>
-        )}
       </div>
     </ListItem>
   );
