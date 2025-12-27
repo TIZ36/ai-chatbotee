@@ -473,15 +473,22 @@ const Workflow: React.FC<WorkflowProps> = ({
   const messagesRef = useRef<Message[]>(messages);
   messagesRef.current = messages;
   
-  // 获取消息的前一条消息内容（用于优化 MessageContent 渲染）
-  const getPrevMessageContent = useCallback((messageId: string): string | undefined => {
-    const msgs = messagesRef.current;
-    const idx = msgs.findIndex(m => m.id === messageId);
-    if (idx > 0) {
-      return msgs[idx - 1]?.content;
+  // 预计算“上一条消息内容”映射：避免每次渲染都在 messages 上 findIndex（可见项多时会明显拖慢）
+  const prevMessageContentMap = useMemo(() => {
+    const map = new Map<string, string | undefined>();
+    for (let i = 0; i < messages.length; i++) {
+      const cur = messages[i];
+      const prev = i > 0 ? messages[i - 1] : undefined;
+      map.set(cur.id, prev?.content);
     }
-    return undefined;
-  }, []);
+    return map;
+  }, [messages]);
+  
+  // 获取消息的前一条消息内容（用于优化 MessageContent 渲染）
+  const getPrevMessageContent = useCallback(
+    (messageId: string): string | undefined => prevMessageContentMap.get(messageId),
+    [prevMessageContentMap]
+  );
   
   // 保存最后一次请求信息，用于快速重试
   const lastRequestRef = useRef<{
@@ -4812,6 +4819,11 @@ const Workflow: React.FC<WorkflowProps> = ({
     atSelectorPosition,
     isComposingRef,
     handleInputChange,
+    handleInputSelect,
+    handleInputClick,
+    handleInputMouseUp,
+    handleInputKeyUp,
+    handleInputScroll,
     handleKeyPress,
     handleKeyDown,
   } = useChatInput({
@@ -5462,6 +5474,11 @@ const Workflow: React.FC<WorkflowProps> = ({
                 ref={inputRef}
               value={input}
                 onChange={handleInputChange}
+              onSelect={handleInputSelect}
+              onClick={handleInputClick}
+              onMouseUp={handleInputMouseUp}
+              onKeyUp={handleInputKeyUp}
+              onScroll={handleInputScroll}
               onCompositionStart={() => {
                 isComposingRef.current = true;
               }}

@@ -168,6 +168,13 @@ if [ -f "package.json" ]; then
     echo "📦 安装 Node.js 依赖..."
     npm install
     echo "✅ Node.js 依赖安装完成"
+
+    # 安装前端依赖（front/）
+    if [ -f "front/package.json" ]; then
+        echo "📦 安装前端依赖 (front/)..."
+        npm --prefix front install
+        echo "✅ 前端依赖安装完成"
+    fi
     
     # 编译原生模块（node-pty）
     if [ -d "node_modules/node-pty" ]; then

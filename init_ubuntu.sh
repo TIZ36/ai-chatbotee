@@ -181,6 +181,13 @@ if [ -f "package.json" ]; then
         npm install || echo "❌ npm install 失败，请检查错误信息"
     }
     echo "✅ Node.js 依赖安装完成"
+
+    # 安装前端依赖（front/）
+    if [ -f "front/package.json" ]; then
+        echo "📦 安装前端依赖 (front/)..."
+        npm --prefix front install || echo "⚠️  front 依赖安装失败，请检查错误信息"
+        echo "✅ 前端依赖安装完成"
+    fi
     
     # 编译原生模块（node-pty 需要编译）
     if [ -d "node_modules/node-pty" ]; then

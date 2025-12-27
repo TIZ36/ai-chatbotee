@@ -1390,7 +1390,7 @@ def init_redis(config: dict) -> Tuple[bool, Optional[str]]:
         
         print(f"Connecting to Redis at {host}:{port}...")
         
-        # 创建Redis连接
+        # 创建Redis连接（注意：如果 ping 失败，需要回滚 redis_client，避免留下“半初始化”的客户端）
         redis_client = redis.Redis(
             host=host,
             port=port,
@@ -1409,10 +1409,12 @@ def init_redis(config: dict) -> Tuple[bool, Optional[str]]:
         return True, None
         
     except redis.ConnectionError as e:
+        redis_client = None
         error_msg = f"Redis connection error: {e}"
         print(f"✗ {error_msg}")
         return False, error_msg
     except Exception as e:
+        redis_client = None
         error_msg = f"Redis initialization error: {e}"
         print(f"✗ {error_msg}")
         return False, error_msg

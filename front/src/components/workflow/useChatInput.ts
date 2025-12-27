@@ -1,5 +1,5 @@
-import React, { useState, useRef, useCallback } from 'react';
-import { calculateCursorPosition } from './utils';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { calculateCursorPosition, releaseCursorMirror } from './utils';
 
 export interface ChatInputProps {
   input: string;
@@ -46,6 +46,7 @@ export const useChatInput = ({
   const isComposingRef = useRef(false);
   const rafUpdateRef = useRef<number | null>(null);
   const atCtxMissRef = useRef(0); // 容错：避免 caret/selectionStart 瞬时抖动导致选择器“闪一下就消失”
+  const lastDomSnapshotRef = useRef<string>(''); // 短路：避免重复测量
 
   const getAtTriggerContext = useCallback(
     (text: string, caret: number): { start: number; query: string } | null => {
@@ -70,6 +71,11 @@ export const useChatInput = ({
     const value = el.value ?? '';
     const cursorPosition = el.selectionStart ?? value.length;
     const textBeforeCursor = value.substring(0, cursorPosition);
+
+    // 只有 DOM 状态变化时才继续（避免 onChange+onKeyUp 等重复触发造成卡顿）
+    const snap = `${cursorPosition}|${el.scrollTop}|${el.scrollLeft}|${showAtSelector ? 1 : 0}|${showModuleSelector ? 1 : 0}|${value.length}`;
+    if (snap === lastDomSnapshotRef.current) return;
+    lastDomSnapshotRef.current = snap;
     
     // Detect / command
     const lastSlashIndex = textBeforeCursor.lastIndexOf('/');
@@ -183,12 +189,64 @@ export const useChatInput = ({
     });
   }, [updateSelectorsFromDom]);
 
+  // 卸载时清理 rAF 与 mirror（避免残留 DOM，让人误判“内存泄漏”）
+  useEffect(() => {
+    const el = inputRef.current;
+    return () => {
+      if (rafUpdateRef.current) cancelAnimationFrame(rafUpdateRef.current);
+      releaseCursorMirror(el);
+    };
+  }, [inputRef]);
+
+  // 当下拉显示时，窗口尺寸变化也需要重算位置
+  useEffect(() => {
+    if (!showAtSelector && !showModuleSelector) return;
+    const onResize = () => scheduleUpdateSelectors();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [scheduleUpdateSelectors, showAtSelector, showModuleSelector]);
+
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
     // 在受控 textarea 场景下，某些平台/输入法会导致 selectionStart 瞬时异常，
     // 用 rAF 在 DOM commit 后读取真实 caret，避免“闪一下就消失”。
     scheduleUpdateSelectors();
   }, [scheduleUpdateSelectors, setInput]);
+
+  // 光标移动/选区变化：不一定触发 onChange，需要单独刷新（但尽量做得很轻）
+  const handleInputSelect = useCallback(() => {
+    if (isComposingRef.current) return;
+    if (!showAtSelector && !showModuleSelector) return;
+    scheduleUpdateSelectors();
+  }, [scheduleUpdateSelectors, showAtSelector, showModuleSelector]);
+
+  const handleInputClick = handleInputSelect;
+  const handleInputMouseUp = handleInputSelect;
+
+  const handleInputKeyUp = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (isComposingRef.current) return;
+      // 只对“移动光标”的键触发，避免输入字符时重复触发（onChange 已经会触发）
+      const k = e.key;
+      const isNavKey =
+        k === 'ArrowLeft' ||
+        k === 'ArrowRight' ||
+        k === 'ArrowUp' ||
+        k === 'ArrowDown' ||
+        k === 'Home' ||
+        k === 'End' ||
+        k === 'PageUp' ||
+        k === 'PageDown';
+      if (!isNavKey) return;
+      scheduleUpdateSelectors();
+    },
+    [scheduleUpdateSelectors]
+  );
+
+  const handleInputScroll = useCallback(() => {
+    if (!showAtSelector && !showModuleSelector) return;
+    scheduleUpdateSelectors();
+  }, [scheduleUpdateSelectors, showAtSelector, showModuleSelector]);
 
   const handleKeyPress = useCallback((e: React.KeyboardEvent) => {
     if (e.key !== 'Enter') return;
@@ -240,6 +298,11 @@ export const useChatInput = ({
     atSelectorPosition,
     isComposingRef,
     handleInputChange,
+    handleInputSelect,
+    handleInputClick,
+    handleInputMouseUp,
+    handleInputKeyUp,
+    handleInputScroll,
     handleKeyPress,
     handleKeyDown,
   };

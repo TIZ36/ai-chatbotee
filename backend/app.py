@@ -4200,15 +4200,23 @@ def remove_topic_participant(session_id, participant_id):
 
 # ==================== 会话和消息管理 API ====================
 
-@app.route('/api/topics/<session_id>/stream', methods=['GET'])
-@app.route('/api/sessions/<session_id>/stream', methods=['GET'])
+@app.route('/api/topics/<session_id>/stream', methods=['GET', 'OPTIONS'])
+@app.route('/api/sessions/<session_id>/stream', methods=['GET', 'OPTIONS'])
 def stream_topic_events(session_id):
     """订阅 Topic 事件流 (SSE)"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+
     from database import get_redis_client
     from flask import stream_with_context
     redis_client = get_redis_client()
     if not redis_client:
         return jsonify({'error': 'Redis not available'}), 503
+    # 防止“半初始化 Redis client”（init_redis 失败但对象仍存在）导致流式接口直接 500
+    try:
+        redis_client.ping()
+    except Exception as e:
+        return jsonify({'error': 'Redis not available', 'detail': str(e)}), 503
 
     def generate():
         pubsub = redis_client.pubsub()
@@ -4247,7 +4255,7 @@ def stream_topic_events(session_id):
                 pass
             print(f"[Topic Stream] Client disconnected from {channel}")
 
-    return Response(
+    resp = Response(
         stream_with_context(generate()),
         mimetype='text/event-stream',
         headers={
@@ -4256,6 +4264,16 @@ def stream_topic_events(session_id):
             'X-Accel-Buffering': 'no'  # 禁用 Nginx 缓存
         }
     )
+    # SSE 场景下明确附加 CORS 头（某些中间层/错误分支会导致 after_request 未覆盖到）
+    try:
+        origin = request.headers.get('Origin')
+        if origin:
+            resp.headers['Access-Control-Allow-Origin'] = origin
+            resp.headers['Access-Control-Allow-Credentials'] = 'true'
+            resp.headers['Vary'] = 'Origin'
+    except Exception:
+        pass
+    return resp
 
 @app.route('/api/sessions', methods=['GET', 'OPTIONS'])
 def list_sessions():

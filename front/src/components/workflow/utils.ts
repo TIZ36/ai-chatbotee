@@ -2,8 +2,26 @@
  * Utility functions for Workflow component
  */
 
+type CursorMirrorCtx = {
+  mirror: HTMLDivElement;
+  beforeNode: Text;
+  marker: HTMLSpanElement;
+};
+
+// 复用镜像节点：避免每次输入都 create/remove DOM 造成 GC 抖动与卡顿
+const cursorMirrorMap = new WeakMap<HTMLTextAreaElement, CursorMirrorCtx>();
+
+export function releaseCursorMirror(textarea?: HTMLTextAreaElement | null) {
+  if (!textarea) return;
+  const ctx = cursorMirrorMap.get(textarea);
+  if (!ctx) return;
+  if (ctx.mirror.parentNode) ctx.mirror.parentNode.removeChild(ctx.mirror);
+  cursorMirrorMap.delete(textarea);
+}
+
 /**
- * Calculate the cursor position in a textarea for positioning selectors
+ * Calculate the cursor position in a textarea for positioning selectors.
+ * 使用 mirror + marker(span) 获取稳定的 caret rect，支持换行/滚动/字体样式。
  */
 export const calculateCursorPosition = (
   textarea: HTMLTextAreaElement,
@@ -11,102 +29,54 @@ export const calculateCursorPosition = (
 ): { x: number; y: number } => {
   const textareaRect = textarea.getBoundingClientRect();
   const styles = window.getComputedStyle(textarea);
-  
-  // Create a mirror div to calculate position
-  const mirror = document.createElement('div');
-  
-  // Copy styles
-  mirror.style.position = 'absolute';
+
+  let ctx = cursorMirrorMap.get(textarea);
+  if (!ctx) {
+    const mirror = document.createElement('div');
+    const beforeNode = document.createTextNode('');
+    const marker = document.createElement('span');
+    // zero-width space：让 marker 在行尾/空内容也有稳定 rect
+    marker.textContent = '\u200b';
+    mirror.appendChild(beforeNode);
+    mirror.appendChild(marker);
+    document.body.appendChild(mirror);
+    ctx = { mirror, beforeNode, marker };
+    cursorMirrorMap.set(textarea, ctx);
+  }
+
+  const { mirror, beforeNode, marker } = ctx;
+
+  // 固定定位到 textarea 的 viewport rect
+  mirror.style.position = 'fixed';
+  mirror.style.top = `${textareaRect.top}px`;
+  mirror.style.left = `${textareaRect.left}px`;
+  mirror.style.width = `${textareaRect.width}px`;
+  mirror.style.height = `${textareaRect.height}px`;
   mirror.style.visibility = 'hidden';
-  mirror.style.whiteSpace = styles.whiteSpace || 'pre-wrap';
-  mirror.style.wordWrap = styles.wordWrap || 'break-word';
-  mirror.style.overflowWrap = styles.overflowWrap || 'break-word';
-  mirror.style.font = styles.font;
-  mirror.style.fontSize = styles.fontSize;
+  mirror.style.pointerEvents = 'none';
+  mirror.style.overflow = 'auto';
+  mirror.style.whiteSpace = 'pre-wrap';
+  mirror.style.wordWrap = 'break-word';
+  mirror.style.overflowWrap = 'break-word';
+
+  // 复制关键样式以保证换行测量一致
   mirror.style.fontFamily = styles.fontFamily;
+  mirror.style.fontSize = styles.fontSize;
   mirror.style.fontWeight = styles.fontWeight;
   mirror.style.fontStyle = styles.fontStyle;
   mirror.style.letterSpacing = styles.letterSpacing;
+  mirror.style.lineHeight = styles.lineHeight;
+  mirror.style.textTransform = styles.textTransform;
+  mirror.style.textAlign = styles.textAlign;
   mirror.style.padding = styles.padding;
   mirror.style.border = styles.border;
-  mirror.style.width = `${textarea.offsetWidth}px`;
   mirror.style.boxSizing = styles.boxSizing;
-  mirror.style.lineHeight = styles.lineHeight;
-  mirror.style.wordSpacing = styles.wordSpacing;
-  mirror.style.top = `${textareaRect.top}px`;
-  mirror.style.left = `${textareaRect.left}px`;
-  
-  mirror.textContent = textBeforeCursor;
-  document.body.appendChild(mirror);
-  
-  let cursorX: number;
-  let cursorY: number;
-  
-  try {
-    const range = document.createRange();
-    const mirrorTextNode = mirror.firstChild;
-    
-    if (mirrorTextNode && mirrorTextNode.nodeType === Node.TEXT_NODE) {
-      const textLength = mirrorTextNode.textContent?.length || 0;
-      range.setStart(mirrorTextNode, textLength);
-      range.setEnd(mirrorTextNode, textLength);
-      const rangeRect = range.getBoundingClientRect();
-      
-      cursorX = rangeRect.right;
-      cursorY = rangeRect.top;
-      
-      if (rangeRect.width === 0 && textLength > 0) {
-        const measureSpan = document.createElement('span');
-        measureSpan.style.font = styles.font;
-        measureSpan.style.fontSize = styles.fontSize;
-        measureSpan.style.fontFamily = styles.fontFamily;
-        measureSpan.style.fontWeight = styles.fontWeight;
-        measureSpan.style.fontStyle = styles.fontStyle;
-        measureSpan.style.letterSpacing = styles.letterSpacing;
-        measureSpan.style.whiteSpace = 'pre';
-        measureSpan.textContent = textBeforeCursor;
-        measureSpan.style.position = 'absolute';
-        measureSpan.style.visibility = 'hidden';
-        document.body.appendChild(measureSpan);
-        const textWidth = measureSpan.offsetWidth;
-        document.body.removeChild(measureSpan);
-        
-        const paddingLeft = parseFloat(styles.paddingLeft) || 0;
-        cursorX = mirrorRect.left + paddingLeft + textWidth;
-      }
-    } else {
-      throw new Error('No text node found');
-    }
-  } catch (e) {
-    const mirrorRect = mirror.getBoundingClientRect();
-    const lines = textBeforeCursor.split('\n');
-    const lineIndex = lines.length - 1;
-    const lineText = lines[lineIndex] || '';
-    
-    const lineMeasure = document.createElement('span');
-    lineMeasure.style.font = styles.font;
-    lineMeasure.style.fontSize = styles.fontSize;
-    lineMeasure.style.fontFamily = styles.fontFamily;
-    lineMeasure.style.fontWeight = styles.fontWeight;
-    lineMeasure.style.fontStyle = styles.fontStyle;
-    lineMeasure.style.letterSpacing = styles.letterSpacing;
-    lineMeasure.style.whiteSpace = 'pre';
-    lineMeasure.textContent = lineText;
-    lineMeasure.style.position = 'absolute';
-    lineMeasure.style.visibility = 'hidden';
-    document.body.appendChild(lineMeasure);
-    const lineWidth = lineMeasure.offsetWidth;
-    document.body.removeChild(lineMeasure);
-    
-    const paddingLeft = parseFloat(styles.paddingLeft) || 0;
-    const paddingTop = parseFloat(styles.paddingTop) || 0;
-    const lineHeight = parseFloat(styles.lineHeight) || 20;
-    
-    cursorX = mirrorRect.left + paddingLeft + lineWidth;
-    cursorY = mirrorRect.top + paddingTop + (lineIndex * lineHeight);
-  }
-  
-  document.body.removeChild(mirror);
-  
-  return { x: cursorX, y: cursorY };
+
+  beforeNode.data = textBeforeCursor;
+  // 同步内部滚动（多行 textarea）
+  mirror.scrollTop = textarea.scrollTop;
+  mirror.scrollLeft = textarea.scrollLeft;
+
+  const rect = marker.getBoundingClientRect();
+  return { x: rect.left, y: rect.top };
 };

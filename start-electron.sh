@@ -23,6 +23,12 @@ if [ ! -d "node_modules" ]; then
     npm install
 fi
 
+# 检查前端依赖（front/node_modules）
+if [ ! -d "front/node_modules" ]; then
+    echo "未找到 front/node_modules，正在安装前端依赖..."
+    npm --prefix front install
+fi
+
 # 检查是否存在 package.json
 if [ ! -f "package.json" ]; then
     echo "错误: 未找到 package.json"
@@ -42,6 +48,17 @@ if [ ! -d "node_modules/vite" ]; then
         exit 1
     fi
     echo "✅ 依赖安装完成"
+fi
+
+# 检查前端 vite 是否已安装（避免使用 root 的 vite/rollup）
+if [ ! -d "front/node_modules/vite" ]; then
+    echo "检测到前端依赖未完全安装，正在安装前端依赖..."
+    npm --prefix front install
+    if [ $? -ne 0 ]; then
+        echo "错误: 安装前端依赖失败"
+        exit 1
+    fi
+    echo "✅ 前端依赖安装完成"
 fi
 
 # 检查并重新编译 node-pty（如果需要）
@@ -96,7 +113,7 @@ if command -v npx &> /dev/null && (npx -y concurrently --version 2>/dev/null || 
 else
     echo "使用基础模式启动（先启动 Vite，再启动 Electron）..."
     # 后台启动 Vite 开发服务器
-    npm run dev &
+    npm --prefix front run dev &
     VITE_PID=$!
     echo "Vite 开发服务器已启动 (PID: $VITE_PID)"
     
