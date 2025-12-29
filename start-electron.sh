@@ -78,6 +78,7 @@ echo "编译 Electron 主进程代码..."
 # 清理旧进程
 echo "🧹 清理旧进程..."
 fuser -k 5177/tcp 2>/dev/null || true
+fuser -k 5174/tcp 2>/dev/null || true
 pkill -f "node_modules/.bin/electron" 2>/dev/null || true
 pkill -f "node_modules/electron/dist" 2>/dev/null || true
 sleep 1

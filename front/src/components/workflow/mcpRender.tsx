@@ -2,6 +2,7 @@ import React from 'react';
 import type { MediaItem } from '@/components/ui/MediaGallery';
 import { MediaGallery } from '@/components/ui/MediaGallery';
 import { truncateBase64Strings } from '@/utils/textUtils';
+import type { SessionMediaItem } from '@/components/ui/SessionMediaPanel';
 
 export type MCPContentBlock =
   | { kind: 'text'; text: string }
@@ -10,8 +11,7 @@ export type MCPContentBlock =
 type RenderMCPMediaParams = {
   media: Array<{ type: 'image' | 'video' | 'audio'; mimeType: string; data: string }>;
   messageId?: string;
-  findSessionMediaIndex: (messageId: string, mediaIndex: number) => number;
-  openSessionMediaPanel: (index: number) => void;
+  openSingleMediaViewer: (item: SessionMediaItem) => void;
 };
 
 export function parseMCPContentBlocks(content: any): MCPContentBlock[] {
@@ -70,8 +70,7 @@ export function parseMCPContentBlocks(content: any): MCPContentBlock[] {
 export function renderMCPMedia({
   media,
   messageId,
-  findSessionMediaIndex,
-  openSessionMediaPanel,
+  openSingleMediaViewer,
 }: RenderMCPMediaParams) {
   if (!media || media.length === 0) return null;
 
@@ -89,8 +88,15 @@ export function renderMCPMedia({
         maxVisible={6}
         showDownload={true}
         onOpenSessionGallery={index => {
-          const sessionIndex = messageId ? findSessionMediaIndex(messageId, index) : index;
-          openSessionMediaPanel(sessionIndex);
+          const picked = galleryMedia[index];
+          if (!picked) return;
+          openSingleMediaViewer({
+            type: picked.type,
+            mimeType: picked.mimeType,
+            data: picked.data,
+            messageId,
+            role: 'tool',
+          });
         }}
       />
     </div>
@@ -100,10 +106,9 @@ export function renderMCPMedia({
 export function renderMCPBlocks(params: {
   blocks: MCPContentBlock[];
   messageId?: string;
-  findSessionMediaIndex: (messageId: string, mediaIndex: number) => number;
-  openSessionMediaPanel: (index: number) => void;
+  openSingleMediaViewer: (item: SessionMediaItem) => void;
 }) {
-  const { blocks, messageId, findSessionMediaIndex, openSessionMediaPanel } = params;
+  const { blocks, messageId, openSingleMediaViewer } = params;
   if (!blocks || blocks.length === 0) return null;
 
   return (
@@ -133,8 +138,7 @@ export function renderMCPBlocks(params: {
             {renderMCPMedia({
               media: [{ type: b.kind, mimeType: b.mimeType, data: b.data }],
               messageId,
-              findSessionMediaIndex,
-              openSessionMediaPanel,
+              openSingleMediaViewer,
             })}
           </div>
         );

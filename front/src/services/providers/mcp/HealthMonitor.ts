@@ -131,7 +131,7 @@ export class HealthMonitor {
     const startTime = Date.now();
 
     try {
-      // 尝试获取工具列表作为健康检查
+      // 尝试获取工具列表作为健康检查（标准 MCP 请求 tools/list）
       const client = await this.pool.acquire(serverId, this.config.timeout);
       
       try {
@@ -159,6 +159,16 @@ export class HealthMonitor {
       };
 
       this.updateHealthState(serverId, result);
+
+      // 关键：健康检查失败后驱动连接池自愈
+      // - 剔除坏连接释放容量
+      // - 补齐 minConnections，确保后续调用能重新建联
+      try {
+        await this.pool.recoverServer(serverId);
+      } catch (recoverError) {
+        logger.warn('Failed to recover server after unhealthy check', { serverId, recoverError });
+      }
+
       return result;
     }
   }

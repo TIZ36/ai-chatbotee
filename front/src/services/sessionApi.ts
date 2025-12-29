@@ -605,6 +605,23 @@ export async function updateSessionName(session_id: string, name: string): Promi
 }
 
 /**
+ * 更新会话类型（用于切换积极模式）
+ */
+export async function updateSessionType(session_id: string, session_type: 'topic_general' | 'agent'): Promise<void> {
+  const response = await fetch(`${API_BASE}/sessions/${session_id}/session-type`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ session_type }),
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(errorData.error || `Failed to update session type: ${response.statusText}`);
+  }
+}
+
+/**
  * 更新会话的系统提示词（人设）
  */
 export async function updateSessionSystemPrompt(session_id: string, system_prompt: string | null): Promise<void> {

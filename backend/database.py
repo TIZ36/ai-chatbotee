@@ -1298,6 +1298,7 @@ def create_tables():
             `summary` TEXT NOT NULL COMMENT '技能包内容（LLM总结的执行步骤和能力描述）',
             `source_session_id` VARCHAR(100) DEFAULT NULL COMMENT '来源会话ID',
             `source_messages` JSON DEFAULT NULL COMMENT '来源消息ID列表',
+            `ext` JSON DEFAULT NULL COMMENT '扩展数据（processSteps执行轨迹等）',
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
             `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
             INDEX `idx_skill_pack_id` (`skill_pack_id`),
@@ -1308,6 +1309,11 @@ def create_tables():
         
         cursor.execute(create_skill_packs_table)
         print("✓ Table 'skill_packs' created/verified successfully")
+        
+        # 迁移：为 skill_packs 表添加 ext 字段（如果不存在）
+        _ensure_column('skill_packs', 'ext', 
+                      "ALTER TABLE `skill_packs` ADD COLUMN `ext` JSON DEFAULT NULL COMMENT '扩展数据（processSteps执行轨迹等）' AFTER `source_messages`", 
+                      'ext')
         
         # 技能包分配表（多对多关系：技能包与记忆体/智能体）
         create_skill_pack_assignments_table = """

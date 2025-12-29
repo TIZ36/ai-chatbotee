@@ -129,6 +129,9 @@ export class MCPClient {
       errorMessage.includes('fetch failed') ||
       errorMessage.includes('failed to fetch') ||
       errorMessage.includes('session') ||
+      // MCP 服务器重启后常见：旧 session 失效会直接返回 404/410
+      errorMessage.includes('http 404') ||
+      errorMessage.includes('http 410') ||
       errorMessage.includes('not connected') ||
       errorMessage.includes('transport');
 
@@ -489,20 +492,46 @@ export class MCPClient {
    * 断开连接
    */
   async disconnect(): Promise<void> {
-    if (this.client && this.transport) {
-      try {
-        await this.transport.close();
-        this.client = null;
-        this.transport = null;
-        this.isConnected = false;
-        // 清除缓存
-        this.cachedTools = null;
-        this.toolsCacheTime = 0;
-        console.log(`[MCP] Disconnected from ${this.server.name}`);
-      } catch (error) {
-        console.error(`[MCP] Error disconnecting from ${this.server.name}:`, error);
-      }
+    if (!this.client && !this.transport) {
+      return;
     }
+    try {
+      // transport.close() 会负责关闭底层 SSE/HTTP 连接
+      if (this.transport) {
+        await this.transport.close();
+      }
+    } catch (error) {
+      console.error(`[MCP] Error disconnecting from ${this.server.name}:`, error);
+    } finally {
+      this.client = null;
+      this.transport = null;
+      this.isConnected = false;
+      // 清除缓存
+      this.cachedTools = null;
+      this.toolsCacheTime = 0;
+      console.log(`[MCP] Disconnected from ${this.server.name}`);
+    }
+  }
+
+  /**
+   * 强制重连（用于 MCP 服务器重启 / session 丢失 等场景）
+   */
+  private async forceReconnect(reason: string, detail?: any): Promise<void> {
+    console.warn(`[MCP] Forcing reconnect to ${this.server.name} (reason=${reason})`, detail ?? '');
+    // 清理旧状态，避免继续携带旧 mcp-session-id
+    await this.disconnect();
+    await this.connect();
+    this.clearToolsCache();
+    this.resetErrors();
+  }
+
+  /**
+   * 是否需要因 HTTP 状态码触发重连
+   * - 404/410: 常见于 MCP 服务重启后旧 session 失效
+   * - 502/503/504: 代理或目标服务短暂不可用
+   */
+  private shouldReconnectForHttpStatus(status: number): boolean {
+    return status === 404 || status === 410 || status === 502 || status === 503 || status === 504;
   }
   
   /**
@@ -587,6 +616,14 @@ export class MCPClient {
         });
 
         if (!response.ok) {
+          // MCP 服务重启后：旧 session 常直接 404/410，需要强制重连后再试
+          if (this.shouldReconnectForHttpStatus(response.status) && attempt < maxRetries) {
+            await this.forceReconnect('listTools_http_status', {
+              status: response.status,
+              statusText: response.statusText,
+            });
+            continue;
+          }
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
 
@@ -659,8 +696,10 @@ export class MCPClient {
 
         // 记录错误并检测是否需要重连
         const needsReconnect = this.recordError(lastError);
-        if (needsReconnect) {
-          console.warn(`[MCP] Connection to ${this.server.name} appears broken, marking for reconnection`);
+        if (needsReconnect && attempt < maxRetries) {
+          // 旧连接可能已失效（服务重启 / session 过期），尝试强制重连再试一次
+          await this.forceReconnect('listTools_error', { message: lastError.message });
+          continue;
         }
 
         if (lastError.message.includes('invalid during session initialization') && attempt < maxRetries) {
@@ -690,7 +729,7 @@ export class MCPClient {
       throw new Error('MCP transport not connected');
     }
 
-    try {
+    const callOnce = async (allowReconnectRetry: boolean): Promise<any> => {
       console.log(`[MCP] Calling tool ${name} on ${this.server.name}`);
       console.log(`[MCP] Tool arguments:`, args);
 
@@ -736,6 +775,14 @@ export class MCPClient {
       }
 
       if (!response.ok) {
+        if (allowReconnectRetry && this.shouldReconnectForHttpStatus(response.status)) {
+          await this.forceReconnect('callTool_http_status', {
+            status: response.status,
+            statusText: response.statusText,
+            toolName: name,
+          });
+          return await callOnce(false);
+        }
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
@@ -797,13 +844,18 @@ export class MCPClient {
         }
         throw parseError;
       }
+    };
 
+    try {
+      return await callOnce(true);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       // 记录错误并检测是否需要重连
       const needsReconnect = this.recordError(err);
       if (needsReconnect) {
-        console.warn(`[MCP] Connection to ${this.server.name} appears broken during tool call, marking for reconnection`);
+        // 这里不再直接 throw 前重连（避免业务层重复调用造成风暴）
+        // 真正重连由上面的 HTTP-status 分支或下一次调用触发（listTools/callTool 会重试一次）
+        console.warn(`[MCP] Connection to ${this.server.name} appears broken during tool call (will reconnect on next attempt)`);
       }
       console.error(`[MCP] Failed to call tool ${name} on ${this.server.name}:`, error);
       throw error;

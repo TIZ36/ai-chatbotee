@@ -4228,32 +4228,66 @@ def stream_topic_events(session_id):
             # 发送初始连接成功消息，确保连接建立
             yield f"data: {json.dumps({'type': 'connected', 'topic_id': session_id})}\n\n"
             # 心跳：防止 SSE 在中间层（Electron/代理/WSGI）被判定为 idle 而断开
+            # 降低心跳间隔到 10 秒，以适应更严格的超时设置
             last_ping = time.time()
+            heartbeat_interval = 10  # 秒
+            message_count = 0
+            
             while True:
-                message = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
-                if message and message.get('type') == 'message':
-                    data = message.get('data')
-                    if isinstance(data, bytes):
-                        data = data.decode('utf-8', errors='ignore')
-                    # 确保符合 SSE 格式（只发送 data 行）
-                    yield f"data: {data}\n\n"
-                else:
-                    # 无消息时定时发送 SSE 注释行作为心跳（客户端会忽略）
-                    now = time.time()
-                    if now - last_ping >= 15:
-                        yield ": ping\n\n"
-                        last_ping = now
+                try:
+                    message = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                    if message and message.get('type') == 'message':
+                        data = message.get('data')
+                        if isinstance(data, bytes):
+                            data = data.decode('utf-8', errors='ignore')
+                        # 确保符合 SSE 格式（只发送 data 行）
+                        yield f"data: {data}\n\n"
+                        message_count += 1
+                        last_ping = time.time()  # 发送消息也算作活动
+                    else:
+                        # 无消息时定时发送 SSE 注释行作为心跳（客户端会忽略）
+                        now = time.time()
+                        if now - last_ping >= heartbeat_interval:
+                            yield ": ping\n\n"
+                            last_ping = now
+                except Exception as inner_e:
+                    # 处理异常：可能是 Redis 连接错误或其他错误
+                    error_type = type(inner_e).__name__
+                    error_msg = str(inner_e).lower()
+                    is_connection_error = 'connection' in error_type.lower() or 'connection' in error_msg
+                    
+                    if is_connection_error:
+                        print(f"[Topic Stream] Redis connection error for {session_id}: {inner_e}")
+                        # 尝试重新订阅
+                        try:
+                            pubsub.close()
+                            pubsub = redis_client.pubsub()
+                            pubsub.subscribe(channel)
+                            print(f"[Topic Stream] Resubscribed to {channel} after connection error")
+                        except Exception as resub_err:
+                            print(f"[Topic Stream] Failed to resubscribe: {resub_err}")
+                            break
+                    else:
+                        print(f"[Topic Stream] Inner error for {session_id}: {inner_e}")
+                        # 短暂等待后继续
+                        time.sleep(0.5)
+                    continue
                 # 轻微 sleep，避免空转占用 CPU
                 time.sleep(0.05)
+        except GeneratorExit:
+            # 客户端正常断开连接
+            print(f"[Topic Stream] Client disconnected normally from {channel} (messages sent: {message_count})")
         except Exception as e:
             print(f"[Topic Stream] Error for {session_id}: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
             try:
                 pubsub.unsubscribe(channel)
                 pubsub.close()
             except:
                 pass
-            print(f"[Topic Stream] Client disconnected from {channel}")
+            print(f"[Topic Stream] Cleanup complete for {channel}")
 
     resp = Response(
         stream_with_context(generate()),
@@ -4364,6 +4398,43 @@ def create_session():
                 
     except Exception as e:
         print(f"[Topic API] Error creating topic: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/sessions/<session_id>/session-type', methods=['PUT', 'OPTIONS'])
+def update_session_type(session_id):
+    """更新会话类型（用于切换积极模式）"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from services.topic_service import get_topic_service
+        data = request.json
+        new_session_type = data.get('session_type')
+        
+        if not new_session_type:
+            return jsonify({'error': 'session_type is required'}), 400
+        
+        # 只允许在 topic_general 和 agent 之间切换（积极模式切换）
+        # topic_general: 普通模式（需要决策）
+        # agent: 积极模式（直接回答）
+        if new_session_type not in ('topic_general', 'agent'):
+            return jsonify({'error': 'session_type must be topic_general or agent'}), 400
+        
+        # 使用 TopicService 更新类型
+        success = get_topic_service().update_topic_type(session_id, new_session_type)
+        
+        if success:
+            return jsonify({
+                'message': 'Session type updated successfully',
+                'session_type': new_session_type
+            })
+        else:
+            return jsonify({'error': 'Failed to update session type'}), 500
+                
+    except Exception as e:
+        print(f"[Topic API] Error updating session type: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
@@ -4936,6 +5007,61 @@ def get_session_messages(session_id):
         traceback.print_exc()
         return jsonify({'messages': [], 'total': 0, 'error': str(e)}), 500
 
+
+# ==================== 媒体库 API ====================
+
+@app.route('/api/media-library/items', methods=['GET', 'OPTIONS'])
+def get_media_library_items():
+    """媒体库：聚合多个会话的媒体条目（使用 Redis 缓存 7 天）"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+
+    try:
+        session_ids_raw = request.args.get('session_ids', '') or ''
+        session_ids = [s.strip() for s in session_ids_raw.split(',') if s.strip()]
+        if not session_ids:
+            return jsonify({'items': [], 'has_more': False, 'next_cursor': None}), 200
+
+        limit = int(request.args.get('limit', 200))
+        limit = max(1, min(500, limit))
+        before_ts = request.args.get('before_ts')
+        order = (request.args.get('order') or 'desc').lower()
+        order_desc = order != 'asc'
+
+        before_ts_f = float(before_ts) if before_ts else None
+
+        from services.media_library_service import get_media_library_service
+        svc = get_media_library_service()
+
+        merged = []
+        for sid in session_ids:
+            merged.extend(svc.get_session_media_items(sid))
+
+        # 仅图片（当前媒体库先聚焦图片；后续可扩展视频/音频）
+        media_type = (request.args.get('type') or 'image').lower()
+        if media_type in ('image', 'video', 'audio'):
+            merged = [x for x in merged if x.get('type') == media_type]
+
+        # 时间过滤（游标）
+        if before_ts_f is not None:
+            merged = [x for x in merged if float(x.get('created_at_ts') or 0.0) < before_ts_f]
+
+        merged.sort(key=lambda x: float(x.get('created_at_ts') or 0.0), reverse=order_desc)
+
+        has_more = len(merged) > limit
+        page = merged[:limit]
+        next_cursor = None
+        if has_more and page:
+            next_cursor = page[-1].get('created_at_ts')
+
+        return jsonify({'items': page, 'has_more': has_more, 'next_cursor': next_cursor}), 200
+
+    except Exception as e:
+        print(f"[MediaLibrary API] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e), 'items': [], 'has_more': False, 'next_cursor': None}), 500
+
 @app.route('/api/messages/<message_id>', methods=['GET', 'OPTIONS'])
 def get_message(message_id):
     """获取单个消息（基于message_id），用于增量加载"""
@@ -5107,15 +5233,62 @@ def save_message(session_id):
             ext=ext,
             message_id=data.get('message_id')
         )
+
+        # 媒体库缓存增量更新：避免每次发消息都 delete 导致频繁全量重建
+        try:
+            from services.media_library_service import get_media_library_service
+            if msg and msg.get('message_id'):
+                get_media_library_service().upsert_message_media(
+                    session_id=session_id,
+                    message_id=msg.get('message_id'),
+                    role=msg.get('role'),
+                    content=msg.get('content'),
+                    ext=msg.get('ext'),
+                    created_ts=msg.get('timestamp'),
+                )
+        except Exception as e:
+            print(f"[Message API] Warning: Failed to update media cache incrementally: {e}")
         
         if msg:
-            # 确保话题中的所有智能体都处于激活状态 (Actor 模型)
+            # 确保智能体处于激活状态 (Actor 模型)，并直接处理触发消息
+            # - topic_general：激活话题中的所有 Agent 参与者
+            # - agent：激活私聊的单个 Agent（session_id 就是 agent_id）
             try:
-                from services.agent_actor import activate_agent
-                participants = get_topic_service().get_participants(session_id)
-                for p in participants:
-                    if p.get('participant_type') == 'agent':
-                        activate_agent(p['participant_id'], session_id)
+                from database import get_mysql_connection
+                conn = get_mysql_connection()
+                if conn:
+                    import pymysql
+                    cursor = conn.cursor(pymysql.cursors.DictCursor)
+                    cursor.execute("SELECT session_type FROM sessions WHERE session_id = %s", (session_id,))
+                    session_row = cursor.fetchone()
+                    cursor.close()
+                    conn.close()
+                    
+                    session_type = session_row.get('session_type') if session_row else None
+                    
+                    # 构建触发消息数据（用于 AgentActor 直接处理）
+                    trigger_message = {
+                        'message_id': msg.get('message_id'),
+                        'sender_id': msg.get('sender_id'),
+                        'sender_type': msg.get('sender_type'),
+                        'content': msg.get('content'),
+                        'role': msg.get('role'),
+                        'mentions': msg.get('mentions'),
+                        'ext': msg.get('ext'),
+                        'timestamp': msg.get('timestamp'),
+                    }
+                    
+                    if session_type == 'topic_general':
+                        # topic_general：激活话题中的所有 Agent 参与者，并传入触发消息
+                        from services.agent_actor import activate_agent
+                        participants = get_topic_service().get_participants(session_id)
+                        for p in participants:
+                            if p.get('participant_type') == 'agent':
+                                activate_agent(p['participant_id'], session_id, trigger_message)
+                    elif session_type == 'agent':
+                        # agent 私聊：只激活该 Agent，并传入触发消息
+                        from services.agent_actor import activate_agent
+                        activate_agent(session_id, session_id, trigger_message)
             except Exception as e:
                 print(f"[Message API] Warning: Failed to auto-activate agents: {e}")
 
@@ -5191,6 +5364,16 @@ def delete_message(session_id, message_id):
             else:
                 deleted_invalid = 0
             
+            # 媒体库缓存增量更新：移除被删除消息关联的媒体条目（不做 delete 全缓存）
+            try:
+                from services.media_library_service import get_media_library_service
+                svc = get_media_library_service()
+                svc.remove_message_media(session_id=session_id, message_id=message_id)
+                for mid in invalid_messages:
+                    svc.remove_message_media(session_id=session_id, message_id=mid)
+            except Exception as e:
+                print(f"[Session API] Warning: Failed to update media cache incrementally: {e}")
+
             return jsonify({
                 'message': 'Message deleted successfully',
                 'deleted_invalid_workflows': deleted_invalid
@@ -8077,40 +8260,74 @@ def create_skill_pack():
             # 格式化消息用于LLM总结（参考总结功能的处理方式）
             formatted_messages = []
             media_info_list = []  # 收集所有媒体资源信息
+            all_process_steps = []  # 收集所有执行轨迹（Topic会话特有）
             process_info = {
                 'messages_count': len(messages),
                 'thinking_count': 0,
                 'tool_calls_count': 0,
                 'media_count': 0,
                 'media_types': set(),
+                'process_steps_count': 0,
             }
             
             for msg in messages:
                 role_label = {'user': '用户', 'assistant': 'AI助手', 'system': '系统', 'tool': '工具'}.get(msg['role'], msg['role'])
                 content = msg['content'] or ''
                 
-                # 处理ext字段中的媒体资源
+                # 处理ext字段中的媒体资源和执行轨迹(processSteps)
                 if msg.get('ext'):
                     try:
                         ext_data = json.loads(msg['ext']) if isinstance(msg['ext'], str) else msg['ext']
-                        if isinstance(ext_data, dict) and 'media' in ext_data:
-                            media_list = ext_data['media']
-                            if isinstance(media_list, list):
-                                for media_item in media_list:
-                                    if isinstance(media_item, dict):
-                                        media_type = media_item.get('type', '').lower()
-                                        if media_type == 'image':
-                                            media_info_list.append('{image}')
-                                            process_info['media_count'] += 1
-                                            process_info['media_types'].add('image')
-                                        elif media_type == 'video':
-                                            media_info_list.append('{video}')
-                                            process_info['media_count'] += 1
-                                            process_info['media_types'].add('video')
-                                        elif media_type == 'audio':
-                                            media_info_list.append('{audio}')
-                                            process_info['media_count'] += 1
-                                            process_info['media_types'].add('audio')
+                        if isinstance(ext_data, dict):
+                            # 处理媒体资源
+                            if 'media' in ext_data:
+                                media_list = ext_data['media']
+                                if isinstance(media_list, list):
+                                    for media_item in media_list:
+                                        if isinstance(media_item, dict):
+                                            media_type = media_item.get('type', '').lower()
+                                            if media_type == 'image':
+                                                media_info_list.append('{image}')
+                                                process_info['media_count'] += 1
+                                                process_info['media_types'].add('image')
+                                            elif media_type == 'video':
+                                                media_info_list.append('{video}')
+                                                process_info['media_count'] += 1
+                                                process_info['media_types'].add('video')
+                                            elif media_type == 'audio':
+                                                media_info_list.append('{audio}')
+                                                process_info['media_count'] += 1
+                                                process_info['media_types'].add('audio')
+                            
+                            # 处理执行轨迹 processSteps（Topic会话的Agent Actor执行轨迹）
+                            if 'processSteps' in ext_data:
+                                steps = ext_data['processSteps']
+                                if isinstance(steps, list):
+                                    for step in steps:
+                                        if isinstance(step, dict):
+                                            all_process_steps.append(step)
+                                            process_info['process_steps_count'] += 1
+                                            # 提取执行步骤信息添加到内容
+                                            step_type = step.get('type', 'unknown')
+                                            if step_type == 'thinking':
+                                                thinking_text = step.get('thinking', '')
+                                                duration = step.get('duration')
+                                                duration_str = f" ({duration}ms)" if duration else ""
+                                                content += f"\n[执行轨迹-思考{duration_str}]: {thinking_text[:500]}"
+                                            elif step_type == 'mcp_call':
+                                                server = step.get('mcpServer', '')
+                                                tool = step.get('toolName', '')
+                                                status = step.get('status', '')
+                                                duration = step.get('duration')
+                                                duration_str = f" ({duration}ms)" if duration else ""
+                                                args = step.get('arguments', {})
+                                                args_str = json.dumps(args, ensure_ascii=False)[:200] if args else ''
+                                                content += f"\n[执行轨迹-MCP调用{duration_str}]: {server}/{tool} ({status}) 参数: {args_str}"
+                                            elif step_type == 'workflow':
+                                                wf_info = step.get('workflowInfo', {})
+                                                wf_name = wf_info.get('name', 'Unknown')
+                                                status = step.get('status', '')
+                                                content += f"\n[执行轨迹-工作流]: {wf_name} ({status})"
                     except Exception as e:
                         print(f"[SkillPack] 解析ext字段失败: {e}")
                 
@@ -8276,6 +8493,7 @@ def create_skill_pack():
                 'source_messages': message_ids,
                 'process_info': process_info,
                 'conversation_text': conversation_text,  # 用于优化时重新生成
+                'process_steps': all_process_steps,  # Topic会话的执行轨迹
             }), 200
             
         finally:
@@ -8307,6 +8525,7 @@ def save_skill_pack():
         summary = data.get('summary')
         source_session_id = data.get('source_session_id')
         source_messages = data.get('source_messages', [])
+        process_steps = data.get('process_steps', [])  # Topic会话的执行轨迹
         
         if not name or not summary:
             return jsonify({'error': 'name and summary are required'}), 400
@@ -8318,16 +8537,22 @@ def save_skill_pack():
             # 生成技能包ID并保存
             skill_pack_id = str(uuid.uuid4())
             
+            # 构建扩展数据（存储执行轨迹等）
+            ext_data = None
+            if process_steps:
+                ext_data = json.dumps({'processSteps': process_steps})
+            
             cursor.execute("""
                 INSERT INTO skill_packs 
-                (skill_pack_id, name, summary, source_session_id, source_messages)
-                VALUES (%s, %s, %s, %s, %s)
+                (skill_pack_id, name, summary, source_session_id, source_messages, ext)
+                VALUES (%s, %s, %s, %s, %s, %s)
             """, (
                 skill_pack_id,
                 name,
                 summary,
                 source_session_id,
-                json.dumps(source_messages) if source_messages else None
+                json.dumps(source_messages) if source_messages else None,
+                ext_data
             ))
             
             conn.commit()
@@ -8338,6 +8563,7 @@ def save_skill_pack():
                 'summary': summary,
                 'source_session_id': source_session_id,
                 'source_messages': source_messages,
+                'process_steps': process_steps,
             }), 201
             
         finally:

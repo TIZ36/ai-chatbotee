@@ -441,11 +441,9 @@ export class MCPClient {
    */
   async healthCheck(): Promise<boolean> {
     try {
-      if (!this.isConnected) {
-        return false;
-      }
-
-      // 简单的 ping（获取工具列表）
+      // 使用标准的 tools/list 作为心跳：
+      // - 各家 /health 不一定实现
+      // - tools/list 是 MCP 标准能力面，能覆盖“服务重启导致 session 失效”等问题
       await this.listTools(true);
       
       eventBus.emit('mcp:health_check', {
@@ -455,6 +453,8 @@ export class MCPClient {
 
       return true;
     } catch (error) {
+      // 标记错误（连续失败会变为不健康，连接池可据此剔除）
+      this.recordError(error as Error);
       eventBus.emit('mcp:health_check', {
         serverId: this.serverId,
         healthy: false,

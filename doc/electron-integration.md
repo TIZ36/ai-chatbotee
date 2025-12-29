@@ -671,8 +671,8 @@ export async function createTerminalSession(cwd?: string): Promise<TerminalSessi
 {
   "scripts": {
     "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
-    "dev:vite": "cd front && vite --port 5174",
-    "dev:electron": "wait-on http://localhost:5174 && electron .",
+    "dev:vite": "cd front && vite --port 5177",
+    "dev:electron": "wait-on http://localhost:5177 && electron .",
     "build": "npm run build:vite && npm run build:electron",
     "build:vite": "cd front && vite build",
     "build:electron": "tsc -p electron/tsconfig.json",

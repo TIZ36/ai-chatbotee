@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
-import { Brain, Plug, Workflow as WorkflowIcon, Settings, Code, Terminal, MessageCircle, Globe, Sparkles, Bot, Users, BookOpen, Shield, Activity, Plus, FolderOpen } from 'lucide-react';
+import { Brain, Plug, Workflow as WorkflowIcon, Settings, Code, Terminal, MessageCircle, Globe, Sparkles, Bot, Users, BookOpen, Shield, Activity, Plus, FolderOpen, Image as ImageIcon } from 'lucide-react';
 import appLogoDark from '../assets/app_logo_dark.png';
 import appLogoLight from '../assets/app_logo_light.png';
 import { Button } from './components/ui/Button';
@@ -27,10 +27,11 @@ import UserAccessPage from './components/UserAccessPage';
 import AgentsPage from './components/AgentsPage';
 // 新架构组件
 import SystemStatusPanel from './components/SystemStatusPanel';
-import { getAgents, getMemories, createSession, deleteSession, type Session } from './services/sessionApi';
+import { getAgents, getMemories, getSessions, createSession, deleteSession, type Session } from './services/sessionApi';
 import { getRoundTables, type RoundTable } from './services/roundTableApi';
 import { toast } from './components/ui/use-toast';
 import { ConfirmDialog } from './components/ui/ConfirmDialog';
+import MediaLibraryPage from './components/MediaLibraryPage';
 
 // 导航项组件 - 带动画和tooltip
 interface NavItemProps {
@@ -204,6 +205,8 @@ const App: React.FC = () => {
   const [isCreatingTopic, setIsCreatingTopic] = useState(false);
   const [deleteSessionTarget, setDeleteSessionTarget] = useState<Session | null>(null);
 
+  // 媒体库已升级为主页面（/media-library），不再使用弹窗
+
   const loadSwitcherData = async () => {
     try {
       setIsLoadingSwitcher(true);
@@ -313,6 +316,13 @@ const App: React.FC = () => {
             icon={<Bot className="w-[18px] h-[18px]" strokeWidth={1.5} />}
             title="聊天"
             isActive={location.pathname === '/'}
+          />
+
+          <NavItem
+            to="/media-library"
+            icon={<ImageIcon className="w-[18px] h-[18px]" strokeWidth={1.5} />}
+            title="媒体库"
+            isActive={location.pathname === '/media-library'}
           />
 
           <NavItem
@@ -743,6 +753,9 @@ const App: React.FC = () => {
 
                     {/* 智能体管理页面 */}
                     <Route path="/agents" element={<AgentsPage />} />
+
+                    {/* 媒体库 */}
+                    <Route path="/media-library" element={<MediaLibraryPage />} />
                   </Routes>
                 </div>
               </div>
@@ -780,6 +793,7 @@ const App: React.FC = () => {
         variant="destructive"
         onConfirm={performDeleteSession}
       />
+
     </div>
   );
 };

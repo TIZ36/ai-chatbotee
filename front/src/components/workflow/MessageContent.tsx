@@ -25,20 +25,28 @@ import {
   XCircle,
   Wrench,
   FileText,
+  ChevronDown,
+  ChevronUp,
+  Brain,
+  Clock,
+  Zap,
+  Target,
+  MessageSquare,
 } from 'lucide-react';
 import { MediaGallery, MediaItem } from '../ui/MediaGallery';
 import { MCPExecutionCard } from '../MCPExecutionCard';
 import { truncateBase64Strings } from '../../utils/textUtils';
 import { parseMCPContentBlocks, renderMCPBlocks, renderMCPMedia } from './mcpRender';
+import type { SessionMediaItem } from '../ui/SessionMediaPanel';
 import type { WorkflowNode, WorkflowConnection } from '../../services/workflowApi';
 
-/** Single process step (for recording multi-round thinking and MCP calls) */
+/** Single process step (for recording multi-round thinking, MCP calls, and agent decisions) */
 export interface ProcessStep {
   /** Step type */
-  type: 'thinking' | 'mcp_call' | 'workflow';
+  type: 'thinking' | 'mcp_call' | 'workflow' | 'agent_activated' | 'agent_deciding' | 'agent_decision' | 'agent_will_reply' | 'llm_generating';
   /** Timestamp */
   timestamp?: number;
-  /** Thinking content (when type === 'thinking') */
+  /** Thinking content (when type === 'thinking' or agent decision types) */
   thinking?: string;
   /** MCP server name (when type === 'mcp_call') */
   mcpServer?: string;
@@ -52,6 +60,18 @@ export interface ProcessStep {
   status?: 'pending' | 'running' | 'completed' | 'error';
   /** Execution duration (milliseconds) */
   duration?: number;
+  /** Error message */
+  error?: string;
+  /** Agent ID (when type is agent-related) */
+  agent_id?: string;
+  /** Agent name (when type is agent-related) */
+  agent_name?: string;
+  /** Decision action (when type === 'agent_decision') */
+  action?: string;
+  /** LLM provider (when type === 'llm_generating') */
+  llm_provider?: string;
+  /** LLM model (when type === 'llm_generating') */
+  llm_model?: string;
   /** Workflow info (when type === 'workflow') */
   workflowInfo?: {
     id?: string;
@@ -71,6 +91,8 @@ export interface Message {
   content: string;
   // Topic/多Agent消息元信息（可选）
   sender_id?: string;
+  sender_avatar?: string;  // Agent 头像 URL
+  sender_name?: string;    // Agent 名称
   sender_type?: 'user' | 'agent' | 'system';
   thinking?: string;
   toolCalls?: Array<{ name: string; arguments: any; result?: any }> | {
@@ -127,10 +149,8 @@ export interface MessageContentProps {
   handleExecuteWorkflow: (messageId: string) => void;
   /** Handler for deleting workflow message */
   handleDeleteWorkflowMessage: (messageId: string) => void;
-  /** Find session media index */
-  findSessionMediaIndex: (messageId: string, mediaIndex: number) => number;
-  /** Open session media panel */
-  openSessionMediaPanel: (index: number) => void;
+  /** Open single media viewer (only show one item) */
+  openSingleMediaViewer: (item: SessionMediaItem) => void;
 }
 
 /**
@@ -203,8 +223,7 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
   toggleThinkingCollapse: _toggleThinkingCollapse, // Kept for API compatibility
   handleExecuteWorkflow,
   handleDeleteWorkflowMessage,
-  findSessionMediaIndex,
-  openSessionMediaPanel,
+  openSingleMediaViewer,
 }) => {
   const galleryMedia = useMemo<MediaItem[] | null>(() => {
     const list = message.media;
@@ -223,8 +242,7 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
     return renderMCPBlocks({
       blocks,
       messageId,
-      findSessionMediaIndex,
-      openSessionMediaPanel,
+      openSingleMediaViewer,
     });
   };
 
@@ -236,8 +254,7 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
     return renderMCPMedia({
       media,
       messageId,
-      findSessionMediaIndex,
-      openSessionMediaPanel,
+      openSingleMediaViewer,
     });
   };
 
@@ -282,8 +299,17 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
           maxVisible={6}
           showDownload={true}
           onOpenSessionGallery={(index) => {
-            const sessionIndex = findSessionMediaIndex(message.id, index);
-            openSessionMediaPanel(sessionIndex);
+            const picked = galleryMedia[index];
+            if (!picked) return;
+            const item: SessionMediaItem = {
+              type: picked.type,
+              mimeType: picked.mimeType,
+              data: picked.data,
+              url: picked.url,
+              messageId: message.id,
+              role: message.role === 'assistant' ? 'assistant' : message.role === 'user' ? 'user' : 'tool',
+            };
+            openSingleMediaViewer(item);
           }}
         />
       </div>
@@ -839,6 +865,183 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
       ) : (
         <div className="text-[15px] leading-relaxed whitespace-pre-wrap break-words text-gray-900 dark:text-[#ffffff]">
           {truncateBase64Strings(message.content)}
+        </div>
+      )}
+      
+      {/* Process Steps / Execution Trace (执行轨迹展示) */}
+      <ProcessStepsViewer processSteps={message.processSteps} ext={message.ext} />
+    </div>
+  );
+};
+
+/**
+ * ProcessStepsViewer - 展示消息的执行轨迹
+ * 用于Topic会话中展示Agent的思考过程、MCP调用、工作流执行等
+ */
+const ProcessStepsViewer: React.FC<{ 
+  processSteps?: ProcessStep[]; 
+  ext?: any;
+}> = ({ processSteps, ext }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  
+  // 合并 processSteps 和 ext.processSteps
+  const steps = useMemo(() => {
+    const result: ProcessStep[] = [];
+    if (Array.isArray(processSteps)) {
+      result.push(...processSteps);
+    }
+    if (ext?.processSteps && Array.isArray(ext.processSteps)) {
+      // 避免重复
+      for (const step of ext.processSteps) {
+        if (!result.some(s => s.timestamp === step.timestamp && s.type === step.type)) {
+          result.push(step);
+        }
+      }
+    }
+    // 按时间戳排序
+    return result.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+  }, [processSteps, ext]);
+  
+  if (steps.length === 0) return null;
+  
+  const formatDuration = (ms?: number) => {
+    if (!ms) return '';
+    if (ms < 1000) return `${ms}ms`;
+    return `${(ms / 1000).toFixed(1)}s`;
+  };
+  
+  const getStatusIcon = (status?: string) => {
+    switch (status) {
+      case 'completed':
+        return <CheckCircle className="w-3.5 h-3.5 text-green-500" />;
+      case 'error':
+        return <XCircle className="w-3.5 h-3.5 text-red-500" />;
+      case 'running':
+        return <Loader className="w-3.5 h-3.5 text-blue-500 animate-spin" />;
+      default:
+        return <Clock className="w-3.5 h-3.5 text-gray-400" />;
+    }
+  };
+  
+  const getTypeIcon = (type: string) => {
+    switch (type) {
+      case 'thinking':
+      case 'llm_generating':
+        return <Brain className="w-3.5 h-3.5 text-purple-500" />;
+      case 'mcp_call':
+        return <Wrench className="w-3.5 h-3.5 text-blue-500" />;
+      case 'workflow':
+        return <WorkflowIcon className="w-3.5 h-3.5 text-orange-500" />;
+      case 'agent_activated':
+        return <Zap className="w-3.5 h-3.5 text-yellow-500" />;
+      case 'agent_deciding':
+        return <Brain className="w-3.5 h-3.5 text-indigo-500 animate-pulse" />;
+      case 'agent_decision':
+        return <Target className="w-3.5 h-3.5 text-green-500" />;
+      case 'agent_will_reply':
+        return <MessageSquare className="w-3.5 h-3.5 text-blue-500" />;
+      default:
+        return <FileText className="w-3.5 h-3.5 text-gray-500" />;
+    }
+  };
+  
+  const getTypeLabel = (type: string, step: ProcessStep) => {
+    switch (type) {
+      case 'thinking':
+        return '思考';
+      case 'llm_generating':
+        return `LLM生成 (${step.llm_provider || ''}/${step.llm_model || ''})`;
+      case 'mcp_call':
+        return `MCP: ${step.mcpServer}/${step.toolName}`;
+      case 'workflow':
+        return `工作流: ${step.workflowInfo?.name || 'Unknown'}`;
+      case 'agent_activated':
+        return `Agent激活: ${step.agent_name || step.agent_id || 'Agent'}`;
+      case 'agent_deciding':
+        return `决策中: ${step.agent_name || 'Agent'}`;
+      case 'agent_decision':
+        return `决策结果: ${step.action || '未知'}`;
+      case 'agent_will_reply':
+        return '决定回答';
+      default:
+        return type;
+    }
+  };
+  
+  return (
+    <div className="mt-2 border-t border-gray-200 dark:border-[#404040] pt-2">
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-[#808080] hover:text-gray-700 dark:hover:text-[#a0a0a0] transition-colors"
+      >
+        {isExpanded ? (
+          <ChevronUp className="w-3.5 h-3.5" />
+        ) : (
+          <ChevronDown className="w-3.5 h-3.5" />
+        )}
+        <span>执行轨迹 ({steps.length} 步)</span>
+        {ext?.llmInfo && (
+          <span className="text-gray-400 dark:text-[#606060]">
+            · {ext.llmInfo.provider}/{ext.llmInfo.model}
+          </span>
+        )}
+      </button>
+      
+      {isExpanded && (
+        <div className="mt-2 space-y-1.5 pl-1">
+          {steps.map((step, idx) => (
+            <div
+              key={idx}
+              className="flex items-start gap-2 text-xs bg-gray-50 dark:bg-[#1e1e1e] rounded p-2 border border-gray-100 dark:border-[#363636]"
+            >
+              <div className="flex items-center gap-1 flex-shrink-0 mt-0.5">
+                {getTypeIcon(step.type)}
+                {getStatusIcon(step.status)}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-gray-700 dark:text-[#d0d0d0]">
+                    {getTypeLabel(step.type, step)}
+                  </span>
+                  {step.duration && (
+                    <span className="text-gray-400 dark:text-[#606060]">
+                      {formatDuration(step.duration)}
+                    </span>
+                  )}
+                </div>
+                {step.thinking && (
+                  <div className="text-gray-600 dark:text-[#a0a0a0] mt-0.5">
+                    {step.thinking}
+                  </div>
+                )}
+                {step.error && (
+                  <div className="text-red-500 mt-0.5">
+                    错误: {step.error}
+                  </div>
+                )}
+                {step.type === 'mcp_call' && step.arguments && (
+                  <details className="mt-1">
+                    <summary className="text-gray-400 cursor-pointer hover:text-gray-600 dark:hover:text-[#a0a0a0]">
+                      查看参数
+                    </summary>
+                    <pre className="mt-1 text-[10px] bg-white dark:bg-[#2d2d2d] p-1.5 rounded overflow-auto max-h-24">
+                      {truncateBase64Strings(JSON.stringify(step.arguments, null, 2))}
+                    </pre>
+                  </details>
+                )}
+                {step.type === 'mcp_call' && step.result && (
+                  <details className="mt-1">
+                    <summary className="text-gray-400 cursor-pointer hover:text-gray-600 dark:hover:text-[#a0a0a0]">
+                      查看结果
+                    </summary>
+                    <pre className="mt-1 text-[10px] bg-white dark:bg-[#2d2d2d] p-1.5 rounded overflow-auto max-h-24">
+                      {truncateBase64Strings(JSON.stringify(step.result, null, 2))}
+                    </pre>
+                  </details>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>

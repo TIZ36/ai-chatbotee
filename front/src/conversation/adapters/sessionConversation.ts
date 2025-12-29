@@ -1,5 +1,6 @@
 import type { ConversationAdapter, ListMessagesParams, ListMessagesResult, UnifiedMedia, UnifiedMessage } from '../types';
 import { deleteMessage, getSessionMessages, getSessionMessagesCursor, saveMessage, type Message } from '../../services/sessionApi';
+import { normalizeBase64ForInlineData } from '../../utils/dataUrl';
 
 function mapSessionMedia(msg: Message): UnifiedMedia[] | undefined {
   const media: UnifiedMedia[] = [];
@@ -122,10 +123,27 @@ export function createSessionConversationAdapter(
 
     async sendMessage(payload) {
       const role = payload.role ?? 'user';
+      // 约定：媒体内容必须写入 ext.media 才能被后端持久化（/api/sessions/<id>/messages 仅存 ext）
+      const mediaExt = payload.media?.length
+        ? {
+            media: payload.media
+              .map((m: any) => {
+                const data = normalizeBase64ForInlineData(m.url);
+                if (!data) return null;
+                return {
+                  type: m.type,
+                  mimeType: m.mimeType,
+                  // 统一存“纯 base64”，避免后续回填时污染 inlineData
+                  data,
+                };
+              })
+              .filter(Boolean),
+          }
+        : {};
       const res = await saveMessage(sessionId, {
         role,
         content: payload.content,
-        ext: payload.meta?.ext,
+        ext: { ...(payload.meta?.ext || {}), ...mediaExt },
         thinking: payload.meta?.thinking,
         tool_calls: payload.meta?.tool_calls,
       } as any);

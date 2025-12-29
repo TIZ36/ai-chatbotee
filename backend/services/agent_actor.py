@@ -38,20 +38,22 @@ class AgentActor:
         self._redis_client = get_redis_client()
         # topic 级别的本地状态：历史消息 + 参与者信息（用于会话收敛）
         self._topic_state: Dict[str, Dict[str, Any]] = {}
+        # 已处理的消息 ID 集合（用于去重）
+        self._processed_messages: set = set()
         
         # 加载 Agent 基础信息
         self.info = self._load_agent_info()
         print(f"[AgentActor:{agent_id}] Initialized")
 
     def _load_agent_info(self) -> dict:
-        """加载 Agent 的模型和人设配置"""
+        """加载 Agent 的模型、人设和头像配置"""
         conn = get_mysql_connection()
         if not conn: return {}
         try:
             import pymysql
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             cursor.execute("""
-                SELECT s.session_id, s.name, s.system_prompt, s.llm_config_id,
+                SELECT s.session_id, s.name, s.avatar, s.system_prompt, s.llm_config_id,
                        lc.provider, lc.model as config_model, lc.api_url, lc.api_key
                 FROM sessions s
                 LEFT JOIN llm_configs lc ON s.llm_config_id = lc.config_id
@@ -61,7 +63,7 @@ class AgentActor:
             cursor.close()
             conn.close()
             if row:
-                print(f"[AgentActor:{self.agent_id}] Info loaded: {row.get('name')} (LLM: {row.get('llm_config_id')}, Provider: {row.get('provider')})")
+                print(f"[AgentActor:{self.agent_id}] Info loaded: {row.get('name')} (LLM: {row.get('llm_config_id')}, Provider: {row.get('provider')}, Avatar: {'Yes' if row.get('avatar') else 'No'})")
             else:
                 print(f"[AgentActor:{self.agent_id}] Warning: No agent info found in database")
             return row or {}
@@ -69,6 +71,78 @@ class AgentActor:
             print(f"[AgentActor:{self.agent_id}] Error loading info: {e}")
             if conn: conn.close()
             return {}
+    
+    def _load_agent_skill_packs(self) -> List[dict]:
+        """加载 Agent 的技能包列表"""
+        conn = get_mysql_connection()
+        if not conn: return []
+        try:
+            import pymysql
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute("""
+                SELECT sp.skill_pack_id, sp.name, sp.summary, sp.process_steps
+                FROM skill_packs sp
+                INNER JOIN skill_pack_assignments spa ON sp.skill_pack_id = spa.skill_pack_id
+                WHERE spa.target_session_id = %s
+                ORDER BY spa.created_at DESC
+            """, (self.agent_id,))
+            skill_packs = cursor.fetchall()
+            cursor.close()
+            conn.close()
+            
+            if skill_packs:
+                print(f"[AgentActor:{self.agent_id}] Loaded {len(skill_packs)} skill packs")
+            return skill_packs or []
+        except Exception as e:
+            print(f"[AgentActor:{self.agent_id}] Error loading skill packs: {e}")
+            if conn: conn.close()
+            return []
+    
+    def _build_skill_pack_prompt(self, skill_packs: List[dict]) -> str:
+        """构建技能包提示词，供 Agent 在回复时参考"""
+        if not skill_packs:
+            return ""
+        
+        prompt_parts = ["\n\n=== 技能包参考 ==="]
+        prompt_parts.append("你已学习以下技能包，可以在回复时参考这些执行模式和能力：\n")
+        
+        for sp in skill_packs:
+            name = sp.get('name', '未命名技能')
+            summary = sp.get('summary', '')
+            process_steps = sp.get('process_steps')
+            
+            prompt_parts.append(f"【{name}】")
+            if summary:
+                # 限制summary长度，避免过长
+                truncated_summary = summary[:500] + '...' if len(summary) > 500 else summary
+                prompt_parts.append(f"执行能力描述：{truncated_summary}")
+            
+            # 如果有结构化的执行步骤，也添加进去
+            if process_steps:
+                try:
+                    steps = json.loads(process_steps) if isinstance(process_steps, str) else process_steps
+                    if isinstance(steps, list) and len(steps) > 0:
+                        step_descriptions = []
+                        for step in steps[:5]:  # 最多显示5个步骤
+                            step_type = step.get('type', 'unknown')
+                            if step_type == 'thinking' and step.get('thinking'):
+                                step_descriptions.append(f"  - 思考: {step['thinking'][:100]}")
+                            elif step_type == 'mcp_call' and step.get('toolName'):
+                                step_descriptions.append(f"  - MCP调用: {step['toolName']}")
+                            elif step_type == 'workflow' and step.get('workflowInfo', {}).get('name'):
+                                step_descriptions.append(f"  - 工作流: {step['workflowInfo']['name']}")
+                        if step_descriptions:
+                            prompt_parts.append("执行步骤参考：")
+                            prompt_parts.extend(step_descriptions)
+                except:
+                    pass
+            
+            prompt_parts.append("")  # 空行分隔
+        
+        prompt_parts.append("当用户请求与上述技能相关的任务时，请参考这些执行模式进行回复。")
+        prompt_parts.append("=== 技能包参考结束 ===")
+        
+        return "\n".join(prompt_parts)
 
     def start(self):
         """启动 Actor 线程"""
@@ -146,6 +220,17 @@ class AgentActor:
         message_id = msg_data.get('message_id')
         ext = msg_data.get('ext', {}) or {}
         
+        # 0. 消息去重：避免同一消息被处理两次（trigger_message + Redis 事件）
+        if message_id:
+            if message_id in self._processed_messages:
+                print(f"[AgentActor:{self.agent_id}] Skipping duplicate message: {message_id}")
+                return
+            self._processed_messages.add(message_id)
+            # 限制集合大小，避免内存无限增长
+            if len(self._processed_messages) > 1000:
+                # 移除最早的 500 个
+                self._processed_messages = set(list(self._processed_messages)[-500:])
+        
         # 1. 过滤掉自己的消息
         if sender_id == self.agent_id:
             return
@@ -155,17 +240,116 @@ class AgentActor:
 
         print(f"[AgentActor:{self.agent_id}] Received message: {content[:50]}... (mentions: {mentions})")
 
-        # 2. 会话收敛：判断行为（reply/like/oppose/silent）
-        action = self._decide_action(topic_id, msg_data)
-        if action == 'silent':
-            return
-        
-        topic = get_topic_service().get_topic(topic_id)
-        if not topic:
-            print(f"[AgentActor:{self.agent_id}] Warning: Topic {topic_id} not found")
-            return
-        
+        # 检查会话类型，判断是否为积极模式（Agent 私聊）
+        topic = get_topic_service().get_topic(topic_id) or {}
         session_type = topic.get('session_type')
+        is_eager_mode = session_type in ('private_chat', 'agent')  # 积极模式：私聊场景
+        
+        # 初始化决策过程步骤列表（用于记录到 processSteps）
+        decision_process_steps = []
+        decision_start_time = int(time.time() * 1000)
+        
+        if is_eager_mode:
+            # === 积极模式：跳过决策过程，直接回答 ===
+            print(f"[AgentActor:{self.agent_id}] Eager mode enabled (session_type={session_type}), skipping decision process")
+            
+            # 只记录简单的激活步骤
+            decision_process_steps.append({
+                'type': 'agent_activated',
+                'timestamp': decision_start_time,
+                'agent_id': self.agent_id,
+                'agent_name': self.info.get('name', 'Agent'),
+                'thinking': '私聊模式，直接响应',
+                'status': 'completed'
+            })
+            
+            # 直接设置 action 为 reply，跳过 LLM 决策
+            action = 'reply'
+            action_type = 'reply'
+            
+        else:
+            # === 标准模式：完整的决策过程 ===
+            
+            # 2. 记录激活步骤
+            decision_process_steps.append({
+                'type': 'agent_activated',
+                'timestamp': decision_start_time,
+                'agent_id': self.agent_id,
+                'agent_name': self.info.get('name', 'Agent'),
+                'status': 'completed'
+            })
+            
+            # 3. 记录开始决策
+            decision_process_steps.append({
+                'type': 'agent_deciding',
+                'timestamp': int(time.time() * 1000),
+                'thinking': f"{self.info.get('name', 'Agent')} 正在分析是否需要回答这个问题...",
+                'status': 'running'
+            })
+            
+            # 通知前端：Agent 开始决策（包含 processSteps）
+            get_topic_service()._publish_event(topic_id, 'agent_deciding', {
+                'agent_id': self.agent_id,
+                'agent_name': self.info.get('name', 'Agent'),
+                'agent_avatar': self.info.get('avatar'),
+                'status': 'deciding',
+                'in_reply_to': message_id,
+                'timestamp': time.time(),
+                'processSteps': decision_process_steps
+            })
+
+            # 4. 会话收敛：判断行为（reply/like/oppose/silent）
+            # 传入 decision_steps 以记录决策过程中的 LLM 调用
+            action = self._decide_action(topic_id, msg_data, decision_steps=decision_process_steps)
+            
+            # 5. 更新 agent_deciding 步骤状态为 completed
+            for step in decision_process_steps:
+                if step.get('type') == 'agent_deciding':
+                    step['status'] = 'completed'
+                    step['duration'] = int(time.time() * 1000) - step.get('timestamp', 0)
+                    break
+            
+            # 6. 记录决策结果
+            action_type = action.split(':')[0] if isinstance(action, str) and ':' in action else action
+            decision_process_steps.append({
+                'type': 'agent_decision',
+                'timestamp': int(time.time() * 1000),
+                'action': action_type,
+                'thinking': self._get_decision_description(action_type),
+                'status': 'completed'
+            })
+            
+            # 通知前端：决策结果（包含完整 processSteps）
+            get_topic_service()._publish_event(topic_id, 'agent_decision', {
+                'agent_id': self.agent_id,
+                'agent_name': self.info.get('name', 'Agent'),
+                'agent_avatar': self.info.get('avatar'),
+                'action': action_type,
+                'in_reply_to': message_id,
+                'timestamp': time.time(),
+                'processSteps': decision_process_steps
+            })
+        
+        # 如果决定不回答，保存一条决策记录消息（让用户知道为什么没有回答）
+        if action == 'silent':
+            get_topic_service().send_message(
+                topic_id=topic_id,
+                sender_id=self.agent_id,
+                sender_type='agent',
+                content=f"[{self.info.get('name', 'Agent')} 决定不参与回答]",
+                role='system',  # 使用 system 角色表示这是决策记录
+                sender_name=self.info.get('name'),
+                sender_avatar=self.info.get('avatar'),
+                ext={
+                    'decision_type': 'silent',
+                    'decision_reason': '经过分析，我认为这个问题不需要我来回答，或者已有其他更合适的 Agent 在处理。',
+                    'processSteps': decision_process_steps,
+                    'in_reply_to': message_id
+                }
+            )
+            return
+        
+        # topic 已在前面获取
         print(f"[AgentActor:{self.agent_id}] Topic type: {session_type}, My ID: {self.agent_id}, Mentions: {mentions}")
         
         # 规则 4/6：自己发的不处理已在上方过滤；@ 了保证回答的逻辑在 _decide_action 内部完成
@@ -185,6 +369,14 @@ class AgentActor:
             return
 
         print(f"[AgentActor:{self.agent_id}] Decision: Replying to message in {topic_id} (action={action})")
+        
+        # 记录决定回答的步骤
+        decision_process_steps.append({
+            'type': 'agent_will_reply',
+            'timestamp': int(time.time() * 1000),
+            'thinking': f"{self.info.get('name', 'Agent')} 决定回答这个问题，正在准备回复...",
+            'status': 'completed'
+        })
 
         # 3. 检查工具使用权 (MCP 和 Workflow)
         requested_tools = []
@@ -215,16 +407,18 @@ class AgentActor:
                         sender_id=self.agent_id,
                         sender_type='agent',
                         content=f"我想用 {tool_name}，但是现在有其他agent在使用了，所以我停止获取。",
-                        role='assistant'
+                        role='assistant',
+                        sender_name=self.info.get('name'),
+                        sender_avatar=self.info.get('avatar')
                     )
                     return
 
-        # 4. 构建上下文并产生流式回答
+        # 4. 构建上下文并产生流式回答，传入决策过程步骤
         # 让 winning agent 明确感知用户选择的工具（并在回答里使用/提及）
         if used_tools:
             tool_hint = "、".join([t.split(':', 1)[1] for t in used_tools])
             content = f"[你已获得工具使用权：{tool_hint}]\\n{content}"
-        self._generate_streaming_reply(topic_id, content, used_tools, message_id)
+        self._generate_streaming_reply(topic_id, content, used_tools, message_id, decision_process_steps)
 
     def _delegate_to_agent(self, topic_id: str, msg_data: dict, agent_id: str):
         """允许在充分了解能力后 @ 对应 agent（带 mentions，保证对方会响应）"""
@@ -243,7 +437,9 @@ class AgentActor:
             content=content,
             role='assistant',
             mentions=[agent_id],
-            ext={'delegated_to': agent_id, 'delegated_to_name': name}
+            ext={'delegated_to': agent_id, 'delegated_to_name': name},
+            sender_name=self.info.get('name'),
+            sender_avatar=self.info.get('avatar')
         )
 
     def _ask_human(self, topic_id: str, msg_data: dict):
@@ -256,8 +452,22 @@ class AgentActor:
             sender_type='agent',
             content=content,
             role='assistant',
-            ext={'needs_human': True}
+            ext={'needs_human': True},
+            sender_name=self.info.get('name'),
+            sender_avatar=self.info.get('avatar')
         )
+    
+    def _get_decision_description(self, action: str) -> str:
+        """获取决策类型的描述文字"""
+        descriptions = {
+            'reply': '决定回答这个问题',
+            'silent': '决定不参与回答（问题不在能力范围内或已有其他Agent处理）',
+            'like': '决定表示赞同',
+            'oppose': '决定表示反对',
+            'delegate': '决定将问题转交给更合适的Agent',
+            'ask_human': '决定请求人类协助'
+        }
+        return descriptions.get(action, f'做出了 {action} 决定')
 
     def _load_topic_context(self, topic_id: str):
         """规则 1/5：加载 topic 历史消息与参与者列表，初始化本地状态"""
@@ -313,12 +523,18 @@ class AgentActor:
         keywords = ['为什么', '怎么', '如何', '能否', '是否', '吗', '么', '多少', '哪', '哪里', '哪个']
         return any(k in t for k in keywords)
 
-    def _decide_action(self, topic_id: str, msg_data: dict) -> str:
+    def _decide_action(self, topic_id: str, msg_data: dict, decision_steps: List[dict] = None) -> str:
         """
         会话收敛决策：
         - 被 @：保证回答
+        - 私聊/积极模式：直接回答
         - user 的问题：更倾向回答
         - agent 的回答/陈述：默认沉默，必要时 like/oppose
+        
+        Args:
+            topic_id: 话题 ID
+            msg_data: 消息数据
+            decision_steps: 决策步骤列表（可选），用于记录决策过程中的 LLM 调用
         """
         sender_type = msg_data.get('sender_type')
         content = msg_data.get('content', '') or ''
@@ -328,10 +544,14 @@ class AgentActor:
         if self.agent_id in mentions:
             return 'reply'
 
-        # 私聊模式：只要不是自己发的就回复
+        # 获取会话类型
         topic = get_topic_service().get_topic(topic_id) or {}
         session_type = topic.get('session_type')
-        if session_type == 'private_chat':
+        
+        # 私聊/积极模式：只要不是自己发的就直接回复（跳过决策）
+        # - private_chat: 旧版私聊
+        # - agent: 新版 Agent 私聊，开启积极模式
+        if session_type in ('private_chat', 'agent'):
             return 'reply'
 
         # 其他 agent 的消息：默认不抢话（收敛）
@@ -342,14 +562,14 @@ class AgentActor:
             # 简化：对 agent 陈述默认沉默（后续可用 LLM 判定 like/oppose）
             return 'silent'
 
-        # user 的消息：只对“问题”更愿意回答；陈述默认沉默（更像圆桌）
+        # user 的消息：只对"问题"更愿意回答；陈述默认沉默（更像圆桌）
         if self._is_question(content):
             # 问题：结合人设/参与者能力做意愿判定（可能委派给其他 agent 或 @human）
-            return self._llm_intent_decision(topic_id, msg_data, default_action='reply')
+            return self._llm_intent_decision(topic_id, msg_data, default_action='reply', decision_steps=decision_steps)
         # 陈述：结合人设做 like/oppose/silent 判定
-        return self._llm_intent_decision(topic_id, msg_data, default_action='silent')
+        return self._llm_intent_decision(topic_id, msg_data, default_action='silent', decision_steps=decision_steps)
 
-    def _llm_intent_decision(self, topic_id: str, msg_data: dict, default_action: str = 'silent') -> str:
+    def _llm_intent_decision(self, topic_id: str, msg_data: dict, default_action: str = 'silent', decision_steps: List[dict] = None) -> str:
         """
         使用轻量 LLM 判定动作（收敛核心）：
         - reply: 我来回答（走流式回答）
@@ -358,7 +578,15 @@ class AgentActor:
         - delegate:<agent_id>: 委派给某个 agent（发一条@该agent的消息）
         - ask_human: @human 要求人类操作/确认
         - silent: 保持沉默
+        
+        Args:
+            topic_id: 话题 ID
+            msg_data: 消息数据
+            default_action: 默认动作
+            decision_steps: 决策步骤列表（可选），用于记录 LLM 调用过程
         """
+        llm_call_start = int(time.time() * 1000)
+        
         try:
             topic_state = self._topic_state.get(topic_id, {})
             participants = topic_state.get('participants') or []
@@ -401,6 +629,22 @@ class AgentActor:
             cfg_id = self.info.get('llm_config_id')
             if not cfg_id:
                 return default_action
+            
+            # 记录 LLM 调用开始（如果提供了 decision_steps）
+            if decision_steps is not None:
+                # 获取 LLM 配置信息
+                llm_config = llm_service.get_config(cfg_id) if hasattr(llm_service, 'get_config') else {}
+                provider = llm_config.get('provider', 'unknown') if llm_config else 'unknown'
+                model = llm_config.get('model', 'unknown') if llm_config else 'unknown'
+                
+                decision_steps.append({
+                    'type': 'thinking',
+                    'timestamp': llm_call_start,
+                    'thinking': f'正在使用 LLM ({provider}/{model}) 分析是否需要回答...',
+                    'llm_provider': provider,
+                    'llm_model': model,
+                    'status': 'running'
+                })
 
             resp = llm_service.chat_completion(
                 config_id=cfg_id,
@@ -408,6 +652,16 @@ class AgentActor:
                 stream=False,
             )
             raw = (resp.get('content') or '').strip()
+            
+            # 更新 LLM 调用步骤状态为完成
+            if decision_steps is not None:
+                for step in decision_steps:
+                    if step.get('type') == 'thinking' and step.get('status') == 'running':
+                        step['status'] = 'completed'
+                        step['duration'] = int(time.time() * 1000) - llm_call_start
+                        step['result'] = raw[:200] + ('...' if len(raw) > 200 else '')
+                        break
+            
             start = raw.find('{')
             end = raw.rfind('}')
             if start == -1 or end == -1 or end <= start:
@@ -426,6 +680,14 @@ class AgentActor:
             return default_action
         except Exception as e:
             print(f"[AgentActor:{self.agent_id}] intent decision error: {e}")
+            # 记录错误
+            if decision_steps is not None:
+                for step in decision_steps:
+                    if step.get('type') == 'thinking' and step.get('status') == 'running':
+                        step['status'] = 'error'
+                        step['duration'] = int(time.time() * 1000) - llm_call_start
+                        step['error'] = str(e)
+                        break
             return default_action
 
     def _publish_reaction_like(self, topic_id: str, message_id: str, target_sender_id: str, target_sender_type: str):
@@ -456,17 +718,39 @@ class AgentActor:
             sender_type='agent',
             content=content,
             role='assistant',
-            ext={'quotedMessage': {'id': msg_data.get('message_id'), 'content': msg_data.get('content')}}
+            ext={'quotedMessage': {'id': msg_data.get('message_id'), 'content': msg_data.get('content')}},
+            sender_name=self.info.get('name'),
+            sender_avatar=self.info.get('avatar')
         )
 
-    def _generate_streaming_reply(self, topic_id: str, user_content: str, used_tools: List[str], in_reply_to: str = None):
-        """流式产生回复并实时推送到 Topic"""
+    def _generate_streaming_reply(self, topic_id: str, user_content: str, used_tools: List[str], in_reply_to: str = None, decision_steps: List[dict] = None):
+        """
+        流式产生回复并实时推送到 Topic
+        
+        Args:
+            topic_id: 话题 ID
+            user_content: 用户消息内容
+            used_tools: 使用的工具列表
+            in_reply_to: 回复的消息 ID
+            decision_steps: 决策过程步骤列表（激活/决策/决定回答等），会合并到最终的 processSteps 中
+        """
         try:
             # 生成回复消息 ID
             reply_message_id = f"msg_{uuid.uuid4().hex[:8]}"
             
+            # 初始化执行轨迹列表 (processSteps)，包含前置的决策步骤
+            process_steps = list(decision_steps) if decision_steps else []
+            llm_start_time = time.time()
+            
             # 获取 Agent 配置
             system_prompt = self.info.get('system_prompt', "你是一个AI助手。")
+            
+            # 加载并添加技能包提示
+            skill_packs = self._load_agent_skill_packs()
+            skill_pack_prompt = self._build_skill_pack_prompt(skill_packs)
+            if skill_pack_prompt:
+                system_prompt += skill_pack_prompt
+            
             if used_tools:
                 system_prompt += f"\n\n你已经获得了以下工具的使用权：{', '.join(used_tools)}。请在回答中使用它们。"
 
@@ -474,12 +758,15 @@ class AgentActor:
             if not config_id:
                 raise ValueError(f"Agent {self.agent_id} has no LLM config assigned")
 
-            # 通知前端：Agent 开始思考
+            # 通知前端：Agent 开始生成回复（包含前置的决策步骤）
             get_topic_service()._publish_event(topic_id, 'agent_thinking', {
                 'agent_id': self.agent_id,
                 'agent_name': self.info.get('name', 'Agent'),
+                'agent_avatar': self.info.get('avatar'),
                 'status': 'generating',
-                'message_id': reply_message_id
+                'message_id': reply_message_id,
+                'processSteps': process_steps,  # 包含决策步骤
+                'in_reply_to': in_reply_to
             })
 
             messages = [
@@ -500,21 +787,52 @@ class AgentActor:
             api_url = config.get('api_url')
             model = config.get('model')
             
+            # 记录 thinking 步骤（LLM调用开始）
+            thinking_step_index = len(process_steps)  # 记录thinking步骤的索引
+            process_steps.append({
+                'type': 'llm_generating',
+                'timestamp': int(llm_start_time * 1000),
+                'thinking': f'正在使用 {provider}/{model} 生成回复...',
+                'llm_provider': provider,
+                'llm_model': model,
+                'status': 'running'
+            })
+            
             # 流式调用 LLM 并逐 chunk 发送
             full_content = ""
             
             for chunk in self._stream_llm_call(provider, api_key, api_url, model, messages):
                 full_content += chunk
-                # 通过 Redis Pub/Sub 发送流式 chunk
+                # 通过 Redis Pub/Sub 发送流式 chunk（包含完整的 processSteps）
                 get_topic_service()._publish_event(topic_id, 'agent_stream_chunk', {
                     'agent_id': self.agent_id,
                     'agent_name': self.info.get('name', 'Agent'),
+                    'agent_avatar': self.info.get('avatar'),
                     'message_id': reply_message_id,
                     'chunk': chunk,
-                    'accumulated': full_content
+                    'accumulated': full_content,
+                    'processSteps': process_steps
                 })
             
+            # 更新 thinking 步骤为完成状态
+            llm_end_time = time.time()
+            process_steps[thinking_step_index]['status'] = 'completed'
+            process_steps[thinking_step_index]['duration'] = int((llm_end_time - llm_start_time) * 1000)
+            process_steps[thinking_step_index]['thinking'] = f'使用 {provider}/{model} 生成回复完成'
+            
             print(f"[AgentActor:{self.agent_id}] Streaming complete, saving message: {full_content[:50]}...")
+            
+            # 构建扩展数据，包含执行轨迹
+            ext_data = {
+                'processSteps': process_steps,
+                'llmInfo': {
+                    'provider': provider,
+                    'model': model,
+                    'configId': config_id
+                }
+            }
+            if used_tools:
+                ext_data['usedTools'] = used_tools
             
             # 流式完成后，保存完整消息到数据库
             get_topic_service().send_message(
@@ -523,25 +841,42 @@ class AgentActor:
                 sender_type='agent',
                 content=full_content,
                 role='assistant',
-                message_id=reply_message_id
+                message_id=reply_message_id,
+                sender_name=self.info.get('name'),
+                sender_avatar=self.info.get('avatar'),
+                ext=ext_data
             )
             
-            # 通知前端：流式完成
+            # 通知前端：流式完成（包含执行轨迹）
             get_topic_service()._publish_event(topic_id, 'agent_stream_done', {
                 'agent_id': self.agent_id,
+                'agent_name': self.info.get('name', 'Agent'),
+                'agent_avatar': self.info.get('avatar'),
                 'message_id': reply_message_id,
-                'content': full_content
+                'content': full_content,
+                'processSteps': process_steps
             })
             
         except Exception as e:
             print(f"[AgentActor:{self.agent_id}] Error in streaming reply: {e}")
             traceback.print_exc()
+            # 记录错误到执行轨迹
+            error_step = {
+                'type': 'thinking',
+                'timestamp': int(time.time() * 1000),
+                'thinking': f'生成回复失败: {str(e)}',
+                'status': 'error',
+                'error': str(e)
+            }
             get_topic_service().send_message(
                 topic_id=topic_id,
                 sender_id=self.agent_id,
                 sender_type='system',
                 content=f"[错误] {self.info.get('name', 'Agent')} 无法产生回复: {str(e)}",
-                role='system'
+                role='system',
+                sender_name=self.info.get('name'),
+                sender_avatar=self.info.get('avatar'),
+                ext={'processSteps': [error_step]}
             )
 
     def _stream_llm_call(self, provider: str, api_key: str, api_url: str, model: str, messages: List[dict]):
@@ -855,12 +1190,25 @@ class AgentActorManager:
 
 # ==================== 辅助函数 ====================
 
-def activate_agent(agent_id: str, topic_id: str) -> AgentActor:
-    """激活 Agent 并让其加入某个 Topic"""
+def activate_agent(agent_id: str, topic_id: str, trigger_message: dict = None) -> AgentActor:
+    """
+    激活 Agent 并让其加入某个 Topic
+    
+    Args:
+        agent_id: Agent ID
+        topic_id: Topic/会话 ID
+        trigger_message: 触发激活的消息（如果提供，会立即处理该消息）
+    """
     manager = AgentActorManager.get_instance()
     actor = manager.get_or_create_actor(agent_id)
     actor.subscribe_topic(topic_id)
     print(f"[activate_agent] Agent {agent_id} activated and subscribed to topic {topic_id}")
+    
+    # 如果提供了触发消息，直接放入 mailbox 立即处理
+    if trigger_message:
+        print(f"[activate_agent] Processing trigger message immediately: {trigger_message.get('message_id')}")
+        actor.on_event(topic_id, {'type': 'new_message', 'data': trigger_message})
+    
     return actor
 
 

@@ -1,8 +1,9 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Download, Play, Volume2, Film, Music, ZoomIn, ChevronUp, ChevronDown } from 'lucide-react';
+import { X, Download, Play, Volume2, Film, Music, ZoomIn, ChevronUp, ChevronDown, Copy, Check } from 'lucide-react';
 import { resolveMediaSrc } from '@/utils/mediaSrc';
 import { preloadImage } from '@/utils/mediaPreload';
+import { IconButton } from '@/components/ui/IconButton';
 
 export interface MediaItem {
   type: 'image' | 'video' | 'audio';
@@ -23,6 +24,8 @@ interface MediaGalleryProps {
   className?: string;
   /** 点击打开会话画廊的回调（如果提供，则不打开内置面板） */
   onOpenSessionGallery?: (index: number) => void;
+  /** 缩略图支持“直接复制”（不打开面板） */
+  enableQuickCopy?: boolean;
 }
 
 const thumbnailSizes = {
@@ -43,10 +46,12 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
   showDownload = true,
   className = '',
   onOpenSessionGallery,
+  enableQuickCopy = true,
 }) => {
   // ============ 所有 hooks 必须在任何条件返回之前调用 ============
   const [panelOpen, setPanelOpen] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -115,6 +120,34 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
     const raw = item.url || item.data || '';
     const src = resolveMediaSrc(raw, item.mimeType);
     return src;
+  };
+
+  const quickCopyImage = async (index: number) => {
+    const item = safeMedia[index];
+    if (!item || item.type !== 'image') return;
+    try {
+      const src = getMediaSrc(item);
+      const img = new window.Image();
+      img.crossOrigin = 'anonymous';
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = reject;
+        img.src = src;
+      });
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(img, 0, 0);
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+      if (!blob) return;
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      setCopiedIndex(index);
+      window.setTimeout(() => setCopiedIndex((prev) => (prev === index ? null : prev)), 1200);
+    } catch (e) {
+      console.error('[MediaGallery] quickCopy failed:', e);
+    }
   };
 
   const handleDownload = (item: MediaItem, index: number) => {
@@ -213,6 +246,21 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
           <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
             <ZoomIn className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
           </div>
+          {enableQuickCopy && (
+            <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <IconButton
+                icon={copiedIndex === index ? Check : Copy}
+                label={copiedIndex === index ? '已复制' : '复制图片'}
+                variant={copiedIndex === index ? 'secondary' : 'ghost'}
+                size="icon"
+                className="h-7 w-7 bg-black/40 hover:bg-black/50 text-white border border-white/20"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void quickCopyImage(index);
+                }}
+              />
+            </div>
+          )}
         </div>
       );
     }

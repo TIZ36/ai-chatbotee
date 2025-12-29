@@ -186,14 +186,76 @@ class TopicService:
             return False
 
     # ==================== 消息分发 ====================
+    
+    def _get_sender_info(self, sender_id: str, sender_type: str) -> tuple:
+        """获取发送者的名称和头像信息"""
+        sender_name = None
+        sender_avatar = None
+        
+        if sender_type == 'agent':
+            # 从 sessions 表查询 Agent 信息
+            conn = self.get_connection()
+            if conn:
+                try:
+                    import pymysql
+                    cursor = conn.cursor(pymysql.cursors.DictCursor)
+                    cursor.execute("""
+                        SELECT name, avatar FROM sessions 
+                        WHERE session_id = %s AND session_type = 'agent'
+                    """, (sender_id,))
+                    row = cursor.fetchone()
+                    cursor.close()
+                    conn.close()
+                    if row:
+                        sender_name = row.get('name')
+                        sender_avatar = row.get('avatar')
+                except Exception as e:
+                    print(f"[TopicService] Error getting sender info: {e}")
+                    if conn:
+                        try:
+                            conn.close()
+                        except:
+                            pass
+        elif sender_type == 'user':
+            # 用户发送者，可以从用户表获取或使用默认值
+            sender_name = '用户'
+        
+        return sender_name, sender_avatar
 
     def send_message(self, topic_id: str, sender_id: str, sender_type: str, 
                     content: str, role: str = 'user', mentions: List[str] = None,
-                    ext: dict = None, message_id: str = None) -> Optional[dict]:
-        """在 Topic 中发送消息，并触发 Redis 通知"""
+                    ext: dict = None, message_id: str = None,
+                    sender_name: str = None, sender_avatar: str = None) -> Optional[dict]:
+        """在 Topic 中发送消息，并触发 Redis 通知
+        
+        Args:
+            topic_id: Topic ID
+            sender_id: 发送者 ID
+            sender_type: 发送者类型 (user/agent/system)
+            content: 消息内容
+            role: 消息角色 (user/assistant/system)
+            mentions: @提及的用户/Agent ID 列表
+            ext: 扩展数据
+            message_id: 消息 ID（可选，自动生成）
+            sender_name: 发送者名称（可选，自动从DB获取）
+            sender_avatar: 发送者头像（可选，自动从DB获取）
+        """
         # 1. 保存消息到数据库
-        # 注意：这里需要 message_service 的逻辑，暂且简化实现
         msg_id = message_id or f"msg_{uuid.uuid4().hex[:8]}"
+        
+        # 如果没有提供 sender_name/sender_avatar，自动获取
+        if sender_name is None or sender_avatar is None:
+            auto_name, auto_avatar = self._get_sender_info(sender_id, sender_type)
+            if sender_name is None:
+                sender_name = auto_name
+            if sender_avatar is None:
+                sender_avatar = auto_avatar
+        
+        # 将 sender 信息添加到 ext 中存储
+        if ext is None:
+            ext = {}
+        ext['sender_name'] = sender_name
+        ext['sender_avatar'] = sender_avatar
         
         conn = self.get_connection()
         if not conn: return None
@@ -227,6 +289,8 @@ class TopicService:
                 'topic_id': topic_id,
                 'sender_id': sender_id,
                 'sender_type': sender_type,
+                'sender_name': sender_name,
+                'sender_avatar': sender_avatar,
                 'role': role,
                 'content': content,
                 'mentions': mentions,

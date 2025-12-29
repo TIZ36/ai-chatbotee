@@ -4,6 +4,7 @@ import { X, Download, Play, Music, Copy, Check, ChevronUp, ChevronDown, Image as
 import { dataUrlToBlob, ensureDataUrlFromMaybeBase64 } from '../../utils/dataUrl';
 import { resolveMediaSrc } from '@/utils/mediaSrc';
 import { preloadImage } from '@/utils/mediaPreload';
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
 export interface SessionMediaItem {
   type: 'image' | 'video' | 'audio';
@@ -49,6 +50,7 @@ export const SessionMediaPanel: React.FC<SessionMediaPanelProps> = ({
   const audioRef = useRef<HTMLAudioElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<VirtuosoHandle>(null);
 
   // 过滤媒体
   const filteredMedia = imagesOnly ? media.filter(m => m.type === 'image') : media;
@@ -98,6 +100,16 @@ export const SessionMediaPanel: React.FC<SessionMediaPanelProps> = ({
       void preloadImage(getMediaSrc(item), { decode: true });
     }
   }, [open, currentIndex, filteredMedia]);
+
+  // 当选中项变化时，让左侧列表对齐到当前项（避免大列表里找不到当前项）
+  useEffect(() => {
+    if (!open) return;
+    // requestAnimationFrame 避免面板初次打开时尺寸尚未稳定导致 scrollToIndex 不生效
+    const id = requestAnimationFrame(() => {
+      listRef.current?.scrollToIndex({ index: currentIndex, align: 'center', behavior: 'auto' });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [open, currentIndex]);
 
   // ============ 现在可以安全地做条件返回 ============
   if (!open || filteredMedia.length === 0) return null;
@@ -451,8 +463,14 @@ export const SessionMediaPanel: React.FC<SessionMediaPanelProps> = ({
             </div>
             
             {/* 列表内容 */}
-            <div className="flex-1 overflow-y-auto p-2 space-y-1">
-              {filteredMedia.map((item, index) => renderListItem(item, index))}
+            <div className="flex-1 min-h-0">
+              <Virtuoso
+                ref={listRef}
+                data={filteredMedia}
+                overscan={240}
+                itemContent={(index, item) => renderListItem(item, index)}
+                className="h-full"
+              />
             </div>
           </div>
 

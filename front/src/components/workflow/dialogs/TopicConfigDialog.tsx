@@ -7,6 +7,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Bot, MessageCircle, Lightbulb, Search, Plus, Trash2, Users } from 'lucide-react';
 import { Button } from '../../ui/Button';
+import { Switch } from '../../ui/Switch';
 import type { Session } from '../../../services/sessionApi';
 import { getAgents } from '../../../services/sessionApi';
 
@@ -20,6 +21,7 @@ export interface TopicConfigDialogProps {
   topicName: string;
   topicAvatar: string | null;
   topicDisplayType: TopicDisplayType;
+  sessionType?: string; // session_type: 'topic_general' | 'agent' | 'memory' 等
   participants: Array<{
     participant_id: string;
     participant_type: 'user' | 'agent';
@@ -35,6 +37,7 @@ export interface TopicConfigDialogProps {
   setEditDisplayType: (type: TopicDisplayType) => void;
   // 回调
   onSave: () => Promise<void>;
+  onUpdateSessionType?: (sessionType: 'topic_general' | 'agent') => Promise<void>;
   onAddParticipant?: (agentId: string) => Promise<void>;
   onRemoveParticipant?: (participantId: string) => Promise<void>;
 }
@@ -67,6 +70,7 @@ export const TopicConfigDialog: React.FC<TopicConfigDialogProps> = ({
   topicName,
   topicAvatar,
   topicDisplayType,
+  sessionType,
   participants,
   editName,
   setEditName,
@@ -75,6 +79,7 @@ export const TopicConfigDialog: React.FC<TopicConfigDialogProps> = ({
   editDisplayType,
   setEditDisplayType,
   onSave,
+  onUpdateSessionType,
   onAddParticipant,
   onRemoveParticipant,
 }) => {
@@ -277,6 +282,35 @@ export const TopicConfigDialog: React.FC<TopicConfigDialogProps> = ({
                   ))}
                 </div>
               </div>
+              
+              {/* 积极模式开关（仅对 topic_general 或 agent 类型的话题显示） */}
+              {(sessionType === 'topic_general' || sessionType === 'agent') && onUpdateSessionType && (
+                <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-[#363636] rounded-lg border border-gray-200 dark:border-[#404040]">
+                  <div className="flex-1">
+                    <div className="text-sm font-medium text-gray-900 dark:text-[#ffffff] mb-1">
+                      积极模式
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-[#808080]">
+                      {sessionType === 'agent' 
+                        ? '开启：Agent 会像普通对话一样直接回答所有问题'
+                        : '关闭：Agent 会智能判断是否需要回答（收敛模式）'}
+                    </div>
+                  </div>
+                  <Switch
+                    checked={sessionType === 'agent'}
+                    onCheckedChange={async (checked) => {
+                      if (onUpdateSessionType) {
+                        try {
+                          await onUpdateSessionType(checked ? 'agent' : 'topic_general');
+                        } catch (error) {
+                          console.error('[TopicConfigDialog] Failed to update session type:', error);
+                          alert('更新失败，请重试');
+                        }
+                      }
+                    }}
+                  />
+                </div>
+              )}
             </>
           ) : (
             <>

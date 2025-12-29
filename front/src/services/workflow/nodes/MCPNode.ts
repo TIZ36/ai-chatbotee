@@ -4,7 +4,7 @@
 
 import { BaseNode } from './BaseNode';
 import type { NodeType, NodeContext, NodeResult } from '../types';
-import { getConnectionPool } from '../../providers/mcp';
+import { ensureMCPProviderInitialized, getConnectionPool } from '../../providers/mcp';
 
 /**
  * MCP 节点配置
@@ -39,6 +39,9 @@ export class MCPNode extends BaseNode {
           renderedArgs[key] = value;
         }
       }
+
+      // 确保 MCP Provider 初始化（加载启用服务器 + 启动 HealthMonitor）
+      await ensureMCPProviderInitialized();
 
       // 获取连接池
       const pool = getConnectionPool();

@@ -75,4 +75,40 @@ export function dataUrlToBlob(dataUrl: string): { blob: Blob; mimeType: string }
   return { blob: new Blob([byteArray], { type: mimeType }), mimeType };
 }
 
+/**
+ * 将可能是 dataURL / base64url / 缺 padding 的内容，归一化为 Gemini inlineData 可接受的“标准 base64”。
+ *
+ * - 去除 data: 前缀（如果存在）
+ * - 去除所有空白字符
+ * - base64url -> base64（- -> +, _ -> /）
+ * - 自动补齐 padding（=）到长度为 4 的倍数
+ *
+ * 返回 null 表示输入为空或明显不合法（避免把坏图塞进 inlineData 导致整个请求 400）。
+ */
+export function normalizeBase64ForInlineData(value: string): string | null {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+
+  const parsed = parseDataUrl(raw);
+  let base64 = (parsed ? parsed.base64 : raw).replace(/\s+/g, '');
+  if (!base64) return null;
+
+  // base64url -> 标准 base64
+  base64 = base64.replace(/-/g, '+').replace(/_/g, '/');
+
+  // 自动补齐 padding（Google API 对缺 padding 的容错不稳定，统一补齐）
+  const mod = base64.length % 4;
+  if (mod === 1) {
+    // 这种长度不可能是合法 base64
+    return null;
+  }
+  if (mod === 2) base64 += '==';
+  if (mod === 3) base64 += '=';
+
+  // 轻量校验：只允许 base64 字符集 + padding
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(base64)) return null;
+
+  return base64;
+}
+
 

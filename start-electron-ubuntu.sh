@@ -95,6 +95,7 @@ echo "✅ 编译文件检查通过"
 # 清理可能存在的旧进程（排除当前脚本）
 echo "🧹 清理旧进程..."
 fuser -k 5177/tcp 2>/dev/null || true
+fuser -k 5174/tcp 2>/dev/null || true
 # 只杀死 electron 二进制进程，不杀死脚本
 pkill -f "node_modules/.bin/electron" 2>/dev/null || true
 pkill -f "node_modules/electron/dist" 2>/dev/null || true

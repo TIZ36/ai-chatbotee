@@ -121,6 +121,9 @@ export class ConnectionPool {
       });
     }
 
+    // 先剔除不健康/断开的连接，避免“池里全是死连接但 pool.length 已满”导致无法自愈
+    await this.pruneUnhealthyConnections(serverId);
+
     // 尝试获取空闲的健康连接
     for (const client of pool) {
       if (client.acquire()) {
@@ -274,6 +277,9 @@ export class ConnectionPool {
     const now = Date.now();
 
     for (const [serverId, pool] of this.pools) {
+      // 先清理不健康/断开的连接，释放容量
+      cleaned += await this.pruneUnhealthyConnections(serverId);
+
       const toRemove: MCPClient[] = [];
 
       for (const client of pool) {
@@ -305,6 +311,56 @@ export class ConnectionPool {
     }
 
     return cleaned;
+  }
+
+  // ============================================================================
+  // Recovery / Eviction
+  // ============================================================================
+
+  /**
+   * 剔除不健康/断开的连接（不会动 inUse 的连接）
+   * 返回剔除数量
+   */
+  async pruneUnhealthyConnections(serverId: string): Promise<number> {
+    const pool = this.pools.get(serverId);
+    if (!pool || pool.length === 0) return 0;
+
+    const toRemove: MCPClient[] = [];
+    for (const client of pool) {
+      if (client.inUse) continue;
+      if (!client.isConnected || !client.isHealthy) {
+        toRemove.push(client);
+      }
+    }
+
+    if (toRemove.length === 0) return 0;
+
+    for (const client of toRemove) {
+      try {
+        await client.disconnect();
+      } catch (error) {
+        logger.warn('Failed to disconnect unhealthy client', { serverId, error });
+      }
+      const idx = pool.indexOf(client);
+      if (idx !== -1) pool.splice(idx, 1);
+    }
+
+    // 工具缓存可能与旧 session 绑定，剔除后强制失效，避免继续使用陈旧工具列表
+    this.toolsCache.delete(serverId);
+
+    logger.info('Pruned unhealthy connections', { serverId, count: toRemove.length });
+    return toRemove.length;
+  }
+
+  /**
+   * 触发一次恢复：剔除坏连接并补齐最小连接数
+   */
+  async recoverServer(serverId: string): Promise<void> {
+    const server = this.servers.get(serverId);
+    if (!server || !server.enabled) return;
+
+    await this.pruneUnhealthyConnections(serverId);
+    await this.ensureMinConnections(serverId);
   }
 
   // ============================================================================
