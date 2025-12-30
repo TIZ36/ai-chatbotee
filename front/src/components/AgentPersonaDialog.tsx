@@ -81,6 +81,7 @@ const AgentPersonaDialog: React.FC<AgentPersonaDialogProps> = ({
           voice: savedPersona.voice || defaultPersonaConfig.voice,
           thinking: savedPersona.thinking || defaultPersonaConfig.thinking,
           memoryTriggers: savedPersona.memoryTriggers || [],
+          responseMode: savedPersona.responseMode || defaultPersonaConfig.responseMode,
         });
       } else {
         setConfig(defaultPersonaConfig);
@@ -140,6 +141,7 @@ const AgentPersonaDialog: React.FC<AgentPersonaDialogProps> = ({
 
   // 统计已启用的 Persona 功能
   const enabledFeatures: string[] = [];
+  if (config.responseMode === 'persona') enabledFeatures.push('人格模式');
   if (config.voice.enabled) enabledFeatures.push('语音');
   if (config.thinking.enabled) enabledFeatures.push('自驱思考');
   if (config.memoryTriggers.length > 0) enabledFeatures.push(`${config.memoryTriggers.length}条触发规则`);

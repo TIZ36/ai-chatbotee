@@ -254,6 +254,7 @@ export const SessionListItem: React.FC<SessionListItemProps> = ({
           voice: savedPersona.voice || defaultPersonaConfig.voice,
           thinking: savedPersona.thinking || defaultPersonaConfig.thinking,
           memoryTriggers: savedPersona.memoryTriggers || [],
+          responseMode: savedPersona.responseMode || defaultPersonaConfig.responseMode,
         });
       } else {
         setEditPersonaConfig(defaultPersonaConfig);

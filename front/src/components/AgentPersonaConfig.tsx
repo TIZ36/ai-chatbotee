@@ -6,7 +6,7 @@
 import React, { useState } from 'react';
 import { 
   Volume2, Brain, Sparkles, Plus, Trash2, 
-  Clock, Tag, AlertCircle
+  Clock, Tag, AlertCircle, MessageSquare
 } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
@@ -58,11 +58,15 @@ export interface MemoryTriggerRule {
   enabled: boolean;
 }
 
+/** 响应模式 */
+export type ResponseMode = 'normal' | 'persona';
+
 /** Agent 人设完整配置 */
 export interface AgentPersonaFullConfig {
   voice: VoicePersonaConfig;
   thinking: AutonomousThinkingConfig;
   memoryTriggers: MemoryTriggerRule[];
+  responseMode: ResponseMode; // 响应模式：normal=普通聊天（立刻响应），persona=人格模式（思考是否响应）
 }
 
 interface AgentPersonaConfigProps {
@@ -92,6 +96,7 @@ export const defaultPersonaConfig: AgentPersonaFullConfig = {
     memoryTriggered: false,
   },
   memoryTriggers: [],
+  responseMode: 'normal', // 默认普通聊天模式
 };
 
 // ============================================================================
@@ -608,6 +613,62 @@ const MemoryTriggerPanel: React.FC<MemoryTriggerPanelProps> = ({ rules, onChange
 // 主组件
 // ============================================================================
 
+// ============================================================================
+// 响应模式配置面板
+// ============================================================================
+
+interface ResponseModePanelProps {
+  responseMode: ResponseMode;
+  onChange: (mode: ResponseMode) => void;
+}
+
+const ResponseModePanel: React.FC<ResponseModePanelProps> = ({ responseMode, onChange }) => {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <MessageSquare className="w-4 h-4 text-gray-500" />
+        <Label className="text-sm font-medium">响应模式</Label>
+      </div>
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <input
+            type="radio"
+            id="response-mode-normal"
+            name="responseMode"
+            value="normal"
+            checked={responseMode === 'normal'}
+            onChange={(e) => onChange(e.target.value as ResponseMode)}
+            className="w-4 h-4 text-primary-600 focus:ring-primary-500"
+          />
+          <Label htmlFor="response-mode-normal" className="cursor-pointer font-normal">
+            <div className="font-medium">普通聊天</div>
+            <div className="text-xs text-gray-500">立刻响应消息并发送回答，就像之前的聊天</div>
+          </Label>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="radio"
+            id="response-mode-persona"
+            name="responseMode"
+            value="persona"
+            checked={responseMode === 'persona'}
+            onChange={(e) => onChange(e.target.value as ResponseMode)}
+            className="w-4 h-4 text-primary-600 focus:ring-primary-500"
+          />
+          <Label htmlFor="response-mode-persona" className="cursor-pointer font-normal">
+            <div className="font-medium">人格模式</div>
+            <div className="text-xs text-gray-500">会思考是否要响应，根据角色和能力判断是否参与</div>
+          </Label>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================================
+// 主组件
+// ============================================================================
+
 const AgentPersonaConfig: React.FC<AgentPersonaConfigProps> = ({
   config,
   onChange,
@@ -615,6 +676,12 @@ const AgentPersonaConfig: React.FC<AgentPersonaConfigProps> = ({
 }) => {
   return (
     <div className={`space-y-4 ${compact ? '' : 'p-4'}`}>
+      {/* 响应模式配置 */}
+      <ResponseModePanel
+        responseMode={config.responseMode}
+        onChange={(responseMode) => onChange({ ...config, responseMode })}
+      />
+
       {/* 语音配置 */}
       <VoiceConfigPanel
         config={config.voice}

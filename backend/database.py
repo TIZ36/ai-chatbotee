@@ -881,6 +881,33 @@ def create_tables():
         except Exception as e:
             print(f"  ⚠ Warning: Could not check/add 'mcpdetail' column: {e}")
         
+        # 迁移：将 messages 表的 content 字段升级为 LONGTEXT（支持存储大型内容如 base64 图片）
+        try:
+            cursor.execute("""
+                SELECT COLUMN_TYPE
+                FROM information_schema.COLUMNS 
+                WHERE TABLE_SCHEMA = DATABASE() 
+                AND TABLE_NAME = 'messages' 
+                AND COLUMN_NAME = 'content'
+            """)
+            result = cursor.fetchone()
+            
+            if result:
+                current_type = result[0].upper() if result[0] else ''
+                # 如果不是 LONGTEXT，则升级
+                if 'LONGTEXT' not in current_type:
+                    print(f"  → Upgrading 'content' column in 'messages' table from {current_type} to LONGTEXT...")
+                    cursor.execute("""
+                        ALTER TABLE `messages` 
+                        MODIFY COLUMN `content` LONGTEXT NOT NULL COMMENT '消息内容（支持大型内容如 base64 图片）'
+                    """)
+                    conn.commit()
+                    print("  ✓ Column 'content' upgraded to LONGTEXT successfully")
+                else:
+                    print("  ✓ Column 'content' is already LONGTEXT")
+        except Exception as e:
+            print(f"  ⚠ Warning: Could not upgrade 'content' column: {e}")
+        
         # 总结表
         create_summaries_table = """
         CREATE TABLE IF NOT EXISTS `summaries` (

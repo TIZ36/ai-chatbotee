@@ -66,6 +66,18 @@ export function get_model_max_tokens(model: string): number {
     'claude-3-opus-20240229': 200000,
     'claude-3-sonnet-20240229': 200000,
     'claude-3-haiku-20240307': 200000,
+    // Google Gemini
+    'gemini-2.5-flash': 1048576,  // 1M tokens
+    'gemini-2.5-pro': 1048576,  // 1M tokens
+    'gemini-2.0-flash': 1048576,  // 1M tokens
+    'gemini-2.0-flash-exp': 1048576,  // 1M tokens
+    'gemini-1.5-pro': 2097152,  // 2M tokens
+    'gemini-1.5-flash': 1048576,  // 1M tokens
+    'gemini-3-pro': 1048576,  // 1M tokens (预览版，保守估计)
+    'gemini-3-pro-preview': 1048576,  // 1M tokens
+    'gemini-2.5-flash-image': 1048576,  // 1M tokens (图片生成模型)
+    'gemini-2.0-flash-preview-image-generation': 1048576,  // 1M tokens (图片生成模型)
+    'gemini-3-pro-image-preview': 1048576,  // 1M tokens (图片生成模型)
     'llama2': 4096,
     'llama3': 8192,
   };

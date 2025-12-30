@@ -273,10 +273,10 @@ class LLMService:
             }
         elif provider in ('google', 'gemini'):
             # Gemini API
-            api_key_param = f"?key={api_key}"
-            target_url = api_url or f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent{api_key_param}"
-            if api_key and 'key=' not in target_url:
-                target_url += api_key_param
+            # 说明：
+            # - generateContent 支持通过 header 传递 x-goog-api-key
+            # - system prompt 的字段名是 systemInstruction（camelCase），不是 system_instruction
+            target_url = api_url or f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
                 
             # 转换消息格式
             contents = []
@@ -290,9 +290,14 @@ class LLMService:
             
             payload = {'contents': contents}
             if system_instruction:
-                payload['system_instruction'] = system_instruction
+                # Gemini REST API 使用 systemInstruction（camelCase）
+                payload['systemInstruction'] = system_instruction
                 
-            response = requests.post(target_url, json=payload, timeout=60)
+            headers = {
+                'Content-Type': 'application/json',
+                'x-goog-api-key': api_key,
+            }
+            response = requests.post(target_url, json=payload, headers=headers, timeout=60)
             if response.status_code != 200:
                 raise RuntimeError(f"Google API error: {response.text}")
                 

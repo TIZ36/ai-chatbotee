@@ -5234,20 +5234,7 @@ def save_message(session_id):
             message_id=data.get('message_id')
         )
 
-        # 媒体库缓存增量更新：避免每次发消息都 delete 导致频繁全量重建
-        try:
-            from services.media_library_service import get_media_library_service
-            if msg and msg.get('message_id'):
-                get_media_library_service().upsert_message_media(
-                    session_id=session_id,
-                    message_id=msg.get('message_id'),
-                    role=msg.get('role'),
-                    content=msg.get('content'),
-                    ext=msg.get('ext'),
-                    created_ts=msg.get('timestamp'),
-                )
-        except Exception as e:
-            print(f"[Message API] Warning: Failed to update media cache incrementally: {e}")
+        # 媒体库缓存增量更新已在 TopicService.send_message 内统一处理（包含 AgentActor 直连场景）
         
         if msg:
             # 确保智能体处于激活状态 (Actor 模型)，并直接处理触发消息

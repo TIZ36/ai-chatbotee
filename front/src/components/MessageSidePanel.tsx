@@ -107,6 +107,16 @@ interface MCPCitation {
   mcpServer?: string;
 }
 
+const normalizeMcpServerId = (sid?: string): string | undefined => {
+  if (!sid) return undefined;
+  return sid.startsWith('mcp-') ? sid : `mcp-${sid}`;
+};
+
+const stripMcpPrefix = (sid?: string): string | undefined => {
+  if (!sid) return undefined;
+  return sid.startsWith('mcp-') ? sid.slice(4) : sid;
+};
+
 /** 
  * 渲染带有 MCP 引用标记的思考内容
  * 将文本中的工具调用引用转换为带样式的引用标记
@@ -121,8 +131,12 @@ const renderThinkingWithCitations = (content: string, citations: MCPCitation[]):
   citations.forEach(c => {
     toolToIndex.set(c.toolName.toLowerCase(), c.index);
     if (c.mcpServer) {
-      toolToIndex.set(`${c.mcpServer}-${c.toolName}`.toLowerCase(), c.index);
-      toolToIndex.set(`mcp-${c.mcpServer}-${c.toolName}`.toLowerCase(), c.index);
+      const normalized = normalizeMcpServerId(c.mcpServer);
+      const raw = c.mcpServer;
+      toolToIndex.set(`${raw}-${c.toolName}`.toLowerCase(), c.index);
+      if (normalized && normalized !== raw) {
+        toolToIndex.set(`${normalized}-${c.toolName}`.toLowerCase(), c.index);
+      }
     }
   });
 
@@ -131,8 +145,13 @@ const renderThinkingWithCitations = (content: string, citations: MCPCitation[]):
   const patterns = citations.map(c => {
     const escapedName = c.toolName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     if (c.mcpServer) {
-      const escapedServer = c.mcpServer.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      return `(?:mcp-)?(?:${escapedServer}-)?${escapedName}`;
+      // 兼容文本里可能出现的三种写法：
+      // - mcp-<id>-tool
+      // - <id>-tool
+      // - mcp-mcp-<id>-tool（历史 bug）
+      const serverNoPrefix = stripMcpPrefix(c.mcpServer) || c.mcpServer;
+      const escapedServer = serverNoPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return `(?:mcp-)*(?:${escapedServer}-)?${escapedName}`;
     }
     return `(?:mcp-)?${escapedName}`;
   }).join('|');
@@ -275,6 +294,50 @@ const formatData = (data: any, maxLength: number = 500): string => {
   return formatted.length > maxLength ? formatted.substring(0, maxLength) + '\n... (数据已截断)' : formatted;
 };
 
+/** 提取 MCP 结果的“核心可用信息”，避免面板被大 JSON/日志撑爆 */
+const extractMcpCoreText = (result: any): { text: string; kind: 'ok' | 'error' | 'info' } => {
+  try {
+    // string: 直接截断
+    if (typeof result === 'string') {
+      const s = result.trim();
+      if (!s) return { text: '（无返回）', kind: 'info' };
+      return { text: s.length > 220 ? `${s.slice(0, 220)}…` : s, kind: 'ok' };
+    }
+    if (!result || typeof result !== 'object') return { text: '（无返回）', kind: 'info' };
+
+    // 常见错误结构
+    const err = (result as any).error || (result as any).error_message || (result as any).message;
+    if (typeof err === 'string' && err.trim()) {
+      const s = err.trim();
+      return { text: s.length > 260 ? `${s.slice(0, 260)}…` : s, kind: 'error' };
+    }
+
+    // 常见摘要字段
+    const summary = (result as any).summary || (result as any).result || (result as any).output || (result as any).content;
+    if (typeof summary === 'string' && summary.trim()) {
+      const s = summary.trim();
+      return { text: s.length > 260 ? `${s.slice(0, 260)}…` : s, kind: 'ok' };
+    }
+
+    // logs: 只取最后 1-2 行
+    const logs = (result as any).logs;
+    if (Array.isArray(logs) && logs.length > 0) {
+      const tail = logs.slice(-2).join('\n').trim();
+      if (tail) return { text: tail.length > 280 ? `${tail.slice(0, 280)}…` : tail, kind: 'info' };
+    }
+
+    // tools_list_response / initialize_response 等诊断：一行提示
+    if ((result as any).tools_list_response) return { text: 'tools/list 返回异常（展开查看详情）', kind: 'error' };
+    if ((result as any).initialize_response) return { text: 'initialize 返回异常（展开查看详情）', kind: 'error' };
+
+    // fallback：打印关键 keys
+    const keys = Object.keys(result).slice(0, 8).join(', ');
+    return { text: keys ? `返回字段: ${keys}` : '（无返回）', kind: 'info' };
+  } catch {
+    return { text: '（返回解析失败）', kind: 'error' };
+  }
+};
+
 /** MCP 调用区块组件 - 扁平化设计，虚线边框 */
 const MCPCallBlock: React.FC<{
   mcpServer?: string;
@@ -290,7 +353,15 @@ const MCPCallBlock: React.FC<{
 }> = ({ mcpServer, toolName, call, result, status, duration, index, citationIndex, isExpanded, onToggle }) => {
   // 生成引用标识
   const citationLabel = citationIndex !== undefined ? `[${citationIndex}]` : '';
-  const displayName = `${mcpServer ? `mcp-${mcpServer}` : 'MCP'}-${toolName || 'tool'}`;
+  const normalizedServer = normalizeMcpServerId(mcpServer);
+  const displayName = `${normalizedServer || 'MCP'}-${toolName || 'tool'}`;
+  const core = extractMcpCoreText(result);
+  const coreClass =
+    core.kind === 'error'
+      ? 'text-red-600 dark:text-red-400'
+      : core.kind === 'ok'
+        ? 'text-emerald-700 dark:text-emerald-300'
+        : 'text-gray-600 dark:text-gray-400';
   
   return (
     <div className="border-l-2 border-dashed border-emerald-300 dark:border-emerald-700 pl-3 py-1 mcp-call-block" data-citation={citationIndex}>
@@ -338,47 +409,64 @@ const MCPCallBlock: React.FC<{
           <ChevronDown className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
         )}
       </button>
+
+      {/* 默认只显示核心摘要（不展开也能看到最有用的一行），避免占空间 */}
+      {!isExpanded && (
+        <div className={`mt-1 pl-1 font-mono text-[10px] leading-snug whitespace-pre-wrap break-words ${coreClass}`}>
+          {core.text}
+        </div>
+      )}
       
       {isExpanded && (
-        <div className="mt-2 space-y-2 text-[11px]">
-          {/* 调用参数 */}
+        <div className="mt-2 space-y-2 text-[10px]">
+          {/* 核心结果（默认只展示这一块） */}
           <div className="pl-1">
-            <div className="flex items-center space-x-1 mb-1 text-gray-500 dark:text-gray-400">
-              <Wrench className="w-3 h-3" />
-              <span className="text-[10px] font-medium">调用参数</span>
-            </div>
-            <div className="text-gray-600 dark:text-gray-400 font-mono whitespace-pre-wrap break-words max-h-[300px] overflow-y-auto bg-gray-50/50 dark:bg-gray-900/30 p-2 rounded border-l border-gray-200 dark:border-gray-700">
-              {call ? formatData(call, 2000) : <span className="text-gray-400 italic">无参数</span>}
-            </div>
-          </div>
-          
-          {/* 返回结果 */}
-          <div className="pl-1">
-            <div className={`flex items-center space-x-1 mb-1 ${
-              status === 'error' ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'
-            }`}>
+            <div className={`flex items-center space-x-1 mb-1 ${status === 'error' ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'}`}>
               <ArrowRight className="w-3 h-3" />
-              <span className="text-[10px] font-medium">返回结果</span>
+              <span className="text-[10px] font-medium">核心结果</span>
             </div>
-            <div className={`font-mono whitespace-pre-wrap break-words max-h-[500px] overflow-y-auto p-2 rounded border-l ${
-              status === 'error' 
+            <div className={`font-mono whitespace-pre-wrap break-words max-h-[140px] overflow-y-auto p-2 rounded border-l ${
+              core.kind === 'error'
                 ? 'bg-red-50/50 dark:bg-red-900/10 border-red-300 dark:border-red-700 text-red-700 dark:text-red-300'
-                : 'bg-emerald-50/50 dark:bg-emerald-900/10 border-emerald-300 dark:border-emerald-700 text-gray-700 dark:text-gray-300'
+                : core.kind === 'ok'
+                  ? 'bg-emerald-50/50 dark:bg-emerald-900/10 border-emerald-300 dark:border-emerald-700 text-gray-800 dark:text-gray-200'
+                  : 'bg-gray-50/50 dark:bg-gray-900/30 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300'
             }`}>
-              {result ? formatData(result, 5000) : (
-                status === 'running' ? (
-                  <span className="text-emerald-500 italic flex items-center space-x-1">
-                    <Loader className="w-3 h-3 animate-spin" />
-                    <span>等待返回...</span>
-                  </span>
-                ) : status === 'pending' ? (
-                  <span className="text-gray-400 italic">等待执行</span>
-                ) : (
-                  <span className="text-gray-400 italic">无返回数据</span>
-                )
-              )}
+              {status === 'running' ? (
+                <span className="text-emerald-500 italic flex items-center space-x-1">
+                  <Loader className="w-3 h-3 animate-spin" />
+                  <span>执行中…</span>
+                </span>
+              ) : core.text}
             </div>
           </div>
+
+          {/* 详情（小字体 + 可折叠，避免撑爆 UI） */}
+          <details className="pl-1">
+            <summary className="text-gray-400 cursor-pointer hover:text-gray-600 dark:hover:text-[#a0a0a0] text-[10px]">
+              查看详情（参数 / 原始返回）
+            </summary>
+            <div className="mt-2 space-y-2">
+              <div>
+                <div className="flex items-center space-x-1 mb-1 text-gray-500 dark:text-gray-400">
+                  <Wrench className="w-3 h-3" />
+                  <span className="text-[10px] font-medium">参数</span>
+                </div>
+                <pre className="mt-1 text-[9px] bg-white dark:bg-[#2d2d2d] p-2 rounded overflow-auto max-h-[140px] leading-snug">
+                  {call ? formatData(call, 600) : '（无参数）'}
+                </pre>
+              </div>
+              <div>
+                <div className="flex items-center space-x-1 mb-1 text-gray-500 dark:text-gray-400">
+                  <ArrowRight className="w-3 h-3" />
+                  <span className="text-[10px] font-medium">原始返回</span>
+                </div>
+                <pre className="mt-1 text-[9px] bg-white dark:bg-[#2d2d2d] p-2 rounded overflow-auto max-h-[180px] leading-snug">
+                  {result ? formatData(result, 1200) : '（无返回）'}
+                </pre>
+              </div>
+            </div>
+          </details>
         </div>
       )}
     </div>
@@ -626,9 +714,7 @@ export const MessageSidePanel: React.FC<MessageSidePanelProps> = ({
       if (step.type === 'thinking' && steps.filter(s => s.type === 'thinking').indexOf(step) === 0) {
         expanded.add(blockId);
       }
-      if (step.type === 'mcp_call') {
-        expanded.add(blockId); // MCP 调用默认全部展开
-      }
+      // MCP 调用不默认展开：返回内容往往很大，容易撑爆面板
       if (step.type === 'workflow' && steps.filter(s => s.type === 'workflow').indexOf(step) === 0) {
         expanded.add(blockId);
       }

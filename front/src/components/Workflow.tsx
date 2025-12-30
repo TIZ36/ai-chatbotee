@@ -85,6 +85,7 @@ import {
 } from './workflow/dialogs';
 import { TopicConfigDialog, TopicDisplayType } from './workflow/dialogs/TopicConfigDialog';
 import { getParticipants, addParticipant as addSessionParticipant, removeParticipant as removeSessionParticipant, Participant, updateSession } from '../services/sessionApi';
+import AgentPersonaDialog from './AgentPersonaDialog';
 
 // 提供商图标映射 - 用于在输入框显示模型提供商 logo
 const PROVIDER_ICONS: Record<string, { icon: string; color: string }> = {
@@ -282,6 +283,10 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [topicConfigEditDisplayType, setTopicConfigEditDisplayType] = useState<TopicDisplayType>('chat');
   const [topicParticipants, setTopicParticipants] = useState<Participant[]>([]);
   
+  // Agent Persona 配置对话框状态（用于从会话面板点击agent头像时打开）
+  const [showAgentPersonaDialog, setShowAgentPersonaDialog] = useState(false);
+  const [agentPersonaDialogAgent, setAgentPersonaDialogAgent] = useState<Session | null>(null);
+  
   // Agent决策状态（用于显示Agent正在思考是否回答）
   // key: agent_id, value: { agentName, agentAvatar, status: 'deciding' | 'decided', action?, inReplyTo?, processSteps? }
   interface AgentDecidingState {
@@ -363,6 +368,34 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [llmConfigs, setLlmConfigs] = useState<LLMConfigFromDB[]>([]);
   const [selectedLLMConfigId, setSelectedLLMConfigId] = useState<string | null>(null);
   const [selectedLLMConfig, setSelectedLLMConfig] = useState<LLMConfigFromDB | null>(null);
+
+  // 将 llm_config_id（可能是 UUID）转成可读名称：name (provider/model)
+  const formatLLMConfigLabel = useCallback((configId: string): string => {
+    const id = String(configId || '').trim();
+    if (!id) return '';
+    const cfg = llmConfigs.find((c) => c.config_id === id);
+    if (!cfg) return id;
+    const name = (cfg as any).name || '';
+    const provider = (cfg as any).provider || 'unknown';
+    const model = (cfg as any).model || 'unknown';
+    if (name) return `${name} (${provider}/${model})`;
+    return `${provider}/${model}`;
+  }, [llmConfigs]);
+
+  // 兼容历史数据：把 processSteps 里“使用用户选择的模型: <id>”替换为可读名称
+  const normalizeIncomingProcessSteps = useCallback((steps?: any[]): any[] | undefined => {
+    if (!Array.isArray(steps) || steps.length === 0) return steps;
+    return steps.map((s) => {
+      const thinking = s?.thinking;
+      if (typeof thinking !== 'string') return s;
+      const m = thinking.match(/^使用用户选择的模型:\s*(\S+)\s*$/);
+      if (!m) return s;
+      const id = m[1];
+      const label = formatLLMConfigLabel(id);
+      if (!label || label === id) return s;
+      return { ...s, thinking: `使用用户选择的模型: ${label}` };
+    });
+  }, [formatLLMConfigLabel]);
 
   // 兜底：当 llmConfigs 迟到加载时，也要把当前 Agent 的偏好模型同步到选择框
   useEffect(() => {
@@ -818,6 +851,11 @@ const Workflow: React.FC<WorkflowProps> = ({
                 // 但保留 processSteps 等扩展信息
                 const updated = [...prev];
                 const existing = updated[existingIndex];
+                const mergedSteps =
+                  existing.processSteps ||
+                  existing.ext?.processSteps ||
+                  msg.ext?.processSteps;
+                const normalizedMergedSteps = normalizeIncomingProcessSteps(mergedSteps);
                 updated[existingIndex] = {
                   ...existing,
                   content: msg.content,
@@ -825,10 +863,10 @@ const Workflow: React.FC<WorkflowProps> = ({
                   // 合并 ext，保留现有的 processSteps
                   ext: {
                     ...(msg.ext || {}),
-                    processSteps: existing.processSteps || existing.ext?.processSteps || msg.ext?.processSteps
+                    processSteps: normalizedMergedSteps || mergedSteps
                   },
                   // 保留已有的 processSteps
-                  processSteps: existing.processSteps || msg.ext?.processSteps
+                  processSteps: normalizedMergedSteps || existing.processSteps || msg.ext?.processSteps
                 };
                 return updated;
               }
@@ -848,7 +886,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                 sender_type: msg.sender_type,
                 sender_avatar: senderAvatar,
                 sender_name: senderName,
-                processSteps: msg.ext?.processSteps,
+                processSteps: normalizeIncomingProcessSteps(msg.ext?.processSteps),
                 ext: {
                   ...msg.ext,
                   sender_avatar: senderAvatar,
@@ -915,7 +953,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                 status: 'deciding',
                 inReplyTo: data.in_reply_to,
                 timestamp: data.timestamp || Date.now() / 1000,
-                processSteps: data.processSteps || []
+                processSteps: normalizeIncomingProcessSteps(data.processSteps) || []
               });
               return next;
             });
@@ -934,7 +972,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                   status: 'decided',
                   action: data.action,
                   timestamp: data.timestamp || Date.now() / 1000,
-                  processSteps: data.processSteps || current.processSteps || []
+                  processSteps: normalizeIncomingProcessSteps(data.processSteps) || current.processSteps || []
                 });
               }
               // 决策完成后，延迟2秒移除状态（淡出效果）
@@ -972,11 +1010,11 @@ const Workflow: React.FC<WorkflowProps> = ({
                 sender_type: 'agent',
                 isStreaming: true,
                 // 包含决策过程步骤
-                processSteps: data.processSteps || [],
+                processSteps: normalizeIncomingProcessSteps(data.processSteps) || [],
                 ext: {
                   sender_name: data.agent_name,
                   sender_avatar: data.agent_avatar,
-                  processSteps: data.processSteps || [],
+                  processSteps: normalizeIncomingProcessSteps(data.processSteps) || [],
                   in_reply_to: data.in_reply_to
                 }
               };
@@ -987,6 +1025,12 @@ const Workflow: React.FC<WorkflowProps> = ({
           } else if (payload.type === 'agent_stream_chunk') {
             // 收到流式 chunk，更新消息内容（包含实时的 processSteps）
             const data = payload.data;
+            
+            // 调试：检查是否包含图片内容
+            const contentPreview = (data.accumulated || data.chunk || '').substring(0, 200);
+            const contentLength = (data.accumulated || data.chunk || '').length;
+            const hasImage = contentPreview.includes('![') || contentPreview.includes('data:image');
+            console.log(`[Workflow] agent_stream_chunk: msgId=${data.message_id}, contentLen=${contentLength}, hasImage=${hasImage}, preview=${contentPreview}`);
             
             setMessages((prev) => {
               const index = prev.findIndex(m => m.id === data.message_id);
@@ -999,11 +1043,11 @@ const Workflow: React.FC<WorkflowProps> = ({
                   sender_id: data.agent_id,
                   sender_type: 'agent',
                   isStreaming: true,
-                  processSteps: data.processSteps || [],
+                  processSteps: normalizeIncomingProcessSteps(data.processSteps) || [],
                   ext: {
                     sender_name: data.agent_name,
                     sender_avatar: data.agent_avatar,
-                    processSteps: data.processSteps || []
+                    processSteps: normalizeIncomingProcessSteps(data.processSteps) || []
                   }
                 };
                 wasAtBottomRef.current = true;
@@ -1017,10 +1061,10 @@ const Workflow: React.FC<WorkflowProps> = ({
                 content: data.accumulated || (updated[index].content + data.chunk),
                 isStreaming: true,
                 // 更新 processSteps
-                processSteps: data.processSteps || updated[index].processSteps || [],
+                processSteps: normalizeIncomingProcessSteps(data.processSteps) || updated[index].processSteps || [],
                 ext: {
                   ...updated[index].ext,
-                  processSteps: data.processSteps || updated[index].ext?.processSteps || []
+                  processSteps: normalizeIncomingProcessSteps(data.processSteps) || updated[index].ext?.processSteps || []
                 }
               };
               wasAtBottomRef.current = true;
@@ -1028,29 +1072,133 @@ const Workflow: React.FC<WorkflowProps> = ({
             });
             
           } else if (payload.type === 'agent_stream_done') {
-            // 流式完成
+            // 流式完成（可能包含错误）
             const data = payload.data;
-            console.log('[Workflow] Agent stream done:', data.message_id, 'processSteps:', data.processSteps?.length || 0);
+            const contentLength = (data.content || '').length;
+            const hasImage = (data.content || '').includes('![') || (data.content || '').includes('data:image');
+            console.log('[Workflow] Agent stream done:', data.message_id, 'contentLen:', contentLength, 'hasImage:', hasImage, 'processSteps:', data.processSteps?.length || 0, 'error:', data.error);
             
             setMessages((prev) => {
               const index = prev.findIndex(m => m.id === data.message_id);
               if (index < 0) return prev;
               
               const updated = [...prev];
+              const existing = updated[index];
+              const incomingMedia = Array.isArray(data.media) ? data.media : undefined;
+              const normalizedSteps = normalizeIncomingProcessSteps(data.processSteps);
+              
+              // 如果有错误，更新内容为错误信息，但保留 processSteps
+              const content = data.error 
+                ? `[错误] ${data.agent_name || 'Agent'} 无法产生回复: ${data.error}`
+                : (data.content || existing.content);
+              
               updated[index] = {
-                ...updated[index],
-                content: data.content,
+                ...existing,
+                content: content,
                 isStreaming: false,
-                // 保存执行轨迹
-                processSteps: data.processSteps,
+                // 如果后端返回了 media（例如 Gemini 图片生成），即时回显到消息气泡（MediaGallery）
+                media: incomingMedia ?? existing.media,
+                // 保存执行轨迹（包含错误步骤）
+                processSteps: normalizedSteps || existing.processSteps,
                 ext: {
-                  ...updated[index].ext,
-                  processSteps: data.processSteps
+                  ...existing.ext,
+                  // 同步写入 ext.media，保证刷新/重进会话后也能回显
+                  media: incomingMedia ?? existing.ext?.media,
+                  processSteps: normalizedSteps || existing.ext?.processSteps,
+                  error: data.error
                 }
               };
               setIsLoading(false);
               return updated;
             });
+          } else if (payload.type === 'agent_silent') {
+            // Agent决定不回答，将信息添加到对应消息的 processSteps 中
+            const data = payload.data;
+            console.log('[Workflow] Agent silent:', data.agent_name, 'processSteps:', data.processSteps?.length || 0);
+            
+            // 找到对应的用户消息，将决策信息添加到其 processSteps 中
+            if (data.in_reply_to) {
+              setMessages((prev) => {
+                const index = prev.findIndex(m => m.id === data.in_reply_to);
+                if (index < 0) return prev;
+                
+                const updated = [...prev];
+                const existing = updated[index];
+                
+                // 如果用户消息还没有对应的assistant消息，创建一个占位消息来显示决策过程
+                const nextIndex = index + 1;
+                const hasReply = nextIndex < updated.length && updated[nextIndex].sender_id === data.agent_id;
+                
+                if (!hasReply) {
+                  // 创建一个占位消息来显示决策过程
+                  const decisionMessage: Message = {
+                    id: `decision-${data.agent_id}-${data.in_reply_to}`,
+                    role: 'assistant',
+                    content: '',
+                    sender_id: data.agent_id,
+                    sender_type: 'agent',
+                    sender_name: data.agent_name,
+                    sender_avatar: data.agent_avatar,
+                    processSteps: normalizeIncomingProcessSteps(data.processSteps),
+                    ext: {
+                      sender_name: data.agent_name,
+                      sender_avatar: data.agent_avatar,
+                      processSteps: normalizeIncomingProcessSteps(data.processSteps),
+                      decision_type: 'silent'
+                    }
+                  };
+                  updated.splice(nextIndex, 0, decisionMessage);
+                } else {
+                  // 如果已有回复消息，将决策步骤合并到其 processSteps 中
+                  updated[nextIndex] = {
+                    ...updated[nextIndex],
+                    processSteps: [
+                      ...(updated[nextIndex].processSteps || []),
+                      ...(normalizeIncomingProcessSteps(data.processSteps) || []),
+                    ],
+                    ext: {
+                      ...updated[nextIndex].ext,
+                      processSteps: [
+                        ...(updated[nextIndex].ext?.processSteps || []),
+                        ...(normalizeIncomingProcessSteps(data.processSteps) || []),
+                      ]
+                    }
+                  };
+                }
+                
+                return updated;
+              });
+            }
+          } else if (payload.type === 'agent_tool_unavailable') {
+            // 工具不可用，将信息添加到对应消息的 processSteps 中
+            const data = payload.data;
+            console.log('[Workflow] Agent tool unavailable:', data.agent_name, data.tool_name);
+            
+            if (data.in_reply_to) {
+              setMessages((prev) => {
+                const index = prev.findIndex(m => m.id === data.in_reply_to);
+                if (index < 0) return prev;
+                
+                const updated = [...prev];
+                // 找到或创建对应的agent回复消息，添加processSteps
+                const agentMessageIndex = updated.findIndex((m, idx) => 
+                  idx > index && m.sender_id === data.agent_id && m.role === 'assistant'
+                );
+                
+                if (agentMessageIndex >= 0) {
+                  updated[agentMessageIndex] = {
+                    ...updated[agentMessageIndex],
+                    processSteps: [...(updated[agentMessageIndex].processSteps || []), ...(data.processSteps || [])],
+                    ext: {
+                      ...updated[agentMessageIndex].ext,
+                      processSteps: [...(updated[agentMessageIndex].ext?.processSteps || []), ...(data.processSteps || [])]
+                    }
+                  };
+                }
+                
+                return updated;
+              });
+            }
           }
         } catch (error) {
           console.error('[Workflow] Failed to parse topic event:', error, event.data);
@@ -2200,13 +2348,19 @@ const Workflow: React.FC<WorkflowProps> = ({
           const workflow_ids = selectedComponents
             .filter(c => c.type === 'workflow')
             .map(c => c.id);
-            
+          
+          messageData.ext = {
+            ...(messageData.ext || {}),
+          };
+          
           if (mcp_servers.length > 0 || workflow_ids.length > 0) {
-            messageData.ext = {
-              ...(messageData.ext || {}),
-              mcp_servers,
-              workflows: workflow_ids
-            };
+            messageData.ext.mcp_servers = mcp_servers;
+            messageData.ext.workflows = workflow_ids;
+          }
+          
+          // 私聊模式（agent类型）：传递用户选择的模型配置ID
+          if (sessionForActor?.session_type === 'agent' && selectedLLMConfigId) {
+            messageData.ext.user_llm_config_id = selectedLLMConfigId;
           }
         }
         
@@ -5019,8 +5173,12 @@ const Workflow: React.FC<WorkflowProps> = ({
                           setTopicParticipants([]);
                         }
                         setShowTopicConfigDialog(true);
+                      } else if (sessionType === 'agent') {
+                        // Agent 会话 - 显示 AgentPersonaDialog（支持完整配置）
+                        setAgentPersonaDialogAgent(currentSession);
+                        setShowAgentPersonaDialog(true);
                       } else {
-                        // Agent/普通会话 - 显示 HeaderConfigDialog
+                        // 普通会话 - 显示 HeaderConfigDialog
                         setHeaderConfigEditName(currentSession.name || '');
                         setHeaderConfigEditAvatar(currentSession.avatar || null);
                         setHeaderConfigEditSystemPrompt(currentSession.system_prompt || '');
@@ -5063,8 +5221,24 @@ const Workflow: React.FC<WorkflowProps> = ({
                       .map(p => (
                         <div 
                           key={p.participant_id}
-                          className="inline-block h-5 w-5 rounded-full ring-2 ring-white dark:ring-[#2d2d2d] bg-gray-100 dark:bg-gray-800 overflow-hidden shadow-sm"
-                          title={p.name}
+                          className="inline-block h-5 w-5 rounded-full ring-2 ring-white dark:ring-[#2d2d2d] bg-gray-100 dark:bg-gray-800 overflow-hidden shadow-sm cursor-pointer hover:ring-primary-400 transition-all"
+                          title={`${p.name} - 点击配置`}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            try {
+                              // 获取agent的完整会话信息
+                              const agentSession = await getSession(p.participant_id);
+                              setAgentPersonaDialogAgent(agentSession);
+                              setShowAgentPersonaDialog(true);
+                            } catch (error) {
+                              console.error('[Workflow] Failed to load agent session:', error);
+                              toast({
+                                title: '加载失败',
+                                description: error instanceof Error ? error.message : '无法加载智能体配置',
+                                variant: 'destructive',
+                              });
+                            }
+                          }}
                         >
                           {p.avatar ? (
                             <img src={p.avatar} alt={p.name} className="h-full w-full object-cover" />
@@ -6913,6 +7087,38 @@ const Workflow: React.FC<WorkflowProps> = ({
         }}
       />
     )}
+
+    {/* Agent Persona 配置对话框 */}
+    <AgentPersonaDialog
+      agent={agentPersonaDialogAgent}
+      open={showAgentPersonaDialog}
+      onOpenChange={setShowAgentPersonaDialog}
+      initialTab="persona"
+      onSaved={async () => {
+        // 刷新会话和参与者信息
+        if (currentSessionId) {
+          await loadSessions();
+          // 刷新当前会话元数据
+          try {
+            const updatedSession = await getSession(currentSessionId);
+            setCurrentSessionMeta(updatedSession);
+          } catch (error) {
+            console.error('[Workflow] Failed to refresh session:', error);
+          }
+          // 如果是 topic，刷新参与者信息
+          if (currentSessionType === 'topic_general' || currentSessionType === 'memory') {
+            try {
+              const participants = await getParticipants(currentSessionId);
+              setTopicParticipants(participants);
+            } catch (error) {
+              console.error('[Workflow] Failed to refresh participants:', error);
+            }
+          }
+        }
+        // 触发会话变更事件
+        emitSessionsChanged();
+      }}
+    />
 
     {/* 首次访问昵称输入对话框 */}
     <NicknameDialog

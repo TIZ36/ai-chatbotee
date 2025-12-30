@@ -282,6 +282,22 @@ class TopicService:
             cursor.close()
             conn.close()
             
+            # 媒体库缓存增量更新：
+            # - app.py 的 /api/sessions/<id>/messages 路由会做一次，但 AgentActor 直接调用 TopicService 时不会经过路由
+            # - 这里做“后处理”，确保 Gemini/Google 生成图片写入 ext.media 后，媒体库能即时可见
+            try:
+                from services.media_library_service import get_media_library_service
+                get_media_library_service().upsert_message_media(
+                    session_id=topic_id,
+                    message_id=msg_id,
+                    role=role,
+                    content=content,
+                    ext=ext,
+                    created_ts=time.time(),
+                )
+            except Exception as e:
+                print(f"[TopicService] Warning: Failed to update media cache incrementally: {e}")
+
             # 2. 发布到 Redis 频道
             # Topic 频道：topic:{topic_id}
             message_data = {

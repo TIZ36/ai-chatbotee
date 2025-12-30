@@ -27,6 +27,7 @@ import UserAccessPage from './components/UserAccessPage';
 import AgentsPage from './components/AgentsPage';
 // 新架构组件
 import SystemStatusPanel from './components/SystemStatusPanel';
+import StatusBar from './components/StatusBar';
 import { getAgents, getMemories, getSessions, createSession, deleteSession, type Session } from './services/sessionApi';
 import { getRoundTables, type RoundTable } from './services/roundTableApi';
 import { toast } from './components/ui/use-toast';
@@ -290,7 +291,7 @@ const App: React.FC = () => {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   return (
-    <div className="h-screen bg-gradient-to-br from-gray-100 via-gray-50 to-gray-100 dark:from-[#0f0f0f] dark:via-[#141414] dark:to-[#0f0f0f] flex flex-col transition-colors duration-200 overflow-hidden">
+    <div className="h-screen bg-gradient-to-br from-gray-100 via-gray-50 to-gray-100 dark:from-[#0f0f0f] dark:via-[#141414] dark:to-[#0f0f0f] flex flex-col transition-colors duration-200 overflow-hidden" style={{ paddingBottom: '28px' }}>
       {/* macOS 专用小标题栏 - 仅用于红黄绿按钮拖拽区域 */}
       {isMac && (
         <div
@@ -794,6 +795,8 @@ const App: React.FC = () => {
         onConfirm={performDeleteSession}
       />
 
+      {/* 底部状态栏 */}
+      <StatusBar />
     </div>
   );
 };

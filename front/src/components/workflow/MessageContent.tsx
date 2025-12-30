@@ -662,10 +662,91 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
       
       {/* AI assistant messages use Markdown rendering */}
       {message.role === 'assistant' ? (
-        <div className="prose prose-sm dark:prose-invert max-w-none text-gray-900 dark:text-[#ffffff] markdown-content text-xs">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{
+        (() => {
+          // 预处理：提取嵌入在 Markdown 中的 base64 图片
+          // ReactMarkdown 对超长 data URL 解析有问题，需要单独处理
+          const extractEmbeddedImages = (content: string): { 
+            cleanContent: string; 
+            images: Array<{ alt: string; dataUrl: string }> 
+          } => {
+            if (!content) return { cleanContent: '', images: [] };
+            
+            const images: Array<{ alt: string; dataUrl: string }> = [];
+            
+            // 匹配 Markdown 图片语法中的 data URL: ![alt](data:image/xxx;base64,...)
+            const imageRegex = /!\[([^\]]*)\]\((data:image\/[^;]+;base64,[A-Za-z0-9+/=]+)\)/g;
+            
+            let match;
+            while ((match = imageRegex.exec(content)) !== null) {
+              const dataUrl = match[2];
+              // 只提取大于 10KB 的图片（小图片让 ReactMarkdown 处理）
+              if (dataUrl.length > 10000) {
+                images.push({
+                  alt: match[1] || '生成的图片',
+                  dataUrl: dataUrl
+                });
+              }
+            }
+            
+            // 从内容中移除已提取的大图片
+            let cleanContent = content;
+            if (images.length > 0) {
+              cleanContent = content.replace(
+                /!\[([^\]]*)\]\((data:image\/[^;]+;base64,[A-Za-z0-9+/=]{10000,})\)/g,
+                '' // 移除大图片的 Markdown 语法
+              ).trim();
+              console.log('[MessageContent] Extracted', images.length, 'embedded images from content');
+            }
+            
+            return { cleanContent, images };
+          };
+          
+          const { cleanContent, images: embeddedImages } = extractEmbeddedImages(message.content || '');
+          
+          return (
+            <div className="prose prose-sm dark:prose-invert max-w-none text-gray-900 dark:text-[#ffffff] markdown-content text-xs">
+              {/* 渲染提取出的嵌入图片 */}
+              {embeddedImages.length > 0 && (
+                <div className="mb-3 space-y-3">
+                  {embeddedImages.map((img, idx) => (
+                    <div key={idx} className="not-prose">
+                      <img
+                        src={img.dataUrl}
+                        alt={img.alt}
+                        loading="lazy"
+                        className="max-w-full h-auto rounded-lg border border-gray-200 dark:border-[#404040] cursor-pointer hover:opacity-90 transition-opacity"
+                        style={{ maxHeight: '400px', objectFit: 'contain' }}
+                        onClick={() => {
+                          const win = window.open('', '_blank');
+                          if (win) {
+                            win.document.write(`
+                              <html>
+                                <head><title>${img.alt}</title></head>
+                                <body style="margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#000">
+                                  <img src="${img.dataUrl}" style="max-width:100%;max-height:100vh;object-fit:contain;" alt="${img.alt}" />
+                                </body>
+                              </html>
+                            `);
+                          }
+                        }}
+                        onError={(e) => {
+                          console.error('[MessageContent] Failed to load embedded image:', idx);
+                          (e.target as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                      {img.alt && img.alt !== '生成的图片' && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 text-center">{img.alt}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              {/* 渲染剩余的 Markdown 内容 */}
+              {cleanContent && (
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
               // Code block styling
               code: ({ node, inline, className, children, ...props }: any) => {
                 const match = /language-(\w+)/.exec(className || '');
@@ -788,6 +869,14 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
               em: ({ children }: any) => <em className="italic">{children}</em>,
               // Image styling - use independent component to handle state
               img: ({ src, alt, ...props }: any) => {
+                // 调试日志
+                console.log('[MessageContent] img component called:', {
+                  hasSrc: !!src,
+                  srcLength: src?.length || 0,
+                  srcPreview: src?.substring(0, 100),
+                  alt
+                });
+                
                 // If no src, don't render
                 if (!src) return null;
                 
@@ -858,13 +947,16 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
                 );
               },
             }}
-          >
-            {truncateBase64Strings(message.content)}
-          </ReactMarkdown>
-        </div>
+                  >
+                    {cleanContent}
+                  </ReactMarkdown>
+              )}
+            </div>
+          );
+        })()
       ) : (
         <div className="text-[15px] leading-relaxed whitespace-pre-wrap break-words text-gray-900 dark:text-[#ffffff]">
-          {truncateBase64Strings(message.content)}
+          {message.content}
         </div>
       )}
       
@@ -883,6 +975,25 @@ const ProcessStepsViewer: React.FC<{
   ext?: any;
 }> = ({ processSteps, ext }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+
+  // MCP 结果核心摘要：避免在“执行轨迹”里塞超大 JSON
+  const getMcpResultSummary = (step: ProcessStep): string | null => {
+    try {
+      const r: any = (step as any).result;
+      if (!r) return null;
+      const err = r?.error || r?.error_message || r?.message;
+      if (typeof err === 'string' && err.trim()) return `❌ ${err.trim().slice(0, 160)}${err.trim().length > 160 ? '…' : ''}`;
+      const summary = r?.summary || r?.result || r?.output;
+      if (typeof summary === 'string' && summary.trim()) return summary.trim().slice(0, 180) + (summary.trim().length > 180 ? '…' : '');
+      if (Array.isArray(r?.logs) && r.logs.length) {
+        const tail = r.logs.slice(-1)[0];
+        if (typeof tail === 'string' && tail.trim()) return tail.trim().slice(0, 180) + (tail.trim().length > 180 ? '…' : '');
+      }
+      return '（展开查看详情）';
+    } catch {
+      return '（结果解析失败）';
+    }
+  };
   
   // 合并 processSteps 和 ext.processSteps
   const steps = useMemo(() => {
@@ -1010,13 +1121,13 @@ const ProcessStepsViewer: React.FC<{
                   )}
                 </div>
                 {step.thinking && (
-                  <div className="text-gray-600 dark:text-[#a0a0a0] mt-0.5">
+                  <div className={`mt-0.5 ${step.status === 'error' ? 'text-red-500 dark:text-red-400' : 'text-gray-600 dark:text-[#a0a0a0]'}`}>
                     {step.thinking}
                   </div>
                 )}
                 {step.error && (
-                  <div className="text-red-500 mt-0.5">
-                    错误: {step.error}
+                  <div className="text-red-500 dark:text-red-400 mt-0.5 font-medium">
+                    ❌ 错误: {step.error}
                   </div>
                 )}
                 {step.type === 'mcp_call' && step.arguments && (
@@ -1024,20 +1135,25 @@ const ProcessStepsViewer: React.FC<{
                     <summary className="text-gray-400 cursor-pointer hover:text-gray-600 dark:hover:text-[#a0a0a0]">
                       查看参数
                     </summary>
-                    <pre className="mt-1 text-[10px] bg-white dark:bg-[#2d2d2d] p-1.5 rounded overflow-auto max-h-24">
+                    <pre className="mt-1 text-[9px] bg-white dark:bg-[#2d2d2d] p-2 rounded overflow-auto max-h-24 leading-snug">
                       {truncateBase64Strings(JSON.stringify(step.arguments, null, 2))}
                     </pre>
                   </details>
                 )}
                 {step.type === 'mcp_call' && step.result && (
-                  <details className="mt-1">
-                    <summary className="text-gray-400 cursor-pointer hover:text-gray-600 dark:hover:text-[#a0a0a0]">
-                      查看结果
-                    </summary>
-                    <pre className="mt-1 text-[10px] bg-white dark:bg-[#2d2d2d] p-1.5 rounded overflow-auto max-h-24">
-                      {truncateBase64Strings(JSON.stringify(step.result, null, 2))}
-                    </pre>
-                  </details>
+                  <div className="mt-1">
+                    <div className="text-[10px] text-gray-500 dark:text-[#808080]">
+                      结果：{getMcpResultSummary(step)}
+                    </div>
+                    <details className="mt-1">
+                      <summary className="text-gray-400 cursor-pointer hover:text-gray-600 dark:hover:text-[#a0a0a0]">
+                        查看原始结果
+                      </summary>
+                      <pre className="mt-1 text-[9px] bg-white dark:bg-[#2d2d2d] p-2 rounded overflow-auto max-h-24 leading-snug">
+                        {truncateBase64Strings(JSON.stringify(step.result, null, 2))}
+                      </pre>
+                    </details>
+                  </div>
                 )}
               </div>
             </div>

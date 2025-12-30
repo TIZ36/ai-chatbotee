@@ -263,6 +263,13 @@ def rollback_to_message(session_id, message_id):
     try:
         service = get_message_service()
         count = service.delete_messages_after(session_id, message_id)
+        # 通知 Actor：会话已回滚，本地历史/摘要必须同步更新（否则会出现“幽灵记忆”）
+        try:
+            from services.topic_service import get_topic_service
+            get_topic_service()._publish_event(session_id, 'messages_rolled_back', {'to_message_id': message_id, 'deleted_count': count})
+        except Exception as e:
+            # 不影响回滚本身
+            print(f"[Message API] Warning: failed to publish messages_rolled_back: {e}")
         return jsonify({'success': True, 'deleted_count': count})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
