@@ -8,12 +8,12 @@ MCP 执行服务（供 AgentActor/接口复用）
 - 执行 tool_calls 并返回结构化结果 + logs
 
 注意：这里不依赖 Flask app.py，避免循环导入。
+使用 mcp_common_logic 模块直接调用 MCP（类似 ok-publish 分支）。
 """
 
 from __future__ import annotations
 
 import json
-import os
 import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -21,7 +21,8 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from database import get_mysql_connection
-from services.llm_service import get_llm_service
+from mcp_server.mcp_common_logic import get_mcp_tools_list, call_mcp_tool, prepare_mcp_headers, initialize_mcp_session
+import pymysql
 
 
 def _mk_logger(external_log: Optional[callable] = None) -> tuple[list[str], callable]:
@@ -64,6 +65,130 @@ def _truncate_deep(obj: Any, *, max_str: int = 2000) -> Any:
     return str(obj)
 
 
+def call_llm_api(llm_config: dict, system_prompt: str, user_input: str, add_log=None):
+    """
+    调用LLM API（类似 ok-publish 分支的实现）
+    直接调用 API，不通过 llm_service
+    """
+    if add_log:
+        add_log(f"调用LLM API: {llm_config['provider']} - {llm_config['model']}")
+    
+    provider = llm_config['provider']
+    api_key = llm_config.get('api_key', '')
+    api_url = llm_config.get('api_url', '')
+    model = llm_config.get('model', '')
+    
+    if provider == 'openai':
+        default_url = 'https://api.openai.com/v1/chat/completions'
+        url = api_url or default_url
+        
+        payload = {
+            'model': model,
+            'messages': [
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': user_input}
+            ],
+            'temperature': 0.7,
+        }
+        
+        headers = {
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json',
+        }
+        
+        response = requests.post(url, json=payload, headers=headers, timeout=60)
+        if response.ok:
+            data = response.json()
+            return data['choices'][0]['message']['content']
+        else:
+            if add_log:
+                add_log(f"❌ LLM API调用失败: {response.status_code} - {response.text}")
+            return None
+            
+    elif provider == 'anthropic':
+        default_url = 'https://api.anthropic.com/v1/messages'
+        url = api_url or default_url
+        
+        payload = {
+            'model': model,
+            'max_tokens': 4096,
+            'messages': [
+                {'role': 'user', 'content': f"{system_prompt}\n\n用户输入: {user_input}"}
+            ],
+        }
+        
+        headers = {
+            'x-api-key': api_key,
+            'anthropic-version': '2023-06-01',
+            'Content-Type': 'application/json',
+        }
+        
+        response = requests.post(url, json=payload, headers=headers, timeout=60)
+        if response.ok:
+            data = response.json()
+            return data['content'][0]['text']
+        else:
+            if add_log:
+                add_log(f"❌ LLM API调用失败: {response.status_code} - {response.text}")
+            return None
+            
+    elif provider == 'gemini':
+        default_url = 'https://generativelanguage.googleapis.com/v1beta'
+        base_url = api_url or default_url
+        model_name = model or 'gemini-2.5-flash'
+        
+        # 构建完整的 API URL
+        if base_url.endswith('/'):
+            url = f"{base_url}models/{model_name}:generateContent"
+        else:
+            url = f"{base_url}/models/{model_name}:generateContent"
+        
+        # 转换消息格式为 Gemini 格式
+        contents = [
+            {
+                'role': 'user',
+                'parts': [{'text': f"{system_prompt}\n\n用户输入: {user_input}"}]
+            }
+        ]
+        
+        payload = {
+            'contents': contents,
+            'generationConfig': {
+                'temperature': 1.0,  # Gemini 推荐使用默认温度
+            },
+        }
+        
+        # 只在metadata中明确指定thinking_level时才添加（某些模型不支持此字段）
+        if llm_config.get('metadata') and llm_config['metadata'].get('thinking_level'):
+            payload['generationConfig']['thinkingLevel'] = llm_config['metadata']['thinking_level']
+        
+        headers = {
+            'x-goog-api-key': api_key,
+            'Content-Type': 'application/json',
+        }
+        
+        response = requests.post(url, json=payload, headers=headers, timeout=60)
+        if response.ok:
+            data = response.json()
+            if data.get('candidates') and len(data['candidates']) > 0:
+                candidate = data['candidates'][0]
+                if candidate.get('content') and candidate['content'].get('parts'):
+                    # 提取所有文本内容
+                    text_parts = [part.get('text', '') for part in candidate['content']['parts'] if part.get('text')]
+                    return ''.join(text_parts)
+            return None
+        else:
+            if add_log:
+                error_data = response.json() if response.content else {}
+                error_msg = error_data.get('error', {}).get('message', response.text)
+                add_log(f"❌ LLM API调用失败: {response.status_code} - {error_msg}")
+            return None
+    else:
+        if add_log:
+            add_log(f"❌ 不支持的LLM提供商: {provider}")
+        return None
+
+
 def execute_mcp_with_llm(
     *,
     mcp_server_id: str,
@@ -104,6 +229,29 @@ def execute_mcp_with_llm(
 
             cursor = conn.cursor(pymysql.cursors.DictCursor)
 
+            # 获取LLM配置（包括加密的API key）
+            log(f"获取LLM配置: {llm_config_id}")
+            cursor.execute(
+                """
+                SELECT config_id, provider, api_key, api_url, model, enabled, metadata
+                FROM llm_configs
+                WHERE config_id = %s AND enabled = 1
+                """,
+                (llm_config_id,),
+            )
+            llm_config = cursor.fetchone()
+            if not llm_config:
+                return {"error": "LLM config not found or disabled", "logs": logs}
+            
+            # 解析 metadata（如果是 JSON 字符串）
+            if llm_config.get('metadata') and isinstance(llm_config['metadata'], str):
+                try:
+                    llm_config['metadata'] = json.loads(llm_config['metadata'])
+                except:
+                    llm_config['metadata'] = {}
+            
+            log(f"LLM配置获取成功: {llm_config['provider']} - {llm_config['model']}")
+
             # MCP server
             log(f"获取MCP服务器配置: {mcp_server_id}")
             cursor.execute(
@@ -122,151 +270,66 @@ def execute_mcp_with_llm(
             server_url = mcp_server.get("url")
             log(f"MCP服务器配置获取成功: {server_name} ({server_url})")
 
-            # ==================== 复用现有 /mcp 代理（关键） ====================
-            # 原因：
-            # - app.py 的 /mcp 代理包含“tools/list/tools/call 返回 SSE 时转 JSON”的兼容逻辑
-            # - 直接打到 MCP server（http://localhost:18060/mcp）时，tools/list 可能是 text/event-stream，json 解析会失败
-            backend_url = os.environ.get("BACKEND_URL") or os.environ.get("BACKEND_BASE_URL") or "http://localhost:3002"
-            proxy_url = f"{backend_url.rstrip('/')}/mcp"
-            log(f"使用后端 /mcp 代理: {proxy_url}")
-
-            def proxy_post(jsonrpc: Dict[str, Any], session_id: Optional[str] = None) -> tuple[Optional[Dict[str, Any]], Optional[str], Optional[str]]:
-                """调用 /mcp?url=... 代理，返回 (json, mcp-session-id, error_text)"""
-                params = {
-                    "url": server_url,
-                    "transportType": "streamable-http",
-                }
-                headers = {
-                    "Content-Type": "application/json",
-                    "Accept": "application/json, text/event-stream",
-                    "mcp-protocol-version": "2025-06-18",
-                }
-                if session_id:
-                    headers["mcp-session-id"] = session_id
-                try:
-                    r = requests.post(proxy_url, params=params, json=jsonrpc, headers=headers, timeout=60)
-                    new_sid = r.headers.get("mcp-session-id") or session_id
-                    if not r.ok:
-                        return None, new_sid, f"HTTP {r.status_code}: {r.text[:800]}"
-                    try:
-                        return r.json(), new_sid, None
-                    except Exception as e:
-                        return None, new_sid, f"Invalid JSON from proxy: {e}"
-                except Exception as e:
-                    return None, session_id, str(e)
-
-            # 1) initialize（让 proxy/服务端建立 session，并返回 mcp-session-id）
-            # 优化：如果提供了 existing_session_id，尝试复用；否则从头开始
-            session_id = existing_session_id
-            if session_id:
-                log(f"尝试复用已有 session: {session_id[:16]}...")
-                # 尝试用已有 session 获取工具列表，验证 session 是否有效
-                test_req = {"jsonrpc": "2.0", "id": 0, "method": "tools/list", "params": {}}
-                test_resp, test_sid, test_err = proxy_post(test_req, session_id)
-                if test_err or not test_resp:
-                    log(f"已有 session 无效，重新初始化")
-                    session_id = None
-                else:
-                    log(f"成功复用 session: {session_id[:16]}...")
+            # ==================== 使用 mcp_common_logic 直接调用 MCP（类似 ok-publish） ====================
+            # 1. 准备请求头（包括 OAuth token 等）
+            base_headers = {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'mcp-protocol-version': '2025-06-18',
+            }
+            headers = prepare_mcp_headers(server_url, base_headers, base_headers)
             
-            if not session_id:
-                log("Step 1/3: initialize")
-                init_req = {
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "initialize",
-                    "params": {
-                        "protocolVersion": "2025-06-18",
-                        "capabilities": {},
-                        "clientInfo": {"name": "AgentActor", "version": "1.0.0"},
-                    },
-                }
-                init_resp, session_id, init_err = proxy_post(init_req, None)
-                if init_err:
-                    return {"error": f"Failed to initialize MCP session: {init_err}", "logs": logs, "initialize_response": _truncate_deep(init_resp, max_str=1200)}
-                log("MCP initialize 完成")
-
-            # 2) tools/list（通过 proxy，自动兼容 SSE→JSON）
+            # 2. 初始化 MCP 会话（如果需要）
+            init_response = initialize_mcp_session(server_url, headers)
+            if not init_response:
+                log("⚠️ MCP initialize 失败，但继续尝试获取工具列表")
+            
+            # 3. 获取工具列表
             log("Step 2/3: tools/list")
-            tools_req = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
-            tools_response, session_id, tools_err = proxy_post(tools_req, session_id)
-            if tools_err:
-                return {"error": f"Failed to get MCP tools list: {tools_err}", "logs": logs, "tools_list_response": _truncate_deep(tools_response, max_str=1200)}
+            tools_response = get_mcp_tools_list(server_url, headers)
+            if not tools_response or 'result' not in tools_response:
+                return {"error": "Failed to get MCP tools list", "logs": logs}
 
-            tools = (tools_response or {}).get("result", {}).get("tools", []) if isinstance(tools_response, dict) else []
+            tools = tools_response['result'].get('tools', [])
             if not tools:
-                # 尽量带上可读诊断（截断），方便定位 server 实际返回结构/错误
-                preview = None
-                try:
-                    preview = _truncate_deep(tools_response, max_str=1200)
-                except Exception:
-                    preview = str(tools_response)[:1200] if tools_response is not None else None
                 return {
                     "error": "No tools available from MCP server",
                     "logs": logs,
-                    "tools_list_response": preview,
                 }
 
             log(f"获取到 {len(tools)} 个可用工具")
 
-            # 构建详细的工具描述（包含名称、描述、参数schema）
-            tools_description_parts = []
-            tool_name_map: Dict[str, Dict[str, Any]] = {}  # 工具名称 -> 工具信息映射
+            # 构建工具描述（简化版，类似 ok-publish）
+            tools_description = '\n'.join([
+                f"- {t.get('name', '')}: {t.get('description', '')}"
+                for t in tools
+            ])
             
+            # 构建工具名称映射（用于验证）
+            tool_name_map: Dict[str, Dict[str, Any]] = {}
             for t in tools:
                 tool_name = t.get('name', '').strip()
-                if not tool_name:
-                    continue
-                    
-                tool_desc = t.get('description', '').strip()
-                schema = t.get("inputSchema") or t.get("input_schema") or t.get("parameters") or {}
-                props = {}
-                if isinstance(schema, dict):
-                    props = schema.get("properties") or {}
-                
-                # 构建参数描述
-                param_descs = []
-                if isinstance(props, dict):
-                    for param_name, param_info in props.items():
-                        if isinstance(param_info, dict):
-                            param_type = param_info.get('type', 'string')
-                            param_desc = param_info.get('description', '')
-                            required = param_info.get('required', False)
-                            req_mark = "（必需）" if required else "（可选）"
-                            param_descs.append(f"  - {param_name} ({param_type}){req_mark}: {param_desc}")
-                
-                param_block = "\n".join(param_descs) if param_descs else "  - 无参数"
-                
-                tool_info = {
-                    'name': tool_name,
-                    'description': tool_desc,
-                    'schema': schema,
-                    'props': props,
-                }
-                tool_name_map[tool_name.lower()] = tool_info
-                
-                tools_description_parts.append(
-                    f"- {tool_name}: {tool_desc}\n  参数:\n{param_block}"
-                )
-            
-            tools_description = "\n\n".join(tools_description_parts)
+                if tool_name:
+                    schema = t.get("inputSchema") or t.get("input_schema") or t.get("parameters") or {}
+                    props = {}
+                    if isinstance(schema, dict):
+                        props = schema.get("properties") or {}
+                    tool_name_map[tool_name.lower()] = {
+                        'name': tool_name,
+                        'description': t.get('description', '').strip(),
+                        'schema': schema,
+                        'props': props if isinstance(props, dict) else {},
+                    }
 
             system_prompt = f"""你是一个智能助手，可以使用以下MCP工具帮助用户：
-
 {tools_description}
-
-**重要规则：**
-1. 只能使用上述列出的工具名称，不要使用不存在的工具名称
-2. 仔细阅读每个工具的描述和参数要求
-3. 根据用户输入选择最合适的工具
-4. 确保参数名称和类型与工具定义完全匹配
 
 请分析用户的输入，决定需要调用哪些工具，并返回JSON格式的工具调用信息。
 格式：
 {{
   "tool_calls": [
     {{
-      "name": "工具名称（必须与上述列表中的名称完全一致）",
+      "name": "工具名称",
       "arguments": {{"参数名": "参数值"}}
     }}
   ]
@@ -346,18 +409,10 @@ def execute_mcp_with_llm(
                 done_flag = False
                 try:
                     log(f"第 {it+1}/{max_iterations} 轮：使用LLM决定下一步工具调用: {llm_config_id}")
-                    llm_service = get_llm_service()
-                    llm_resp = llm_service.chat_completion(
-                        config_id=llm_config_id,
-                        messages=[
-                            {"role": "system", "content": iter_system},
-                            {"role": "user", "content": iter_user},
-                        ],
-                        stream=False,
-                    )
-                    llm_text = (llm_resp.get("content") or "").strip()
+                    # 直接调用 LLM API（类似 ok-publish）
+                    llm_text = call_llm_api(llm_config, iter_system, iter_user, log)
                     if llm_text:
-                        json_match = re.search(r"\{.*\}", llm_text, re.DOTALL)
+                        json_match = re.search(r'\{.*\}', llm_text, re.DOTALL)
                         if json_match:
                             data = json.loads(json_match.group())
                             tc = data.get("tool_calls", [])
@@ -373,7 +428,7 @@ def execute_mcp_with_llm(
                         picked = _pick_best_tool(effective_input, tools)
                         picked_name = picked.get("name") or ""
                         if not picked_name:
-                            return {"error": "No valid tool name from MCP tools list", "logs": logs, "tools_list_response": _truncate_deep(tools_response, max_str=1200)}
+                            return {"error": "No valid tool name from MCP tools list", "logs": logs}
                         picked_args = _default_args_for_tool(picked, effective_input)
                         tool_calls = [{"name": picked_name, "arguments": picked_args}]
                         log(f"Fallback 选择工具: {picked_name}，参数键推断: {list(picked_args.keys())}")
@@ -448,40 +503,33 @@ def execute_mcp_with_llm(
                     all_tool_calls.append({"name": tool_name, "arguments": tool_args})
                     log(f"执行工具调用: {tool_name} (参数: {list(tool_args.keys())})")
                     try:
-                        tool_req = {
-                            "jsonrpc": "2.0",
-                            "id": int(datetime.now().timestamp() * 1000),
-                            "method": "tools/call",
-                            "params": {"name": tool_name, "arguments": tool_args},
-                        }
-                        tool_resp, session_id, tool_err = proxy_post(tool_req, session_id)
-                        if tool_err:
-                            results.append({"tool": tool_name, "error": tool_err, "response": _truncate_deep(tool_resp, max_str=1200)})
-                        else:
-                            # 验证执行结果的有效性
-                            is_valid = False
-                            if isinstance(tool_resp, dict):
-                                # 检查是否有错误
-                                if "error" in tool_resp:
-                                    error_info = tool_resp.get("error", {})
-                                    error_msg = error_info.get("message", "") if isinstance(error_info, dict) else str(error_info)
-                                    results.append({"tool": tool_name, "error": f"MCP错误: {error_msg}", "response": _truncate_deep(tool_resp, max_str=1200)})
-                                elif "result" in tool_resp:
-                                    result_data = tool_resp.get("result")
-                                    # 检查result是否为空或无效
-                                    if result_data is None:
-                                        results.append({"tool": tool_name, "error": "工具返回空结果", "response": _truncate_deep(tool_resp, max_str=1200)})
-                                    else:
-                                        is_valid = True
-                                        results.append({"tool": tool_name, "result": tool_resp})
-                                else:
-                                    # 没有result也没有error，可能是格式异常
-                                    results.append({"tool": tool_name, "error": "工具返回格式异常", "response": _truncate_deep(tool_resp, max_str=1200)})
+                        # 使用 mcp_common_logic 直接调用工具（类似 ok-publish）
+                        tool_result = call_mcp_tool(server_url, headers, tool_name, tool_args, log)
+                        if tool_result:
+                            # call_mcp_tool 返回的是工具结果内容（可能是文本或字典）
+                            # 需要包装成标准格式，与 ok-publish 一致
+                            if isinstance(tool_result, dict):
+                                # 如果已经是字典，直接使用
+                                results.append({
+                                    'tool': tool_name,
+                                    'result': tool_result
+                                })
                             else:
-                                results.append({"tool": tool_name, "error": f"工具返回非字典格式: {type(tool_resp)}", "response": _truncate_deep(tool_resp, max_str=1200)})
-                            
-                            if is_valid:
-                                log(f"✅ 工具 {tool_name} 执行成功")
+                                # 如果是文本，包装成标准格式
+                                results.append({
+                                    'tool': tool_name,
+                                    'result': {
+                                        'jsonrpc': '2.0',
+                                        'result': {
+                                            'content': [
+                                                {'type': 'text', 'text': str(tool_result)}
+                                            ]
+                                        }
+                                    }
+                                })
+                            log(f"✅ 工具 {tool_name} 执行成功")
+                        else:
+                            results.append({"tool": tool_name, "error": "工具返回空结果"})
                     except Exception as e:
                         import traceback
                         log(f"❌ 工具 {tool_name} 执行异常: {str(e)}\n{traceback.format_exc()}")
@@ -579,8 +627,7 @@ def execute_mcp_with_llm(
                 "mcp_server_url": server_url,
                 "input": effective_input,
                 "tool_calls": all_tool_calls,
-                "results": results,
-                "session_id": session_id,  # 保存 session_id 供后续复用
+                "results": results,  # results[i].result 保留原始 MCP jsonrpc（含 base64 图片）
             }
 
             return {
