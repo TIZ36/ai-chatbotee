@@ -109,12 +109,22 @@ class GoogleProvider(BaseLLMProvider):
                                 else:
                                     data = image_data
 
+                                # 提取 thoughtSignature（Gemini 2.5+）
+                                thought_sig = None
+                                if hasattr(part, 'thought_signature') and part.thought_signature:
+                                    thought_sig = part.thought_signature
+                                    self._log(f"Found thoughtSignature in image: {len(thought_sig)} chars")
+
                                 # 保存到 media 列表（前端用缩略图/预览展示，不再往 Markdown content 里塞图）
-                                media.append({
+                                media_item = {
                                     'type': 'image',
                                     'mimeType': mime_type,
                                     'data': data
-                                })
+                                }
+                                # 保存 thoughtSignature（如果存在），供后续请求使用
+                                if thought_sig:
+                                    media_item['thoughtSignature'] = thought_sig
+                                media.append(media_item)
                                 self._log(f"Received image: {mime_type} ({len(data)} chars)")
             
             return LLMResponse(

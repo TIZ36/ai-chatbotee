@@ -22,16 +22,8 @@ import {
   Play,
   ArrowRight,
   Trash2,
-  XCircle,
   Wrench,
   FileText,
-  ChevronDown,
-  ChevronUp,
-  Brain,
-  Clock,
-  Zap,
-  Target,
-  MessageSquare,
 } from 'lucide-react';
 import { MediaGallery, MediaItem } from '../ui/MediaGallery';
 import { MCPExecutionCard } from '../MCPExecutionCard';
@@ -39,6 +31,7 @@ import { truncateBase64Strings } from '../../utils/textUtils';
 import { parseMCPContentBlocks, renderMCPBlocks, renderMCPMedia } from './mcpRender';
 import type { SessionMediaItem } from '../ui/SessionMediaPanel';
 import type { WorkflowNode, WorkflowConnection } from '../../services/workflowApi';
+import { ProcessStepsViewer as UnifiedProcessStepsViewer } from '../ui/ProcessStepsViewer';
 
 /** Single process step (for recording multi-round thinking, MCP calls, and agent decisions) */
 export interface ProcessStep {
@@ -961,218 +954,11 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
       )}
       
       {/* Process Steps / Execution Trace (执行轨迹展示) */}
-      <ProcessStepsViewer processSteps={message.processSteps} ext={message.ext} />
+      <UnifiedProcessStepsViewer processSteps={message.processSteps} ext={message.ext} />
     </div>
   );
 };
 
-/**
- * ProcessStepsViewer - 展示消息的执行轨迹
- * 用于Topic会话中展示Agent的思考过程、MCP调用、工作流执行等
- */
-const ProcessStepsViewer: React.FC<{ 
-  processSteps?: ProcessStep[]; 
-  ext?: any;
-}> = ({ processSteps, ext }) => {
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  // MCP 结果核心摘要：避免在“执行轨迹”里塞超大 JSON
-  const getMcpResultSummary = (step: ProcessStep): string | null => {
-    try {
-      const r: any = (step as any).result;
-      if (!r) return null;
-      const err = r?.error || r?.error_message || r?.message;
-      if (typeof err === 'string' && err.trim()) return `❌ ${err.trim().slice(0, 160)}${err.trim().length > 160 ? '…' : ''}`;
-      const summary = r?.summary || r?.result || r?.output;
-      if (typeof summary === 'string' && summary.trim()) return summary.trim().slice(0, 180) + (summary.trim().length > 180 ? '…' : '');
-      if (Array.isArray(r?.logs) && r.logs.length) {
-        const tail = r.logs.slice(-1)[0];
-        if (typeof tail === 'string' && tail.trim()) return tail.trim().slice(0, 180) + (tail.trim().length > 180 ? '…' : '');
-      }
-      return '（展开查看详情）';
-    } catch {
-      return '（结果解析失败）';
-    }
-  };
-  
-  // 合并 processSteps 和 ext.processSteps
-  const steps = useMemo(() => {
-    const result: ProcessStep[] = [];
-    if (Array.isArray(processSteps)) {
-      result.push(...processSteps);
-    }
-    if (ext?.processSteps && Array.isArray(ext.processSteps)) {
-      // 避免重复
-      for (const step of ext.processSteps) {
-        if (!result.some(s => s.timestamp === step.timestamp && s.type === step.type)) {
-          result.push(step);
-        }
-      }
-    }
-    // 按时间戳排序
-    return result.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-  }, [processSteps, ext]);
-  
-  if (steps.length === 0) return null;
-  
-  const formatDuration = (ms?: number) => {
-    if (!ms) return '';
-    if (ms < 1000) return `${ms}ms`;
-    return `${(ms / 1000).toFixed(1)}s`;
-  };
-  
-  const getStatusIcon = (status?: string) => {
-    switch (status) {
-      case 'completed':
-        return <CheckCircle className="w-3.5 h-3.5 text-green-500" />;
-      case 'error':
-        return <XCircle className="w-3.5 h-3.5 text-red-500" />;
-      case 'running':
-        return <Loader className="w-3.5 h-3.5 text-blue-500 animate-spin" />;
-      default:
-        return <Clock className="w-3.5 h-3.5 text-gray-400" />;
-    }
-  };
-  
-  const getTypeIcon = (type: string) => {
-    switch (type) {
-      case 'thinking':
-      case 'llm_generating':
-        return <Brain className="w-3.5 h-3.5 text-purple-500" />;
-      case 'mcp_call':
-        return <Wrench className="w-3.5 h-3.5 text-blue-500" />;
-      case 'workflow':
-        return <WorkflowIcon className="w-3.5 h-3.5 text-orange-500" />;
-      case 'agent_activated':
-        return <Zap className="w-3.5 h-3.5 text-yellow-500" />;
-      case 'agent_deciding':
-        return <Brain className="w-3.5 h-3.5 text-indigo-500 animate-pulse" />;
-      case 'agent_decision':
-        return <Target className="w-3.5 h-3.5 text-green-500" />;
-      case 'agent_will_reply':
-        return <MessageSquare className="w-3.5 h-3.5 text-blue-500" />;
-      default:
-        return <FileText className="w-3.5 h-3.5 text-gray-500" />;
-    }
-  };
-  
-  const getTypeLabel = (type: string, step: ProcessStep) => {
-    switch (type) {
-      case 'thinking':
-        return '思考';
-      case 'llm_generating':
-        return `LLM生成 (${step.llm_provider || ''}/${step.llm_model || ''})`;
-      case 'mcp_call':
-        return `MCP: ${step.mcpServer}/${step.toolName}`;
-      case 'workflow':
-        return `工作流: ${step.workflowInfo?.name || 'Unknown'}`;
-      case 'agent_activated':
-        return `Agent激活: ${step.agent_name || step.agent_id || 'Agent'}`;
-      case 'agent_deciding':
-        return `决策中: ${step.agent_name || 'Agent'}`;
-      case 'agent_decision':
-        return `决策结果: ${step.action || '未知'}`;
-      case 'agent_will_reply':
-        return '决定回答';
-      default:
-        return type;
-    }
-  };
-  
-  // 判断是否为重要步骤（MCP调用、工作流、决策结果）
-  const isImportantStep = (type: string) => {
-    return ['mcp_call', 'workflow', 'agent_decision', 'agent_will_reply'].includes(type);
-  };
-
-  return (
-    <div className="mt-2 pt-2">
-      <button
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-[#808080] hover:text-gray-700 dark:hover:text-[#a0a0a0] transition-colors"
-      >
-        {isExpanded ? (
-          <ChevronUp className="w-3.5 h-3.5" />
-        ) : (
-          <ChevronDown className="w-3.5 h-3.5" />
-        )}
-        <span className="font-semibold">执行轨迹 ({steps.length} 步)</span>
-        {ext?.llmInfo && (
-          <span className="text-gray-400 dark:text-[#606060]">
-            · {ext.llmInfo.provider}/{ext.llmInfo.model}
-          </span>
-        )}
-      </button>
-      
-      {isExpanded && (
-        <div className="mt-2 pl-2 border-l-2 border-dashed border-gray-300 dark:border-[#505050] space-y-2">
-          {steps.map((step, idx) => {
-            const important = isImportantStep(step.type);
-            return (
-              <div
-                key={idx}
-                className={`flex items-start gap-2 text-xs pl-2 py-1 ${
-                  important ? 'border-l-2 border-primary-400 dark:border-primary-500 -ml-[2px]' : ''
-                }`}
-              >
-                <div className="flex items-center gap-1 flex-shrink-0 mt-0.5">
-                  {getTypeIcon(step.type)}
-                  {getStatusIcon(step.status)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className={`${important ? 'font-semibold' : 'font-medium'} text-gray-700 dark:text-[#d0d0d0]`}>
-                      {getTypeLabel(step.type, step)}
-                    </span>
-                    {step.duration && (
-                      <span className="text-gray-400 dark:text-[#606060]">
-                        {formatDuration(step.duration)}
-                      </span>
-                    )}
-                  </div>
-                  {step.thinking && (
-                    <div className={`mt-0.5 ${step.status === 'error' ? 'text-red-500 dark:text-red-400' : 'text-gray-600 dark:text-[#a0a0a0]'}`}>
-                      {step.thinking}
-                    </div>
-                  )}
-                  {step.error && (
-                    <div className="text-red-500 dark:text-red-400 mt-0.5 font-semibold">
-                      ❌ 错误: {step.error}
-                    </div>
-                  )}
-                  {step.type === 'mcp_call' && step.arguments && (
-                    <details className="mt-1">
-                      <summary className="text-gray-400 cursor-pointer hover:text-gray-600 dark:hover:text-[#a0a0a0]">
-                        查看参数
-                      </summary>
-                      <pre className="mt-1 text-[9px] bg-gray-50 dark:bg-[#2d2d2d] p-2 rounded overflow-auto max-h-24 leading-snug border border-dashed border-gray-200 dark:border-[#404040]">
-                        {truncateBase64Strings(JSON.stringify(step.arguments, null, 2))}
-                      </pre>
-                    </details>
-                  )}
-                  {step.type === 'mcp_call' && step.result && (
-                    <div className="mt-1">
-                      <div className="text-[10px] text-gray-500 dark:text-[#808080] font-medium">
-                        结果：{getMcpResultSummary(step)}
-                      </div>
-                      <details className="mt-1">
-                        <summary className="text-gray-400 cursor-pointer hover:text-gray-600 dark:hover:text-[#a0a0a0]">
-                          查看原始结果
-                        </summary>
-                        <pre className="mt-1 text-[9px] bg-gray-50 dark:bg-[#2d2d2d] p-2 rounded overflow-auto max-h-24 leading-snug border border-dashed border-gray-200 dark:border-[#404040]">
-                          {truncateBase64Strings(JSON.stringify(step.result, null, 2))}
-                        </pre>
-                      </details>
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-};
 
 /**
  * Custom comparison function for React.memo

@@ -1019,9 +1019,38 @@ class AgentActor:
                     except Exception as e:
                         print(f"[AgentActor] Warning: Failed to get MCP server names: {e}")
 
+                    # 尝试从历史消息中提取 MCP session_id（用于复用session）
+                    existing_session_ids: Dict[str, str] = {}
+                    try:
+                        topic_state = self._topic_state.get(topic_id, {})
+                        history = topic_state.get('history', [])
+                        # 从最近的几条消息中查找 MCP session_id
+                        for msg in reversed(history[-10:]):  # 只检查最近10条
+                            if not isinstance(msg, dict):
+                                continue
+                            ext = msg.get('ext') or {}
+                            process_steps_in_msg = ext.get('processSteps') or []
+                            for ps in process_steps_in_msg:
+                                if ps.get('type') == 'mcp_call' and ps.get('mcpServerId') == sid:
+                                    # 尝试从 result 中提取 session_id
+                                    result_data = ps.get('result') or {}
+                                    raw_result = result_data.get('raw_result') or result_data.get('raw_result_compact') or {}
+                                    # session_id 可能存储在 raw_result 中
+                                    session_id = raw_result.get('session_id')
+                                    if session_id:
+                                        existing_session_ids[sid] = session_id
+                                        print(f"[AgentActor] 从历史消息中找到 MCP session_id: {session_id[:16]}... for server {sid}")
+                                        break
+                            if sid in existing_session_ids:
+                                break
+                    except Exception as e:
+                        print(f"[AgentActor] Warning: Failed to extract session_id from history: {e}")
+                    
                     for sid in mcp_server_ids[:3]:  # 避免一次触发太多服务器
                         step_start = time.time()
                         mcp_server_name = mcp_server_names.get(sid, sid)
+                        existing_session_id = existing_session_ids.get(sid)
+                        
                         step: Dict[str, Any] = {
                             'type': 'mcp_call',
                             'timestamp': int(step_start * 1000),
@@ -1050,6 +1079,8 @@ class AgentActor:
                             mcp_server_id=sid,
                             input_text=user_content,
                             llm_config_id=config_id,
+                            topic_id=topic_id,
+                            existing_session_id=existing_session_id,
                         )
                         step['duration'] = int((time.time() - step_start) * 1000)
                         if result.get('error'):
@@ -1122,15 +1153,18 @@ class AgentActor:
                                 f"{facts_text.strip()}\n"
                                 "\n"
                                 "【你的任务】：\n"
+                                "仔细阅读上述工具执行结果的所有内容，不要遗漏任何细节。\n"
                                 "基于上述工具执行结果，直接用自然语言回答用户的问题。\n"
                                 "\n"
                                 "【严格禁止】：\n"
                                 "- 禁止输出任何代码块（JSON、tool_code、mcp.xxx 等）\n"
                                 "- 禁止说「我来为您调用/检查...」——工具已经执行完了\n"
                                 "- 禁止重复调用工具——直接使用上面的结果\n"
+                                "- 禁止忽略工具返回的详细信息——必须完整使用所有信息\n"
                                 "\n"
                                 "【正确做法】：\n"
-                                "直接告诉用户结果，例如：「根据查询结果，您的小红书已登录，账号是xxx」"
+                                "仔细阅读工具返回的所有内容，提取关键信息，然后直接告诉用户结果。\n"
+                                "例如：「根据查询结果，您的小红书已登录，账号是xxx，状态是xxx」"
                             )
             except Exception as e:
                 # 不阻断正常回复
@@ -1178,28 +1212,7 @@ class AgentActor:
             # ActorAgent 本地维护了 topic 历史（_topic_state[topic_id]['history']），但旧实现只发 system+当前消息给 LLM。
             # 这里把最近若干轮 user/assistant 消息一起发送，作为“带记忆的对话上下文”。
             # 注意：摘要生成移至后台异步执行，不阻塞当前回复
-            import threading
-            def _async_summarize():
-                try:
-                    self._maybe_summarize_topic_history(topic_id=topic_id, llm_config_id=config_id)
-                except Exception as _sum_err:
-                    print(f"[AgentActor:{self.agent_id}] ⚠️ async summarize failed: {_sum_err}")
-            threading.Thread(target=_async_summarize, daemon=True).start()
-            messages = self._build_llm_messages_with_history(
-                topic_id=topic_id,
-                system_prompt=system_prompt,
-                user_message=user_message,
-                in_reply_to=in_reply_to,
-                max_history_messages=24,
-                max_total_chars=18000,
-                max_per_message_chars=2400,
-            )
-            
-            print(f"[AgentActor:{self.agent_id}] Starting streaming LLM call (config: {config_id})")
-            if user_message.get('media'):
-                print(f"[AgentActor:{self.agent_id}] Message contains {len(user_message['media'])} media items")
-            
-            # 获取 LLM 配置
+            # 先获取 LLM 配置，以便判断是否是生图模型
             llm_service = get_llm_service()
             config = llm_service.get_config(config_id, include_api_key=True)
             if not config:
@@ -1209,6 +1222,37 @@ class AgentActor:
             api_key = config.get('api_key')
             api_url = config.get('api_url')
             model = config.get('model')
+            
+            # 判断是否是生图模型（通过 model 名称判断，如包含 'image'）
+            is_image_generation_model = 'image' in (model or '').lower()
+            
+            # 对于生图模型，只保留最近1条历史消息，重点关注当前消息的参考图和文字
+            max_history_messages = 1 if is_image_generation_model else 24
+            
+            import threading
+            def _async_summarize():
+                try:
+                    self._maybe_summarize_topic_history(topic_id=topic_id, llm_config_id=config_id)
+                except Exception as _sum_err:
+                    print(f"[AgentActor:{self.agent_id}] ⚠️ async summarize failed: {_sum_err}")
+            threading.Thread(target=_async_summarize, daemon=True).start()
+            
+            if is_image_generation_model:
+                print(f"[AgentActor:{self.agent_id}] Image generation model detected ({model}), limiting history to 1 message")
+            
+            messages = self._build_llm_messages_with_history(
+                topic_id=topic_id,
+                system_prompt=system_prompt,
+                user_message=user_message,
+                in_reply_to=in_reply_to,
+                max_history_messages=max_history_messages,
+                max_total_chars=18000,
+                max_per_message_chars=2400,
+            )
+            
+            print(f"[AgentActor:{self.agent_id}] Starting streaming LLM call (config: {config_id})")
+            if user_message.get('media'):
+                print(f"[AgentActor:{self.agent_id}] Message contains {len(user_message['media'])} media items")
             
             # 记录 thinking 步骤（LLM调用开始）
             thinking_step_index = len(process_steps)  # 记录thinking步骤的索引
@@ -1245,14 +1289,417 @@ class AgentActor:
             
             print(f"[AgentActor:{self.agent_id}] Streaming complete, saving message: {full_content[:50]}...")
             
-            # 构建扩展数据，包含执行轨迹
+            # ============ React 机制：检测并执行 LLM 输出中的工具调用 ============
+            # 对于生图模型，通常不需要工具调用，但为了保险起见仍然检查
+            max_react_iterations = 3
+            react_iteration = 0
+            current_content = full_content
+            current_messages = messages.copy()
+            
+            # 收集所有阶段的正式输出（用于 citation 和合并）
+            output_segments: List[Dict[str, Any]] = []
+            # 第一次输出：基于思考（没有工具调用）
+            if full_content.strip():
+                output_segments.append({
+                    'content': full_content.strip(),
+                    'source': 'thinking',  # 基于思考
+                    'iteration': 0,
+                    'citation_ref': '[1]',  # citation 引用标记
+                })
+            
+            # 对于生图模型，限制历史消息数量（只保留 system + 最近1条历史 + 当前消息）
+            if is_image_generation_model and len(current_messages) > 3:
+                # 保留 system 消息和最后2条消息（1条历史 + 当前用户消息）
+                system_msg = current_messages[0] if current_messages and current_messages[0].get('role') == 'system' else None
+                if system_msg:
+                    # 如果有多个 system 消息（包括摘要），保留所有 system 消息
+                    system_msgs = [m for m in current_messages if m.get('role') == 'system']
+                    non_system_msgs = [m for m in current_messages if m.get('role') != 'system']
+                    # 只保留最后2条非 system 消息
+                    current_messages = system_msgs + non_system_msgs[-2:]
+                    print(f"[AgentActor:{self.agent_id}] React: Limited messages for image generation model to {len(current_messages)} messages")
+            
+            while react_iteration < max_react_iterations:
+                # 检测工具调用请求（格式：mcp.服务器名.工具名() 或 {"tool_code": "mcp.xxx.xxx()"}）
+                tool_calls_detected = self._detect_tool_calls_in_content(current_content)
+                
+                if not tool_calls_detected:
+                    # 没有工具调用，结束迭代
+                    # 如果 current_content 是新的输出（不是第一次的 full_content），需要添加
+                    if current_content.strip() and current_content.strip() != full_content.strip():
+                        # 这是最后一次迭代的输出，基于之前的 MCP 结果（如果有）
+                        # 检查是否有之前的工具调用
+                        prev_tools = []
+                        if react_iteration > 0:
+                            # 从 process_steps 中查找本次迭代之前的 MCP 调用
+                            for ps in process_steps:
+                                if ps.get('type') == 'mcp_call' and ps.get('status') == 'completed':
+                                    mcp_server = ps.get('mcpServer', '')
+                                    tool_name = ps.get('toolName', '')
+                                    if mcp_server and tool_name:
+                                        prev_tools.append(f"{mcp_server}.{tool_name}")
+                        
+                        if prev_tools:
+                            # 基于之前的 MCP 结果
+                            output_segments.append({
+                                'content': current_content.strip(),
+                                'source': 'mcp_result',
+                                'iteration': react_iteration,
+                                'citation_ref': f'[{len(output_segments) + 1}]',
+                                'mcp_tools': prev_tools,
+                            })
+                        else:
+                            # 没有 MCP 结果，基于思考
+                            output_segments.append({
+                                'content': current_content.strip(),
+                                'source': 'thinking',
+                                'iteration': react_iteration,
+                                'citation_ref': f'[{len(output_segments) + 1}]',
+                            })
+                    break
+                
+                react_iteration += 1
+                print(f"[AgentActor:{self.agent_id}] React iteration {react_iteration}: Detected {len(tool_calls_detected)} tool calls")
+                
+                # 通知前端：React 迭代开始
+                get_topic_service()._publish_event(topic_id, 'agent_thinking', {
+                    'agent_id': self.agent_id,
+                    'agent_name': self.info.get('name', 'Agent'),
+                    'agent_avatar': self.info.get('avatar'),
+                    'status': 'react_iteration',
+                    'message_id': reply_message_id,
+                    'processSteps': process_steps,
+                    'in_reply_to': in_reply_to,
+                    'react_iteration': react_iteration,
+                })
+                
+                # 执行检测到的工具调用
+                tool_results = []
+                for tool_call in tool_calls_detected:
+                    mcp_server_name = tool_call.get('server_name')
+                    tool_name = tool_call.get('tool_name')
+                    
+                    # 通过服务器名称查找服务器 ID
+                    mcp_server_id = self._find_mcp_server_id_by_name(mcp_server_name)
+                    if not mcp_server_id:
+                        tool_results.append({
+                            'server_name': mcp_server_name,
+                            'tool_name': tool_name,
+                            'error': f'未找到 MCP 服务器: {mcp_server_name}'
+                        })
+                        continue
+                    
+                    # 执行 MCP 工具（React 迭代中直接调用，不使用 LLM 决策）
+                    try:
+                        step_start = time.time()
+                        
+                        # 记录到 processSteps（开始状态）
+                        step = {
+                            'type': 'mcp_call',
+                            'timestamp': int(step_start * 1000),
+                            'mcpServer': mcp_server_name,
+                            'mcpServerId': mcp_server_id,
+                            'toolName': tool_name,
+                            'arguments': {'input': user_content},
+                            'status': 'running',
+                        }
+                        process_steps.append(step)
+                        
+                        # 通知前端：MCP 调用开始
+                        get_topic_service()._publish_event(topic_id, 'mcp_call_start', {
+                            'agent_id': self.agent_id,
+                            'agent_name': self.info.get('name', 'Agent'),
+                            'agent_avatar': self.info.get('avatar'),
+                            'mcp_server_id': mcp_server_id,
+                            'mcp_server_name': mcp_server_name,
+                            'step': step,
+                            'processSteps': process_steps,
+                            'in_reply_to': in_reply_to,
+                            'timestamp': time.time(),
+                        })
+                        
+                        # 尝试从历史消息中提取 MCP session_id（用于复用session）
+                        existing_session_id = None
+                        try:
+                            topic_state = self._topic_state.get(topic_id, {})
+                            history = topic_state.get('history', [])
+                            # 从最近的几条消息中查找 MCP session_id
+                            for msg in reversed(history[-10:]):  # 只检查最近10条
+                                if not isinstance(msg, dict):
+                                    continue
+                                ext = msg.get('ext') or {}
+                                process_steps_in_msg = ext.get('processSteps') or []
+                                for ps in process_steps_in_msg:
+                                    if ps.get('type') == 'mcp_call' and ps.get('mcpServerId') == mcp_server_id:
+                                        # 尝试从 result 中提取 session_id
+                                        result_data = ps.get('result') or {}
+                                        raw_result = result_data.get('raw_result') or result_data.get('raw_result_compact') or {}
+                                        session_id = raw_result.get('session_id')
+                                        if session_id:
+                                            existing_session_id = session_id
+                                            print(f"[AgentActor] React: 从历史消息中找到 MCP session_id: {session_id[:16]}... for server {mcp_server_id}")
+                                            break
+                                if existing_session_id:
+                                    break
+                        except Exception as e:
+                            print(f"[AgentActor] React: Warning: Failed to extract session_id from history: {e}")
+                        
+                        # 直接调用 MCP 工具（React 迭代中已知工具名，使用简化调用）
+                        # 注意：这里仍然使用 execute_mcp_with_llm，但通过特殊输入让 LLM 快速决策
+                        from services.mcp_execution_service import execute_mcp_with_llm
+                        result = execute_mcp_with_llm(
+                            mcp_server_id=mcp_server_id,
+                            input_text=f"直接调用工具 {tool_name}，参数: {json.dumps({'input': user_content}, ensure_ascii=False)}",
+                            llm_config_id=config_id,
+                            max_iterations=1,  # 只执行一次，避免多轮迭代
+                            topic_id=topic_id,
+                            existing_session_id=existing_session_id,
+                        )
+                        step_duration = int((time.time() - step_start) * 1000)
+                        
+                        # 更新步骤状态
+                        step['status'] = 'completed' if not result.get('error') else 'error'
+                        step['duration'] = step_duration
+                        
+                        # 提取完整的工具结果（优先使用 tool_text，它包含实际内容）
+                        tool_text = result.get('tool_text') or ''
+                        raw_result = result.get('raw_result') or {}
+                        
+                        # 如果 tool_text 为空，尝试从 raw_result 中提取
+                        if not tool_text and raw_result:
+                            results_list = raw_result.get('results', [])
+                            if isinstance(results_list, list) and results_list:
+                                # 查找对应工具的结果
+                                for r in results_list:
+                                    if r.get('tool') == tool_name:
+                                        tool_resp = r.get('result', {})
+                                        if isinstance(tool_resp, dict):
+                                            content = tool_resp.get('result', {}).get('content', [])
+                                            if isinstance(content, list):
+                                                texts = []
+                                                for item in content:
+                                                    if isinstance(item, dict) and item.get('type') == 'text':
+                                                        texts.append(str(item.get('text', '')))
+                                                if texts:
+                                                    tool_text = '\n'.join(texts)
+                                        elif isinstance(tool_resp, str):
+                                            tool_text = tool_resp
+                                        break
+                        
+                        # 如果还是没有，使用 summary 作为后备
+                        if not tool_text:
+                            tool_text = result.get('summary', '执行完成')
+                        
+                        step['result'] = {
+                            'summary': result.get('summary'),
+                            'tool_text': tool_text,
+                            'raw_result_compact': result.get('raw_result_compact'),
+                        }
+                        
+                        if result.get('error'):
+                            step['error'] = result.get('error')
+                        
+                        # 通知前端：MCP 调用完成
+                        get_topic_service()._publish_event(topic_id, 'mcp_call_done', {
+                            'agent_id': self.agent_id,
+                            'agent_name': self.info.get('name', 'Agent'),
+                            'agent_avatar': self.info.get('avatar'),
+                            'mcp_server_id': mcp_server_id,
+                            'mcp_server_name': mcp_server_name,
+                            'step': step,
+                            'processSteps': process_steps,
+                            'in_reply_to': in_reply_to,
+                            'timestamp': time.time(),
+                        })
+                        
+                        tool_results.append({
+                            'server_name': mcp_server_name,
+                            'tool_name': tool_name,
+                            'result': tool_text,  # 使用完整的 tool_text，而不是 summary
+                            'raw_result': result.get('raw_result_compact'),
+                            'full_result': result  # 保留完整结果供后续使用
+                        })
+                    except Exception as e:
+                        print(f"[AgentActor:{self.agent_id}] React tool execution failed: {e}")
+                        tool_results.append({
+                            'server_name': mcp_server_name,
+                            'tool_name': tool_name,
+                            'error': str(e)
+                        })
+                
+                # 将工具结果添加到消息上下文（使用完整的工具返回内容）
+                tool_results_text = "\n\n=== 工具执行结果（完整内容）===\n"
+                for tr in tool_results:
+                    if tr.get('error'):
+                        tool_results_text += f"❌ {tr['server_name']}.{tr['tool_name']}: {tr['error']}\n\n"
+                    else:
+                        # 使用完整的 result（tool_text），而不是简短的 summary
+                        result_content = tr.get('result', '')
+                        if result_content:
+                            tool_results_text += f"✅ {tr['server_name']}.{tr['tool_name']} 执行结果：\n{result_content}\n\n"
+                        else:
+                            # 如果 result 为空，尝试从 full_result 中提取
+                            full_result = tr.get('full_result', {})
+                            tool_text = full_result.get('tool_text') or full_result.get('summary', '执行完成')
+                            tool_results_text += f"✅ {tr['server_name']}.{tr['tool_name']} 执行结果：\n{tool_text}\n\n"
+                
+                # 添加工具结果到消息列表
+                current_messages.append({
+                    'role': 'assistant',
+                    'content': current_content
+                })
+                current_messages.append({
+                    'role': 'user',
+                    'content': (
+                        f"{tool_results_text}\n"
+                        "【重要提示】\n"
+                        "上述是工具执行的完整结果，请仔细阅读所有信息，不要遗漏任何细节。\n"
+                        "基于上述工具执行结果，继续完成用户请求。\n"
+                        "不要再次调用工具，直接给出最终答案。"
+                    )
+                })
+                
+                # 再次调用 LLM 生成最终回复
+                print(f"[AgentActor:{self.agent_id}] React: Calling LLM again with tool results...")
+                react_llm_start = time.time()
+                current_content = ""
+                
+                # 记录 React LLM 调用步骤
+                react_thinking_index = len(process_steps)
+                process_steps.append({
+                    'type': 'llm_generating',
+                    'timestamp': int(react_llm_start * 1000),
+                    'thinking': f'React 迭代 {react_iteration}: 基于工具结果生成最终回复...',
+                    'llm_provider': provider,
+                    'llm_model': model,
+                    'status': 'running'
+                })
+                
+                # 通知前端：React LLM 开始生成
+                get_topic_service()._publish_event(topic_id, 'agent_thinking', {
+                    'agent_id': self.agent_id,
+                    'agent_name': self.info.get('name', 'Agent'),
+                    'agent_avatar': self.info.get('avatar'),
+                    'status': 'generating',
+                    'message_id': reply_message_id,
+                    'processSteps': process_steps,
+                    'in_reply_to': in_reply_to,
+                })
+                
+                for chunk in self._stream_llm_call(provider, api_key, api_url, model, current_messages):
+                    current_content += chunk
+                    # 发送流式更新
+                    get_topic_service()._publish_event(topic_id, 'agent_stream_chunk', {
+                        'agent_id': self.agent_id,
+                        'agent_name': self.info.get('name', 'Agent'),
+                        'agent_avatar': self.info.get('avatar'),
+                        'message_id': reply_message_id,
+                        'chunk': chunk,
+                        'accumulated': current_content,
+                        'processSteps': process_steps
+                    })
+                
+                react_llm_end = time.time()
+                process_steps[react_thinking_index]['status'] = 'completed'
+                process_steps[react_thinking_index]['duration'] = int((react_llm_end - react_llm_start) * 1000)
+                process_steps[react_thinking_index]['thinking'] = f'React 迭代 {react_iteration}: 生成完成'
+                
+                # 收集本次 React 迭代的输出（基于 MCP 结果）
+                if current_content.strip():
+                    # 获取本次迭代使用的工具名称列表
+                    used_tool_names = [tr.get('server_name', '') + '.' + tr.get('tool_name', '') for tr in tool_results if not tr.get('error')]
+                    output_segments.append({
+                        'content': current_content.strip(),
+                        'source': 'mcp_result',  # 基于 MCP 结果
+                        'iteration': react_iteration,
+                        'citation_ref': f'[{len(output_segments) + 1}]',
+                        'mcp_tools': used_tool_names,
+                    })
+                
+                # 通知前端：React LLM 生成完成
+                get_topic_service()._publish_event(topic_id, 'agent_stream_chunk', {
+                    'agent_id': self.agent_id,
+                    'agent_name': self.info.get('name', 'Agent'),
+                    'agent_avatar': self.info.get('avatar'),
+                    'message_id': reply_message_id,
+                    'chunk': '',  # 空 chunk 表示完成
+                    'accumulated': current_content,
+                    'processSteps': process_steps,
+                    'react_complete': True,
+                })
+            
+            # ============ 合并所有输出段，添加 citation ============
+            # 如果有多个输出段，需要合并并添加 citation
+            if len(output_segments) > 1:
+                merged_parts = []
+                citations = []
+                
+                for idx, seg in enumerate(output_segments):
+                    content = seg['content']
+                    source = seg['source']
+                    citation_ref = seg['citation_ref']
+                    iteration = seg.get('iteration', 0)
+                    
+                    # 在内容末尾添加 citation 标记
+                    if source == 'thinking':
+                        citation_text = f"{citation_ref} 基于思考过程"
+                    elif source == 'mcp_result':
+                        mcp_tools = seg.get('mcp_tools', [])
+                        if mcp_tools:
+                            tools_str = ', '.join(mcp_tools[:3])  # 最多显示3个工具
+                            if len(mcp_tools) > 3:
+                                tools_str += f" 等{len(mcp_tools)}个工具"
+                            citation_text = f"{citation_ref} 基于MCP工具结果（{tools_str}）"
+                        else:
+                            citation_text = f"{citation_ref} 基于MCP工具结果"
+                    else:
+                        citation_text = citation_ref
+                    
+                    # 添加 citation 标记到内容末尾（如果内容不为空）
+                    if content.strip():
+                        # 检查内容末尾是否已有 citation（避免重复）
+                        if not content.rstrip().endswith(citation_ref):
+                            content_with_citation = f"{content}\n\n*{citation_text}*"
+                        else:
+                            content_with_citation = content
+                        
+                        merged_parts.append(content_with_citation)
+                        
+                        # 记录 citation 信息
+                        citations.append({
+                            'ref': citation_ref,
+                            'text': citation_text,
+                            'source': source,
+                            'iteration': iteration,
+                        })
+                
+                # 合并所有部分，用分隔符连接
+                full_content = "\n\n---\n\n".join(merged_parts)
+                
+                # 如果有多个输出段，在末尾添加完整的引用列表
+                if len(citations) > 1:
+                    citations_block = "\n\n**引用说明：**\n"
+                    for cit in citations:
+                        citations_block += f"- {cit['ref']}: {cit['text']}\n"
+                    full_content += citations_block
+                
+                print(f"[AgentActor:{self.agent_id}] 合并了 {len(output_segments)} 个输出段，添加了 citation")
+            elif len(output_segments) == 1:
+                # 只有一个输出段，直接使用（不添加 citation）
+                full_content = output_segments[0]['content']
+            else:
+                # 没有输出段（理论上不应该发生），使用原始的 full_content
+                pass
+            
+            # 构建扩展数据，包含执行轨迹和输出段信息
             ext_data = {
                 'processSteps': process_steps,
                 'llmInfo': {
                     'provider': provider,
                     'model': model,
                     'configId': config_id
-                }
+                },
+                'outputSegments': output_segments,  # 保存所有输出段信息（供前端使用）
             }
             if used_tools:
                 ext_data['usedTools'] = used_tools
@@ -1506,6 +1953,28 @@ class AgentActor:
         # 只取最近 N 条，但保持顺序
         tail = history[-max_history_messages:] if max_history_messages > 0 else []
         hist_msgs: List[dict] = []
+        
+        # 为了获取历史消息的 media，需要从数据库重新加载（因为 history 中只保存了轻量结构）
+        # 但为了性能，只加载最近几条需要 media 的消息
+        history_with_media: Dict[str, dict] = {}
+        try:
+            # 只加载最近 10 条消息的完整信息（包含 media）
+            recent_msg_ids = [m.get("message_id") for m in tail[-10:] if m.get("message_id")]
+            if recent_msg_ids:
+                svc = get_message_service()
+                for msg_id in recent_msg_ids:
+                    try:
+                        full_msg = svc.get_message(msg_id)
+                        if full_msg and isinstance(full_msg, dict):
+                            ext = full_msg.get('ext') or {}
+                            media = ext.get('media')
+                            if media and isinstance(media, list) and media:
+                                history_with_media[msg_id] = {'media': media}
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        
         for m in tail:
             if not isinstance(m, dict):
                 continue
@@ -1517,17 +1986,25 @@ class AgentActor:
             if role not in ("user", "assistant"):
                 continue
             content = _clean_text(m.get("content") or "")
-            if not content:
+            # 注意：即使 content 为空，如果有 media，也要包含这条消息
+            if not content and not history_with_media.get(mid):
                 continue
             if len(content) > max_per_message_chars:
                 content = content[:max_per_message_chars] + "…"
-            hist_msgs.append({"role": role, "content": content})
+            
+            msg_dict = {"role": role, "content": content}
+            # 添加媒体内容（如果存在）
+            if mid in history_with_media:
+                msg_dict["media"] = history_with_media[mid]["media"]
+                print(f"[AgentActor] History message {mid} has {len(history_with_media[mid]['media'])} media items")
+            hist_msgs.append(msg_dict)
 
         # 3) current user
         current = {"role": "user", "content": _clean_text(user_message.get("content") or "")}
         if user_message.get("media"):
             # 多模态：仍传给 provider，让 Gemini/Claude 等能接收图片输入
             current["media"] = user_message.get("media")
+            print(f"[AgentActor] Current user message has {len(user_message.get('media', []))} media items")
         if current["content"] or current.get("media"):
             hist_msgs.append(current)
 
@@ -1707,6 +2184,161 @@ class AgentActor:
             return text
         # 匹配 ![alt](data:image/xxx;base64,....)
         cleaned = re.sub(r"!\[[^\]]*\]\(data:image\/[^)]+\)", "", text)
+        return cleaned
+    
+    def _detect_tool_calls_in_content(self, content: str) -> List[Dict[str, str]]:
+        """
+        检测内容中的工具调用请求
+        
+        支持的格式：
+        1. mcp.服务器名.工具名()
+        2. {"tool_code": "mcp.服务器名.工具名()"}
+        3. tool_code: "mcp.服务器名.工具名()"
+        
+        Returns:
+            工具调用列表，每个元素包含 server_name 和 tool_name
+        """
+        if not content or not isinstance(content, str):
+            return []
+        
+        tool_calls = []
+        
+        # 模式1: mcp.服务器名.工具名()
+        pattern1 = r'mcp\.([^.]+)\.([^(]+)\('
+        matches1 = re.finditer(pattern1, content)
+        for match in matches1:
+            server_name = match.group(1).strip()
+            tool_name = match.group(2).strip()
+            if server_name and tool_name:
+                tool_calls.append({
+                    'server_name': server_name,
+                    'tool_name': tool_name
+                })
+        
+        # 模式2: JSON 格式 {"tool_code": "mcp.xxx.xxx()"}
+        try:
+            # 尝试提取 JSON 代码块
+            json_pattern = r'\{[^{}]*"tool_code"[^{}]*\}'
+            json_matches = re.finditer(json_pattern, content)
+            for json_match in json_matches:
+                try:
+                    json_obj = json.loads(json_match.group())
+                    tool_code = json_obj.get('tool_code', '')
+                    if tool_code:
+                        # 从 tool_code 中提取
+                        m = re.search(r'mcp\.([^.]+)\.([^(]+)\(', tool_code)
+                        if m:
+                            tool_calls.append({
+                                'server_name': m.group(1).strip(),
+                                'tool_name': m.group(2).strip()
+                            })
+                except json.JSONDecodeError:
+                    continue
+        except Exception:
+            pass
+        
+        # 去重（基于 server_name + tool_name）
+        seen = set()
+        unique_calls = []
+        for tc in tool_calls:
+            key = (tc['server_name'], tc['tool_name'])
+            if key not in seen:
+                seen.add(key)
+                unique_calls.append(tc)
+        
+        return unique_calls
+    
+    def _execute_mcp_tool_directly(
+        self,
+        mcp_server_id: str,
+        tool_name: str,
+        tool_args: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        直接调用 MCP 工具（React 迭代中使用，不通过 LLM 决策，更快）
+        
+        Args:
+            mcp_server_id: MCP 服务器 ID
+            tool_name: 工具名称
+            tool_args: 工具参数
+            
+        Returns:
+            执行结果，格式与 execute_mcp_with_llm 兼容
+        """
+        try:
+            # 复用 execute_mcp_with_llm，但设置 max_iterations=1 并传入已知工具名
+            # 实际上，我们可以创建一个简化版本，直接调用工具
+            # 但为了复用现有逻辑（session 管理、代理等），暂时使用 execute_mcp_with_llm
+            # 但传入一个特殊的提示，让 LLM 直接调用指定工具
+            
+            from services.mcp_execution_service import execute_mcp_with_llm
+            
+            # 构造一个明确的输入，让 LLM 直接调用指定工具（避免决策时间）
+            direct_input = f"[React迭代] 直接调用工具 {tool_name}，参数: {json.dumps(tool_args, ensure_ascii=False)}"
+            
+            # 使用 max_iterations=1 避免多轮迭代
+            result = execute_mcp_with_llm(
+                mcp_server_id=mcp_server_id,
+                input_text=direct_input,
+                llm_config_id=None,  # React 迭代中不需要 LLM 配置
+                max_iterations=1,
+            )
+            
+            # 如果结果中没有找到指定工具的结果，尝试从 raw_result 中提取
+            if result.get('error'):
+                return result
+            
+            # 检查结果中是否包含我们调用的工具
+            raw_result = result.get('raw_result') or {}
+            tool_calls = raw_result.get('tool_calls', [])
+            
+            # 查找指定工具的结果
+            for tc in tool_calls:
+                if tc.get('name') == tool_name:
+                    # 找到了，返回结果
+                    return result
+            
+            # 如果没找到，但也没有错误，说明可能工具名不匹配，返回原结果
+            return result
+                    
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return {"error": str(e)}
+    
+    def _find_mcp_server_id_by_name(self, server_name: str) -> Optional[str]:
+        """
+        通过服务器名称查找服务器 ID
+        
+        Args:
+            server_name: MCP 服务器名称
+            
+        Returns:
+            服务器 ID，如果未找到则返回 None
+        """
+        if not server_name:
+            return None
+        
+        try:
+            from models.mcp_server import MCPServerRepository
+            mcp_repo = MCPServerRepository(get_mysql_connection)
+            
+            # 尝试精确匹配名称
+            servers = mcp_repo.find_all()
+            for server in servers:
+                if server.name == server_name or server.name.lower() == server_name.lower():
+                    return server.server_id
+            
+            # 如果精确匹配失败，尝试模糊匹配（包含关系）
+            for server in servers:
+                if server_name.lower() in server.name.lower() or server.name.lower() in server_name.lower():
+                    return server.server_id
+            
+            print(f"[AgentActor] Warning: MCP server not found by name: {server_name}")
+            return None
+        except Exception as e:
+            print(f"[AgentActor] Error finding MCP server by name: {e}")
+            return None
         # 连续空行收敛
         cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
         return cleaned
@@ -1820,10 +2452,18 @@ class AgentActor:
                     except json.JSONDecodeError:
                         continue
 
-    def _convert_messages_to_gemini_contents(self, messages: List[dict]) -> tuple:
-        """转换消息格式为 Gemini 格式（支持多模态）"""
+    def _convert_messages_to_gemini_contents(self, messages: List[dict], model: str = '') -> tuple:
+        """转换消息格式为 Gemini 格式（支持多模态）
+        
+        Args:
+            messages: 消息列表
+            model: 模型名称（用于检测是否需要 thoughtSignature）
+        """
         contents = []
         system_instruction = None
+        
+        # 检测是否是 Gemini 2.5+ 模型（需要 thoughtSignature）
+        is_gemini_25_plus = '2.5' in model or '3' in model
         
         for m in messages:
             if m['role'] == 'system':
@@ -1833,8 +2473,9 @@ class AgentActor:
                 parts = []
                 
                 # 添加文本部分（如果有内容）
-                if m.get('content'):
-                    parts.append({'text': m['content']})
+                content_text = m.get('content', '').strip()
+                if content_text:
+                    parts.append({'text': content_text})
                 
                 # 添加媒体部分（如果存在）
                 media_list = m.get('media', [])
@@ -1859,15 +2500,36 @@ class AgentActor:
                             media_data = media_data.strip().replace('\n', '').replace('\r', '').replace(' ', '')
                         
                         if media_data and mime_type:
-                            parts.append({
+                            inline_data_part = {
                                 'inlineData': {
                                     'mimeType': mime_type,
                                     'data': media_data
                                 }
-                            })
+                            }
+                            
+                            # Gemini 2.5+ 需要 thoughtSignature
+                            # 根据错误信息，所有图片 part 都需要 thoughtSignature（即使是用户上传的）
+                            if is_gemini_25_plus:
+                                # 尝试从 media_item 中获取 thoughtSignature（如果之前保存过）
+                                thought_sig = media_item.get('thoughtSignature') or media_item.get('thought_signature')
+                                if thought_sig:
+                                    inline_data_part['thoughtSignature'] = thought_sig
+                                else:
+                                    # 如果没有保存的 thoughtSignature，对于用户上传的图片，使用空字符串
+                                    # 对于模型响应的图片，也应该有 thoughtSignature，如果没有则使用空字符串
+                                    # 根据 API 错误，必须提供 thoughtSignature 字段
+                                    inline_data_part['thoughtSignature'] = ''
+                                    print(f"[AgentActor] Warning: No thoughtSignature found for media, using empty string (role: {role})")
+                            
+                            parts.append(inline_data_part)
+                            print(f"[AgentActor] Added media to Gemini message: {mime_type}, data length: {len(media_data)}, role: {role}")
                 
+                # 重要：即使只有 media 没有 text，也要包含这条消息
                 if parts:
                     contents.append({'role': role, 'parts': parts})
+                elif media_list:
+                    # 如果只有 media 但没有成功添加到 parts，记录警告
+                    print(f"[AgentActor] Warning: Media list exists but failed to add to parts: {media_list}")
         
         return contents, system_instruction
 
@@ -1924,7 +2586,24 @@ class AgentActor:
                                 import base64
                                 try:
                                     image_bytes = base64.b64decode(media_data)
-                                    parts.append(types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
+                                    # 对于 Gemini 2.5+，图片 part 需要 thoughtSignature
+                                    is_gemini_25_plus = '2.5' in model or '3' in model
+                                    if is_gemini_25_plus:
+                                        # 尝试获取 thoughtSignature
+                                        thought_sig = media_item.get('thoughtSignature') or media_item.get('thought_signature') or ''
+                                        # SDK 方式：使用 from_bytes_with_signature（如果 SDK 支持）
+                                        # 否则使用普通方式，thoughtSignature 会在响应中返回
+                                        try:
+                                            # 尝试使用带签名的 API（如果 SDK 支持）
+                                            part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+                                            # 如果 SDK 支持设置 thoughtSignature，在这里设置
+                                            # 注意：SDK 可能不支持直接设置，需要在响应中获取并保存
+                                            parts.append(part)
+                                        except Exception:
+                                            # 回退到普通方式
+                                            parts.append(types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
+                                    else:
+                                        parts.append(types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
                                     print(f"[AgentActor] Added image part: {mime_type}, {len(image_bytes)} bytes")
                                 except Exception as e:
                                     print(f"[AgentActor] Failed to decode image: {e}")
@@ -1968,6 +2647,12 @@ class AgentActor:
                                 mime_type = part.inline_data.mime_type or 'image/png'
                                 print(f"[AgentActor] Received image in response: {mime_type}")
                                 
+                                # 提取 thoughtSignature（如果存在）
+                                thought_sig = None
+                                if hasattr(part, 'thought_signature') and part.thought_signature:
+                                    thought_sig = part.thought_signature
+                                    print(f"[AgentActor] Found thoughtSignature in SDK response: {thought_sig[:50]}...")
+                                
                                 # 将图片保存到媒体列表（用于 ext.media）
                                 try:
                                     image_data = part.inline_data.data
@@ -1978,11 +2663,15 @@ class AgentActor:
                                         image_base64 = image_data
                                     
                                     # 同步写入媒体列表（用于 ext.media，供媒体库/前端稳定渲染）
-                                    media_items.append({
+                                    media_item = {
                                         'type': 'image',
                                         'mimeType': mime_type,
                                         'data': image_base64
-                                    })
+                                    }
+                                    # 保存 thoughtSignature（如果存在），供后续请求使用
+                                    if thought_sig:
+                                        media_item['thoughtSignature'] = thought_sig
+                                    media_items.append(media_item)
                                     print(f"[AgentActor] Image captured for ext.media ({len(image_base64)} chars)")
                                 except Exception as img_err:
                                     print(f"[AgentActor] Failed to encode image: {img_err}")
@@ -2016,7 +2705,7 @@ class AgentActor:
             url += f"?key={api_key}" if '?' not in url else f"&key={api_key}"
         
         # 转换消息格式
-        contents, system_instruction = self._convert_messages_to_gemini_contents(messages)
+        contents, system_instruction = self._convert_messages_to_gemini_contents(messages, model=model)
         
         # 构建请求负载
         payload = {'contents': contents}
@@ -2058,13 +2747,19 @@ class AgentActor:
                 elif 'inlineData' in part:
                     mime_type = part['inlineData'].get('mimeType', 'image/png')
                     image_base64 = part['inlineData'].get('data', '')
+                    thought_sig = part.get('thoughtSignature')  # 提取 thoughtSignature
                     
                     if image_base64:
-                        media_items.append({
+                        media_item = {
                             'type': 'image',
                             'mimeType': mime_type,
                             'data': image_base64
-                        })
+                        }
+                        # 保存 thoughtSignature（如果存在），供后续请求使用
+                        if thought_sig:
+                            media_item['thoughtSignature'] = thought_sig
+                            print(f"[AgentActor] REST API: Image with thoughtSignature captured ({len(thought_sig)} chars)")
+                        media_items.append(media_item)
                         print(f"[AgentActor] REST API: Image captured for ext.media ({len(image_base64)} chars)")
                     else:
                         result_text += f"\n[图片生成失败: 数据为空]"
@@ -2101,7 +2796,17 @@ class AgentActor:
             url += f"?key={api_key}" if '?' not in url else f"&key={api_key}"
         
         # 转换消息格式（支持多模态）
-        contents, system_instruction = self._convert_messages_to_gemini_contents(messages)
+        print(f"[AgentActor] Converting {len(messages)} messages to Gemini format (model: {model})")
+        for i, m in enumerate(messages):
+            if m.get('media'):
+                print(f"[AgentActor] Message {i} ({m.get('role')}) has {len(m.get('media', []))} media items")
+        contents, system_instruction = self._convert_messages_to_gemini_contents(messages, model=model)
+        print(f"[AgentActor] Converted to {len(contents)} Gemini contents")
+        for i, c in enumerate(contents):
+            parts_count = len(c.get('parts', []))
+            media_parts = sum(1 for p in c.get('parts', []) if 'inlineData' in p)
+            text_parts = sum(1 for p in c.get('parts', []) if 'text' in p)
+            print(f"[AgentActor] Content {i} ({c.get('role')}): {parts_count} parts ({text_parts} text, {media_parts} media)")
         
         payload = {'contents': contents}
         if system_instruction:
@@ -2213,6 +2918,15 @@ class AgentActor:
                                 text = part.get('text', '')
                                 if text:
                                     yield text
+                                
+                                # 提取图片的 thoughtSignature（Gemini 2.5+）
+                                if 'inlineData' in part:
+                                    thought_sig = part.get('thoughtSignature')
+                                    if thought_sig:
+                                        # 保存 thoughtSignature 到 pending media（后续会写入 ext.media）
+                                        # 注意：这里需要将 thoughtSignature 与对应的图片关联
+                                        # 由于流式响应，我们暂时记录，在最终响应中处理
+                                        print(f"[AgentActor] Found thoughtSignature in image part: {thought_sig[:50]}...")
                     except json.JSONDecodeError:
                         continue
                     except RuntimeError:

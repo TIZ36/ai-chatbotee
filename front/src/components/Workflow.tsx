@@ -63,6 +63,7 @@ import {
 import { useFloatingComposerPadding } from './workflow/useFloatingComposerPadding';
 import { parseMCPContentBlocks, renderMCPBlocks, renderMCPMedia } from './workflow/mcpRender';
 import { MessageContent, Message, ProcessStep } from './workflow/MessageContent';
+import { ProcessStepsViewer } from './ui/ProcessStepsViewer';
 import { useChatInput } from './workflow/useChatInput';
 import { calculateCursorPosition } from './workflow/utils';
 import { TokenCounter } from './workflow/TokenCounter';
@@ -5539,56 +5540,14 @@ const Workflow: React.FC<WorkflowProps> = ({
                       ) : null}
                     </div>
                     
-                    {/* 执行轨迹（思维模块风格：虚线边框） */}
+                    {/* 执行轨迹（使用统一的 ProcessStepsViewer 组件） */}
                     {state.processSteps && state.processSteps.length > 0 && !isImmediateReply && (
-                      <div className="ml-3 pl-2 border-l-2 border-dashed border-gray-300 dark:border-[#505050] space-y-1">
-                        {state.processSteps.map((step: any, idx: number) => {
-                          // 重要步骤：MCP调用、工作流、决策结果
-                          const isImportant = ['mcp_call', 'workflow', 'agent_decision', 'agent_will_reply'].includes(step.type);
-                          const stepIcon = step.type === 'mcp_call' ? '🔧' :
-                                          step.type === 'thinking' ? '💭' :
-                                          step.type === 'workflow' ? '⚡' :
-                                          step.type === 'agent_decision' ? '✅' : '📝';
-                          const stepLabel = step.type === 'mcp_call' ? `MCP: ${step.mcpServer || ''}/${step.toolName || ''}` :
-                                           step.type === 'thinking' ? '思考' :
-                                           step.type === 'workflow' ? `工作流: ${step.workflowInfo?.name || ''}` :
-                                           step.type === 'agent_decision' ? `决策: ${step.action || ''}` : step.type;
-                          
-                          return (
-                            <div 
-                              key={idx} 
-                              className={`flex items-start gap-1.5 text-xs py-0.5 ${
-                                isImportant ? 'border-l-2 border-primary-400 dark:border-primary-500 pl-1.5 -ml-[2px]' : 'pl-1.5'
-                              }`}
-                            >
-                              <span>{stepIcon}</span>
-                              <div className="flex-1 min-w-0">
-                                <span className={`${isImportant ? 'font-semibold' : ''} text-gray-700 dark:text-[#c0c0c0]`}>
-                                  {stepLabel}
-                                </span>
-                                {step.status === 'running' && (
-                                  <Loader className="inline w-3 h-3 ml-1 text-blue-500 animate-spin" />
-                                )}
-                                {step.status === 'completed' && (
-                                  <CheckCircle className="inline w-3 h-3 ml-1 text-green-500" />
-                                )}
-                                {step.status === 'error' && (
-                                  <span className="text-red-500 ml-1">❌</span>
-                                )}
-                                {step.duration && (
-                                  <span className="text-gray-400 dark:text-[#606060] ml-1">
-                                    {step.duration < 1000 ? `${step.duration}ms` : `${(step.duration / 1000).toFixed(1)}s`}
-                                  </span>
-                                )}
-                                {step.thinking && (
-                                  <div className="text-gray-500 dark:text-[#909090] mt-0.5 line-clamp-2">
-                                    {step.thinking}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
+                      <div className="ml-3">
+                        <ProcessStepsViewer 
+                          processSteps={state.processSteps} 
+                          hideTitle
+                          defaultExpanded
+                        />
                       </div>
                     )}
                   </div>
