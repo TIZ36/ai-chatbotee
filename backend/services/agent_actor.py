@@ -724,12 +724,25 @@ class AgentActor:
             # 简化：对 agent 陈述默认沉默（后续可用 LLM 判定 like/oppose）
             return 'silent'
 
-        # user 的消息：只对"问题"更愿意回答；陈述默认沉默（更像圆桌）
+        # ========= 优化：减少 LLM 调用次数 =========
+        # 判断是否为单 Agent 场景（私聊或只有一个 Agent 的 topic）
+        topic_state = self._topic_state.get(topic_id, {})
+        participants = topic_state.get('participants') or []
+        agent_count = sum(1 for p in participants if p.get('participant_type') == 'agent')
+        
+        # 单 Agent 场景：直接回答用户问题，不需要 LLM 决策
+        if agent_count <= 1:
+            if self._is_question(content):
+                return 'reply'
+            # 用户的陈述也直接回复（单Agent模式下更友好）
+            return 'reply'
+        
+        # 多 Agent 场景：只有对问题进行决策，陈述默认沉默
         if self._is_question(content):
             # 问题：结合人设/参与者能力做意愿判定（可能委派给其他 agent 或 @human）
             return self._llm_intent_decision(topic_id, msg_data, default_action='reply', decision_steps=decision_steps)
-        # 陈述：结合人设做 like/oppose/silent 判定
-        return self._llm_intent_decision(topic_id, msg_data, default_action='silent', decision_steps=decision_steps)
+        # 陈述：默认沉默（避免不必要的 LLM 调用）
+        return 'silent'
 
     def _llm_intent_decision(self, topic_id: str, msg_data: dict, default_action: str = 'silent', decision_steps: List[dict] = None) -> str:
         """
@@ -929,12 +942,17 @@ class AgentActor:
                     "只有在你确实看到了工具执行结果后，才能在回答中引用工具输出；"
                     "如果工具执行失败，请直接说明失败原因，不要编造工具结果。"
                     "严禁提及或假装使用未在以上列表中的任何工具/MCP/Workflow/技能。"
+                    "\n【输出禁令】严禁输出以下无意义内容："
+                    "1) 禁止输出「好的，我来为您...」「让我帮你...」等过渡废话后接假代码块；"
+                    "2) 禁止输出 tool_code / print(mcp.xxx) / {\"tool_code\":...} 等伪工具调用；"
+                    "3) 工具已在后台自动执行，你只需基于【事实源】直接回答问题，不要复述工具调用过程。"
                 )
             else:
                 # 没有工具授权：严禁模型编造“我调用了工具”
                 system_prompt += (
                     "\n\n工具使用规则：你当前没有任何可用工具授权（包括 MCP/Workflow/技能）。"
-                    "严禁声称你调用了工具，严禁输出伪代码/伪调用（例如 tool_code / print(mcp.xxx)）。"
+                    "严禁声称你调用了工具，严禁输出伪代码/伪调用（例如 tool_code / print(mcp.xxx) / {\"tool_code\":...}）。"
+                    "严禁输出「好的，我来为您检查...」等过渡废话后接代码块——这对用户毫无意义。"
                     "如需工具，请提示用户通过 @ 选择/授权对应 MCP 或 Workflow。"
                 )
 
@@ -987,17 +1005,46 @@ class AgentActor:
                     # 本轮“高优先级事实源”：同一工具如果多次调用，后一次覆盖前一次
                     mcp_facts_by_key: Dict[str, str] = {}
 
+                    # 预先获取所有 MCP 服务器的名称映射
+                    mcp_server_names: Dict[str, str] = {}
+                    try:
+                        from models.mcp_server import MCPServerRepository
+                        mcp_repo = MCPServerRepository(get_mysql_connection)
+                        for s_id in mcp_server_ids[:3]:
+                            server = mcp_repo.find_by_id(s_id)
+                            if server:
+                                mcp_server_names[s_id] = server.name
+                            else:
+                                mcp_server_names[s_id] = s_id  # fallback
+                    except Exception as e:
+                        print(f"[AgentActor] Warning: Failed to get MCP server names: {e}")
+
                     for sid in mcp_server_ids[:3]:  # 避免一次触发太多服务器
                         step_start = time.time()
+                        mcp_server_name = mcp_server_names.get(sid, sid)
                         step: Dict[str, Any] = {
                             'type': 'mcp_call',
                             'timestamp': int(step_start * 1000),
-                            'mcpServer': sid,
+                            'mcpServer': mcp_server_name,  # 使用名称而非 ID
+                            'mcpServerId': sid,  # 保留 ID 以备后用
                             'toolName': 'auto',
                             'arguments': {'input': user_content},
                             'status': 'running',
                         }
                         process_steps.append(step)
+
+                        # ========= 优化：立即通知前端 MCP 调用开始 =========
+                        get_topic_service()._publish_event(topic_id, 'mcp_call_start', {
+                            'agent_id': self.agent_id,
+                            'agent_name': self.info.get('name', 'Agent'),
+                            'agent_avatar': self.info.get('avatar'),
+                            'mcp_server_id': sid,
+                            'mcp_server_name': mcp_server_name,
+                            'step': step,
+                            'processSteps': process_steps,
+                            'in_reply_to': in_reply_to,
+                            'timestamp': time.time(),
+                        })
 
                         result = execute_mcp_with_llm(
                             mcp_server_id=sid,
@@ -1021,18 +1068,34 @@ class AgentActor:
                             }
 
                             # 聚合“事实源”：按工具名覆盖（同轮后一次结果优先）
+                            # 同时更新 step 中的 toolName 为实际调用的工具名称
+                            raw = result.get('raw_result') or {}
+                            tcalls = raw.get('tool_calls') if isinstance(raw, dict) else None
+                            actual_tool_name = None
+                            if isinstance(tcalls, list) and tcalls:
+                                name0 = (tcalls[0] or {}).get('name')
+                                if name0:
+                                    actual_tool_name = name0
+                                    step['toolName'] = name0  # 更新为实际工具名称
+                            
                             if tool_text:
-                                raw = result.get('raw_result') or {}
-                                tcalls = raw.get('tool_calls') if isinstance(raw, dict) else None
                                 # 如果能取到工具名，用工具名做 key；否则用 server 做 key
-                                key = None
-                                if isinstance(tcalls, list) and tcalls:
-                                    name0 = (tcalls[0] or {}).get('name')
-                                    if name0:
-                                        key = f"{sid}:{name0}"
-                                if not key:
-                                    key = f"{sid}:tool"
+                                key = f"{sid}:{actual_tool_name}" if actual_tool_name else f"{sid}:tool"
                                 mcp_facts_by_key[key] = tool_text
+
+
+                        # ========= 优化：通知前端 MCP 调用完成 =========
+                        get_topic_service()._publish_event(topic_id, 'mcp_call_done', {
+                            'agent_id': self.agent_id,
+                            'agent_name': self.info.get('name', 'Agent'),
+                            'agent_avatar': self.info.get('avatar'),
+                            'mcp_server_id': sid,
+                            'mcp_server_name': mcp_server_name,
+                            'step': step,
+                            'processSteps': process_steps,
+                            'in_reply_to': in_reply_to,
+                            'timestamp': time.time(),
+                        })
 
                         # 把 MCP 结果摘要注入 system_prompt，让后续回答“确实使用了工具结果”
                         summary = result.get('summary')
@@ -1053,12 +1116,21 @@ class AgentActor:
                         facts_text = "\n\n".join([mcp_facts_by_key[k] for k in sorted(mcp_facts_by_key.keys()) if mcp_facts_by_key.get(k)])
                         if facts_text.strip():
                             system_prompt += (
-                                "\n\n=== MCP 工具输出（事实源，本轮最新，必须遵循）===\n"
+                                "\n\n"
+                                "【重要：工具已自动执行完毕，以下是执行结果】\n"
+                                "=== 工具执行结果（事实源，本轮最新）===\n"
                                 f"{facts_text.strip()}\n"
-                                "规则：\n"
-                                "1) 你必须以【事实源（本轮最新）】为准；如果它与历史对话/你之前的说法冲突，以本轮事实源为准并纠正。\n"
-                                "2) 不要输出伪代码/伪工具调用（例如 tool_code / print(mcp.xxx)），只用自然语言说明你已得到的工具结果。\n"
-                                "3) 如果事实源不足以回答，请明确缺失信息并建议下一步可调用的工具。"
+                                "\n"
+                                "【你的任务】：\n"
+                                "基于上述工具执行结果，直接用自然语言回答用户的问题。\n"
+                                "\n"
+                                "【严格禁止】：\n"
+                                "- 禁止输出任何代码块（JSON、tool_code、mcp.xxx 等）\n"
+                                "- 禁止说「我来为您调用/检查...」——工具已经执行完了\n"
+                                "- 禁止重复调用工具——直接使用上面的结果\n"
+                                "\n"
+                                "【正确做法】：\n"
+                                "直接告诉用户结果，例如：「根据查询结果，您的小红书已登录，账号是xxx」"
                             )
             except Exception as e:
                 # 不阻断正常回复
@@ -1105,11 +1177,14 @@ class AgentActor:
             # ============ “memory 属性”：拼接最近历史上下文 ============
             # ActorAgent 本地维护了 topic 历史（_topic_state[topic_id]['history']），但旧实现只发 system+当前消息给 LLM。
             # 这里把最近若干轮 user/assistant 消息一起发送，作为“带记忆的对话上下文”。
-            # 另外：如果历史累计接近上下文阈值，会在发送前自动触发摘要（成熟逻辑：保留摘要 + 最近窗口）。
-            try:
-                self._maybe_summarize_topic_history(topic_id=topic_id, llm_config_id=config_id)
-            except Exception as _sum_err:
-                print(f"[AgentActor:{self.agent_id}] ⚠️ summarize skipped: {_sum_err}")
+            # 注意：摘要生成移至后台异步执行，不阻塞当前回复
+            import threading
+            def _async_summarize():
+                try:
+                    self._maybe_summarize_topic_history(topic_id=topic_id, llm_config_id=config_id)
+                except Exception as _sum_err:
+                    print(f"[AgentActor:{self.agent_id}] ⚠️ async summarize failed: {_sum_err}")
+            threading.Thread(target=_async_summarize, daemon=True).start()
             messages = self._build_llm_messages_with_history(
                 topic_id=topic_id,
                 system_prompt=system_prompt,

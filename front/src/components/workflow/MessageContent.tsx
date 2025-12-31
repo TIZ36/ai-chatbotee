@@ -1079,8 +1079,13 @@ const ProcessStepsViewer: React.FC<{
     }
   };
   
+  // 判断是否为重要步骤（MCP调用、工作流、决策结果）
+  const isImportantStep = (type: string) => {
+    return ['mcp_call', 'workflow', 'agent_decision', 'agent_will_reply'].includes(type);
+  };
+
   return (
-    <div className="mt-2 border-t border-gray-200 dark:border-[#404040] pt-2">
+    <div className="mt-2 pt-2">
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-[#808080] hover:text-gray-700 dark:hover:text-[#a0a0a0] transition-colors"
@@ -1090,7 +1095,7 @@ const ProcessStepsViewer: React.FC<{
         ) : (
           <ChevronDown className="w-3.5 h-3.5" />
         )}
-        <span>执行轨迹 ({steps.length} 步)</span>
+        <span className="font-semibold">执行轨迹 ({steps.length} 步)</span>
         {ext?.llmInfo && (
           <span className="text-gray-400 dark:text-[#606060]">
             · {ext.llmInfo.provider}/{ext.llmInfo.model}
@@ -1099,65 +1104,70 @@ const ProcessStepsViewer: React.FC<{
       </button>
       
       {isExpanded && (
-        <div className="mt-2 space-y-1.5 pl-1">
-          {steps.map((step, idx) => (
-            <div
-              key={idx}
-              className="flex items-start gap-2 text-xs bg-gray-50 dark:bg-[#1e1e1e] rounded p-2 border border-gray-100 dark:border-[#363636]"
-            >
-              <div className="flex items-center gap-1 flex-shrink-0 mt-0.5">
-                {getTypeIcon(step.type)}
-                {getStatusIcon(step.status)}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-gray-700 dark:text-[#d0d0d0]">
-                    {getTypeLabel(step.type, step)}
-                  </span>
-                  {step.duration && (
-                    <span className="text-gray-400 dark:text-[#606060]">
-                      {formatDuration(step.duration)}
-                    </span>
-                  )}
+        <div className="mt-2 pl-2 border-l-2 border-dashed border-gray-300 dark:border-[#505050] space-y-2">
+          {steps.map((step, idx) => {
+            const important = isImportantStep(step.type);
+            return (
+              <div
+                key={idx}
+                className={`flex items-start gap-2 text-xs pl-2 py-1 ${
+                  important ? 'border-l-2 border-primary-400 dark:border-primary-500 -ml-[2px]' : ''
+                }`}
+              >
+                <div className="flex items-center gap-1 flex-shrink-0 mt-0.5">
+                  {getTypeIcon(step.type)}
+                  {getStatusIcon(step.status)}
                 </div>
-                {step.thinking && (
-                  <div className={`mt-0.5 ${step.status === 'error' ? 'text-red-500 dark:text-red-400' : 'text-gray-600 dark:text-[#a0a0a0]'}`}>
-                    {step.thinking}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className={`${important ? 'font-semibold' : 'font-medium'} text-gray-700 dark:text-[#d0d0d0]`}>
+                      {getTypeLabel(step.type, step)}
+                    </span>
+                    {step.duration && (
+                      <span className="text-gray-400 dark:text-[#606060]">
+                        {formatDuration(step.duration)}
+                      </span>
+                    )}
                   </div>
-                )}
-                {step.error && (
-                  <div className="text-red-500 dark:text-red-400 mt-0.5 font-medium">
-                    ❌ 错误: {step.error}
-                  </div>
-                )}
-                {step.type === 'mcp_call' && step.arguments && (
-                  <details className="mt-1">
-                    <summary className="text-gray-400 cursor-pointer hover:text-gray-600 dark:hover:text-[#a0a0a0]">
-                      查看参数
-                    </summary>
-                    <pre className="mt-1 text-[9px] bg-white dark:bg-[#2d2d2d] p-2 rounded overflow-auto max-h-24 leading-snug">
-                      {truncateBase64Strings(JSON.stringify(step.arguments, null, 2))}
-                    </pre>
-                  </details>
-                )}
-                {step.type === 'mcp_call' && step.result && (
-                  <div className="mt-1">
-                    <div className="text-[10px] text-gray-500 dark:text-[#808080]">
-                      结果：{getMcpResultSummary(step)}
+                  {step.thinking && (
+                    <div className={`mt-0.5 ${step.status === 'error' ? 'text-red-500 dark:text-red-400' : 'text-gray-600 dark:text-[#a0a0a0]'}`}>
+                      {step.thinking}
                     </div>
+                  )}
+                  {step.error && (
+                    <div className="text-red-500 dark:text-red-400 mt-0.5 font-semibold">
+                      ❌ 错误: {step.error}
+                    </div>
+                  )}
+                  {step.type === 'mcp_call' && step.arguments && (
                     <details className="mt-1">
                       <summary className="text-gray-400 cursor-pointer hover:text-gray-600 dark:hover:text-[#a0a0a0]">
-                        查看原始结果
+                        查看参数
                       </summary>
-                      <pre className="mt-1 text-[9px] bg-white dark:bg-[#2d2d2d] p-2 rounded overflow-auto max-h-24 leading-snug">
-                        {truncateBase64Strings(JSON.stringify(step.result, null, 2))}
+                      <pre className="mt-1 text-[9px] bg-gray-50 dark:bg-[#2d2d2d] p-2 rounded overflow-auto max-h-24 leading-snug border border-dashed border-gray-200 dark:border-[#404040]">
+                        {truncateBase64Strings(JSON.stringify(step.arguments, null, 2))}
                       </pre>
                     </details>
-                  </div>
-                )}
+                  )}
+                  {step.type === 'mcp_call' && step.result && (
+                    <div className="mt-1">
+                      <div className="text-[10px] text-gray-500 dark:text-[#808080] font-medium">
+                        结果：{getMcpResultSummary(step)}
+                      </div>
+                      <details className="mt-1">
+                        <summary className="text-gray-400 cursor-pointer hover:text-gray-600 dark:hover:text-[#a0a0a0]">
+                          查看原始结果
+                        </summary>
+                        <pre className="mt-1 text-[9px] bg-gray-50 dark:bg-[#2d2d2d] p-2 rounded overflow-auto max-h-24 leading-snug border border-dashed border-gray-200 dark:border-[#404040]">
+                          {truncateBase64Strings(JSON.stringify(step.result, null, 2))}
+                        </pre>
+                      </details>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

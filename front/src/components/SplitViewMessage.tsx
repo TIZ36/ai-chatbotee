@@ -14,7 +14,7 @@ import {
   ChevronUp,
   Plug
 } from 'lucide-react';
-import { MessageSidePanel, ProcessStep } from './MessageSidePanel';
+import { ProcessStepsViewer, type ProcessStep } from './ui/ProcessStepsViewer';
 import { 
   MessageBubble, 
   MessageAvatar, 
@@ -248,18 +248,18 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
         <div className="space-y-2">
           {/* 过程区域（思考/工具/工作流） */}
           {shouldShowSidePanel && (
-            <div className="rounded-lg border border-gray-200 dark:border-[#404040] bg-white/60 dark:bg-[#2d2d2d]/60 backdrop-blur-sm overflow-hidden">
+            <div className="pl-2 border-l-2 border-dashed border-gray-300 dark:border-[#505050]">
               <button
                 onClick={() => {
                   userToggledRef.current = true;
                   setProcessExpanded(v => !v);
                 }}
-                className="w-full px-3 py-2 flex items-center justify-between hover:bg-gray-50/80 dark:hover:bg-[#363636]/60 transition-colors"
+                className="w-full py-1 flex items-center justify-between hover:bg-gray-50/50 dark:hover:bg-[#363636]/30 transition-colors rounded"
                 title={processExpanded ? '折叠过程' : '展开过程'}
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <Plug className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-                  <span className="text-xs font-medium text-gray-700 dark:text-gray-200 truncate">
+                  <span className="text-xs font-semibold text-gray-700 dark:text-gray-200 truncate">
                     思考 / 工具 / Workflow 过程
                   </span>
                   {(isThinking || isStreaming) && (
@@ -293,26 +293,23 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
               </button>
 
               {processExpanded && (
-                <div className="border-t border-gray-200/60 dark:border-[#404040]/60 p-2">
-                  <MessageSidePanel
-                    thinking={thinking}
-                    isThinking={isThinking}
-                    mcpDetail={mcpDetail}
-                    toolCalls={hasToolCalls ? (toolCalls as Array<{ name: string; arguments: any; result?: any }>) : undefined}
-                    workflowInfo={hasWorkflow ? {
-                      id: workflowId,
-                      name: workflowName,
-                      status: workflowStatus,
-                      result: workflowResult,
-                      config: workflowConfig,
-                    } : undefined}
-                    currentStep={currentStep}
-                    isStreaming={isStreaming}
-                    thoughtSignature={thoughtSignature}
-                    hasContent={hasContent}
-                    processSteps={processSteps}
-                  />
-                </div>
+                <ProcessStepsViewer
+                  processSteps={processSteps}
+                  thinking={thinking}
+                  isThinking={isThinking}
+                  isStreaming={isStreaming}
+                  mcpDetail={mcpDetail}
+                  toolCalls={hasToolCalls ? (toolCalls as Array<{ name: string; arguments: any; result?: any }>) : undefined}
+                  workflowInfo={hasWorkflow ? {
+                    id: workflowId,
+                    name: workflowName,
+                    status: workflowStatus,
+                    result: workflowResult,
+                    config: workflowConfig,
+                  } : undefined}
+                  hideTitle
+                  defaultExpanded
+                />
               )}
             </div>
           )}

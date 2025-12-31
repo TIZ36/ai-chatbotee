@@ -506,6 +506,9 @@ const Workflow: React.FC<WorkflowProps> = ({
 
   // 会话切换时重置“顶部加载”状态（避免跨会话继承 cooldown/autoFired）
   useEffect(() => {
+    // 重置初始加载标记，确保切换会话后自动滚动到最新消息位置
+    isInitialLoadRef.current = true;
+    wasAtBottomRef.current = true;
     historyAutoFiredInNearTopRef.current = false;
     historyCooldownUntilRef.current = 0;
     if (historyTopStayTimerRef.current) {
@@ -947,13 +950,23 @@ const Workflow: React.FC<WorkflowProps> = ({
             
             setAgentDecidingStates((prev) => {
               const next = new Map(prev);
+              const current = next.get(data.agent_id);
+              const existingSteps = current?.processSteps || [];
+              const incomingSteps = normalizeIncomingProcessSteps(data.processSteps) || [];
+              // 合并步骤：保留已有步骤，追加新步骤（去重）
+              const mergedSteps = [...existingSteps];
+              for (const step of incomingSteps) {
+                if (!mergedSteps.some(s => s.timestamp === step.timestamp && s.type === step.type)) {
+                  mergedSteps.push(step);
+                }
+              }
               next.set(data.agent_id, {
                 agentName: data.agent_name,
                 agentAvatar: data.agent_avatar,
                 status: 'deciding',
                 inReplyTo: data.in_reply_to,
                 timestamp: data.timestamp || Date.now() / 1000,
-                processSteps: normalizeIncomingProcessSteps(data.processSteps) || []
+                processSteps: mergedSteps
               });
               return next;
             });
@@ -967,12 +980,24 @@ const Workflow: React.FC<WorkflowProps> = ({
               const next = new Map(prev);
               const current = next.get(data.agent_id);
               if (current) {
+                const existingSteps = current.processSteps || [];
+                const incomingSteps = normalizeIncomingProcessSteps(data.processSteps) || [];
+                // 合并步骤
+                const mergedSteps = [...existingSteps];
+                for (const step of incomingSteps) {
+                  const existingIdx = mergedSteps.findIndex(s => s.timestamp === step.timestamp && s.type === step.type);
+                  if (existingIdx >= 0) {
+                    mergedSteps[existingIdx] = { ...mergedSteps[existingIdx], ...step };
+                  } else {
+                    mergedSteps.push(step);
+                  }
+                }
                 next.set(data.agent_id, {
                   ...current,
                   status: 'decided',
                   action: data.action,
                   timestamp: data.timestamp || Date.now() / 1000,
-                  processSteps: normalizeIncomingProcessSteps(data.processSteps) || current.processSteps || []
+                  processSteps: mergedSteps
                 });
               }
               // 决策完成后，延迟2秒移除状态（淡出效果）
@@ -1169,6 +1194,68 @@ const Workflow: React.FC<WorkflowProps> = ({
                 return updated;
               });
             }
+          } else if (payload.type === 'mcp_call_start') {
+            // ========= MCP 调用开始 - 实时显示调用进度 =========
+            const data = payload.data;
+            console.log('[Workflow] MCP call start:', data.agent_name, 'server:', data.mcp_server_id);
+
+            // 更新决策状态，保留已有步骤并追加新步骤
+            setAgentDecidingStates((prev) => {
+              const next = new Map(prev);
+              const current = next.get(data.agent_id);
+              const existingSteps = current?.processSteps || [];
+              const incomingSteps = normalizeIncomingProcessSteps(data.processSteps) || [];
+              // 合并步骤：保留已有步骤，追加新步骤（去重）
+              const mergedSteps = [...existingSteps];
+              for (const step of incomingSteps) {
+                if (!mergedSteps.some(s => s.timestamp === step.timestamp && s.type === step.type)) {
+                  mergedSteps.push(step);
+                }
+              }
+              next.set(data.agent_id, {
+                agentName: data.agent_name,
+                agentAvatar: data.agent_avatar,
+                status: 'deciding',
+                inReplyTo: data.in_reply_to,
+                timestamp: data.timestamp || Date.now() / 1000,
+                processSteps: mergedSteps
+              });
+              return next;
+            });
+
+          } else if (payload.type === 'mcp_call_done') {
+            // ========= MCP 调用完成 - 更新调用结果 =========
+            const data = payload.data;
+            const stepStatus = data.step?.status || 'unknown';
+            console.log('[Workflow] MCP call done:', data.agent_name, 'server:', data.mcp_server_id, 'status:', stepStatus);
+
+            // 更新决策状态中的 processSteps（合并而非覆盖）
+            setAgentDecidingStates((prev) => {
+              const next = new Map(prev);
+              const current = next.get(data.agent_id);
+              if (current) {
+                const existingSteps = current.processSteps || [];
+                const incomingSteps = normalizeIncomingProcessSteps(data.processSteps) || [];
+                // 合并步骤：保留已有，更新同类型同时间戳的步骤状态
+                const mergedSteps = [...existingSteps];
+                for (const step of incomingSteps) {
+                  const existingIdx = mergedSteps.findIndex(s => s.timestamp === step.timestamp && s.type === step.type);
+                  if (existingIdx >= 0) {
+                    // 更新已有步骤（可能状态变化）
+                    mergedSteps[existingIdx] = { ...mergedSteps[existingIdx], ...step };
+                  } else {
+                    mergedSteps.push(step);
+                  }
+                }
+                next.set(data.agent_id, {
+                  ...current,
+                  timestamp: data.timestamp || Date.now() / 1000,
+                  processSteps: mergedSteps
+                });
+              }
+              return next;
+            });
+
           } else if (payload.type === 'agent_tool_unavailable') {
             // 工具不可用，将信息添加到对应消息的 processSteps 中
             const data = payload.data;
@@ -4966,10 +5053,19 @@ const Workflow: React.FC<WorkflowProps> = ({
   );
 
   // 稳定的 Virtuoso itemContent 回调，避免每次渲染都创建新函数
+  // 注意：react-virtuoso 要求所有项都有非零尺寸，使用 display:none 会触发警告
+  // 因此隐藏消息使用极小高度而非 display:none
   const renderVirtuosoItem = useCallback(
     (_index: number, message: Message) => {
       if (shouldHideMessage(message)) {
-        return <div data-message-id={message.id} style={{ display: 'none' }} />;
+        // 使用 1px 高度而非 display:none，避免 react-virtuoso "Zero-sized element" 警告
+        return (
+          <div
+            data-message-id={message.id}
+            style={{ height: '1px', overflow: 'hidden', visibility: 'hidden' }}
+            aria-hidden="true"
+          />
+        );
       }
       return (
         <div className="py-1" data-message-id={message.id}>
@@ -5388,49 +5484,49 @@ const Workflow: React.FC<WorkflowProps> = ({
           />
           
           {/* Agent决策状态提示 - 在 AgentActor 模式（topic_general 或 agent）中显示 */}
+          {/* 使用思维模块风格：虚线框 + 重要步骤加粗 */}
           {agentDecidingStates.size > 0 && (currentSessionType === 'topic_general' || currentSessionType === 'agent') && (
             <div className="px-4 py-2 space-y-2">
-              {Array.from(agentDecidingStates.entries()).map(([agentId, state]) => (
-                <div 
-                  key={agentId}
-                  className={`flex items-center space-x-3 p-3 rounded-lg transition-all duration-500 ${
-                    state.status === 'deciding' 
-                      ? 'bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800' 
-                      : state.action === 'reply'
-                        ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 opacity-70'
-                        : 'bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 opacity-50'
-                  }`}
-                >
-                  {/* Agent头像 */}
-                  <div className="flex-shrink-0">
-                    {state.agentAvatar ? (
-                      <img 
-                        src={state.agentAvatar} 
-                        alt={state.agentName} 
-                        className="w-8 h-8 rounded-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-800 flex items-center justify-center">
-                        <Bot className="w-4 h-4 text-primary-600 dark:text-primary-300" />
-                      </div>
-                    )}
-                  </div>
-                  
-                  {/* 状态文本 */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center space-x-2">
-                      <span className="text-sm font-medium text-gray-900 dark:text-white truncate">
+              {Array.from(agentDecidingStates.entries()).map(([agentId, state]) => {
+                // 判断是否有 MCP 调用步骤（重要步骤）
+                const hasMcpStep = state.processSteps?.some(s => s.type === 'mcp_call');
+                // 判断是否立即回答（无决策过程或决策步骤很少）
+                const isImmediateReply = state.action === 'reply' && (!state.processSteps || state.processSteps.length <= 1);
+                
+                return (
+                  <div 
+                    key={agentId}
+                    className="transition-all duration-500"
+                  >
+                    {/* Agent 头像和名称行 */}
+                    <div className="flex items-center gap-2 mb-1">
+                      {state.agentAvatar ? (
+                        <img 
+                          src={state.agentAvatar} 
+                          alt={state.agentName} 
+                          className="w-6 h-6 rounded-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-6 h-6 rounded-full bg-primary-100 dark:bg-primary-800 flex items-center justify-center">
+                          <Bot className="w-3 h-3 text-primary-600 dark:text-primary-300" />
+                        </div>
+                      )}
+                      <span className="text-xs font-medium text-gray-700 dark:text-[#d0d0d0]">
                         {state.agentName}
                       </span>
-                      {state.status === 'deciding' ? (
-                        <span className="text-xs text-primary-600 dark:text-primary-400 flex items-center">
-                          <Brain className="w-3 h-3 mr-1 animate-pulse" />
-                          正在思考是否回答...
+                      {/* 状态标签 */}
+                      {isImmediateReply ? (
+                        <span className="text-xs text-green-600 dark:text-green-400 font-medium">
+                          普通模式，立即回答
+                        </span>
+                      ) : state.status === 'deciding' ? (
+                        <span className="text-xs text-primary-500 dark:text-primary-400 flex items-center">
+                          <Loader className="w-3 h-3 mr-1 animate-spin" />
+                          处理中...
                         </span>
                       ) : state.action === 'reply' ? (
-                        <span className="text-xs text-green-600 dark:text-green-400 flex items-center">
-                          <MessageCircle className="w-3 h-3 mr-1" />
-                          决定回答
+                        <span className="text-xs text-green-600 dark:text-green-400">
+                          准备回答
                         </span>
                       ) : state.action === 'silent' ? (
                         <span className="text-xs text-gray-500 dark:text-gray-400">
@@ -5440,24 +5536,64 @@ const Workflow: React.FC<WorkflowProps> = ({
                         <span className="text-xs text-amber-600 dark:text-amber-400">
                           👍 点赞
                         </span>
-                      ) : (
-                        <span className="text-xs text-gray-500 dark:text-gray-400">
-                          {state.action || '思考中...'}
-                        </span>
-                      )}
+                      ) : null}
                     </div>
+                    
+                    {/* 执行轨迹（思维模块风格：虚线边框） */}
+                    {state.processSteps && state.processSteps.length > 0 && !isImmediateReply && (
+                      <div className="ml-3 pl-2 border-l-2 border-dashed border-gray-300 dark:border-[#505050] space-y-1">
+                        {state.processSteps.map((step: any, idx: number) => {
+                          // 重要步骤：MCP调用、工作流、决策结果
+                          const isImportant = ['mcp_call', 'workflow', 'agent_decision', 'agent_will_reply'].includes(step.type);
+                          const stepIcon = step.type === 'mcp_call' ? '🔧' :
+                                          step.type === 'thinking' ? '💭' :
+                                          step.type === 'workflow' ? '⚡' :
+                                          step.type === 'agent_decision' ? '✅' : '📝';
+                          const stepLabel = step.type === 'mcp_call' ? `MCP: ${step.mcpServer || ''}/${step.toolName || ''}` :
+                                           step.type === 'thinking' ? '思考' :
+                                           step.type === 'workflow' ? `工作流: ${step.workflowInfo?.name || ''}` :
+                                           step.type === 'agent_decision' ? `决策: ${step.action || ''}` : step.type;
+                          
+                          return (
+                            <div 
+                              key={idx} 
+                              className={`flex items-start gap-1.5 text-xs py-0.5 ${
+                                isImportant ? 'border-l-2 border-primary-400 dark:border-primary-500 pl-1.5 -ml-[2px]' : 'pl-1.5'
+                              }`}
+                            >
+                              <span>{stepIcon}</span>
+                              <div className="flex-1 min-w-0">
+                                <span className={`${isImportant ? 'font-semibold' : ''} text-gray-700 dark:text-[#c0c0c0]`}>
+                                  {stepLabel}
+                                </span>
+                                {step.status === 'running' && (
+                                  <Loader className="inline w-3 h-3 ml-1 text-blue-500 animate-spin" />
+                                )}
+                                {step.status === 'completed' && (
+                                  <CheckCircle className="inline w-3 h-3 ml-1 text-green-500" />
+                                )}
+                                {step.status === 'error' && (
+                                  <span className="text-red-500 ml-1">❌</span>
+                                )}
+                                {step.duration && (
+                                  <span className="text-gray-400 dark:text-[#606060] ml-1">
+                                    {step.duration < 1000 ? `${step.duration}ms` : `${(step.duration / 1000).toFixed(1)}s`}
+                                  </span>
+                                )}
+                                {step.thinking && (
+                                  <div className="text-gray-500 dark:text-[#909090] mt-0.5 line-clamp-2">
+                                    {step.thinking}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
-                  
-                  {/* 思考动画 */}
-                  {state.status === 'deciding' && (
-                    <div className="flex space-x-1">
-                      <span className="w-2 h-2 bg-primary-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                      <span className="w-2 h-2 bg-primary-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                      <span className="w-2 h-2 bg-primary-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                    </div>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
           
