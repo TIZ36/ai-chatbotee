@@ -31,6 +31,10 @@ class IterationContext:
     original_message: Optional[Dict[str, Any]] = None
     topic_id: Optional[str] = None
     reply_message_id: Optional[str] = None
+
+    # 用户选择的模型信息（优先于session默认配置）
+    user_selected_model: Optional[str] = None
+    user_selected_llm_config_id: Optional[str] = None
     
     # 行动规划与执行
     planned_actions: List['Action'] = field(default_factory=list)

@@ -26,10 +26,7 @@ class AgentActorCompat:
     
     使用方式：
     ```python
-    # 旧代码
-    from services.agent_actor import AgentActor
-    
-    # 新代码（推荐）
+    # 推荐使用新 API
     from services.actor import ChatAgent, activate_agent
     ```
     """

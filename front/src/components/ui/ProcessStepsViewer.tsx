@@ -222,7 +222,7 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
   }
 
   const formatDuration = (ms?: number) => {
-    if (!ms) return '';
+    if (ms == null) return '';
     if (ms < 1000) return `${ms}ms`;
     return `${(ms / 1000).toFixed(1)}s`;
   };
@@ -328,7 +328,7 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
                 <span className={`${important ? 'font-semibold' : 'font-medium'} text-gray-700 dark:text-[#d0d0d0]`}>
                   {getTypeLabel(step.type, step)}
                 </span>
-                {step.duration && (
+                {step.duration != null && (
                   <span className="text-gray-400 dark:text-[#606060]">
                     {formatDuration(step.duration)}
                   </span>

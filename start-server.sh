@@ -5,6 +5,40 @@
 
 cd "$(dirname "$0")/backend"
 
+# ========== 停止已运行的后端进程 ==========
+echo "检查并停止已运行的后端进程..."
+
+# 方法1: 通过端口查找进程 (默认端口 3001/3002)
+for PORT in 3001 3002; do
+    PID=$(lsof -ti :$PORT 2>/dev/null)
+    if [ -n "$PID" ]; then
+        echo "  发现端口 $PORT 被进程 $PID 占用，正在停止..."
+        kill -9 $PID 2>/dev/null
+        sleep 1
+        echo "  ✅ 进程 $PID 已停止"
+    fi
+done
+
+# 方法2: 通过进程名查找 (app.py)
+PIDS=$(pgrep -f "python.*app\.py" 2>/dev/null)
+if [ -n "$PIDS" ]; then
+    echo "  发现后端进程: $PIDS，正在停止..."
+    echo "$PIDS" | xargs kill -9 2>/dev/null
+    sleep 1
+    echo "  ✅ 后端进程已停止"
+fi
+
+echo "✅ 旧进程清理完成"
+echo ""
+
+# ========== 清理 Python 编译缓存 ==========
+echo "清理 Python 编译缓存..."
+find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null
+find . -type f -name "*.pyc" -delete 2>/dev/null
+find . -type f -name "*.pyo" -delete 2>/dev/null
+echo "✅ 编译缓存已清理"
+echo ""
+
 # 检查 Python 环境
 if ! command -v python3 &> /dev/null; then
     echo "错误: 未找到 python3，请先安装 Python"

@@ -322,6 +322,16 @@ class ChatAgent(ActorBase):
             sender_name=self.info.get('name'),
             sender_avatar=self.info.get('avatar'),
         )
+        
+        # 追加到本地历史
+        self.state.append_history({
+            'message_id': None,
+            'role': 'assistant',
+            'content': content,
+            'created_at': time.time(),
+            'sender_id': self.agent_id,
+            'sender_type': 'agent',
+        })
     
     def _handle_ask_human(self, topic_id: str, msg_data: Dict[str, Any]):
         """处理请求人类"""
@@ -340,6 +350,16 @@ class ChatAgent(ActorBase):
             sender_name=self.info.get('name'),
             sender_avatar=self.info.get('avatar'),
         )
+        
+        # 追加到本地历史
+        self.state.append_history({
+            'message_id': None,
+            'role': 'assistant',
+            'content': content,
+            'created_at': time.time(),
+            'sender_id': self.agent_id,
+            'sender_type': 'agent',
+        })
     
     def _handle_new_message(self, topic_id: str, msg_data: Dict[str, Any]):
         """

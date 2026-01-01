@@ -3847,15 +3847,15 @@ def init_services():
         print(f"Warning: Redis initialization failed: {redis_error}")
         print("Continuing without Redis support...")
     
-    # 初始化 TopicService 和 AgentActorManager
+    # 初始化 TopicService 和 ActorManager
     try:
         from database import get_mysql_connection, get_redis_client
         from services.topic_service import init_topic_service
-        from services.agent_actor import AgentActorManager
-        
+        from services.actor import ActorManager
+
         init_topic_service(get_mysql_connection, get_redis_client())
-        AgentActorManager.get_instance() # 触发单例初始化
-        print("[Services] TopicService and AgentActorManager initialized")
+        ActorManager.get_instance()  # 触发单例初始化
+        print("[Services] TopicService and ActorManager initialized")
     except Exception as e:
         print(f"[Services] Error initializing Topic/Actor services: {e}")
         import traceback
@@ -4167,15 +4167,15 @@ def add_topic_participant(session_id):
         return handle_cors_preflight()
     try:
         from services.topic_service import get_topic_service
-        from services.agent_actor import activate_agent
+        from services.actor import activate_agent
         data = request.json
         participant_id = data.get('participant_id')
         p_type = data.get('participant_type', 'agent')
         role = data.get('role', 'member')
-        
+
         if not participant_id:
             return jsonify({'error': 'participant_id is required'}), 400
-            
+
         success = get_topic_service().add_participant(session_id, participant_id, p_type, role)
         if success and p_type == 'agent':
             # 激活该 Agent 的 Actor 并订阅该 Topic
@@ -5263,18 +5263,19 @@ def save_message(session_id):
                         'mentions': msg.get('mentions'),
                         'ext': msg.get('ext'),
                         'timestamp': msg.get('timestamp'),
+                        'model': data.get('model'),  # 传递用户选择的模型
                     }
                     
                     if session_type == 'topic_general':
                         # topic_general：激活话题中的所有 Agent 参与者，并传入触发消息
-                        from services.agent_actor import activate_agent
+                        from services.actor import activate_agent
                         participants = get_topic_service().get_participants(session_id)
                         for p in participants:
                             if p.get('participant_type') == 'agent':
                                 activate_agent(p['participant_id'], session_id, trigger_message)
                     elif session_type == 'agent':
                         # agent 私聊：只激活该 Agent，并传入触发消息
-                        from services.agent_actor import activate_agent
+                        from services.actor import activate_agent
                         activate_agent(session_id, session_id, trigger_message)
             except Exception as e:
                 print(f"[Message API] Warning: Failed to auto-activate agents: {e}")
@@ -11886,13 +11887,9 @@ def send_round_table_message(round_table_id):
             conn.commit()
             
             # --- 核心更新: 触发 Agent Actor ---
-            if sender_type == 'user' and not is_temporary:
-                try:
-                    from services.agent_actor import get_agent_actor
-                    # 这里不需要阻塞等待，直接发布到 Redis
-                    get_agent_actor().handle_new_message(session_id, message_id)
-                except Exception as e:
-                    print(f"[AgentActor] Failed to notify: {e}")
+            # 新架构通过 Redis Pub/Sub 自动触发，这里只需确保消息事件已发布
+            # TopicService.send_message 已经会发布 new_message 事件
+            # ActorManager 订阅频道后会自动分发给相关 Actor
             
             # 如果是 agent 发送的消息，获取 agent 信息
             agent_name = None

@@ -36,8 +36,10 @@ class ActorState:
         self.participants: List[Dict[str, Any]] = []
         self.agent_abilities: Dict[str, str] = {}  # agent_id -> 能力描述
         
-        # 媒体上下文（最近一次媒体，用于引用"上图/这张图"）
-        self.last_media: Optional[List[Dict[str, Any]]] = None
+        # 媒体上下文（最近一次媒体消息 ID，用于引用"上图/这张图"）
+        # 使用 message_id 作为占位符，需要时再从数据库获取实际媒体数据
+        self._last_media_message_id: Optional[str] = None
+        self._media_cache: Dict[str, List[Dict[str, Any]]] = {}  # message_id -> media list
         
         # 已处理消息 ID 集合（去重）
         self._processed_ids: Set[str] = set()
@@ -56,8 +58,13 @@ class ActorState:
         Returns:
             加载的消息列表
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         self.topic_id = topic_id
         svc = get_message_service()
+        
+        logger.info(f"[ActorState] Loading history for topic {topic_id}, limit={limit}")
         
         # 分页加载全部历史
         all_msgs: List[Dict[str, Any]] = []
@@ -104,23 +111,49 @@ class ActorState:
             if not isinstance(m, dict):
                 continue
             
-            # 提取媒体（缓存最近一次）
+            # 检测是否有媒体（仅记录占位符，不存储实际数据）
+            has_media = False
+            media_count = 0
             try:
                 ext = m.get('ext') or {}
                 media = ext.get('media')
                 if isinstance(media, list) and media:
-                    self.last_media = media
+                    has_media = True
+                    media_count = len(media)
+                    # 缓存最近一次媒体的消息 ID（而非实际数据）
+                    self._last_media_message_id = m.get('message_id')
             except Exception:
                 pass
             
-            self.history.append({
+            history_item = {
                 'message_id': m.get('message_id'),
                 'role': m.get('role'),
                 'content': m.get('content'),
                 'created_at': m.get('created_at'),
                 'sender_id': m.get('sender_id'),
                 'sender_type': m.get('sender_type'),
-            })
+            }
+            
+            # 如果有媒体，添加占位符信息
+            if has_media:
+                history_item['has_media'] = True
+                history_item['media_count'] = media_count
+                # 在 content 中添加占位符提示（如果原 content 为空）
+                if not history_item.get('content'):
+                    history_item['content'] = f'[图片×{media_count}]'
+            
+            self.history.append(history_item)
+        
+        logger.info(f"[ActorState] Loaded {len(self.history)} messages for topic {topic_id}")
+        if self.history:
+            # 打印前3条和后3条消息的摘要
+            for i, h in enumerate(self.history[:3]):
+                logger.debug(f"  [{i}] {h.get('role')}: {(h.get('content') or '')[:50]}...")
+            if len(self.history) > 6:
+                logger.debug(f"  ... ({len(self.history) - 6} more messages) ...")
+            for i, h in enumerate(self.history[-3:]):
+                idx = len(self.history) - 3 + i
+                logger.debug(f"  [{idx}] {h.get('role')}: {(h.get('content') or '')[:50]}...")
         
         return self.history
     
@@ -168,24 +201,50 @@ class ActorState:
         Args:
             msg: 消息数据
         """
-        # 提取媒体
+        message_id = msg.get('message_id')
+        
+        # 去重检查：如果消息已存在于历史中，不重复添加
+        if message_id:
+            existing_ids = {h.get('message_id') for h in self.history if h.get('message_id')}
+            if message_id in existing_ids:
+                return  # 跳过重复消息
+        
+        has_media = False
+        media_count = 0
+        
+        # 检测是否有媒体
         try:
             ext = msg.get('ext') or {}
             media = ext.get('media')
             if isinstance(media, list) and media:
-                self.last_media = media
+                has_media = True
+                media_count = len(media)
+                # 更新最近媒体消息 ID
+                if message_id:
+                    self._last_media_message_id = message_id
+                    # 缓存媒体数据（当前消息的媒体可以直接缓存）
+                    self._media_cache[message_id] = media
         except Exception:
             pass
         
         # 追加轻量消息
-        self.history.append({
-            'message_id': msg.get('message_id'),
+        history_item = {
+            'message_id': message_id,
             'role': msg.get('role'),
             'content': msg.get('content'),
             'created_at': msg.get('created_at') or msg.get('timestamp'),
             'sender_id': msg.get('sender_id'),
             'sender_type': msg.get('sender_type'),
-        })
+        }
+        
+        # 如果有媒体，添加占位符
+        if has_media:
+            history_item['has_media'] = True
+            history_item['media_count'] = media_count
+            if not history_item.get('content'):
+                history_item['content'] = f'[图片×{media_count}]'
+        
+        self.history.append(history_item)
     
     def clear_after(self, message_id: str):
         """
@@ -279,6 +338,12 @@ class ActorState:
                 continue
             
             content = self._clean_content(m.get('content', ''))
+            
+            # 如果有媒体占位符但内容为空，添加提示
+            if m.get('has_media') and not content:
+                media_count = m.get('media_count', 1)
+                content = f'[图片×{media_count}]'
+            
             if not content:
                 continue
             
@@ -286,7 +351,14 @@ class ActorState:
             if len(content) > max_per_message_chars:
                 content = content[:max_per_message_chars] + '…'
             
-            msgs.append({'role': role, 'content': content})
+            msg_item = {'role': role, 'content': content}
+            
+            # 保留媒体占位符信息，供后续按需获取
+            if m.get('has_media'):
+                msg_item['has_media'] = True
+                msg_item['message_id'] = m.get('message_id')
+            
+            msgs.append(msg_item)
         
         # 总字符预算
         total = sum(len(x.get('content', '')) for x in msgs)
@@ -381,7 +453,56 @@ class ActorState:
         return any(k in t for k in keywords)
     
     def get_last_media(self) -> Optional[List[Dict[str, Any]]]:
-        """获取最近的媒体"""
-        if isinstance(self.last_media, list) and self.last_media:
-            return self.last_media
+        """
+        获取最近的媒体（按需从数据库/缓存加载）
+        
+        Returns:
+            媒体列表，或 None
+        """
+        if not self._last_media_message_id:
+            return None
+        
+        return self.get_media_by_message_id(self._last_media_message_id)
+    
+    def get_media_by_message_id(self, message_id: str) -> Optional[List[Dict[str, Any]]]:
+        """
+        按消息 ID 获取媒体数据（优先缓存，其次数据库）
+        
+        Args:
+            message_id: 消息 ID
+            
+        Returns:
+            媒体列表，或 None
+        """
+        if not message_id:
+            return None
+        
+        # 1. 检查缓存
+        if message_id in self._media_cache:
+            return self._media_cache[message_id]
+        
+        # 2. 从数据库加载
+        try:
+            svc = get_message_service()
+            msg = svc.get_message(message_id)
+            if msg:
+                ext = msg.get('ext') or {}
+                media = ext.get('media')
+                if isinstance(media, list) and media:
+                    # 缓存并返回
+                    self._media_cache[message_id] = media
+                    return media
+        except Exception:
+            pass
+        
         return None
+    
+    def clear_media_cache(self):
+        """清理媒体缓存（内存优化）"""
+        # 只保留最近的几条
+        max_cache = 10
+        if len(self._media_cache) > max_cache:
+            # 保留最近的条目（按插入顺序，保留最后 max_cache 个）
+            keys = list(self._media_cache.keys())
+            for k in keys[:-max_cache]:
+                del self._media_cache[k]

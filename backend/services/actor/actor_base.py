@@ -100,39 +100,49 @@ class ActorBase(ABC):
         激活 Agent
         
         加载配置、历史消息、注册 Pub/Sub，启动工作线程。
+        如果已激活，仅处理新消息，不重复初始化。
         
         Args:
             topic_id: 话题 ID
             trigger_message: 触发消息（如果提供，激活后立即处理）
             history_limit: 历史消息加载数量限制
         """
-        self.topic_id = topic_id
+        # 检查是否已激活在同一 topic
+        already_active = self.is_running and self.topic_id == topic_id
         
-        # 1. 加载配置
-        self._load_config()
+        if not already_active:
+            self.topic_id = topic_id
+            
+            # 1. 加载配置
+            self._load_config()
+            
+            # 2. 加载能力（MCP/Skill/Tool）
+            self._load_capabilities()
+            
+            # 3. 加载历史消息
+            limit = history_limit or self.DEFAULT_HISTORY_LIMIT
+            self.state.load_history(topic_id, limit=limit)
+            
+            # 4. 订阅 Pub/Sub
+            self._subscribe_pubsub(topic_id)
+            
+            # 5. 启动工作线程
+            self._start_worker_thread()
+            
+            logger.info(f"[ActorBase:{self.agent_id}] Activated on topic {topic_id}, loaded {len(self.state.history)} history messages")
+        else:
+            # 已激活，只需刷新历史（获取最新消息）
+            logger.debug(f"[ActorBase:{self.agent_id}] Already active on topic {topic_id}, refreshing history")
+            limit = history_limit or self.DEFAULT_HISTORY_LIMIT
+            self.state.load_history(topic_id, limit=limit)
         
-        # 2. 加载能力（MCP/Skill/Tool）
-        self._load_capabilities()
-        
-        # 3. 加载历史消息
-        limit = history_limit or self.DEFAULT_HISTORY_LIMIT
-        self.state.load_history(topic_id, limit=limit)
-        
-        # 4. 订阅 Pub/Sub
-        self._subscribe_pubsub(topic_id)
-        
-        # 5. 启动工作线程
-        self._start_worker_thread()
-        
-        # 6. 如果有触发消息，立即处理
+        # 如果有触发消息，立即处理
         if trigger_message:
             self.mailbox.put({
                 'type': 'new_message',
                 'topic_id': topic_id,
                 'data': trigger_message,
             })
-        
-        logger.info(f"[ActorBase:{self.agent_id}] Activated on topic {topic_id}")
     
     def _load_config(self):
         """加载 Agent 配置（从数据库）"""
@@ -462,6 +472,19 @@ class ActorBase(ABC):
         ctx.original_message = msg_data
         ctx.topic_id = topic_id
         ctx.reply_message_id = reply_message_id
+
+        # 提取用户选择的模型信息（优先于session默认配置）
+        # 1. 优先检查 ext.user_llm_config_id（前端直接传递的配置ID）
+        ext = msg_data.get('ext', {}) or {}
+        if ext.get('user_llm_config_id'):
+            ctx.user_selected_llm_config_id = ext['user_llm_config_id']
+            print(f"[ActorBase:{self.agent_id}] 用户选择了LLM配置ID: {ctx.user_selected_llm_config_id}")
+        # 2. 其次检查 model 字段（前端传递的模型名称）
+        elif msg_data.get('model'):
+            ctx.user_selected_model = msg_data['model']
+            # 如果消息包含模型名称，我们需要找到对应的llm_config_id
+            # 这里先设置model，后面再处理config_id映射
+            print(f"[ActorBase:{self.agent_id}] 用户选择了模型: {ctx.user_selected_model}")
         
         # 添加激活步骤
         ctx.add_step(
@@ -620,7 +643,46 @@ class ActorBase(ABC):
                 return False
         
         return False
-    
+
+    def _find_llm_config_for_model(self, model_name: str, fallback_config_id: str) -> str:
+        """
+        根据模型名称找到对应的LLM配置ID
+
+        Args:
+            model_name: 模型名称（如"gpt-4", "claude-3"）
+            fallback_config_id: 后备配置ID
+
+        Returns:
+            LLM配置ID
+        """
+        try:
+            from database import get_mysql_connection
+            conn = get_mysql_connection()
+            if not conn:
+                return fallback_config_id
+
+            import pymysql
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+            # 查找匹配的LLM配置
+            cursor.execute(
+                "SELECT config_id FROM llm_configs WHERE model = %s AND enabled = 1 LIMIT 1",
+                (model_name,)
+            )
+            result = cursor.fetchone()
+            cursor.close()
+            conn.close()
+
+            if result:
+                return result['config_id']
+            else:
+                print(f"{YELLOW}[MCP DEBUG] 未找到模型 '{model_name}' 对应的配置，使用后备配置{RESET}")
+                return fallback_config_id
+
+        except Exception as e:
+            print(f"{RED}[MCP DEBUG] 查找模型配置失败: {e}，使用后备配置{RESET}")
+            return fallback_config_id
+
     def _check_interruption(self, ctx: IterationContext) -> bool:
         """
         检查是否被打断
@@ -651,6 +713,17 @@ class ActorBase(ABC):
         start_time = time.time()
         server_id = action.server_id
         
+        # ANSI 颜色码
+        CYAN = '\033[96m'
+        GREEN = '\033[92m'
+        YELLOW = '\033[93m'
+        RED = '\033[91m'
+        RESET = '\033[0m'
+        BOLD = '\033[1m'
+        
+        print(f"{CYAN}{BOLD}[MCP DEBUG] ========== 开始 MCP 调用 =========={RESET}")
+        print(f"{CYAN}[MCP DEBUG] Agent: {self.agent_id}, Server: {server_id}{RESET}")
+        
         # 添加处理步骤
         ctx.add_step(
             'mcp_call',
@@ -664,29 +737,120 @@ class ActorBase(ABC):
             'message_id': ctx.reply_message_id,
             'processSteps': ctx.to_process_steps_dict(),
         })
+        print(f"{GREEN}[MCP DEBUG] 已发送 agent_thinking 事件{RESET}")
         
         try:
             from services.mcp_execution_service import execute_mcp_with_llm
+            from mcp_server.mcp_common_logic import get_mcp_tools_list, prepare_mcp_headers
             
-            llm_config_id = self._config.get('llm_config_id')
-            input_text = ctx.original_message.get('content', '')
+            # 优先使用用户选择的模型，其次使用session默认配置
+            # 1. 优先使用 ext.user_llm_config_id（前端直接传递的配置ID）
+            user_selected_llm_config_id = ctx.user_selected_llm_config_id
+            # 2. 其次使用 user_selected_model（前端传递的模型名称，需要查找配置ID）
+            user_selected_model = ctx.user_selected_model
+            session_llm_config_id = self._config.get('llm_config_id')
+
+            print(f"{CYAN}[MCP DEBUG] 用户选择LLM配置ID: {user_selected_llm_config_id}{RESET}")
+            print(f"{CYAN}[MCP DEBUG] 用户选择模型: {user_selected_model}{RESET}")
+            print(f"{CYAN}[MCP DEBUG] Session默认配置ID: {session_llm_config_id}{RESET}")
+
+            # 确定最终使用的LLM配置
+            if user_selected_llm_config_id:
+                # 用户直接选择了配置ID，直接使用
+                final_llm_config_id = user_selected_llm_config_id
+                print(f"{GREEN}[MCP DEBUG] ✅ 使用用户选择的LLM配置ID: {final_llm_config_id}{RESET}")
+            elif user_selected_model:
+                # 用户选择了特定模型，尝试找到对应的配置
+                final_llm_config_id = self._find_llm_config_for_model(user_selected_model, session_llm_config_id)
+                if final_llm_config_id != session_llm_config_id:
+                    print(f"{GREEN}[MCP DEBUG] ✅ 找到用户选择模型的配置: {final_llm_config_id}{RESET}")
+                else:
+                    print(f"{YELLOW}[MCP DEBUG] ⚠️ 未找到用户选择模型的配置，使用Session默认配置: {final_llm_config_id}{RESET}")
+            else:
+                final_llm_config_id = session_llm_config_id
+                print(f"{CYAN}[MCP DEBUG] 使用Session默认配置: {final_llm_config_id}{RESET}")
+
+            user_content = ctx.original_message.get('content', '')
+
+            print(f"{CYAN}[MCP DEBUG] User Content: {user_content[:100]}...{RESET}")
             
+            # 1. 先获取 MCP 工具列表，构建工具描述
+            print(f"{YELLOW}[MCP DEBUG] 获取工具列表...{RESET}")
+            tools_desc = self._get_mcp_tools_description(server_id)
+            print(f"{GREEN}[MCP DEBUG] 工具描述长度: {len(tools_desc) if tools_desc else 0} 字符{RESET}")
+            
+            # 2. 构建带历史上下文和工具描述的输入
+            history_context = self._build_mcp_context(ctx)
+            print(f"{CYAN}[MCP DEBUG] 历史上下文长度: {len(history_context) if history_context else 0} 字符{RESET}")
+            
+            input_parts = []
+            if tools_desc:
+                input_parts.append(f"【可用工具】\n{tools_desc}")
+            if history_context:
+                input_parts.append(f"【对话历史】\n{history_context}")
+            input_parts.append(f"【当前请求】\n{user_content}")
+            
+            input_text = "\n\n".join(input_parts)
+            
+            print(f"{CYAN}[MCP DEBUG] 最终输入长度: {len(input_text)} 字符{RESET}")
+            logger.info(f"[ActorBase:{self.agent_id}] MCP call with tools desc and context: {len(input_text)} chars")
+            
+            # 获取 Agent 的人设作为系统提示词
+            agent_persona = self._config.get('system_prompt', '')
+            print(f"{CYAN}[MCP DEBUG] Agent 人设长度: {len(agent_persona) if agent_persona else 0} 字符{RESET}")
+            
+            print(f"{YELLOW}[MCP DEBUG] 调用 execute_mcp_with_llm...{RESET}")
             result = execute_mcp_with_llm(
                 mcp_server_id=server_id,
                 input_text=input_text,
-                llm_config_id=llm_config_id,
+                llm_config_id=final_llm_config_id,
+                agent_system_prompt=agent_persona,  # 传递 Agent 人设
             )
+            print(f"{GREEN}[MCP DEBUG] execute_mcp_with_llm 返回{RESET}")
+            print(f"{CYAN}[MCP DEBUG] Result keys: {list(result.keys()) if result else 'None'}{RESET}")
             
             duration_ms = int((time.time() - start_time) * 1000)
+            print(f"{CYAN}[MCP DEBUG] 耗时: {duration_ms}ms{RESET}")
             
             if result.get('error'):
+                error_msg = result.get('error')
+                print(f"{RED}[MCP DEBUG] ❌ 检测到错误: {error_msg}{RESET}")
+                llm_resp = result.get("llm_response")
+                if llm_resp:
+                    preview = str(llm_resp).replace("\n", "\\n")[:600]
+                    print(f"{YELLOW}[MCP DEBUG] LLM 原始输出预览: {preview}{RESET}")
+                dbg = result.get("debug") or {}
+                if isinstance(dbg, dict) and dbg.get("llm_parse_error"):
+                    print(f"{YELLOW}[MCP DEBUG] JSON 解析失败原因: {dbg.get('llm_parse_error')}{RESET}")
+                
+                # 检查是否有详细的错误信息
+                results_list = result.get('results', [])
+                print(f"{YELLOW}[MCP DEBUG] Results 列表长度: {len(results_list)}{RESET}")
+                
+                error_details = []
+                for r in results_list:
+                    if r.get('error'):
+                        error_type = r.get('error_type', 'unknown')
+                        tool_name = r.get('tool', 'unknown')
+                        print(f"{RED}[MCP DEBUG]   - 工具 {tool_name} 错误类型: {error_type}{RESET}")
+                        if error_type == 'network':
+                            error_details.append(f"[网络错误] {tool_name}: {r.get('error')}")
+                        elif error_type == 'business':
+                            error_details.append(f"[业务错误] {tool_name}: {r.get('error')}")
+                        else:
+                            error_details.append(f"[{error_type}] {tool_name}: {r.get('error')}")
+                
+                detailed_error = "\n".join(error_details) if error_details else error_msg
+                print(f"{RED}[MCP DEBUG] 详细错误: {detailed_error}{RESET}")
+                
                 ctx.update_last_step(
                     status='error',
-                    error=result.get('error'),
+                    error=detailed_error,
                 )
+                print(f"{RED}[MCP DEBUG] ========== MCP 调用失败 =========={RESET}")
                 return ActionResult.error_result(
                     action_type='mcp',
-                    error=result.get('error'),
+                    error=detailed_error,
                     duration_ms=duration_ms,
                     action=action,
                 )
@@ -694,6 +858,28 @@ class ActorBase(ABC):
             # 提取结果文本
             tool_text = result.get('tool_text', '')
             summary = result.get('summary', '')
+            
+            print(f"{GREEN}[MCP DEBUG] ✅ 无顶层错误{RESET}")
+            print(f"{CYAN}[MCP DEBUG] Summary: {summary[:100] if summary else 'None'}...{RESET}")
+            print(f"{CYAN}[MCP DEBUG] Tool text 长度: {len(tool_text) if tool_text else 0}{RESET}")
+            
+            # 检查是否有部分工具失败（但整体没报错）
+            results_list = result.get('results', [])
+            print(f"{CYAN}[MCP DEBUG] Results 数量: {len(results_list)}{RESET}")
+            
+            partial_errors = []
+            for i, r in enumerate(results_list):
+                tool_name = r.get('tool', 'unknown')
+                if r.get('error'):
+                    error_type = r.get('error_type', 'unknown')
+                    partial_errors.append(f"{tool_name}({error_type}): {r.get('error')}")
+                    print(f"{YELLOW}[MCP DEBUG]   [{i}] {tool_name}: ❌ 错误 - {r.get('error')[:50]}{RESET}")
+                else:
+                    print(f"{GREEN}[MCP DEBUG]   [{i}] {tool_name}: ✅ 成功{RESET}")
+            
+            if partial_errors:
+                tool_text += f"\n\n⚠️ 部分工具执行失败:\n" + "\n".join(partial_errors)
+                print(f"{YELLOW}[MCP DEBUG] 有 {len(partial_errors)} 个工具失败{RESET}")
             
             ctx.update_last_step(
                 status='completed',
@@ -704,6 +890,7 @@ class ActorBase(ABC):
             if tool_text:
                 ctx.append_tool_result(f"MCP:{server_id}", tool_text)
             
+            print(f"{GREEN}{BOLD}[MCP DEBUG] ========== MCP 调用成功 =========={RESET}")
             return ActionResult.success_result(
                 action_type='mcp',
                 data=result,
@@ -713,7 +900,12 @@ class ActorBase(ABC):
             )
             
         except Exception as e:
+            import traceback
             duration_ms = int((time.time() - start_time) * 1000)
+            print(f"{RED}{BOLD}[MCP DEBUG] ❌❌❌ 异常: {str(e)}{RESET}")
+            print(f"{RED}[MCP DEBUG] Traceback:{RESET}")
+            traceback.print_exc()
+            print(f"{RED}[MCP DEBUG] ========== MCP 调用异常 =========={RESET}")
             ctx.update_last_step(status='error', error=str(e))
             return ActionResult.error_result(
                 action_type='mcp',
@@ -721,6 +913,114 @@ class ActorBase(ABC):
                 duration_ms=duration_ms,
                 action=action,
             )
+    
+    def _get_mcp_tools_description(self, server_id: str) -> str:
+        """
+        获取 MCP 服务器的工具列表描述
+        
+        Args:
+            server_id: MCP 服务器 ID
+            
+        Returns:
+            格式化的工具描述字符串
+        """
+        try:
+            from mcp_server.mcp_common_logic import get_mcp_tools_list, prepare_mcp_headers
+            from database import get_mysql_connection
+            import pymysql
+            
+            # 获取 MCP 服务器 URL
+            conn = get_mysql_connection()
+            if not conn:
+                return ""
+            
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute(
+                "SELECT url FROM mcp_servers WHERE server_id = %s AND enabled = 1",
+                (server_id,)
+            )
+            row = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if not row or not row.get('url'):
+                return ""
+            
+            server_url = row['url']
+            
+            # 准备请求头
+            base_headers = {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json, text/event-stream',
+            }
+            headers = prepare_mcp_headers(server_url, base_headers, base_headers)
+            
+            # 获取工具列表
+            tools_response = get_mcp_tools_list(server_url, headers, use_cache=True)
+            if not tools_response or 'result' not in tools_response:
+                print(f"{YELLOW}[MCP DEBUG] ⚠️ 获取工具列表失败{RESET}")
+                return ""
+            
+            tools = tools_response['result'].get('tools', [])
+            if not tools:
+                print(f"{YELLOW}[MCP DEBUG] ⚠️ 工具列表为空{RESET}")
+                return ""
+            
+            print(f"{GREEN}[MCP DEBUG] 获取到 {len(tools)} 个工具{RESET}")
+            
+            # 格式化工具描述（包含完整信息）
+            lines = []
+            for i, t in enumerate(tools, 1):
+                name = t.get('name', '')
+                desc = t.get('description', '')
+                if name:
+                    # 打印每个工具
+                    print(f"{CYAN}[MCP DEBUG]   {i}. {name}{RESET}")
+                    lines.append(f"{i}. 【{name}】: {desc}" if desc else f"{i}. 【{name}】")
+            
+            return "\n".join(lines)
+            
+        except Exception as e:
+            logger.warning(f"[ActorBase:{self.agent_id}] Failed to get MCP tools: {e}")
+            return ""
+    
+    def _build_mcp_context(self, ctx: IterationContext, max_history: int = 6) -> str:
+        """
+        构建 MCP 调用的对话上下文
+        
+        让 MCP 执行服务能看到最近的对话历史，以便正确选择工具
+        
+        Args:
+            ctx: 迭代上下文
+            max_history: 最大历史消息数
+            
+        Returns:
+            格式化的对话历史字符串
+        """
+        if not self.state.history:
+            return ""
+        
+        # 取最近的历史消息（不包括当前消息）
+        recent = self.state.history[-max_history:] if len(self.state.history) > max_history else self.state.history
+        
+        lines = []
+        for msg in recent:
+            role = msg.get('role', 'user')
+            content = msg.get('content', '')
+            if not content:
+                continue
+            
+            # 截断过长的内容
+            if len(content) > 500:
+                content = content[:500] + '...'
+            
+            role_label = '用户' if role == 'user' else '助手'
+            lines.append(f"{role_label}: {content}")
+        
+        if not lines:
+            return ""
+        
+        return "\n".join(lines)
     
     def _call_skill(self, action: Action, ctx: IterationContext) -> ActionResult:
         """
@@ -927,6 +1227,9 @@ class ActorBase(ABC):
         # 构建消息列表
         messages = self._build_llm_messages(ctx, system_prompt)
         
+        logger.info(f"[ActorBase:{self.agent_id}] Final messages count: {len(messages)}, "
+                    f"roles: {[m.get('role') for m in messages]}")
+        
         # 添加 LLM 生成步骤
         llm_config_id = self._config.get('llm_config_id')
         llm_service = get_llm_service()
@@ -989,6 +1292,16 @@ class ActorBase(ABC):
                 ext=ext_data,
             )
             
+            # 追加到本地历史（确保 history 包含 LLM 输出）
+            self.state.append_history({
+                'message_id': message_id,
+                'role': 'assistant',
+                'content': full_content,
+                'created_at': time.time(),
+                'sender_id': self.agent_id,
+                'sender_type': 'agent',
+            })
+            
             # 发送完成事件
             get_topic_service()._publish_event(topic_id, 'agent_stream_done', {
                 'agent_id': self.agent_id,
@@ -1013,12 +1326,21 @@ class ActorBase(ABC):
         if cap_desc:
             system_prompt += f"\n\n{cap_desc}"
         
-        # 添加工具结果
+        # 添加历史消息利用提示
+        history_count = len(self.state.history)
+        if history_count > 0:
+            system_prompt += f"\n\n[对话历史] 你与用户已有 {history_count} 条对话记录。请注意：\n"
+            system_prompt += "1. 仔细阅读历史消息，理解对话的上下文和背景\n"
+            system_prompt += "2. 用户可能引用之前的内容，请结合历史回答\n"
+            system_prompt += "3. 历史中可能包含重要信息，请充分利用\n"
+            system_prompt += "4. 保持对话的连贯性，避免重复已经提供过的信息"
+        
+        # 工具结果不再放入 system_prompt，而是作为对话消息注入
+        # 只在 system_prompt 中添加简短提示
         if ctx.tool_results_text:
             system_prompt += (
-                "\n\n=== 工具执行结果（事实源，必须遵循）===\n"
-                f"{ctx.tool_results_text}\n"
-                "规则：以上述工具结果为准，不要编造或假设。"
+                "\n\n【工具执行】工具已自动执行完毕，结果会在对话中提供。"
+                "请仔细阅读工具执行结果，然后用自然语言直接回答用户。"
             )
         
         return system_prompt
@@ -1039,13 +1361,37 @@ class ActorBase(ABC):
             })
         
         # 添加历史
+        logger.info(f"[ActorBase:{self.agent_id}] Building LLM messages, state.history has {len(self.state.history)} items")
+        
         history_msgs = self.state.get_recent_history(
             max_messages=24,
             max_total_chars=18000,
             max_per_message_chars=2400,
             include_summary=False,  # 已经单独添加
         )
+        
+        logger.info(f"[ActorBase:{self.agent_id}] get_recent_history returned {len(history_msgs)} messages")
+        
+        # 处理历史消息中的媒体占位符（按需获取最近 N 条有媒体的消息）
+        media_load_limit = 3  # 最多为最近 3 条消息加载实际媒体
+        media_loaded = 0
+        for msg in reversed(history_msgs):
+            if msg.get('has_media') and msg.get('message_id') and media_loaded < media_load_limit:
+                media = self.state.get_media_by_message_id(msg['message_id'])
+                if media:
+                    msg['media'] = media
+                    media_loaded += 1
+        
         messages.extend(history_msgs)
+        
+        # 如果有工具结果，作为助手消息注入（在用户消息之前）
+        if ctx.tool_results_text:
+            tool_result_msg = {
+                "role": "assistant",
+                "content": f"【工具执行结果】\n{ctx.tool_results_text}\n\n"
+                           "我已经执行了上述工具调用。现在我将根据工具返回的结果来回答你的问题。",
+            }
+            messages.append(tool_result_msg)
         
         # 添加当前消息
         user_content = ctx.original_message.get('content', '')
@@ -1218,6 +1564,16 @@ class ActorBase(ABC):
             sender_name=self.info.get('name'),
             sender_avatar=self.info.get('avatar'),
         )
+        
+        # 追加到本地历史
+        self.state.append_history({
+            'message_id': None,  # 委派消息没有预设 ID
+            'role': 'assistant',
+            'content': content,
+            'created_at': time.time(),
+            'sender_id': self.agent_id,
+            'sender_type': 'agent',
+        })
     
     def _handle_process_error(self, ctx: IterationContext, error: Exception):
         """处理处理错误"""
@@ -1238,17 +1594,28 @@ class ActorBase(ABC):
         })
         
         # 保存错误消息
+        error_content = f"[错误] {self.info.get('name', 'Agent')} 无法产生回复: {str(error)}"
         get_topic_service().send_message(
             topic_id=topic_id,
             sender_id=self.agent_id,
             sender_type='agent',
-            content=f"[错误] {self.info.get('name', 'Agent')} 无法产生回复: {str(error)}",
+            content=error_content,
             role='assistant',
             message_id=message_id,
             sender_name=self.info.get('name'),
             sender_avatar=self.info.get('avatar'),
             ext={'processSteps': ctx.to_process_steps_dict(), 'error': str(error)},
         )
+        
+        # 追加到本地历史
+        self.state.append_history({
+            'message_id': message_id,
+            'role': 'assistant',
+            'content': error_content,
+            'created_at': time.time(),
+            'sender_id': self.agent_id,
+            'sender_type': 'agent',
+        })
     
     def _normalize_media_for_ext(
         self,
