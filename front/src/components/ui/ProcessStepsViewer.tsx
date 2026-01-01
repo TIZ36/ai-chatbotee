@@ -20,6 +20,8 @@ import {
   Loader,
   Clock,
   Lightbulb,
+  ShieldCheck,
+  ShieldAlert,
 } from 'lucide-react';
 import { truncateBase64Strings } from '../../utils/textUtils';
 
@@ -78,6 +80,8 @@ export interface ProcessStepsViewerProps {
   defaultExpanded?: boolean;
   /** 隐藏标题，直接显示内容 */
   hideTitle?: boolean;
+  /** 消息角色（用于判断是否显示LLM媒体签名） */
+  role?: string;
 }
 
 /**
@@ -95,6 +99,7 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
   title = '执行轨迹',
   defaultExpanded = false,
   hideTitle = false,
+  role,
 }) => {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
 
@@ -212,9 +217,73 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
       });
     }
 
+    // 7. 显示LLM输出消息的图片thoughtSignature状态（仅assistant消息）
+    // 判断条件：有 llmInfo（说明是 LLM 回复）且有 media
+    if (ext?.media && Array.isArray(ext.media) && ext?.llmInfo && role === 'assistant') {
+      const mediaWithImages = ext.media.filter((m: any) => m?.type === 'image');
+      if (mediaWithImages.length > 0) {
+        const withSig = mediaWithImages.filter((m: any) => m?.thoughtSignature);
+        const withoutSig = mediaWithImages.filter((m: any) => !m?.thoughtSignature);
+
+        result.push({
+          type: 'llm_media_signature',
+          thinking: withSig.length > 0
+            ? `✅ ${withSig.length} 张图片带 thoughtSignature`
+            : `❌ ${withoutSig.length} 张图片缺少 thoughtSignature`,
+          status: withSig.length === mediaWithImages.length ? 'completed' : 'error',
+          // @ts-ignore
+          mediaInfo: {
+            total: mediaWithImages.length,
+            withSignature: withSig.length,
+            withoutSignature: withoutSig.length,
+          },
+        });
+      }
+    }
+
+    // 8. 显示LLM响应元数据（usage、finish_reason等）
+    if (ext?.llmResponse && ext?.llmInfo) {
+      const llmResp = ext.llmResponse;
+      let metadataText = '';
+
+      // Token使用统计
+      if (llmResp.usage) {
+        const usage = llmResp.usage;
+        const parts = [];
+        if (usage.prompt_tokens !== undefined) parts.push(`${usage.prompt_tokens} 输入`);
+        if (usage.completion_tokens !== undefined) parts.push(`${usage.completion_tokens} 输出`);
+        if (usage.total_tokens !== undefined) parts.push(`${usage.total_tokens} 总计`);
+        if (parts.length > 0) {
+          metadataText += `Token: ${parts.join(' + ')}`;
+        }
+      }
+
+      // 完成原因
+      if (llmResp.finish_reason) {
+        const reasonMap: Record<string, string> = {
+          'stop': '正常结束',
+          'length': '长度限制',
+          'content_filter': '内容过滤',
+          'function_call': '函数调用',
+          'tool_calls': '工具调用'
+        };
+        const reasonText = reasonMap[llmResp.finish_reason] || llmResp.finish_reason;
+
+        metadataText += (metadataText ? ' | ' : '') + `原因: ${reasonText}`;
+      }
+
+      if (metadataText) {
+        result.push({
+          type: 'llm_metadata',
+          thinking: metadataText,
+          status: 'completed',
+        });
+      }
+    }
+
     // 按时间戳排序
     return result.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-  }, [processSteps, ext, thinking, isThinking, mcpDetail, toolCalls, workflowInfo]);
+  }, [processSteps, ext, thinking, isThinking, mcpDetail, toolCalls, workflowInfo, role]);
 
   // 如果没有步骤且不在思考中，不显示
   if (steps.length === 0 && !isThinking && !isStreaming) {
@@ -240,7 +309,7 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
     }
   };
 
-  const getTypeIcon = (type: string) => {
+  const getTypeIcon = (type: string, step?: ProcessStep) => {
     switch (type) {
       case 'thinking':
       case 'llm_generating':
@@ -257,6 +326,22 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
         return <Target className="w-3.5 h-3.5 text-green-500" />;
       case 'agent_will_reply':
         return <MessageSquare className="w-3.5 h-3.5 text-blue-500" />;
+      case 'media_signature':
+        // @ts-ignore
+        const info = step?.mediaInfo;
+        if (info?.withoutSignature > 0) {
+          return <ShieldAlert className="w-3.5 h-3.5 text-orange-500" />;
+        }
+        return <ShieldCheck className="w-3.5 h-3.5 text-green-500" />;
+      case 'llm_metadata':
+        return <FileText className="w-3.5 h-3.5 text-blue-500" />;
+      case 'llm_media_signature':
+        // @ts-ignore
+        const llmMediaInfo = step?.mediaInfo;
+        if (llmMediaInfo?.withoutSignature > 0) {
+          return <XCircle className="w-3.5 h-3.5 text-red-500" />;
+        }
+        return <ShieldCheck className="w-3.5 h-3.5 text-green-500" />;
       default:
         return <FileText className="w-3.5 h-3.5 text-gray-500" />;
     }
@@ -283,6 +368,12 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
         return `决策结果: ${step.action || '未知'}`;
       case 'agent_will_reply':
         return '决定回答';
+      case 'media_signature':
+        return 'Gemini 图片签名';
+      case 'llm_metadata':
+        return 'LLM 响应信息';
+      case 'llm_media_signature':
+        return 'LLM 图片签名';
       default:
         return type;
     }
@@ -290,7 +381,7 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
 
   // 判断是否为重要步骤
   const isImportantStep = (type: string) => {
-    return ['mcp_call', 'workflow', 'agent_decision', 'agent_will_reply'].includes(type);
+    return ['mcp_call', 'workflow', 'agent_decision', 'agent_will_reply', 'llm_media_signature'].includes(type);
   };
 
   // 计算步骤数（如果还在思考中但没有步骤，显示为 0）
@@ -320,7 +411,7 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
             }`}
           >
             <div className="flex items-center gap-1 flex-shrink-0 mt-0.5">
-              {getTypeIcon(step.type)}
+              {getTypeIcon(step.type, step)}
               {getStatusIcon(step.status)}
             </div>
             <div className="flex-1 min-w-0">

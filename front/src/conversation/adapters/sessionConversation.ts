@@ -36,11 +36,14 @@ function mapSessionMedia(msg: Message): UnifiedMedia[] | undefined {
           mediaUrl = `data:${inferredMime};base64,${m.data}`;
         }
       }
-      media.push({
+      const mediaItem: UnifiedMedia = {
         type: m.type,
         mimeType: m.mimeType,
         url: mediaUrl,
-      });
+        thoughtSignature: m.thoughtSignature,
+      };
+
+      media.push(mediaItem);
     }
   }
 
@@ -91,6 +94,8 @@ function mapSessionMessage(msg: Message): UnifiedMessage {
     thoughtSignature,
     // Expose mcpdetail at top level
     mcpdetail,
+    // Expose ext at top level for ProcessStepsViewer (thoughtSignature status)
+    ext,
     meta: {
       thinking: msg.thinking,
       tool_calls: msg.tool_calls,
@@ -145,12 +150,17 @@ export function createSessionConversationAdapter(
               .map((m: any) => {
                 const data = normalizeBase64ForInlineData(m.url);
                 if (!data) return null;
-                return {
+                const mediaItem: any = {
                   type: m.type,
                   mimeType: m.mimeType,
-                  // 统一存“纯 base64”，避免后续回填时污染 inlineData
+                  // 统一存"纯 base64"，避免后续回填时污染 inlineData
                   data,
                 };
+                // 保存 thoughtSignature（用于 Gemini 图片）
+                if ((m as any).thoughtSignature) {
+                  mediaItem.thoughtSignature = (m as any).thoughtSignature;
+                }
+                return mediaItem;
               })
               .filter(Boolean),
           }

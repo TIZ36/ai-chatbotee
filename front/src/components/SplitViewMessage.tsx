@@ -300,6 +300,7 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
                   isStreaming={isStreaming}
                   mcpDetail={mcpDetail}
                   toolCalls={hasToolCalls ? (toolCalls as Array<{ name: string; arguments: any; result?: any }>) : undefined}
+                  role={role}
                   workflowInfo={hasWorkflow ? {
                     id: workflowId,
                     name: workflowName,

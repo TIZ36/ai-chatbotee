@@ -318,23 +318,44 @@ class IterationContext:
         """转换为 processSteps 格式（供前端）"""
         return self.process_steps.copy()
     
+    def set_llm_response_metadata(self, usage: Optional[Dict[str, int]] = None,
+                                  finish_reason: Optional[str] = None,
+                                  raw_response: Optional[Dict[str, Any]] = None):
+        """
+        设置LLM响应元数据
+
+        Args:
+            usage: Token使用统计
+            finish_reason: 完成原因
+            raw_response: 原始响应数据
+        """
+        if usage or finish_reason or raw_response:
+            llm_metadata = {}
+            if usage:
+                llm_metadata['usage'] = usage
+            if finish_reason:
+                llm_metadata['finish_reason'] = finish_reason
+            if raw_response:
+                llm_metadata['raw_response'] = raw_response
+            self.final_ext['llmResponse'] = llm_metadata
+
     def build_ext_data(self) -> Dict[str, Any]:
         """构建扩展数据（用于消息存储）"""
         ext = {
             'processSteps': self.process_steps,
             **self.final_ext,
         }
-        
+
         # 合并所有媒体数据：final_media + mcp_media
         all_media = []
         if self.final_media:
             all_media.extend(self.final_media)
         if self.mcp_media:
             all_media.extend(self.mcp_media)
-        
+
         if all_media:
             ext['media'] = all_media
-        
+
         if self.error:
             ext['error'] = self.error
         return ext

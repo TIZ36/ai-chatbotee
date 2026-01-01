@@ -294,7 +294,6 @@ class TopicService:
         if ext is None:
             ext = {}
         ext['sender_name'] = sender_name
-        ext['sender_avatar'] = sender_avatar
         
         conn = self.get_connection()
         if not conn: return None
@@ -365,13 +364,21 @@ class TopicService:
         """发布事件到 Redis"""
         if not self.redis_client:
             return
-        
+
+        # 自定义JSON编码器，处理bytes对象
+        def json_encoder(obj):
+            if isinstance(obj, bytes):
+                # 将bytes转换为base64字符串
+                import base64
+                return base64.b64encode(obj).decode('utf-8')
+            raise TypeError(f'Object of type {obj.__class__.__name__} is not JSON serializable')
+
         channel = f"topic:{topic_id}"
         payload = {
             'type': event_type,
             'data': data
         }
-        self.redis_client.publish(channel, json.dumps(payload))
+        self.redis_client.publish(channel, json.dumps(payload, default=json_encoder))
         print(f"[TopicService] Published {event_type} to {channel}")
     
     def publish_process_event(

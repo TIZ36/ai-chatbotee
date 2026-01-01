@@ -682,8 +682,13 @@ class ActorBase(ABC):
             if ctx.should_continue and ctx.next_tool_call:
                 logger.info(f"[ActorBase:{self.agent_id}] Tool call triggered, waiting for next message")
             else:
-                # 发送完成事件
+                # 发送完成事件（包含 media，用于前端显示 thoughtSignature 状态）
                 from services.topic_service import get_topic_service
+                
+                # 获取 media 数据（来自 ext_data）
+                ext_data = ctx.build_ext_data()
+                media_data = ext_data.get('media') if ext_data else None
+                
                 get_topic_service()._publish_event(topic_id, 'agent_stream_done', {
                     'agent_id': self.agent_id,
                     'agent_name': self.info.get('name', 'Agent'),
@@ -692,6 +697,7 @@ class ActorBase(ABC):
                     'content': ctx.final_content,
                     'processSteps': ctx.to_process_steps_dict(),
                     'process_version': 'v2',
+                    'media': media_data,  # 包含 thoughtSignature
                 })
                 
                 # 追加到本地历史
@@ -2325,9 +2331,9 @@ class ActorBase(ABC):
         full_content = ""
         
         try:
-            for chunk in self._stream_llm_response(messages, llm_config_id=final_llm_config_id):
+            for chunk in self._stream_llm_response(messages, llm_config_id=final_llm_config_id, ctx=ctx):
                 full_content += chunk
-                
+
                 # 发送流式 chunk
                 get_topic_service()._publish_event(topic_id, 'agent_stream_chunk', {
                     'agent_id': self.agent_id,
@@ -2491,11 +2497,12 @@ class ActorBase(ABC):
         self,
         messages: List[Dict[str, Any]],
         llm_config_id: str = None,
+        ctx: Optional['IterationContext'] = None,
     ) -> Generator[str, None, None]:
         """流式调用 LLM"""
         from services.providers import create_provider, LLMMessage
         from services.llm_service import get_llm_service
-        
+
         # 如果指定了 llm_config_id，使用指定的配置；否则使用 session 默认配置
         if llm_config_id:
             llm_service = get_llm_service()
@@ -2510,7 +2517,7 @@ class ActorBase(ABC):
             api_key = self._config.get('api_key')
             api_url = self._config.get('api_url')
             model = self._config.get('model')
-        
+
         # 转换消息格式
         llm_messages = []
         for msg in messages:
@@ -2519,7 +2526,7 @@ class ActorBase(ABC):
                 content=msg.get('content', ''),
                 media=msg.get('media'),
             ))
-        
+
         # 创建 Provider
         llm_provider = create_provider(
             provider_type=provider,
@@ -2527,7 +2534,7 @@ class ActorBase(ABC):
             api_url=api_url,
             model=model,
         )
-        
+
         # 流式调用
         stream = llm_provider.chat_stream(llm_messages)
         while True:
@@ -2539,6 +2546,14 @@ class ActorBase(ABC):
                 media = getattr(resp, "media", None) if resp else None
                 if media:
                     self._pending_reply_media = media
+
+                # 存储LLM响应元数据到上下文
+                if ctx and resp:
+                    ctx.set_llm_response_metadata(
+                        usage=getattr(resp, "usage", None),
+                        finish_reason=getattr(resp, "finish_reason", None),
+                        raw_response=getattr(resp, "raw", None),
+                    )
                 break
     
     # ========== 消息操作 ==========
@@ -2733,9 +2748,17 @@ class ActorBase(ABC):
                 except Exception:
                     pass
             
-            if isinstance(data, str):
+            # 确保data是字符串格式
+            if isinstance(data, bytes):
+                # 如果是bytes，转换为base64字符串
+                import base64
+                data = base64.b64encode(data).decode('utf-8')
+            elif isinstance(data, str):
                 data = data.strip().replace('\n', '').replace('\r', '').replace(' ', '')
-            
+            else:
+                # 如果是其他类型，转换为字符串
+                data = str(data)
+
             if not data and not url:
                 continue
             
@@ -2759,6 +2782,11 @@ class ActorBase(ABC):
                 item['url'] = url
             if data:
                 item['data'] = data
+            
+            # 保留 Gemini 的 thoughtSignature（图片生成模型必须）
+            thought_sig = m.get('thoughtSignature') or m.get('thought_signature')
+            if thought_sig:
+                item['thoughtSignature'] = thought_sig
             
             out.append(item)
         

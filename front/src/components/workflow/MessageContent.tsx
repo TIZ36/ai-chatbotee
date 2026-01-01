@@ -244,6 +244,7 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
         mimeType: m.mimeType || (m.type === 'image' ? 'image/png' : m.type === 'video' ? 'video/mp4' : 'audio/mpeg'),
         data: data || url || '', // 确保有 data
         url: url || data, // 确保有 url
+        thoughtSignature: (m as any).thoughtSignature, // Gemini图片签名
       };
     });
   }, [message.media]);
@@ -967,7 +968,7 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
       )}
       
       {/* Process Steps / Execution Trace (执行轨迹展示) */}
-      <UnifiedProcessStepsViewer processSteps={message.processSteps} ext={message.ext} />
+      <UnifiedProcessStepsViewer processSteps={message.processSteps} ext={message.ext} role={message.role} />
     </div>
   );
 };

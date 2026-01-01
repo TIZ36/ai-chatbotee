@@ -10,6 +10,7 @@ export interface MediaItem {
   mimeType: string;
   data: string; // base64 编码的数据
   url?: string; // 如果是 URL
+  thoughtSignature?: string; // Gemini图片签名
 }
 
 interface MediaGalleryProps {
@@ -366,6 +367,13 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
             <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
               {item.mimeType}
             </div>
+            {item.thoughtSignature && (
+              <div className="text-xs text-gray-400 dark:text-gray-500 font-mono truncate">
+                {item.thoughtSignature.length > 20
+                  ? `${item.thoughtSignature.substring(0, 20)}...`
+                  : item.thoughtSignature}
+              </div>
+            )}
           </div>
           
           {/* 下载按钮 */}

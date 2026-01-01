@@ -12,6 +12,8 @@ export interface UnifiedMedia {
   id?: string;
   /** 可选：缩略图（如视频封面） */
   thumbnailUrl?: string;
+  /** 可选：Gemini图片签名 */
+  thoughtSignature?: string;
 }
 
 export interface UnifiedMessage {
@@ -41,6 +43,8 @@ export interface UnifiedMessage {
   thoughtSignature?: string;
   /** MCP 执行详情 */
   mcpdetail?: Record<string, any>;
+  /** 扩展数据（包含 media.thoughtSignature 等） */
+  ext?: Record<string, any>;
   /** 容纳各模块特有信息（会议多响应、tokens、toolCalls 等） */
   meta?: Record<string, any>;
 }
