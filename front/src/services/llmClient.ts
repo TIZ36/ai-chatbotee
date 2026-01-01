@@ -245,6 +245,7 @@ export class LLMClient {
   ): Promise<LLMResponse> {
     switch (this.config.provider) {
       case 'openai':
+      case 'deepseek':  // DeepSeek 使用 OpenAI 兼容 API
         return stream 
           ? this.callOpenAIStream(messages, tools, onChunk, onThinking)
           : this.callOpenAI(messages, tools);

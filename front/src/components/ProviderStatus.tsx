@@ -72,6 +72,8 @@ const LLMProviderCard: React.FC<LLMProviderCardProps> = ({ provider, onConfigure
     switch (provider.provider.toLowerCase()) {
       case 'openai':
         return '🤖';
+      case 'deepseek':
+        return '🔮';
       case 'anthropic':
         return '🧠';
       case 'gemini':

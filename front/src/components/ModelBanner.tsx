@@ -21,6 +21,8 @@ const ModelBanner: React.FC<ModelBannerProps> = ({ currentModel, streamEnabled }
     switch (provider.toLowerCase()) {
       case 'openai':
         return 'bg-[#10A37F]';
+      case 'deepseek':
+        return 'bg-[#5B68DF]';
       case 'anthropic':
         return 'bg-[#D4A574]';
       case 'gemini':
@@ -36,6 +38,8 @@ const ModelBanner: React.FC<ModelBannerProps> = ({ currentModel, streamEnabled }
     switch (provider.toLowerCase()) {
       case 'openai':
         return 'OpenAI';
+      case 'deepseek':
+        return 'DeepSeek';
       case 'anthropic':
         return 'Anthropic';
       case 'gemini':

@@ -36,14 +36,26 @@ class LLMService:
     def get_config(self, config_id: str, include_api_key: bool = False) -> Optional[dict]:
         """
         获取单个配置
-        
+
         Args:
             config_id: 配置 ID
             include_api_key: 是否包含 API Key
         """
         config = self.repository.find_by_id(config_id)
         if config:
-            return config.to_dict(include_api_key=include_api_key)
+            config_dict = config.to_dict(include_api_key=include_api_key)
+
+            # 自动设置 DeepSeek 的 API URL
+            # 1. 直接使用 deepseek provider 的情况（迁移后的新格式）
+            if config.provider == 'deepseek':
+                if not config.api_url:  # 只有在没有设置自定义 URL 时才自动设置
+                    config_dict['api_url'] = 'https://api.deepseek.com/v1/chat/completions'
+            # 2. 兼容旧数据：provider='openai' 但 model 包含 'deepseek'（建议运行迁移脚本）
+            elif config.provider == 'openai' and config.model and 'deepseek' in config.model.lower():
+                if not config.api_url:  # 只有在没有设置自定义 URL 时才自动设置
+                    config_dict['api_url'] = 'https://api.deepseek.com/v1/chat/completions'
+
+            return config_dict
         return None
     
     def get_api_key(self, config_id: str) -> Optional[str]:
@@ -209,6 +221,41 @@ class LLMService:
             
             if response.status_code != 200:
                 raise RuntimeError(f"OpenAI API error: {response.text}")
+                
+            data = response.json()
+            return {
+                'content': data['choices'][0]['message']['content'],
+                'raw': data
+            }
+        
+        elif provider == 'deepseek':
+            # DeepSeek API (OpenAI 兼容)
+            default_url = 'https://api.deepseek.com/v1/chat/completions'
+            if not api_url:
+                api_url = default_url
+            elif '/chat/completions' not in api_url:
+                base_url = api_url.rstrip('/')
+                if base_url.endswith('/v1'):
+                    api_url = f"{base_url}/chat/completions"
+                else:
+                    api_url = f"{base_url}/v1/chat/completions"
+            
+            response = requests.post(
+                api_url,
+                headers={
+                    'Content-Type': 'application/json',
+                    'Authorization': f'Bearer {api_key}',
+                },
+                json={
+                    'model': model_name,
+                    'messages': messages,
+                    'stream': stream,
+                },
+                timeout=60
+            )
+            
+            if response.status_code != 200:
+                raise RuntimeError(f"DeepSeek API error: {response.text}")
                 
             data = response.json()
             return {

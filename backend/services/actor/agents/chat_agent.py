@@ -49,10 +49,15 @@ class ChatAgent(ActorBase):
         sender_type = msg_data.get('sender_type')
         content = msg_data.get('content', '') or ''
         mentions = msg_data.get('mentions', []) or []
+        ext = msg_data.get('ext', {}) or {}
         
         # 1. 被 @ 提及：必须回复
         if self.agent_id in mentions:
             return ResponseDecision.reply('被 @ 提及，必须回复')
+        
+        # 2. MCP 错误自动触发：功能已禁用
+        # if ext.get('auto_trigger') and ext.get('mcp_error'):
+        #     return ResponseDecision.reply('MCP 错误自动触发，需要处理')
         
         # 获取会话类型
         from services.topic_service import get_topic_service

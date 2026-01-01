@@ -553,10 +553,12 @@ def call_mcp_tool(target_url: str, headers: Dict[str, str], tool_name: str, tool
             print(f"{BLUE}[MCP TOOL]   Session ID: {prepared_headers.get('mcp-session-id', 'N/A')[:20]}...{RESET}")
             
             # 发送请求（使用连接池）
-            # 工具调用可能需要较长时间，使用较长的超时
+            # 工具调用可能需要较长时间，特别是涉及浏览器操作时，使用较长的超时
+            # 对于涉及页面加载的操作，需要等待页面完全加载，超时设置为 60 秒
             session = get_mcp_session(target_url)
-            print(f"{YELLOW}[MCP TOOL]   → 发送中 (timeout=120s)...{RESET}")
-            response = session.post(target_url, json=tool_request, headers=prepared_headers, timeout=120)
+            tool_timeout = 60  # 60秒超时，确保页面加载完成
+            print(f"{YELLOW}[MCP TOOL]   → 发送中 (timeout={tool_timeout}s，等待页面加载)...{RESET}")
+            response = session.post(target_url, json=tool_request, headers=prepared_headers, timeout=tool_timeout)
             
             # 打印响应状态
             status_color = GREEN if response.ok else RED
@@ -613,10 +615,32 @@ def call_mcp_tool(target_url: str, headers: Dict[str, str], tool_name: str, tool
                 error_msg = error.get('message', 'unknown error')
                 error_data = error.get('data')  # 业务错误可能有额外数据
                 
-                # 判断是否可重试（-32000 通常是服务器错误）
-                is_retryable = error_code in [-32000, -32603] or 'timeout' in error_msg.lower() or 'network' in error_msg.lower()
+                # 判断是否可重试
+                # -32000: Execution context was destroyed（浏览器上下文被销毁，可能是页面加载超时）
+                # -32603: Internal error（服务器内部错误）
+                # 对于 Execution context 错误，增加等待时间后重试
+                is_execution_context_error = (
+                    error_code == -32000 or 
+                    'execution context' in error_msg.lower() or
+                    'context was destroyed' in error_msg.lower()
+                )
+                is_retryable = (
+                    error_code in [-32000, -32603] or 
+                    'timeout' in error_msg.lower() or 
+                    'network' in error_msg.lower() or
+                    is_execution_context_error
+                )
                 
-                if is_retryable and attempt < max_retries - 1:
+                # 如果是 Execution context 错误，增加等待时间（页面可能需要更多时间加载）
+                if is_execution_context_error and attempt < max_retries - 1:
+                    wait_time = min(5 + (2 ** attempt), 15)  # 至少等待5秒，最多15秒
+                    if add_log:
+                        add_log(f"⚠️ 检测到 Execution context 错误，等待 {wait_time} 秒后重试（页面可能需要更多时间加载）")
+                    time.sleep(wait_time)
+                    last_error = f"{error_code} - {error_msg}"
+                    continue
+                elif is_retryable and attempt < max_retries - 1:
+                    # 其他可重试错误使用标准退避策略
                     wait_time = 2 ** attempt
                     if add_log:
                         add_log(f"⚠️ 可重试错误，{wait_time}秒后重试: {error_code} - {error_msg}")

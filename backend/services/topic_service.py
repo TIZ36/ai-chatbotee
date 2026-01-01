@@ -12,6 +12,45 @@ from datetime import datetime
 from models.session import Session, SessionRepository
 from database import get_redis_client
 
+
+# ==================== 事件类型定义 ====================
+
+class TopicEventType:
+    """Topic 事件类型"""
+    # 消息相关
+    NEW_MESSAGE = 'new_message'
+    MESSAGES_ROLLED_BACK = 'messages_rolled_back'
+    
+    # Topic 状态
+    TOPIC_UPDATED = 'topic_updated'
+    TOPIC_PARTICIPANTS_UPDATED = 'topic_participants_updated'
+    
+    # 参与者状态
+    AGENT_JOINED = 'agent_joined'
+    PARTICIPANT_LEFT = 'participant_left'
+    
+    # Agent 状态
+    AGENT_RECEIVED = 'agent_received'
+    AGENT_DECIDING = 'agent_deciding'
+    AGENT_DECISION_MADE = 'agent_decision_made'
+    AGENT_THINKING = 'agent_thinking'
+    AGENT_STREAM_CHUNK = 'agent_stream_chunk'
+    AGENT_STREAM_DONE = 'agent_stream_done'
+    AGENT_SILENT = 'agent_silent'
+    
+    # 处理流程事件（新增）
+    PROCESS_EVENT = 'process_event'  # Topic.Event.Process 统一事件
+
+
+class ProcessEventPhase:
+    """处理流程事件阶段"""
+    LOAD_LLM_TOOL = 'load_llm_tool'           # 加载LLM和工具
+    PREPARE_CONTEXT = 'prepare_context'        # 准备上下文消息
+    MSG_TYPE_CLASSIFY = 'msg_type_classify'    # 消息类型分类
+    MSG_PRE_DEAL = 'msg_pre_deal'              # 消息预处理
+    MSG_DEAL = 'msg_deal'                      # 消息处理（LLM调用）
+    POST_MSG_DEAL = 'post_msg_deal'            # 消息后处理
+
 class TopicService:
     """Topic 服务"""
     
@@ -334,6 +373,39 @@ class TopicService:
         }
         self.redis_client.publish(channel, json.dumps(payload))
         print(f"[TopicService] Published {event_type} to {channel}")
+    
+    def publish_process_event(
+        self,
+        topic_id: str,
+        phase: str,
+        agent_id: str,
+        status: str = 'running',
+        data: Dict[str, Any] = None,
+        agent_name: str = None,
+        agent_avatar: str = None,
+    ):
+        """
+        发布处理流程事件 (Topic.Event.Process)
+        
+        Args:
+            topic_id: Topic ID
+            phase: 处理阶段（ProcessEventPhase 中的值）
+            agent_id: Agent ID
+            status: 状态（running/completed/error）
+            data: 阶段数据
+            agent_name: Agent 名称
+            agent_avatar: Agent 头像
+        """
+        event_data = {
+            'phase': phase,
+            'agent_id': agent_id,
+            'agent_name': agent_name,
+            'agent_avatar': agent_avatar,
+            'status': status,
+            'timestamp': time.time(),
+            **(data or {}),
+        }
+        self._publish_event(topic_id, TopicEventType.PROCESS_EVENT, event_data)
 
 # 全局实例
 topic_service: Optional[TopicService] = None

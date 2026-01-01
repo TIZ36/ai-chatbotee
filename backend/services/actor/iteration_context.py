@@ -19,14 +19,38 @@ if TYPE_CHECKING:
     from .actions import Action, ActionResult
 
 
+class MessageType:
+    """消息类型常量"""
+    USER_NEW_MSG = 'user_new_msg'           # 用户新消息
+    AGENT_MSG = 'agent_msg'                  # Agent 链式追加消息
+    AGENT_TOOLCALL_MSG = 'agent_toolcall_msg'  # Agent 工具调用请求
+    RESULT_MSG = 'result_msg'                # 工具调用结果消息
+
+
+class ProcessPhase:
+    """处理阶段常量"""
+    LOAD_LLM_TOOL = 'load_llm_tool'
+    PREPARE_CONTEXT = 'prepare_context'
+    MSG_TYPE_CLASSIFY = 'msg_type_classify'
+    MSG_PRE_DEAL = 'msg_pre_deal'
+    MSG_DEAL = 'msg_deal'
+    POST_MSG_DEAL = 'post_msg_deal'
+
+
+class LLMDecision:
+    """LLM 决策类型"""
+    CONTINUE = 'continue'    # 继续处理（触发新消息处理）
+    COMPLETE = 'complete'    # 处理完毕
+
+
 @dataclass
 class IterationContext:
     """迭代上下文"""
-    
+
     # 迭代配置
     max_iterations: int = 10
     iteration: int = 0
-    
+
     # 原始消息
     original_message: Optional[Dict[str, Any]] = None
     topic_id: Optional[str] = None
@@ -35,28 +59,84 @@ class IterationContext:
     # 用户选择的模型信息（优先于session默认配置）
     user_selected_model: Optional[str] = None
     user_selected_llm_config_id: Optional[str] = None
-    
+
     # 行动规划与执行
     planned_actions: List['Action'] = field(default_factory=list)
     executed_results: List['ActionResult'] = field(default_factory=list)
-    
+
     # 处理步骤（供前端显示 processSteps）
     process_steps: List[Dict[str, Any]] = field(default_factory=list)
-    
+
     # 状态标记
     is_complete: bool = False
     is_interrupted: bool = False
-    
+
     # 最终输出
     final_content: str = ""
     final_media: Optional[List[Dict[str, Any]]] = None
     final_ext: Dict[str, Any] = field(default_factory=dict)
-    
+
     # 累积的工具结果（用于构建 LLM 上下文）
     tool_results_text: str = ""
-    
+
+    # MCP 返回的媒体数据（图片等）
+    mcp_media: Optional[List[Dict[str, Any]]] = None
+
     # 错误信息
     error: Optional[str] = None
+
+    # ========== 新增：步骤变更回调 ==========
+
+    # 步骤变更回调函数 (step_callback: (ctx, step) -> None)
+    _step_callback: Optional[callable] = None
+
+    # Agent ID（用于日志）
+    _agent_id: Optional[str] = None
+
+    def set_step_callback(self, callback: callable, agent_id: str = None):
+        """
+        设置步骤变更回调函数
+
+        Args:
+            callback: 回调函数，签名: (ctx: IterationContext, step: Dict[str, Any]) -> None
+            agent_id: Agent ID，用于日志记录
+        """
+        self._step_callback = callback
+        self._agent_id = agent_id
+    
+    # ========== 新增字段：支持消息处理流程 ==========
+    
+    # LLM 配置（从请求参数或session默认加载）
+    llm_config: Optional[Dict[str, Any]] = None
+    llm_config_id: Optional[str] = None
+    
+    # MCP 工具列表（从MCP池加载）
+    mcp_tools: Optional[List[Dict[str, Any]]] = None
+    mcp_server_ids: Optional[List[str]] = None
+    
+    # System prompt 和历史消息（准备好的上下文）
+    system_prompt: Optional[str] = None
+    history_messages: Optional[List[Dict[str, Any]]] = None
+    
+    # 消息类型分类结果
+    msg_type: Optional[str] = None  # MessageType 中的值
+    
+    # 工具调用结果消息
+    result_msg: Optional[Dict[str, Any]] = None
+    
+    # 事件状态（各阶段的状态）
+    event_states: Dict[str, Any] = field(default_factory=dict)
+    
+    # 当前处理阶段
+    current_phase: Optional[str] = None  # ProcessPhase 中的值
+    
+    # LLM 决策结果
+    llm_decision: Optional[str] = None  # LLMDecision 中的值
+    llm_decision_data: Optional[Dict[str, Any]] = None  # 决策附加数据
+    
+    # 是否需要继续处理（用于链式调用）
+    should_continue: bool = False
+    next_tool_call: Optional[Dict[str, Any]] = None  # 下一个工具调用参数
     
     def add_step(
         self,
@@ -67,13 +147,13 @@ class IterationContext:
     ) -> Dict[str, Any]:
         """
         添加处理步骤
-        
+
         Args:
             step_type: 步骤类型（thinking/mcp_call/llm_generating/agent_decision 等）
             thinking: 思考/说明文字
             status: 状态（running/completed/error）
             **kwargs: 其他字段
-            
+
         Returns:
             添加的步骤对象
         """
@@ -85,30 +165,46 @@ class IterationContext:
         }
         if thinking:
             step['thinking'] = thinking
-        
+
         self.process_steps.append(step)
+
+        # 记录日志
+        self._log_step_change(step, "添加")
+
+        # 调用回调函数（通知前端）
+        self._notify_step_change(step)
+
         return step
     
     def update_last_step(self, status: str = None, **kwargs):
         """
         更新最后一个步骤
-        
+
         Args:
             status: 新状态
             **kwargs: 其他更新字段
         """
         if not self.process_steps:
             return
-        
+
         step = self.process_steps[-1]
+        old_status = step.get('status')
+
         if status:
             step['status'] = status
-        
+
         # 计算耗时
         if status in ('completed', 'error') and 'timestamp' in step:
             step['duration'] = int(time.time() * 1000) - step['timestamp']
-        
+
         step.update(kwargs)
+
+        # 记录状态变更日志
+        if status and status != old_status:
+            self._log_step_change(step, f"状态变更: {old_status} -> {status}")
+
+        # 调用回调函数（通知前端）
+        self._notify_step_change(step)
     
     def get_step_by_type(self, step_type: str) -> Optional[Dict[str, Any]]:
         """
@@ -195,7 +291,29 @@ class IterationContext:
         if executed_count < len(self.planned_actions):
             return self.planned_actions[executed_count]
         return None
-    
+
+    def _log_step_change(self, step: Dict[str, Any], action: str):
+        """记录步骤变更到日志"""
+        step_type = step.get('type', 'unknown')
+        status = step.get('status', 'unknown')
+        thinking = step.get('thinking', '')
+
+        agent_prefix = f"[IterationContext:{self._agent_id}]" if self._agent_id else "[IterationContext]"
+
+        if thinking:
+            print(f"{agent_prefix} {action}步骤: {step_type} ({status}) - {thinking}")
+        else:
+            print(f"{agent_prefix} {action}步骤: {step_type} ({status})")
+
+    def _notify_step_change(self, step: Dict[str, Any]):
+        """通知前端步骤变更"""
+        if self._step_callback:
+            try:
+                self._step_callback(self, step)
+            except Exception as e:
+                agent_prefix = f"[IterationContext:{self._agent_id}]" if self._agent_id else "[IterationContext]"
+                print(f"{agent_prefix} 步骤回调失败: {e}")
+
     def to_process_steps_dict(self) -> List[Dict[str, Any]]:
         """转换为 processSteps 格式（供前端）"""
         return self.process_steps.copy()
@@ -206,11 +324,119 @@ class IterationContext:
             'processSteps': self.process_steps,
             **self.final_ext,
         }
+        
+        # 合并所有媒体数据：final_media + mcp_media
+        all_media = []
         if self.final_media:
-            ext['media'] = self.final_media
+            all_media.extend(self.final_media)
+        if self.mcp_media:
+            all_media.extend(self.mcp_media)
+        
+        if all_media:
+            ext['media'] = all_media
+        
         if self.error:
             ext['error'] = self.error
         return ext
+    
+    # ========== 新增方法：支持消息处理流程 ==========
+    
+    def set_phase(self, phase: str, status: str = 'running', **data):
+        """
+        设置当前处理阶段
+        
+        Args:
+            phase: 处理阶段（ProcessPhase 中的值）
+            status: 状态（running/completed/error）
+            **data: 阶段数据
+        """
+        self.current_phase = phase
+        self.event_states[phase] = {
+            'status': status,
+            'timestamp': int(time.time() * 1000),
+            **data
+        }
+    
+    def update_phase(self, phase: str = None, status: str = None, **data):
+        """
+        更新处理阶段状态
+        
+        Args:
+            phase: 处理阶段（可选，默认当前阶段）
+            status: 状态
+            **data: 更新数据
+        """
+        phase = phase or self.current_phase
+        if not phase or phase not in self.event_states:
+            return
+        
+        if status:
+            self.event_states[phase]['status'] = status
+        
+        # 计算耗时
+        if status in ('completed', 'error'):
+            start_ts = self.event_states[phase].get('timestamp', 0)
+            if start_ts:
+                self.event_states[phase]['duration'] = int(time.time() * 1000) - start_ts
+        
+        self.event_states[phase].update(data)
+    
+    def get_phase_data(self, phase: str) -> Optional[Dict[str, Any]]:
+        """获取阶段数据"""
+        return self.event_states.get(phase)
+    
+    def set_llm_config(self, config: Dict[str, Any], config_id: str = None):
+        """设置 LLM 配置"""
+        self.llm_config = config
+        self.llm_config_id = config_id
+    
+    def set_mcp_tools(self, tools: List[Dict[str, Any]], server_ids: List[str] = None):
+        """设置 MCP 工具列表"""
+        self.mcp_tools = tools
+        self.mcp_server_ids = server_ids
+    
+    def set_context(self, system_prompt: str, history_messages: List[Dict[str, Any]]):
+        """设置上下文（system prompt 和历史消息）"""
+        self.system_prompt = system_prompt
+        self.history_messages = history_messages
+    
+    def set_msg_type(self, msg_type: str):
+        """设置消息类型"""
+        self.msg_type = msg_type
+    
+    def set_result_msg(self, result_msg: Dict[str, Any]):
+        """设置工具调用结果消息"""
+        self.result_msg = result_msg
+    
+    def set_llm_decision(self, decision: str, data: Dict[str, Any] = None):
+        """
+        设置 LLM 决策结果
+        
+        Args:
+            decision: 决策类型（LLMDecision 中的值）
+            data: 决策附加数据（如工具调用参数）
+        """
+        self.llm_decision = decision
+        self.llm_decision_data = data
+        self.should_continue = (decision == LLMDecision.CONTINUE)
+        
+        if data and data.get('next_tool_call'):
+            self.next_tool_call = data['next_tool_call']
+    
+    def to_event_data(self) -> Dict[str, Any]:
+        """转换为事件数据（用于 Topic.Event.Process）"""
+        return {
+            'topic_id': self.topic_id,
+            'message_id': self.original_message.get('message_id') if self.original_message else None,
+            'reply_message_id': self.reply_message_id,
+            'current_phase': self.current_phase,
+            'msg_type': self.msg_type,
+            'llm_decision': self.llm_decision,
+            'event_states': self.event_states,
+            'process_steps': self.process_steps,
+            'is_complete': self.is_complete,
+            'error': self.error,
+        }
 
 
 @dataclass

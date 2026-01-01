@@ -133,6 +133,20 @@ except Exception as e:
     print('继续启动服务器...')
 " 2>&1
 
+# 运行 DeepSeek Provider 数据迁移
+echo ""
+echo "检查并执行 DeepSeek Provider 数据迁移..."
+python -c "
+try:
+    from migrate_deepseek_provider import migrate_deepseek_provider
+    migrate_deepseek_provider()
+except ImportError as e:
+    print(f'⚠️  迁移脚本未找到，跳过迁移')
+except Exception as e:
+    print(f'⚠️  DeepSeek 迁移出错: {e}')
+    print('继续启动服务器...')
+" 2>&1
+
 # 验证新架构模块
 echo ""
 echo "验证新架构模块..."

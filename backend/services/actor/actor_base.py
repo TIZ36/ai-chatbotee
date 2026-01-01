@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from services.llm_service import LLMService
 
 from .actor_state import ActorState
-from .iteration_context import IterationContext, DecisionContext
+from .iteration_context import IterationContext, DecisionContext, MessageType, ProcessPhase, LLMDecision
 from .actions import Action, ActionResult, ResponseDecision
 from .capability_registry import CapabilityRegistry
 
@@ -412,11 +412,23 @@ class ActorBase(ABC):
     
     # ========== 消息处理（迭代器模式）==========
     
+    # 是否启用新的处理流程（默认关闭，子类可覆盖）
+    USE_NEW_PROCESS_FLOW = False
+    
     def _handle_new_message(self, topic_id: str, msg_data: Dict[str, Any]):
-        """处理新消息"""
+        """
+        处理新消息
+        
+        支持两种处理流程：
+        1. 旧流程（默认）：迭代器模式，兼容现有逻辑
+        2. 新流程：基于事件的处理流程，更细粒度的步骤控制
+        
+        通过 USE_NEW_PROCESS_FLOW 类属性或 ext.use_new_flow 控制
+        """
         message_id = msg_data.get('message_id')
         sender_id = msg_data.get('sender_id')
         content = msg_data.get('content', '')
+        ext = msg_data.get('ext', {}) or {}
         
         # 1. 去重检查
         if self.state.is_processed(message_id):
@@ -447,8 +459,15 @@ class ActorBase(ABC):
             self._handle_delegate_decision(topic_id, msg_data, decision)
             return
         
-        # 6. 执行迭代处理
-        self.process_message(topic_id, msg_data, decision)
+        # 6. 选择处理流程
+        use_new_flow = ext.get('use_new_flow', self.USE_NEW_PROCESS_FLOW)
+        
+        if use_new_flow:
+            # 使用新的处理流程
+            self.process_message_v2(topic_id, msg_data, decision)
+        else:
+            # 使用旧的迭代器模式
+            self.process_message(topic_id, msg_data, decision)
     
     def process_message(
         self,
@@ -554,6 +573,144 @@ class ActorBase(ABC):
         
         # 4. 观察结果，决定是否继续
         ctx.is_complete = not self._should_continue(ctx)
+    
+    def process_message_v2(
+        self,
+        topic_id: str,
+        msg_data: Dict[str, Any],
+        decision: ResponseDecision = None,
+    ):
+        """
+        消息处理主流程 V2（新版本）
+        
+        基于事件驱动的处理流程，更细粒度的步骤控制：
+        1. loadLLMAndTool - 加载 LLM 配置和 MCP 工具
+        2. prepareContextMessage - 准备上下文消息
+        3. msgtypeclassify - 消息类型分类
+        4. msg_pre_deal - 消息预处理
+        5. msg_deal - 消息处理（LLM 调用）
+        6. post_msg_deal - 消息后处理
+        
+        Args:
+            topic_id: 话题 ID
+            msg_data: 消息数据
+            decision: 响应决策（可选）
+        """
+        message_id = msg_data.get('message_id')
+        reply_message_id = f"msg_{uuid.uuid4().hex[:8]}"
+
+        # 创建迭代上下文
+        ctx = IterationContext(max_iterations=self.DEFAULT_MAX_ITERATIONS)
+        ctx.original_message = msg_data
+        ctx.topic_id = topic_id
+        ctx.reply_message_id = reply_message_id
+
+        # 设置步骤变更回调（自动通知前端并记录日志）
+        ctx.set_step_callback(self._on_step_change, self.agent_id)
+
+        # 提取用户选择的模型信息（优先于session默认配置）
+        ext = msg_data.get('ext', {}) or {}
+        if ext.get('user_llm_config_id'):
+            ctx.user_selected_llm_config_id = ext['user_llm_config_id']
+            logger.info(f"[ActorBase:{self.agent_id}] 用户选择了LLM配置ID: {ctx.user_selected_llm_config_id}")
+        elif msg_data.get('model'):
+            ctx.user_selected_model = msg_data['model']
+            logger.info(f"[ActorBase:{self.agent_id}] 用户选择了模型: {ctx.user_selected_model}")
+        
+        # 添加激活步骤
+        ctx.add_step(
+            'agent_activated',
+            thinking='开始处理消息（V2流程）...',
+            agent_id=self.agent_id,
+            agent_name=self.info.get('name', 'Agent'),
+        )
+        ctx.update_last_step(status='completed')
+        
+        # 通知前端：开始处理
+        self._sync_message('agent_thinking', '', ext={
+            'message_id': reply_message_id,
+            'processSteps': ctx.to_process_steps_dict(),
+            'in_reply_to': message_id,
+            'process_version': 'v2',
+        })
+        
+        try:
+            # 步骤 1: 加载 LLM 配置和 MCP 工具
+            ctx.add_step('load_llm_tool', thinking='加载 LLM 配置和工具...')
+            if not self._load_llm_and_tools(ctx):
+                ctx.update_last_step(status='error', error='加载配置失败')
+                raise RuntimeError("Failed to load LLM and tools")
+            ctx.update_last_step(status='completed')
+            
+            # 步骤 2: 准备上下文消息
+            ctx.add_step('prepare_context', thinking='准备上下文消息...')
+            if not self._prepare_context_message(ctx):
+                ctx.update_last_step(status='error', error='准备上下文失败')
+                raise RuntimeError("Failed to prepare context message")
+            ctx.update_last_step(status='completed')
+            
+            # 步骤 3: 消息类型分类
+            ctx.add_step('msg_classify', thinking='分析消息类型...')
+            msg_type = self._classify_msg_type(ctx)
+            ctx.update_last_step(status='completed', msg_type=msg_type)
+            
+            # 步骤 4: 消息预处理
+            ctx.add_step('msg_pre_deal', thinking='消息预处理...')
+            if not self._msg_pre_deal(ctx):
+                # 如果返回 False，可能是跳过处理（如自己的 agent_msg）
+                ctx.update_last_step(status='completed', action='skipped')
+                logger.info(f"[ActorBase:{self.agent_id}] Message pre-deal returned False, skipping")
+                return
+            ctx.update_last_step(status='completed')
+            
+            # 步骤 5: 消息处理（LLM 调用）
+            ctx.add_step('msg_deal', thinking='处理消息...')
+            if not self._msg_deal(ctx):
+                ctx.update_last_step(status='error', error='消息处理失败')
+                raise RuntimeError("Failed to deal with message")
+            ctx.update_last_step(status='completed', decision=ctx.llm_decision)
+            
+            # 步骤 6: 消息后处理
+            ctx.add_step('post_msg_deal', thinking='后处理...')
+            if not self._post_msg_deal(ctx):
+                ctx.update_last_step(status='error', error='后处理失败')
+                raise RuntimeError("Failed to post-deal message")
+            ctx.update_last_step(status='completed')
+            
+            # 如果决策是继续（工具调用），且有下一个工具调用
+            # 这里不需要递归，因为工具调用消息会通过 topic 再次触发 _handle_new_message
+            if ctx.should_continue and ctx.next_tool_call:
+                logger.info(f"[ActorBase:{self.agent_id}] Tool call triggered, waiting for next message")
+            else:
+                # 发送完成事件
+                from services.topic_service import get_topic_service
+                get_topic_service()._publish_event(topic_id, 'agent_stream_done', {
+                    'agent_id': self.agent_id,
+                    'agent_name': self.info.get('name', 'Agent'),
+                    'agent_avatar': self.info.get('avatar'),
+                    'message_id': reply_message_id,
+                    'content': ctx.final_content,
+                    'processSteps': ctx.to_process_steps_dict(),
+                    'process_version': 'v2',
+                })
+                
+                # 追加到本地历史
+                self.state.append_history({
+                    'message_id': reply_message_id,
+                    'role': 'assistant',
+                    'content': ctx.final_content,
+                    'created_at': time.time(),
+                    'sender_id': self.agent_id,
+                    'sender_type': 'agent',
+                })
+            
+            logger.info(f"[ActorBase:{self.agent_id}] Message processed successfully (V2)")
+            
+        except Exception as e:
+            logger.error(f"[ActorBase:{self.agent_id}] Process error (V2): {e}")
+            traceback.print_exc()
+            ctx.mark_error(str(e))
+            self._handle_process_error(ctx, e)
     
     # ========== 可重写的钩子方法 ==========
     
@@ -697,6 +854,802 @@ class ActorBase(ABC):
         # 这里简单实现，子类可重写
         return False
     
+    # ========== 消息处理流程（新增）==========
+    
+    def _load_llm_and_tools(self, ctx: IterationContext) -> bool:
+        """
+        加载 LLM 配置和 MCP 工具列表
+        
+        根据请求参数确定可用的模型配置，从MCP池中加载工具列表。
+        
+        Args:
+            ctx: 迭代上下文
+            
+        Returns:
+            True 表示加载成功，False 表示失败
+        """
+        from services.topic_service import get_topic_service, ProcessEventPhase
+        from services.llm_service import get_llm_service
+        
+        ctx.set_phase(ProcessPhase.LOAD_LLM_TOOL, 'running')
+        
+        # 发布处理事件
+        self._publish_process_event(ctx, ProcessPhase.LOAD_LLM_TOOL, 'running')
+        
+        try:
+            # 1. 确定 LLM 配置
+            ext = ctx.original_message.get('ext', {}) or {}
+            session_llm_config_id = self._config.get('llm_config_id')
+            
+            # 优先级：ext.user_llm_config_id > ctx.user_selected_model > session默认
+            final_llm_config_id = None
+            
+            if ctx.user_selected_llm_config_id and ctx.user_selected_llm_config_id != session_llm_config_id:
+                final_llm_config_id = ctx.user_selected_llm_config_id
+                logger.info(f"[ActorBase:{self.agent_id}] 使用用户选择的LLM配置ID: {final_llm_config_id}")
+            elif ctx.user_selected_model:
+                final_llm_config_id = self._find_llm_config_for_model(ctx.user_selected_model, session_llm_config_id)
+                logger.info(f"[ActorBase:{self.agent_id}] 根据模型名称找到配置: {final_llm_config_id}")
+            else:
+                final_llm_config_id = session_llm_config_id
+                logger.info(f"[ActorBase:{self.agent_id}] 使用Agent默认配置: {final_llm_config_id}")
+            
+            if not final_llm_config_id:
+                error_msg = f"Agent {self.agent_id} 未配置默认LLM模型，且用户未选择模型"
+                ctx.update_phase(status='error', error=error_msg)
+                self._publish_process_event(ctx, ProcessPhase.LOAD_LLM_TOOL, 'error', {'error': error_msg})
+                return False
+            
+            # 加载 LLM 配置详情
+            llm_service = get_llm_service()
+            llm_config = llm_service.get_config(final_llm_config_id, include_api_key=True) or {}
+            ctx.set_llm_config(llm_config, final_llm_config_id)
+            
+            # 2. 加载 MCP 工具列表
+            mcp_server_ids = []
+            mcp_tools = []
+            
+            # 从消息 ext 中提取 MCP 服务器 ID
+            if ext.get('mcp_servers'):
+                mcp_server_ids = ext['mcp_servers']
+            elif ext.get('selectedMcpServerIds'):
+                mcp_server_ids = ext['selectedMcpServerIds']
+            elif ext.get('selected_mcp_server_ids'):
+                mcp_server_ids = ext['selected_mcp_server_ids']
+            
+            # 从 Agent 配置中加载默认的 MCP 服务器
+            agent_ext = self._config.get('ext', {}) or {}
+            if not mcp_server_ids and agent_ext.get('mcp_servers'):
+                mcp_server_ids = agent_ext['mcp_servers']
+            
+            # 加载每个 MCP 服务器的工具列表
+            for server_id in mcp_server_ids[:3]:  # 最多支持3个
+                tools = self._get_mcp_tools_for_server(server_id)
+                if tools:
+                    mcp_tools.extend(tools)
+            
+            ctx.set_mcp_tools(mcp_tools, mcp_server_ids)
+            
+            ctx.update_phase(status='completed', llm_config_id=final_llm_config_id, mcp_server_count=len(mcp_server_ids), tool_count=len(mcp_tools))
+            self._publish_process_event(ctx, ProcessPhase.LOAD_LLM_TOOL, 'completed', {
+                'llm_config_id': final_llm_config_id,
+                'llm_provider': llm_config.get('provider'),
+                'llm_model': llm_config.get('model'),
+                'mcp_server_ids': mcp_server_ids,
+                'tool_count': len(mcp_tools),
+            })
+            
+            logger.info(f"[ActorBase:{self.agent_id}] Loaded LLM config: {final_llm_config_id}, MCP tools: {len(mcp_tools)}")
+            return True
+            
+        except Exception as e:
+            error_msg = str(e)
+            ctx.update_phase(status='error', error=error_msg)
+            self._publish_process_event(ctx, ProcessPhase.LOAD_LLM_TOOL, 'error', {'error': error_msg})
+            logger.error(f"[ActorBase:{self.agent_id}] Failed to load LLM and tools: {e}")
+            return False
+    
+    def _get_mcp_tools_for_server(self, server_id: str) -> List[Dict[str, Any]]:
+        """
+        获取 MCP 服务器的工具列表（结构化数据）
+        
+        Args:
+            server_id: MCP 服务器 ID
+            
+        Returns:
+            工具列表，每个工具包含 name, description, parameters
+        """
+        try:
+            from mcp_server.mcp_common_logic import get_mcp_tools_list, prepare_mcp_headers
+            import pymysql
+            
+            conn = get_mysql_connection()
+            if not conn:
+                return []
+            
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute(
+                "SELECT url FROM mcp_servers WHERE server_id = %s AND enabled = 1",
+                (server_id,)
+            )
+            row = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            
+            if not row or not row.get('url'):
+                return []
+            
+            server_url = row['url']
+            
+            base_headers = {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json, text/event-stream',
+            }
+            headers = prepare_mcp_headers(server_url, base_headers, base_headers)
+            
+            tools_response = get_mcp_tools_list(server_url, headers, use_cache=True)
+            if not tools_response or 'result' not in tools_response:
+                return []
+            
+            tools = tools_response['result'].get('tools', [])
+            
+            # 给每个工具添加 server_id 标识
+            for tool in tools:
+                tool['server_id'] = server_id
+            
+            return tools
+            
+        except Exception as e:
+            logger.warning(f"[ActorBase:{self.agent_id}] Failed to get MCP tools for {server_id}: {e}")
+            return []
+    
+    def _prepare_context_message(self, ctx: IterationContext) -> bool:
+        """
+        准备上下文消息
+        
+        检查token是否达到上限，如果达到则触发summary但保留最近5条消息。
+        
+        Args:
+            ctx: 迭代上下文
+            
+        Returns:
+            True 表示准备成功
+        """
+        ctx.set_phase(ProcessPhase.PREPARE_CONTEXT, 'running')
+        self._publish_process_event(ctx, ProcessPhase.PREPARE_CONTEXT, 'running')
+        
+        try:
+            # 1. 获取模型配置
+            llm_config = ctx.llm_config or {}
+            model = llm_config.get('model') or self._config.get('model') or 'gpt-4'
+            
+            # 2. 获取模型的 token 上限
+            max_tokens = get_model_max_tokens(model)
+            token_threshold = int(max_tokens * self.MEMORY_BUDGET_THRESHOLD)
+            
+            # 3. 构建 system prompt
+            system_prompt = self._build_system_prompt(ctx)
+            
+            # 4. 检查历史消息的 token 使用量
+            history = self.state.history
+            history_msgs = []
+            
+            if history:
+                # 计算 system prompt 的 token
+                system_tokens = estimate_messages_tokens([{"role": "system", "content": system_prompt}], model)
+                
+                # 预留空间
+                available_tokens = token_threshold - system_tokens - 1000  # 预留 1000 给回复
+                
+                # 如果需要 summary，保留最近 5 条消息
+                keep_recent = 5
+                
+                if len(history) > keep_recent:
+                    # 估算所有历史消息的 token
+                    all_history_tokens = estimate_messages_tokens(history, model)
+                    
+                    if all_history_tokens > available_tokens:
+                        # 需要 summary
+                        logger.info(f"[ActorBase:{self.agent_id}] Token budget exceeded, triggering summary")
+                        
+                        # 调用 summary（保留最近 5 条）
+                        self._summarize_memory_with_keep(keep_recent)
+                        
+                        # 使用 summary + 最近消息
+                        if self.state.summary:
+                            history_msgs.append({
+                                "role": "system",
+                                "content": f"【对话摘要】\n{self.state.summary}",
+                            })
+                        
+                        # 添加最近的消息
+                        recent_msgs = self.state.get_recent_history(
+                            max_messages=keep_recent,
+                            max_total_chars=8000,
+                            max_per_message_chars=2400,
+                            include_summary=False,
+                        )
+                        history_msgs.extend(recent_msgs)
+                    else:
+                        # 不需要 summary，直接使用历史
+                        history_msgs = self.state.get_recent_history(
+                            max_messages=10,
+                            max_total_chars=8000,
+                            max_per_message_chars=2400,
+                            include_summary=True,
+                        )
+                else:
+                    # 历史消息少，直接使用
+                    history_msgs = list(history)
+            
+            ctx.set_context(system_prompt, history_msgs)
+            
+            ctx.update_phase(status='completed', history_count=len(history_msgs), has_summary=bool(self.state.summary))
+            self._publish_process_event(ctx, ProcessPhase.PREPARE_CONTEXT, 'completed', {
+                'history_count': len(history_msgs),
+                'has_summary': bool(self.state.summary),
+                'model': model,
+            })
+            
+            logger.info(f"[ActorBase:{self.agent_id}] Prepared context: {len(history_msgs)} history messages")
+            return True
+            
+        except Exception as e:
+            error_msg = str(e)
+            ctx.update_phase(status='error', error=error_msg)
+            self._publish_process_event(ctx, ProcessPhase.PREPARE_CONTEXT, 'error', {'error': error_msg})
+            logger.error(f"[ActorBase:{self.agent_id}] Failed to prepare context: {e}")
+            return False
+    
+    def _summarize_memory_with_keep(self, keep_recent: int = 5):
+        """
+        记忆总结，保留最近 N 条消息
+        
+        Args:
+            keep_recent: 保留的最近消息数量
+        """
+        llm_config_id = self._config.get('llm_config_id')
+        if not llm_config_id:
+            return
+        
+        from services.llm_service import get_llm_service
+        
+        llm_service = get_llm_service()
+        llm_cfg = llm_service.get_config(llm_config_id, include_api_key=False) or {}
+        model = llm_cfg.get('model') or 'gpt-4'
+        
+        history = self.state.history
+        if not isinstance(history, list) or len(history) <= keep_recent:
+            return
+        
+        # 保留最后 N 条原文，其余进摘要
+        older = history[:-keep_recent]
+        if len(older) < 5:  # 至少需要 5 条才进行摘要
+            return
+        
+        # 构建摘要输入
+        lines = []
+        last_id = None
+        for m in older[-80:]:  # 最多处理 80 条
+            if not isinstance(m, dict):
+                continue
+            role = m.get('role')
+            content = (m.get('content') or '').strip()
+            if role not in ('user', 'assistant') or not content:
+                continue
+            if len(content) > 1200:
+                content = content[:1200] + '…'
+            lines.append(f"{role}: {content}")
+            last_id = m.get('message_id') or last_id
+        
+        if not lines:
+            return
+        
+        system = (
+            "你是一个对话摘要器。请把以下对话浓缩成可供后续继续对话的「记忆摘要」。\n"
+            "要求：\n"
+            "- 保留关键事实、用户偏好、已做决定、待办事项等。\n"
+            "- 去掉寒暄与重复。\n"
+            "- 输出中文，控制在 400~800 字。\n"
+            "- 只输出摘要正文，不要标题。"
+        )
+        user = "\n".join(lines)
+        
+        try:
+            resp = llm_service.chat_completion(
+                config_id=llm_config_id,
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                stream=False,
+            )
+            summary = (resp.get('content') or '').strip()
+            if summary:
+                self.state.summary = summary
+                self.state.summary_until = last_id
+                logger.info(f"[ActorBase:{self.agent_id}] Memory summarized with keep_recent={keep_recent} ({len(summary)} chars)")
+        except Exception as e:
+            logger.error(f"[ActorBase:{self.agent_id}] Summarize with keep failed: {e}")
+    
+    def _classify_msg_type(self, ctx: IterationContext) -> str:
+        """
+        消息类型分类
+        
+        根据消息特征分类为：
+        - agent_msg: Agent 链式追加消息
+        - agent_toolcall_msg: Agent 工具调用请求
+        - user_new_msg: 用户新消息
+        
+        Args:
+            ctx: 迭代上下文
+            
+        Returns:
+            消息类型
+        """
+        ctx.set_phase(ProcessPhase.MSG_TYPE_CLASSIFY, 'running')
+        self._publish_process_event(ctx, ProcessPhase.MSG_TYPE_CLASSIFY, 'running')
+        
+        msg_data = ctx.original_message or {}
+        sender_type = msg_data.get('sender_type', '')
+        ext = msg_data.get('ext', {}) or {}
+        
+        msg_type = MessageType.USER_NEW_MSG  # 默认
+        
+        # 1. 检查是否是 Agent 消息
+        if sender_type == 'agent':
+            # 检查是否是链式追加
+            if ext.get('chain_append') or ext.get('auto_trigger'):
+                msg_type = MessageType.AGENT_MSG
+            # 检查是否是工具调用请求
+            elif ext.get('tool_call'):
+                tool_call = ext['tool_call']
+                if isinstance(tool_call, dict) and tool_call.get('tool_name'):
+                    msg_type = MessageType.AGENT_TOOLCALL_MSG
+        
+        # 2. 检查系统消息中的工具调用标记
+        elif sender_type == 'system':
+            if ext.get('mcp_error') and ext.get('auto_trigger'):
+                msg_type = MessageType.AGENT_MSG  # 错误触发的自处理消息
+        
+        ctx.set_msg_type(msg_type)
+        
+        ctx.update_phase(status='completed', msg_type=msg_type)
+        self._publish_process_event(ctx, ProcessPhase.MSG_TYPE_CLASSIFY, 'completed', {
+            'msg_type': msg_type,
+            'sender_type': sender_type,
+        })
+        
+        logger.info(f"[ActorBase:{self.agent_id}] Message classified as: {msg_type}")
+        return msg_type
+    
+    def _msg_pre_deal(self, ctx: IterationContext) -> bool:
+        """
+        消息预处理
+        
+        - agent_msg from self: 跳过
+        - agent_toolcall_msg: 执行 MCP 调用，等待结果
+        
+        Args:
+            ctx: 迭代上下文
+            
+        Returns:
+            True 表示继续处理，False 表示跳过
+        """
+        ctx.set_phase(ProcessPhase.MSG_PRE_DEAL, 'running')
+        self._publish_process_event(ctx, ProcessPhase.MSG_PRE_DEAL, 'running')
+        
+        msg_data = ctx.original_message or {}
+        sender_id = msg_data.get('sender_id', '')
+        msg_type = ctx.msg_type
+        
+        try:
+            # 1. agent_msg from self: 跳过
+            if msg_type == MessageType.AGENT_MSG and sender_id == self.agent_id:
+                ctx.update_phase(status='completed', action='skip', reason='self_message')
+                self._publish_process_event(ctx, ProcessPhase.MSG_PRE_DEAL, 'completed', {
+                    'action': 'skip',
+                    'reason': 'self_message',
+                })
+                logger.debug(f"[ActorBase:{self.agent_id}] Skipping self agent message")
+                return False
+            
+            # 2. agent_toolcall_msg: 执行 MCP 调用
+            if msg_type == MessageType.AGENT_TOOLCALL_MSG:
+                ext = msg_data.get('ext', {}) or {}
+                tool_call = ext.get('tool_call', {})
+                
+                server_id = tool_call.get('server_id') or tool_call.get('mcp_server_id')
+                tool_name = tool_call.get('tool_name')
+                params = tool_call.get('params', {})
+                
+                if server_id and tool_name:
+                    # 创建 MCP 调用 Action
+                    action = Action.mcp(
+                        server_id=server_id,
+                        tool_name=tool_name,
+                        params=params,
+                    )
+                    
+                    # 执行 MCP 调用
+                    result = self._call_mcp(action, ctx)
+                    
+                    # 将结果存储为 result_msg
+                    result_msg = {
+                        'role': 'tool',
+                        'content': result.text_result or '',
+                        'tool_name': tool_name,
+                        'server_id': server_id,
+                        'success': result.success,
+                        'error': result.error,
+                    }
+                    ctx.set_result_msg(result_msg)
+                    
+                    # 更新消息类型为结果消息
+                    ctx.set_msg_type(MessageType.RESULT_MSG)
+                    
+                    ctx.update_phase(status='completed', action='mcp_call', tool_name=tool_name, success=result.success)
+                    self._publish_process_event(ctx, ProcessPhase.MSG_PRE_DEAL, 'completed', {
+                        'action': 'mcp_call',
+                        'tool_name': tool_name,
+                        'server_id': server_id,
+                        'success': result.success,
+                    })
+                    
+                    logger.info(f"[ActorBase:{self.agent_id}] MCP call completed: {tool_name}, success={result.success}")
+                else:
+                    ctx.update_phase(status='error', error='Invalid tool_call parameters')
+                    self._publish_process_event(ctx, ProcessPhase.MSG_PRE_DEAL, 'error', {
+                        'error': 'Invalid tool_call parameters',
+                    })
+                    return False
+            else:
+                # 其他消息类型，正常继续
+                ctx.update_phase(status='completed', action='pass')
+                self._publish_process_event(ctx, ProcessPhase.MSG_PRE_DEAL, 'completed', {
+                    'action': 'pass',
+                })
+            
+            return True
+            
+        except Exception as e:
+            error_msg = str(e)
+            ctx.update_phase(status='error', error=error_msg)
+            self._publish_process_event(ctx, ProcessPhase.MSG_PRE_DEAL, 'error', {'error': error_msg})
+            logger.error(f"[ActorBase:{self.agent_id}] Message pre-deal failed: {e}")
+            return False
+    
+    def _msg_deal(self, ctx: IterationContext) -> bool:
+        """
+        消息处理
+        
+        调用 LLM 处理消息，LLM 决策是继续处理还是处理完毕。
+        
+        Args:
+            ctx: 迭代上下文
+            
+        Returns:
+            True 表示处理成功
+        """
+        ctx.set_phase(ProcessPhase.MSG_DEAL, 'running')
+        self._publish_process_event(ctx, ProcessPhase.MSG_DEAL, 'running')
+        
+        try:
+            # 1. 构建 LLM 输入
+            llm_input = self._build_llm_input_for_msg_deal(ctx)
+            
+            # 2. 调用 LLM 处理
+            from services.llm_service import get_llm_service
+            
+            llm_service = get_llm_service()
+            llm_config_id = ctx.llm_config_id or self._config.get('llm_config_id')
+            
+            if not llm_config_id:
+                error_msg = "No LLM config available"
+                ctx.update_phase(status='error', error=error_msg)
+                self._publish_process_event(ctx, ProcessPhase.MSG_DEAL, 'error', {'error': error_msg})
+                return False
+            
+            # 非流式调用，获取决策
+            resp = llm_service.chat_completion(
+                config_id=llm_config_id,
+                messages=llm_input,
+                stream=False,
+            )
+            
+            content = (resp.get('content') or '').strip()
+            
+            # 3. 解析 LLM 决策
+            decision, decision_data = self._parse_llm_decision(content, ctx)
+            ctx.set_llm_decision(decision, decision_data)
+            
+            ctx.update_phase(status='completed', decision=decision)
+            self._publish_process_event(ctx, ProcessPhase.MSG_DEAL, 'completed', {
+                'decision': decision,
+                'has_tool_call': bool(ctx.next_tool_call),
+            })
+            
+            logger.info(f"[ActorBase:{self.agent_id}] LLM decision: {decision}")
+            return True
+            
+        except Exception as e:
+            error_msg = str(e)
+            ctx.update_phase(status='error', error=error_msg)
+            self._publish_process_event(ctx, ProcessPhase.MSG_DEAL, 'error', {'error': error_msg})
+            logger.error(f"[ActorBase:{self.agent_id}] Message deal failed: {e}")
+            return False
+    
+    def _build_llm_input_for_msg_deal(self, ctx: IterationContext) -> List[Dict[str, Any]]:
+        """
+        构建 LLM 输入消息（用于 msg_deal）
+        
+        Args:
+            ctx: 迭代上下文
+            
+        Returns:
+            LLM 消息列表
+        """
+        messages = []
+        
+        # 1. System prompt
+        system_prompt = ctx.system_prompt or self._build_system_prompt(ctx)
+        
+        # 添加处理能力说明
+        system_prompt += """
+
+【消息处理说明】
+你正在处理用户或系统的消息。根据消息类型，你需要决定：
+1. 如果需要调用工具来完成任务，返回工具调用请求（JSON格式）
+2. 如果可以直接回答，返回最终回复
+
+【可处理的消息类型】
+- user_new_msg: 用户新消息
+- agent_msg: Agent 链式追加消息
+- result_msg: 工具调用结果消息
+
+【工具调用格式】
+如果需要调用工具，请返回以下 JSON 格式：
+```json
+{
+  "action": "tool_call",
+  "tool": {
+    "server_id": "mcp_server_id",
+    "tool_name": "tool_name",
+    "params": {}
+  }
+}
+```
+
+【直接回复格式】
+如果可以直接回答，返回以下 JSON 格式：
+```json
+{
+  "action": "complete",
+  "content": "你的回复内容"
+}
+```
+"""
+        
+        messages.append({"role": "system", "content": system_prompt})
+        
+        # 2. 历史消息
+        if ctx.history_messages:
+            messages.extend(ctx.history_messages)
+        
+        # 3. 工具结果（如果有）
+        if ctx.tool_results_text:
+            messages.append({
+                "role": "assistant",
+                "content": f"【工具执行结果】\n{ctx.tool_results_text}"
+            })
+        
+        # 4. 当前消息
+        msg_data = ctx.original_message or {}
+        user_content = msg_data.get('content', '')
+        msg_type = ctx.msg_type or MessageType.USER_NEW_MSG
+        
+        # 构建带消息类型标记的内容
+        typed_content = f"【消息类型: {msg_type}】\n{user_content}"
+        
+        # 如果有结果消息，附加到内容
+        if ctx.result_msg:
+            result_content = ctx.result_msg.get('content', '')
+            if result_content:
+                typed_content += f"\n\n【工具返回结果】\n{result_content}"
+        
+        messages.append({"role": "user", "content": typed_content})
+        
+        return messages
+    
+    def _parse_llm_decision(self, content: str, ctx: IterationContext) -> tuple:
+        """
+        解析 LLM 决策
+        
+        Args:
+            content: LLM 返回的内容
+            ctx: 迭代上下文
+            
+        Returns:
+            (decision, decision_data) 元组
+        """
+        decision = LLMDecision.COMPLETE
+        decision_data = {'content': content}
+        
+        # 尝试解析 JSON
+        try:
+            # 查找 JSON 块
+            json_match = re.search(r'```json\s*\n?(.*?)\n?```', content, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1).strip()
+            else:
+                # 尝试直接解析
+                json_str = content.strip()
+            
+            data = json.loads(json_str)
+            
+            action = data.get('action', '').lower()
+            
+            if action == 'tool_call' and data.get('tool'):
+                decision = LLMDecision.CONTINUE
+                decision_data = {
+                    'content': content,
+                    'next_tool_call': data['tool'],
+                }
+            elif action == 'complete':
+                decision = LLMDecision.COMPLETE
+                decision_data = {
+                    'content': data.get('content', content),
+                }
+            else:
+                # 无法识别的格式，默认完成
+                decision_data = {'content': content}
+                
+        except (json.JSONDecodeError, AttributeError):
+            # 不是 JSON，使用原始内容作为回复
+            decision_data = {'content': content}
+        
+        return decision, decision_data
+    
+    def _post_msg_deal(self, ctx: IterationContext) -> bool:
+        """
+        消息后处理
+        
+        解析消息和媒体，决定是否往 topic 中追加新消息。
+        
+        Args:
+            ctx: 迭代上下文
+            
+        Returns:
+            True 表示处理成功
+        """
+        ctx.set_phase(ProcessPhase.POST_MSG_DEAL, 'running')
+        self._publish_process_event(ctx, ProcessPhase.POST_MSG_DEAL, 'running')
+        
+        try:
+            from services.topic_service import get_topic_service
+            
+            topic_id = ctx.topic_id or self.topic_id
+            decision = ctx.llm_decision
+            decision_data = ctx.llm_decision_data or {}
+            
+            # 1. 如果决策是继续（工具调用）
+            if decision == LLMDecision.CONTINUE and ctx.next_tool_call:
+                tool_call = ctx.next_tool_call
+                
+                # 发送工具调用消息到 topic
+                get_topic_service().send_message(
+                    topic_id=topic_id,
+                    sender_id=self.agent_id,
+                    sender_type='agent',
+                    content=f"正在调用工具: {tool_call.get('tool_name', 'unknown')}",
+                    role='assistant',
+                    sender_name=self.info.get('name'),
+                    sender_avatar=self.info.get('avatar'),
+                    ext={
+                        'tool_call': tool_call,
+                        'auto_trigger': True,
+                        'processSteps': ctx.to_process_steps_dict(),
+                    }
+                )
+                
+                ctx.update_phase(status='completed', action='tool_call_sent')
+                self._publish_process_event(ctx, ProcessPhase.POST_MSG_DEAL, 'completed', {
+                    'action': 'tool_call_sent',
+                    'tool_name': tool_call.get('tool_name'),
+                })
+                
+                logger.info(f"[ActorBase:{self.agent_id}] Tool call message sent")
+            
+            # 2. 如果决策是完成
+            elif decision == LLMDecision.COMPLETE:
+                content = decision_data.get('content', '')
+                
+                # 解析媒体
+                media = []
+                if ctx.mcp_media:
+                    media.extend(ctx.mcp_media)
+                if ctx.final_media:
+                    media.extend(ctx.final_media)
+                
+                # 构建 ext
+                ext_data = ctx.build_ext_data()
+                if media:
+                    ext_data['media'] = media
+                
+                # 发送最终回复
+                get_topic_service().send_message(
+                    topic_id=topic_id,
+                    sender_id=self.agent_id,
+                    sender_type='agent',
+                    content=content,
+                    role='assistant',
+                    message_id=ctx.reply_message_id,
+                    sender_name=self.info.get('name'),
+                    sender_avatar=self.info.get('avatar'),
+                    ext=ext_data,
+                )
+                
+                ctx.mark_complete(content, media)
+                
+                ctx.update_phase(status='completed', action='reply_sent')
+                self._publish_process_event(ctx, ProcessPhase.POST_MSG_DEAL, 'completed', {
+                    'action': 'reply_sent',
+                    'has_media': bool(media),
+                })
+                
+                logger.info(f"[ActorBase:{self.agent_id}] Final reply sent")
+            
+            else:
+                # 未知决策，标记完成
+                ctx.update_phase(status='completed', action='unknown_decision')
+                self._publish_process_event(ctx, ProcessPhase.POST_MSG_DEAL, 'completed', {
+                    'action': 'unknown_decision',
+                })
+            
+            return True
+            
+        except Exception as e:
+            error_msg = str(e)
+            ctx.update_phase(status='error', error=error_msg)
+            self._publish_process_event(ctx, ProcessPhase.POST_MSG_DEAL, 'error', {'error': error_msg})
+            logger.error(f"[ActorBase:{self.agent_id}] Post message deal failed: {e}")
+            return False
+    
+    def _publish_process_event(
+        self,
+        ctx: IterationContext,
+        phase: str,
+        status: str,
+        data: Dict[str, Any] = None,
+    ):
+        """
+        发布处理流程事件
+        
+        Args:
+            ctx: 迭代上下文
+            phase: 处理阶段
+            status: 状态
+            data: 附加数据
+        """
+        try:
+            from services.topic_service import get_topic_service
+            
+            topic_id = ctx.topic_id or self.topic_id
+            if not topic_id:
+                return
+            
+            get_topic_service().publish_process_event(
+                topic_id=topic_id,
+                phase=phase,
+                agent_id=self.agent_id,
+                status=status,
+                data={
+                    **(data or {}),
+                    'event_data': ctx.to_event_data(),
+                },
+                agent_name=self.info.get('name'),
+                agent_avatar=self.info.get('avatar'),
+            )
+        except Exception as e:
+            logger.warning(f"[ActorBase:{self.agent_id}] Failed to publish process event: {e}")
+    
     # ========== 能力调用 ==========
     
     def _call_mcp(self, action: Action, ctx: IterationContext) -> ActionResult:
@@ -724,7 +1677,7 @@ class ActorBase(ABC):
         print(f"{CYAN}{BOLD}[MCP DEBUG] ========== 开始 MCP 调用 =========={RESET}")
         print(f"{CYAN}[MCP DEBUG] Agent: {self.agent_id}, Server: {server_id}{RESET}")
         
-        # 添加处理步骤
+        # 添加处理步骤（但不立即发送实时更新，以加速 MCP 过程）
         ctx.add_step(
             'mcp_call',
             thinking=f'调用 MCP {server_id}...',
@@ -732,12 +1685,9 @@ class ActorBase(ABC):
             toolName=action.mcp_tool_name or 'auto',
         )
         
-        # 发送实时更新
-        self._sync_message('agent_thinking', '', ext={
-            'message_id': ctx.reply_message_id,
-            'processSteps': ctx.to_process_steps_dict(),
-        })
-        print(f"{GREEN}[MCP DEBUG] 已发送 agent_thinking 事件{RESET}")
+        # 不发送实时更新，等待 MCP 调用完成后再发送
+        # 这样可以减少网络开销，加速 MCP 过程
+        print(f"{GREEN}[MCP DEBUG] 开始 MCP 调用（已跳过实时更新以加速）{RESET}")
         
         try:
             from services.mcp_execution_service import execute_mcp_with_llm
@@ -750,13 +1700,43 @@ class ActorBase(ABC):
             user_selected_model = ctx.user_selected_model
             session_llm_config_id = self._config.get('llm_config_id')
 
-            print(f"{CYAN}[MCP DEBUG] 用户选择LLM配置ID: {user_selected_llm_config_id}{RESET}")
-            print(f"{CYAN}[MCP DEBUG] 用户选择模型: {user_selected_model}{RESET}")
-            print(f"{CYAN}[MCP DEBUG] Session默认配置ID: {session_llm_config_id}{RESET}")
+            # 打印用户选择信息（只有当用户真正选择了时才显示）
+            if user_selected_llm_config_id:
+                print(f"{CYAN}[MCP DEBUG] 用户选择LLM配置ID: {user_selected_llm_config_id}{RESET}")
+            if user_selected_model:
+                print(f"{CYAN}[MCP DEBUG] 用户选择模型: {user_selected_model}{RESET}")
+            
+            print(f"{CYAN}[MCP DEBUG] Agent默认配置ID: {session_llm_config_id}{RESET}")
+            
+            # 查询并显示配置ID对应的模型信息
+            if user_selected_llm_config_id or session_llm_config_id:
+                config_id_to_check = user_selected_llm_config_id or session_llm_config_id
+                try:
+                    from database import get_mysql_connection
+                    import pymysql
+                    conn = get_mysql_connection()
+                    if conn:
+                        cursor = conn.cursor(pymysql.cursors.DictCursor)
+                        cursor.execute("""
+                            SELECT provider, model, name
+                            FROM llm_configs
+                            WHERE config_id = %s
+                        """, (config_id_to_check,))
+                        config_info = cursor.fetchone()
+                        cursor.close()
+                        conn.close()
+                        if config_info:
+                            print(f"{CYAN}[MCP DEBUG] 配置ID {config_id_to_check} 对应: Provider={config_info.get('provider')}, Model={config_info.get('model')}, Name={config_info.get('name')}{RESET}")
+                        else:
+                            print(f"{YELLOW}[MCP DEBUG] ⚠️ 配置ID {config_id_to_check} 在数据库中不存在{RESET}")
+                except Exception as e:
+                    print(f"{YELLOW}[MCP DEBUG] ⚠️ 查询配置信息失败: {e}{RESET}")
 
             # 确定最终使用的LLM配置
-            if user_selected_llm_config_id:
-                # 用户直接选择了配置ID，直接使用
+            # 优先级：用户选择的配置ID（且与默认不同） > 用户选择的模型 > Agent默认配置
+            # 注意：如果 user_selected_llm_config_id 与 session_llm_config_id 相同，说明用户没有主动选择，使用默认配置
+            if user_selected_llm_config_id and user_selected_llm_config_id != session_llm_config_id:
+                # 用户直接选择了配置ID，且与默认配置不同，说明是主动选择
                 final_llm_config_id = user_selected_llm_config_id
                 print(f"{GREEN}[MCP DEBUG] ✅ 使用用户选择的LLM配置ID: {final_llm_config_id}{RESET}")
             elif user_selected_model:
@@ -765,10 +1745,22 @@ class ActorBase(ABC):
                 if final_llm_config_id != session_llm_config_id:
                     print(f"{GREEN}[MCP DEBUG] ✅ 找到用户选择模型的配置: {final_llm_config_id}{RESET}")
                 else:
-                    print(f"{YELLOW}[MCP DEBUG] ⚠️ 未找到用户选择模型的配置，使用Session默认配置: {final_llm_config_id}{RESET}")
+                    print(f"{YELLOW}[MCP DEBUG] ⚠️ 未找到用户选择模型的配置，使用Agent默认配置: {final_llm_config_id}{RESET}")
             else:
+                # 用户没有选择模型，使用Agent的默认配置
                 final_llm_config_id = session_llm_config_id
-                print(f"{CYAN}[MCP DEBUG] 使用Session默认配置: {final_llm_config_id}{RESET}")
+                if final_llm_config_id:
+                    print(f"{CYAN}[MCP DEBUG] 使用Agent默认配置: {final_llm_config_id}{RESET}")
+                else:
+                    # Agent没有配置默认模型，返回错误
+                    error_msg = f"Agent {self.agent_id} 未配置默认LLM模型，且用户未选择模型。请在Agent配置中设置默认LLM模型。"
+                    print(f"{RED}[MCP DEBUG] ❌ {error_msg}{RESET}")
+                    return ActionResult(
+                        success=False,
+                        error=error_msg,
+                        thinking="无法执行MCP调用：缺少LLM配置",
+                        process_steps=ctx.to_process_steps_dict(),
+                    )
 
             user_content = ctx.original_message.get('content', '')
 
@@ -805,6 +1797,7 @@ class ActorBase(ABC):
                 input_text=input_text,
                 llm_config_id=final_llm_config_id,
                 agent_system_prompt=agent_persona,  # 传递 Agent 人设
+                original_message=ctx.original_message,  # 传递原始消息（用于提取图片等上下文）
             )
             print(f"{GREEN}[MCP DEBUG] execute_mcp_with_llm 返回{RESET}")
             print(f"{CYAN}[MCP DEBUG] Result keys: {list(result.keys()) if result else 'None'}{RESET}")
@@ -847,6 +1840,12 @@ class ActorBase(ABC):
                     status='error',
                     error=detailed_error,
                 )
+                
+                # MCP 错误自动分析功能已禁用
+                # 之前的逻辑：当 MCP 出错时，触发自处理：发送一个特殊的消息让 Agent 处理错误
+                # 现在直接返回错误，不触发自动分析
+                print(f"{YELLOW}[MCP DEBUG] ⚠️ MCP 调用失败，但未触发自动分析（功能已禁用）{RESET}")
+                
                 print(f"{RED}[MCP DEBUG] ========== MCP 调用失败 =========={RESET}")
                 return ActionResult.error_result(
                     action_type='mcp',
@@ -886,6 +1885,20 @@ class ActorBase(ABC):
                 result={'summary': summary, 'tool_text': tool_text[:500] if tool_text else ''},
             )
             
+            # 提取 MCP 返回的媒体数据（图片等）
+            mcp_media = result.get('media')
+            if mcp_media and isinstance(mcp_media, list) and len(mcp_media) > 0:
+                # 将 MCP 返回的媒体数据存储到 ctx 中，后续会合并到 ext.media
+                if ctx.mcp_media is None:
+                    ctx.mcp_media = []
+                ctx.mcp_media.extend(mcp_media)
+                print(f"{GREEN}[MCP DEBUG] ✅ 提取到 {len(mcp_media)} 个媒体文件{RESET}")
+                for img in mcp_media:
+                    img_type = img.get('type', 'unknown')
+                    img_mime = img.get('mimeType', 'unknown')
+                    img_size = len(str(img.get('data', '')))
+                    print(f"{CYAN}[MCP DEBUG]   - {img_type} ({img_mime}), 大小: {img_size} 字符{RESET}")
+            
             # 追加工具结果
             if tool_text:
                 ctx.append_tool_result(f"MCP:{server_id}", tool_text)
@@ -924,6 +1937,12 @@ class ActorBase(ABC):
         Returns:
             格式化的工具描述字符串
         """
+        # ANSI 颜色码
+        YELLOW = '\033[93m'
+        GREEN = '\033[92m'
+        CYAN = '\033[96m'
+        RESET = '\033[0m'
+        
         try:
             from mcp_server.mcp_common_logic import get_mcp_tools_list, prepare_mcp_headers
             from database import get_mysql_connection
@@ -984,7 +2003,7 @@ class ActorBase(ABC):
             logger.warning(f"[ActorBase:{self.agent_id}] Failed to get MCP tools: {e}")
             return ""
     
-    def _build_mcp_context(self, ctx: IterationContext, max_history: int = 6) -> str:
+    def _build_mcp_context(self, ctx: IterationContext, max_history: int = 8) -> str:
         """
         构建 MCP 调用的对话上下文
         
@@ -992,7 +2011,7 @@ class ActorBase(ABC):
         
         Args:
             ctx: 迭代上下文
-            max_history: 最大历史消息数
+            max_history: 最大历史消息数（默认8条）
             
         Returns:
             格式化的对话历史字符串
@@ -1172,9 +2191,31 @@ class ActorBase(ABC):
             data={'pending': True},
             action=action,
         )
-    
+
+    # ========== 步骤变更处理 ==========
+
+    def _on_step_change(self, ctx: IterationContext, step: Dict[str, Any]):
+        """
+        处理步骤变更事件
+
+        Args:
+            ctx: 迭代上下文
+            step: 步骤信息
+        """
+        try:
+            # 通知前端步骤变更
+            self._sync_message('agent_thinking', '', ext={
+                'message_id': ctx.reply_message_id,
+                'processSteps': ctx.to_process_steps_dict(),
+                'in_reply_to': ctx.original_message.get('message_id'),
+                'process_version': 'v2',
+                'step_update': step,  # 当前变更的步骤
+            })
+        except Exception as e:
+            logger.warning(f"[ActorBase:{self.agent_id}] Failed to notify step change: {e}")
+
     # ========== 消息同步 ==========
-    
+
     def _sync_message(
         self,
         msg_type: str,
@@ -1230,10 +2271,45 @@ class ActorBase(ABC):
         logger.info(f"[ActorBase:{self.agent_id}] Final messages count: {len(messages)}, "
                     f"roles: {[m.get('role') for m in messages]}")
         
+        # 确定使用的 LLM 配置（优先用户选择，其次 session 默认）
+        session_llm_config_id = self._config.get('llm_config_id')
+        
+        # 优先使用用户选择的配置
+        YELLOW = '\033[93m'
+        GREEN = '\033[92m'
+        CYAN = '\033[96m'
+        RESET = '\033[0m'
+        
+        # 如果 user_selected_llm_config_id 与 session_llm_config_id 相同，说明用户没有主动选择，使用默认配置
+        if ctx.user_selected_llm_config_id and ctx.user_selected_llm_config_id != session_llm_config_id:
+            final_llm_config_id = ctx.user_selected_llm_config_id
+            print(f"{GREEN}[ActorBase:{self.agent_id}] 生成回复：使用用户选择的LLM配置ID: {final_llm_config_id}{RESET}")
+        elif ctx.user_selected_model:
+            # 用户选择了模型名称，查找对应的配置ID
+            final_llm_config_id = self._find_llm_config_for_model(ctx.user_selected_model, session_llm_config_id)
+            if final_llm_config_id != session_llm_config_id:
+                print(f"{GREEN}[ActorBase:{self.agent_id}] 生成回复：找到用户选择模型的配置: {final_llm_config_id}{RESET}")
+            else:
+                print(f"{YELLOW}[ActorBase:{self.agent_id}] 生成回复：未找到用户选择模型的配置，使用Session默认配置: {final_llm_config_id}{RESET}")
+        else:
+            # 用户没有选择模型，使用Agent的默认配置
+            final_llm_config_id = session_llm_config_id
+            if final_llm_config_id:
+                print(f"{CYAN}[ActorBase:{self.agent_id}] 生成回复：使用Agent默认配置: {final_llm_config_id}{RESET}")
+            else:
+                # Agent没有配置默认模型，返回错误
+                error_msg = f"Agent {self.agent_id} 未配置默认LLM模型，且用户未选择模型。请在Agent配置中设置默认LLM模型。"
+                print(f"{RED}[ActorBase:{self.agent_id}] ❌ {error_msg}{RESET}")
+                return ActionResult(
+                    success=False,
+                    error=error_msg,
+                    thinking="无法生成回复：缺少LLM配置",
+                    process_steps=ctx.to_process_steps_dict(),
+                )
+        
         # 添加 LLM 生成步骤
-        llm_config_id = self._config.get('llm_config_id')
         llm_service = get_llm_service()
-        config = llm_service.get_config(llm_config_id, include_api_key=True) or {}
+        config = llm_service.get_config(final_llm_config_id, include_api_key=True) or {}
         
         provider = config.get('provider', 'unknown')
         model = config.get('model', 'unknown')
@@ -1249,7 +2325,7 @@ class ActorBase(ABC):
         full_content = ""
         
         try:
-            for chunk in self._stream_llm_response(messages):
+            for chunk in self._stream_llm_response(messages, llm_config_id=final_llm_config_id):
                 full_content += chunk
                 
                 # 发送流式 chunk
@@ -1271,7 +2347,7 @@ class ActorBase(ABC):
             ext_data['llmInfo'] = {
                 'provider': provider,
                 'model': model,
-                'configId': llm_config_id,
+                'configId': final_llm_config_id,
             }
             
             # 处理多模态媒体
@@ -1364,8 +2440,8 @@ class ActorBase(ABC):
         logger.info(f"[ActorBase:{self.agent_id}] Building LLM messages, state.history has {len(self.state.history)} items")
         
         history_msgs = self.state.get_recent_history(
-            max_messages=24,
-            max_total_chars=18000,
+            max_messages=10,
+            max_total_chars=8000,
             max_per_message_chars=2400,
             include_summary=False,  # 已经单独添加
         )
@@ -1414,14 +2490,26 @@ class ActorBase(ABC):
     def _stream_llm_response(
         self,
         messages: List[Dict[str, Any]],
+        llm_config_id: str = None,
     ) -> Generator[str, None, None]:
         """流式调用 LLM"""
         from services.providers import create_provider, LLMMessage
+        from services.llm_service import get_llm_service
         
-        provider = self._config.get('provider')
-        api_key = self._config.get('api_key')
-        api_url = self._config.get('api_url')
-        model = self._config.get('model')
+        # 如果指定了 llm_config_id，使用指定的配置；否则使用 session 默认配置
+        if llm_config_id:
+            llm_service = get_llm_service()
+            config = llm_service.get_config(llm_config_id, include_api_key=True) or {}
+            provider = config.get('provider')
+            api_key = config.get('api_key')
+            api_url = config.get('api_url')
+            model = config.get('model')
+        else:
+            # 回退到 session 默认配置
+            provider = self._config.get('provider')
+            api_key = self._config.get('api_key')
+            api_url = self._config.get('api_url')
+            model = self._config.get('model')
         
         # 转换消息格式
         llm_messages = []

@@ -154,9 +154,11 @@ export class OpenAIProvider extends BaseProvider {
       body.tool_choice = 'auto';
     }
 
-    // DeepSeek 思考模式
-    if (this.type === 'deepseek' && options.thinkingMode) {
-      body.reasoning_effort = options.thinkingBudget || 'medium';
+    // DeepSeek 思考模式 - 移除不支持的参数
+    // DeepSeek 的 reasoning_effort 参数可能不被支持
+    if (this.type === 'deepseek' && options.thinkingMode && this.config.model === 'deepseek-reasoner') {
+      // DeepSeek reasoning 模型不需要特殊的参数设置
+      // 它会自动启用思考模式
     }
 
     // 流式选项

@@ -14,7 +14,7 @@ class LLMConfig:
     
     config_id: str
     name: str
-    provider: str  # openai, anthropic, gemini, ollama, local, custom
+    provider: str  # openai, deepseek, anthropic, gemini, ollama, local, custom
     api_key: Optional[str] = None
     api_url: Optional[str] = None
     model: Optional[str] = None

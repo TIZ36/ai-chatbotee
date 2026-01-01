@@ -295,8 +295,8 @@ class ActorState:
     
     def get_recent_history(
         self,
-        max_messages: int = 24,
-        max_total_chars: int = 18000,
+        max_messages: int = 10,
+        max_total_chars: int = 8000,
         max_per_message_chars: int = 2400,
         include_summary: bool = True,
     ) -> List[Dict[str, Any]]:

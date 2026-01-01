@@ -158,7 +158,7 @@ def create_tables():
             `config_id` VARCHAR(100) NOT NULL UNIQUE COMMENT '配置ID',
             `name` VARCHAR(255) NOT NULL COMMENT '配置名称',
             `shortname` VARCHAR(50) DEFAULT NULL COMMENT '短名称',
-            `provider` VARCHAR(50) NOT NULL COMMENT '提供商: openai, anthropic, ollama, local, custom',
+            `provider` VARCHAR(50) NOT NULL COMMENT '提供商: openai, deepseek, anthropic, gemini, ollama, local, custom',
             `api_key` TEXT DEFAULT NULL COMMENT 'API密钥',
             `api_url` TEXT DEFAULT NULL COMMENT 'API地址',
             `model` VARCHAR(255) DEFAULT NULL COMMENT '模型名称',
@@ -1423,7 +1423,7 @@ def init_redis(config: dict) -> Tuple[bool, Optional[str]]:
         
         print(f"Connecting to Redis at {host}:{port}...")
         
-        # 创建Redis连接（注意：如果 ping 失败，需要回滚 redis_client，避免留下“半初始化”的客户端）
+        # 创建Redis连接（注意：如果 ping 失败，需要回滚 redis_client，避免留下"半初始化"的客户端）
         redis_client = redis.Redis(
             host=host,
             port=port,
@@ -1441,14 +1441,19 @@ def init_redis(config: dict) -> Tuple[bool, Optional[str]]:
         
         return True, None
         
+    except redis.AuthenticationError as e:
+        redis_client = None
+        error_msg = f"Redis认证失败: {e}. 请检查配置文件中的密码是否正确，如果Redis未设置密码，请将password设置为空字符串"
+        print(f"✗ {error_msg}")
+        return False, error_msg
     except redis.ConnectionError as e:
         redis_client = None
-        error_msg = f"Redis connection error: {e}"
+        error_msg = f"Redis连接错误: {e}. 请检查Redis服务是否运行在 {host}:{port}"
         print(f"✗ {error_msg}")
         return False, error_msg
     except Exception as e:
         redis_client = None
-        error_msg = f"Redis initialization error: {e}"
+        error_msg = f"Redis初始化错误: {e}"
         print(f"✗ {error_msg}")
         return False, error_msg
 

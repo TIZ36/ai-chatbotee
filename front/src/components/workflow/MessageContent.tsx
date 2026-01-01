@@ -222,12 +222,30 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
     const list = message.media;
     if (!list || list.length === 0) return null;
     // 保持引用稳定：避免父级因输入重渲染时，每次都创建新数组触发 MediaGallery 的 preload effect
-    return list.map(m => ({
-      type: m.type,
-      mimeType: m.mimeType,
-      data: m.data,
-      url: m.url,
-    }));
+    return list.map(m => {
+      // UnifiedMedia 只有 url 字段，MediaItem 需要 data 和 url
+      // 如果 url 是 data URL，提取 base64 数据；否则保持原样
+      let data = m.data;
+      let url = m.url;
+      
+      // 如果 url 是 data URL，提取 base64 部分作为 data
+      if (url && url.startsWith('data:')) {
+        const commaIdx = url.indexOf(',');
+        if (commaIdx >= 0) {
+          data = url.slice(commaIdx + 1); // 提取 base64 部分
+        }
+      } else if (url && !data) {
+        // 如果只有 url 没有 data，且 url 不是 data URL，将 url 作为 data（兼容旧数据）
+        data = url;
+      }
+      
+      return {
+        type: m.type,
+        mimeType: m.mimeType || (m.type === 'image' ? 'image/png' : m.type === 'video' ? 'video/mp4' : 'audio/mpeg'),
+        data: data || url || '', // 确保有 data
+        url: url || data, // 确保有 url
+      };
+    });
   }, [message.media]);
 
   // Helper function to render MCP blocks for a message
@@ -583,45 +601,40 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
   }
   
   // Regular tool call message (not perception component)
+  // 隐藏工具调用的详细信息，只显示错误信息（如果有）
   if (message.role === 'tool' && message.toolCalls && !message.toolType) {
-    return (
-      <div>
-        <div className="font-medium text-sm mb-2">工具调用:</div>
-        {Array.isArray(message.toolCalls) && message.toolCalls.map((toolCall: any, idx: number) => {
-          // Parse tool result as ordered blocks (supports multiple MCP returns)
-          const blocks = toolCall.result ? parseMCPContentBlocks(toolCall.result) : [];
-          
-          return (
-            <div key={idx} className="mb-3 p-3 bg-gray-50 dark:bg-[#363636] rounded-lg">
-              <div className="flex items-center space-x-2 mb-2">
-                <Wrench className="w-4 h-4 text-primary-500" />
-                <span className="font-medium text-sm">{toolCall.name}</span>
-              </div>
-              {toolCall.arguments && (
-                <div className="text-xs text-gray-600 dark:text-[#b0b0b0] mb-2">
-                  <span className="font-medium">参数:</span>
-                  <pre className="mt-1 bg-white dark:bg-[#2d2d2d] p-2 rounded border text-xs overflow-auto max-h-32">
-                    {JSON.stringify(toolCall.arguments, null, 2)}
-                  </pre>
-                </div>
-              )}
-              {toolCall.result && (
-                <div className="text-xs text-gray-600 dark:text-[#b0b0b0]">
-                  <span className="font-medium">结果:</span>
-                  {blocks.length > 0 ? (
-                    <div className="mt-1">{renderMCPBlocksForMessage(blocks, message.id)}</div>
-                  ) : (
-                    <pre className="mt-1 bg-white dark:bg-[#2d2d2d] p-2 rounded border text-xs overflow-auto max-h-64">
-                      {truncateBase64Strings(JSON.stringify(toolCall.result, null, 2))}
-                    </pre>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+    // 检查是否有错误
+    const hasError = Array.isArray(message.toolCalls) && message.toolCalls.some(
+      (tc: any) => tc.error || (tc.result && typeof tc.result === 'object' && tc.result.error)
     );
+    
+    // 如果有错误，显示错误信息；否则不显示工具调用详情
+    if (hasError) {
+      return (
+        <div>
+          <div className="font-medium text-sm mb-2 text-red-600 dark:text-red-400">工具调用错误:</div>
+          {Array.isArray(message.toolCalls) && message.toolCalls.map((toolCall: any, idx: number) => {
+            const error = toolCall.error || (toolCall.result && typeof toolCall.result === 'object' && toolCall.result.error);
+            if (!error) return null;
+            
+            return (
+              <div key={idx} className="mb-3 p-3 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
+                <div className="flex items-center space-x-2 mb-2">
+                  <Wrench className="w-4 h-4 text-red-500" />
+                  <span className="font-medium text-sm text-red-700 dark:text-red-400">{toolCall.name}</span>
+                </div>
+                <div className="text-sm text-red-600 dark:text-red-300">
+                  {typeof error === 'string' ? error : JSON.stringify(error, null, 2)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+    
+    // 没有错误，不显示工具调用详情（隐藏）
+    return null;
   }
 
   // Note: Thinking and MCP details are shown in MessageSidePanel (above message bubble).

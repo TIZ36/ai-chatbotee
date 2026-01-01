@@ -8,11 +8,11 @@ function mapSessionMedia(msg: Message): UnifiedMedia[] | undefined {
   const toolCalls = msg.tool_calls as any;
   if (toolCalls && typeof toolCalls === 'object' && !Array.isArray(toolCalls) && Array.isArray(toolCalls.media)) {
     for (const m of toolCalls.media) {
-      if (!m?.data) continue;
+      if (!m?.data && !m?.url) continue;
       media.push({
         type: m.type,
         mimeType: m.mimeType,
-        url: m.data,
+        url: m.url || m.data, // 优先使用 url，如果没有则使用 data
       });
     }
   }
@@ -20,11 +20,26 @@ function mapSessionMedia(msg: Message): UnifiedMedia[] | undefined {
   const ext: any = (msg as any).ext;
   if (ext && Array.isArray(ext.media)) {
     for (const m of ext.media) {
-      if (!m?.data) continue;
+      if (!m?.data && !m?.url) continue;
+      // 如果 data 是 base64，需要转换为 data URL；如果是 URL，直接使用
+      let mediaUrl = m.url;
+      if (!mediaUrl && m.data) {
+        // 检查是否是 base64 数据
+        if (m.data.startsWith('data:')) {
+          mediaUrl = m.data;
+        } else if (m.mimeType) {
+          // 将 base64 数据转换为 data URL
+          mediaUrl = `data:${m.mimeType};base64,${m.data}`;
+        } else {
+          // 没有 mimeType，尝试推断
+          const inferredMime = m.type === 'image' ? 'image/png' : m.type === 'video' ? 'video/mp4' : 'audio/mpeg';
+          mediaUrl = `data:${inferredMime};base64,${m.data}`;
+        }
+      }
       media.push({
         type: m.type,
         mimeType: m.mimeType,
-        url: m.data,
+        url: mediaUrl,
       });
     }
   }

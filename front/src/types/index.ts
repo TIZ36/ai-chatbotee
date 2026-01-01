@@ -36,7 +36,7 @@ export interface LLMConfig {
 export interface LLMConfigFromDB {
   config_id: string;
   name: string;
-  provider: 'openai' | 'anthropic' | 'local' | 'custom' | 'ollama' | 'gemini';
+  provider: 'openai' | 'deepseek' | 'anthropic' | 'local' | 'custom' | 'ollama' | 'gemini';
   api_url?: string;
   model?: string;
   tags?: string[];
@@ -50,7 +50,7 @@ export interface LLMConfigFromDB {
 export interface CreateLLMConfigRequest {
   config_id?: string;
   name: string;
-  provider: 'openai' | 'anthropic' | 'local' | 'custom' | 'ollama' | 'gemini';
+  provider: 'openai' | 'deepseek' | 'anthropic' | 'local' | 'custom' | 'ollama' | 'gemini';
   api_key?: string;
   api_url?: string;
   model?: string;

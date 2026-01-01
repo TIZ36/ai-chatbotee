@@ -37,6 +37,7 @@ import {
 // Provider display info
 const PROVIDER_INFO: Record<string, { name: string; color: string; icon: string }> = {
   openai: { name: 'OpenAI', color: '#10A37F', icon: '🤖' },
+  deepseek: { name: 'DeepSeek', color: '#5B68DF', icon: '🔮' },
   anthropic: { name: 'Anthropic (Claude)', color: '#D4A574', icon: '🧠' },
   gemini: { name: 'Google Gemini', color: '#4285F4', icon: '✨' },
   ollama: { name: 'Ollama', color: '#1D4ED8', icon: '🦙' },
@@ -509,6 +510,8 @@ const LLMConfigPanel: React.FC = () => {
     switch (provider) {
       case 'openai':
         return 'sk-...';
+      case 'deepseek':
+        return 'sk-...';
       case 'anthropic':
         return 'sk-ant-...';
       case 'gemini':
@@ -520,10 +523,16 @@ const LLMConfigPanel: React.FC = () => {
     }
   };
 
-  const getProviderDefaultUrl = (provider: string) => {
+  const getProviderDefaultUrl = (provider: string, model?: string) => {
     switch (provider) {
       case 'openai':
+        // 检查是否是 DeepSeek 模型（兼容旧数据）
+        if (model && model.includes('deepseek')) {
+          return 'https://api.deepseek.com/v1/chat/completions';
+        }
         return 'https://api.openai.com/v1/chat/completions';
+      case 'deepseek':
+        return 'https://api.deepseek.com/v1/chat/completions';
       case 'anthropic':
         return 'https://api.anthropic.com/v1/messages';
       case 'gemini':
@@ -539,6 +548,8 @@ const LLMConfigPanel: React.FC = () => {
     switch (provider) {
       case 'openai':
         return 'gpt-4';
+      case 'deepseek':
+        return 'deepseek-chat';
       case 'anthropic':
         return 'claude-3-5-sonnet-20241022';
       case 'gemini':
@@ -553,7 +564,9 @@ const LLMConfigPanel: React.FC = () => {
   const getProviderUrlPlaceholder = (provider: string) => {
     switch (provider) {
       case 'openai':
-        return 'https://api.openai.com/v1/chat/completions 或 https://api.deepseek.com';
+        return 'https://api.openai.com/v1/chat/completions';
+      case 'deepseek':
+        return 'https://api.deepseek.com/v1/chat/completions';
       case 'anthropic':
         return 'https://api.anthropic.com/v1/messages';
       case 'gemini':
@@ -689,11 +702,14 @@ const LLMConfigPanel: React.FC = () => {
                 onValueChange={(value) => {
                   const provider =
                     value as CreateLLMConfigRequest['provider'];
+                  const defaultModel = getProviderDefaultModel(provider);
+                  const defaultUrl = getProviderDefaultUrl(provider, defaultModel);
+
                   setNewConfig({
                     ...newConfig,
                     provider,
-                    api_url: getProviderDefaultUrl(provider),
-                    model: getProviderDefaultModel(provider),
+                    api_url: defaultUrl,
+                    model: defaultModel,
                     api_key: provider === 'ollama' ? '' : newConfig.api_key,
                   });
                 }}
@@ -705,6 +721,8 @@ const LLMConfigPanel: React.FC = () => {
                       switch (provider) {
                         case 'openai':
                           return <Brain className="w-4 h-4 text-[#10A37F]" />;
+                        case 'deepseek':
+                          return <Brain className="w-4 h-4 text-[#5B68DF]" />;
                         case 'anthropic':
                           return <Brain className="w-4 h-4 text-[#D4A574]" />;
                         case 'gemini':
@@ -720,6 +738,7 @@ const LLMConfigPanel: React.FC = () => {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="openai">OpenAI</SelectItem>
+                  <SelectItem value="deepseek">DeepSeek</SelectItem>
                   <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
                   <SelectItem value="gemini">Google Gemini</SelectItem>
                   <SelectItem value="ollama">Ollama</SelectItem>
@@ -955,7 +974,7 @@ const LLMConfigPanel: React.FC = () => {
             </div>
 
             {/* API URL */}
-            {(newConfig.provider === 'local' || newConfig.provider === 'custom' || newConfig.provider === 'openai' || newConfig.provider === 'gemini' || newConfig.provider === 'ollama') && (
+            {(newConfig.provider === 'local' || newConfig.provider === 'custom' || newConfig.provider === 'openai' || newConfig.provider === 'deepseek' || newConfig.provider === 'gemini' || newConfig.provider === 'ollama') && (
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   {newConfig.provider === 'ollama' ? 'Ollama 服务器地址' : 'API URL'}
@@ -984,9 +1003,9 @@ const LLMConfigPanel: React.FC = () => {
                   ) : (
                     <>
                       默认: {getProviderDefaultUrl(newConfig.provider || 'openai')}
-                      {newConfig.provider === 'openai' && (
+                      {(newConfig.provider === 'openai' || newConfig.provider === 'deepseek') && (
                         <span className="block mt-1">
-                          💡 提示：OpenAI兼容的API（如DeepSeek），可以只输入host（如 https://api.deepseek.com），系统会自动添加路径 /v1/chat/completions
+                          💡 提示：OpenAI兼容的API可以只输入host，系统会自动添加路径 /v1/chat/completions
                         </span>
                       )}
                     </>

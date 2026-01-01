@@ -122,25 +122,28 @@ class OpenAIProvider(BaseLLMProvider):
             raise RuntimeError(f"OpenAI API error: {str(e)}")
     
     def _chat_rest(self, messages: List[LLMMessage], **kwargs) -> LLMResponse:
-        """使用 REST API 的非流式聊天"""
+        """使用 REST API 的非流式聊天（DeepSeek 特殊处理）"""
         url = self._get_api_url()
         headers = self._get_headers()
-        
+
+        # 过滤 DeepSeek 不支持的参数
+        filtered_kwargs = self._filter_deepseek_params(kwargs)
+
         payload = {
-            'model': self.model or 'gpt-4',
+            'model': self.model or ('deepseek-chat' if self.provider_type == 'deepseek' else 'gpt-4'),
             'messages': self._convert_messages_for_openai(messages),
             'stream': False,
-            **kwargs
+            **filtered_kwargs
         }
-        
+
         response = requests.post(url, headers=headers, json=payload, timeout=120)
-        
+
         if response.status_code != 200:
-            raise RuntimeError(f"OpenAI API error: {response.text}")
-        
+            raise RuntimeError(f"{'DeepSeek' if self.provider_type == 'deepseek' else 'OpenAI'} API error: {response.text}")
+
         data = response.json()
         choice = data['choices'][0]
-        
+
         return LLMResponse(
             content=choice['message']['content'],
             finish_reason=choice.get('finish_reason'),
@@ -148,25 +151,28 @@ class OpenAIProvider(BaseLLMProvider):
         )
     
     def _chat_stream_rest(self, messages: List[LLMMessage], **kwargs) -> Generator[str, None, LLMResponse]:
-        """使用 REST API 的流式聊天"""
+        """使用 REST API 的流式聊天（DeepSeek 特殊处理）"""
         url = self._get_api_url()
         headers = self._get_headers()
-        
+
+        # 过滤 DeepSeek 不支持的参数
+        filtered_kwargs = self._filter_deepseek_params(kwargs)
+
         payload = {
-            'model': self.model or 'gpt-4',
+            'model': self.model or ('deepseek-chat' if self.provider_type == 'deepseek' else 'gpt-4'),
             'messages': self._convert_messages_for_openai(messages),
             'stream': True,
-            **kwargs
+            **filtered_kwargs
         }
-        
+
         response = requests.post(url, headers=headers, json=payload, stream=True, timeout=120)
-        
+
         if response.status_code != 200:
-            raise RuntimeError(f"OpenAI API error: {response.text}")
-        
+            raise RuntimeError(f"{'DeepSeek' if self.provider_type == 'deepseek' else 'OpenAI'} API error: {response.text}")
+
         full_content = ""
         finish_reason = None
-        
+
         for line in response.iter_lines():
             if line:
                 line = line.decode('utf-8')
@@ -184,7 +190,7 @@ class OpenAIProvider(BaseLLMProvider):
                             finish_reason = chunk['choices'][0]['finish_reason']
                     except json.JSONDecodeError:
                         continue
-        
+
         return LLMResponse(
             content=full_content,
             finish_reason=finish_reason
@@ -255,3 +261,50 @@ class DeepSeekProvider(OpenAIProvider):
         if not api_url:
             api_url = 'https://api.deepseek.com/v1/chat/completions'
         super().__init__(api_key, api_url, model or 'deepseek-chat', **kwargs)
+
+    def _chat_sdk(self, messages: List[LLMMessage], **kwargs) -> LLMResponse:
+        """使用 SDK 的非流式聊天（DeepSeek 特殊处理）"""
+        try:
+            # DeepSeek 不支持某些 OpenAI 参数，需要过滤
+            filtered_kwargs = self._filter_deepseek_params(kwargs)
+
+            msg_list = self._convert_messages_for_openai(messages)
+
+            response = self._client.chat.completions.create(
+                model=self.model or 'deepseek-chat',
+                messages=msg_list,
+                **filtered_kwargs
+            )
+
+            choice = response.choices[0]
+            return LLMResponse(
+                content=choice.message.content or '',
+                finish_reason=choice.finish_reason,
+                tool_calls=self._parse_tool_calls(choice.message.tool_calls) if choice.message.tool_calls else None,
+                usage={
+                    'prompt_tokens': response.usage.prompt_tokens if response.usage else 0,
+                    'completion_tokens': response.usage.completion_tokens if response.usage else 0,
+                    'total_tokens': response.usage.total_tokens if response.usage else 0,
+                } if response.usage else None,
+                raw=response.model_dump()
+            )
+        except Exception as e:
+            self._log_error(f"DeepSeek SDK chat error: {e}", e)
+            raise RuntimeError(f"DeepSeek API error: {str(e)}")
+
+    def _filter_deepseek_params(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        """过滤 DeepSeek 不支持的参数"""
+        # 移除 DeepSeek 不支持的参数
+        unsupported_params = [
+            'reasoning_effort',  # DeepSeek 使用不同的参数名
+            'thinking_budget',   # 这个参数不存在
+        ]
+
+        filtered = {k: v for k, v in kwargs.items() if k not in unsupported_params}
+
+        # 如果有 thinking_mode，转换为 DeepSeek 支持的参数
+        if kwargs.get('thinking_mode') and self.model == 'deepseek-reasoner':
+            # DeepSeek reasoning 模型有特殊处理，这里暂时移除可能有问题的参数
+            pass
+
+        return filtered

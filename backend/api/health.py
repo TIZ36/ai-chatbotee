@@ -41,17 +41,21 @@ def health_check():
             result['redis_enabled'] = True
             redis_client = get_redis_client()
             if redis_client is not None:
-                redis_client.ping()
-                result['redis'] = True
+                try:
+                    redis_client.ping()
+                    result['redis'] = True
+                except Exception as ping_error:
+                    result['redis'] = False
+                    result['redis_error'] = f'Redis连接已断开: {str(ping_error)}'
             else:
                 result['redis'] = False
-                result['redis_error'] = 'Redis client is None (可能初始化失败)'
+                result['redis_error'] = 'Redis客户端未初始化 (请检查Redis服务是否运行，以及配置中的密码是否正确)'
         else:
             result['redis_enabled'] = False
-            result['redis_error'] = 'Redis is disabled in config'
+            result['redis_error'] = 'Redis在配置中已禁用'
     except Exception as e:
         print(f"[Health] Redis check failed: {e}")
         result['redis'] = False
-        result['redis_error'] = str(e)
+        result['redis_error'] = f'Redis检查失败: {str(e)}'
     
     return jsonify(result)
