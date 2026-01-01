@@ -294,6 +294,46 @@ class TopicService:
         if ext is None:
             ext = {}
         ext['sender_name'] = sender_name
+        ext['sender_avatar'] = sender_avatar
+
+        # 确保持久化：ext 可能包含 bytes/复杂对象（例如 LLM raw），这里做序列化兜底
+        def _json_safe(obj, max_depth: int = 8):
+            import base64
+            import json
+
+            def _inner(x, depth: int):
+                if depth > max_depth:
+                    return str(x)
+                if x is None or isinstance(x, (bool, int, float, str)):
+                    return x
+                if isinstance(x, (bytes, bytearray)):
+                    # bytes 统一转为 base64 字符串，避免 JSON 序列化失败（并满足“图片转base64字符串”需求）
+                    try:
+                        return bytes(x).decode('utf-8')
+                    except Exception:
+                        return base64.b64encode(bytes(x)).decode('utf-8')
+                if isinstance(x, Exception):
+                    return str(x)
+                if isinstance(x, dict):
+                    out = {}
+                    for k, v in x.items():
+                        try:
+                            kk = k if isinstance(k, str) else str(k)
+                        except Exception:
+                            kk = repr(k)
+                        out[kk] = _inner(v, depth + 1)
+                    return out
+                if isinstance(x, (list, tuple, set)):
+                    return [_inner(v, depth + 1) for v in list(x)]
+                try:
+                    json.dumps(x)
+                    return x
+                except Exception:
+                    return str(x)
+
+            return _inner(obj, 0)
+
+        ext = _json_safe(ext)
         
         conn = self.get_connection()
         if not conn: return None
@@ -364,21 +404,52 @@ class TopicService:
         """发布事件到 Redis"""
         if not self.redis_client:
             return
-
-        # 自定义JSON编码器，处理bytes对象
-        def json_encoder(obj):
-            if isinstance(obj, bytes):
-                # 将bytes转换为base64字符串
-                import base64
-                return base64.b64encode(obj).decode('utf-8')
-            raise TypeError(f'Object of type {obj.__class__.__name__} is not JSON serializable')
-
+        
         channel = f"topic:{topic_id}"
         payload = {
             'type': event_type,
             'data': data
         }
-        self.redis_client.publish(channel, json.dumps(payload, default=json_encoder))
+        # 运行时兜底：事件 payload 里可能混入 bytes/bytearray（例如媒体/原始响应/第三方结果），
+        # Redis publish 这里会直接 json.dumps，必须保证可序列化，避免整个链路报错。
+        def _json_safe(obj, max_depth: int = 8):
+            import base64
+            import json as _json
+
+            def _inner(x, depth: int):
+                if depth > max_depth:
+                    return str(x)
+                if x is None or isinstance(x, (bool, int, float, str)):
+                    return x
+                if isinstance(x, (bytes, bytearray)):
+                    # bytes 统一转 base64 字符串
+                    try:
+                        return bytes(x).decode('utf-8')
+                    except Exception:
+                        return base64.b64encode(bytes(x)).decode('utf-8')
+                if isinstance(x, Exception):
+                    return str(x)
+                if isinstance(x, dict):
+                    out = {}
+                    for k, v in x.items():
+                        try:
+                            kk = k if isinstance(k, str) else str(k)
+                        except Exception:
+                            kk = repr(k)
+                        out[kk] = _inner(v, depth + 1)
+                    return out
+                if isinstance(x, (list, tuple, set)):
+                    return [_inner(v, depth + 1) for v in list(x)]
+                try:
+                    _json.dumps(x)
+                    return x
+                except Exception:
+                    return str(x)
+
+            return _inner(obj, 0)
+
+        safe_payload = _json_safe(payload)
+        self.redis_client.publish(channel, json.dumps(safe_payload))
         print(f"[TopicService] Published {event_type} to {channel}")
     
     def publish_process_event(

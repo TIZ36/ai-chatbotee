@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 import json
+import base64
 
 
 @dataclass
@@ -71,17 +72,54 @@ class Message:
     
     def to_db_params(self) -> dict:
         """转换为数据库插入参数"""
+        def _json_safe(obj: Any, max_depth: int = 8):
+            """
+            将任意对象递归转换为可 JSON 序列化结构。
+            bytes/bytearray 会转为 base64 字符串（满足“图片转base64字符串”需求）。
+            """
+            def _inner(x: Any, depth: int):
+                if depth > max_depth:
+                    return str(x)
+                if x is None or isinstance(x, (bool, int, float, str)):
+                    return x
+                if isinstance(x, (bytes, bytearray)):
+                    try:
+                        return bytes(x).decode('utf-8')
+                    except Exception:
+                        return base64.b64encode(bytes(x)).decode('utf-8')
+                if isinstance(x, Exception):
+                    return str(x)
+                if isinstance(x, dict):
+                    out: Dict[str, Any] = {}
+                    for k, v in x.items():
+                        try:
+                            kk = k if isinstance(k, str) else str(k)
+                        except Exception:
+                            kk = repr(k)
+                        out[kk] = _inner(v, depth + 1)
+                    return out
+                if isinstance(x, (list, tuple, set)):
+                    return [_inner(v, depth + 1) for v in list(x)]
+                # 兜底：不可序列化对象转字符串
+                try:
+                    json.dumps(x)
+                    return x
+                except Exception:
+                    return str(x)
+
+            return _inner(obj, 0)
+
         return {
             'message_id': self.message_id,
             'session_id': self.session_id,
             'role': self.role,
             'content': self.content,
             'thinking': self.thinking,
-            'tool_calls': json.dumps(self.tool_calls) if self.tool_calls else None,
+            'tool_calls': json.dumps(_json_safe(self.tool_calls)) if self.tool_calls else None,
             'token_count': self.token_count,
             'acc_token': self.acc_token,
-            'ext': json.dumps(self.ext) if self.ext else None,
-            'mcpdetail': json.dumps(self.mcpdetail) if self.mcpdetail else None,
+            'ext': json.dumps(_json_safe(self.ext)) if self.ext else None,
+            'mcpdetail': json.dumps(_json_safe(self.mcpdetail)) if self.mcpdetail else None,
         }
 
 

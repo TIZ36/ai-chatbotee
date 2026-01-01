@@ -2748,17 +2748,9 @@ class ActorBase(ABC):
                 except Exception:
                     pass
             
-            # 确保data是字符串格式
-            if isinstance(data, bytes):
-                # 如果是bytes，转换为base64字符串
-                import base64
-                data = base64.b64encode(data).decode('utf-8')
-            elif isinstance(data, str):
+            if isinstance(data, str):
                 data = data.strip().replace('\n', '').replace('\r', '').replace(' ', '')
-            else:
-                # 如果是其他类型，转换为字符串
-                data = str(data)
-
+            
             if not data and not url:
                 continue
             

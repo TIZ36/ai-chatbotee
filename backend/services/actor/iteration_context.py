@@ -317,6 +317,51 @@ class IterationContext:
     def to_process_steps_dict(self) -> List[Dict[str, Any]]:
         """转换为 processSteps 格式（供前端）"""
         return self.process_steps.copy()
+
+    def _json_safe(self, obj: Any, max_depth: int = 8):
+        """
+        将任意对象递归转换为可 JSON 序列化结构，避免 bytes / Exception / 自定义对象导致持久化失败。
+        - bytes/bytearray: 优先 UTF-8 解码，否则 base64
+        - dict/list/tuple/set: 递归处理
+        - Exception: 转为 str
+        - 其他不可序列化对象: 转为 str
+        """
+        import base64
+        import json
+
+        def _inner(x: Any, depth: int):
+            if depth > max_depth:
+                return str(x)
+            if x is None or isinstance(x, (bool, int, float, str)):
+                return x
+            if isinstance(x, (bytes, bytearray)):
+                # bytes 统一转为 base64 字符串，避免 JSON 序列化失败（并满足“图片转base64字符串”需求）
+                try:
+                    return bytes(x).decode('utf-8')
+                except Exception:
+                    return base64.b64encode(bytes(x)).decode('utf-8')
+            if isinstance(x, Exception):
+                return str(x)
+            if isinstance(x, dict):
+                out: Dict[str, Any] = {}
+                for k, v in x.items():
+                    try:
+                        kk = k if isinstance(k, str) else str(k)
+                    except Exception:
+                        kk = repr(k)
+                    out[kk] = _inner(v, depth + 1)
+                return out
+            if isinstance(x, (list, tuple, set)):
+                return [_inner(v, depth + 1) for v in list(x)]
+
+            # 尝试直接序列化（有些对象本身就是 JSON 兼容的）
+            try:
+                json.dumps(x)
+                return x
+            except Exception:
+                return str(x)
+
+        return _inner(obj, 0)
     
     def set_llm_response_metadata(self, usage: Optional[Dict[str, int]] = None,
                                   finish_reason: Optional[str] = None,
@@ -332,11 +377,12 @@ class IterationContext:
         if usage or finish_reason or raw_response:
             llm_metadata = {}
             if usage:
-                llm_metadata['usage'] = usage
+                llm_metadata['usage'] = self._json_safe(usage)
             if finish_reason:
-                llm_metadata['finish_reason'] = finish_reason
+                llm_metadata['finish_reason'] = self._json_safe(finish_reason)
             if raw_response:
-                llm_metadata['raw_response'] = raw_response
+                # raw 可能包含 bytes/复杂对象，必须清洗，否则会导致 ext 持久化失败
+                llm_metadata['raw_response'] = self._json_safe(raw_response)
             self.final_ext['llmResponse'] = llm_metadata
 
     def build_ext_data(self) -> Dict[str, Any]:

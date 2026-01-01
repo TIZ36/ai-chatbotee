@@ -3108,7 +3108,6 @@ const Workflow: React.FC<WorkflowProps> = ({
           if (sessionId && !isTemporarySession) {
             try {
               const messageData: any = {
-                message_id: assistantMessageId,
                 role: 'assistant',
                 content: finalContent, // 保存完整的回答内容
                 thinking: finalThinking, // 保存思考过程
@@ -3127,6 +3126,8 @@ const Workflow: React.FC<WorkflowProps> = ({
               if (response.media && response.media.length > 0) {
                 extData.media = response.media;
                 console.log(`[Workflow] 保存 ${response.media.length} 个 AI 生成的媒体文件到数据库`);
+              } else {
+                console.log(`[Workflow] 响应中没有媒体内容: response.media =`, response.media);
               }
               // 保存过程步骤（思考和MCP调用历史）
               if (currentProcessSteps.length > 0) {
@@ -3139,13 +3140,36 @@ const Workflow: React.FC<WorkflowProps> = ({
                   status: s.status
                 })));
               }
-              
-              if (Object.keys(extData).length > 0) {
+
+              console.log(`[Workflow] extData keys:`, Object.keys(extData));
+              // 如果有媒体内容，强制创建 ext 字段
+              if (Object.keys(extData).length > 0 || (response.media && response.media.length > 0)) {
+                // 确保媒体内容被包含在 extData 中
+                if (response.media && response.media.length > 0 && !extData.media) {
+                  extData.media = response.media;
+                  console.log(`[Workflow] 强制添加媒体内容到 extData`);
+                }
                 messageData.ext = extData;
+                console.log(`[Workflow] 设置 messageData.ext:`, extData);
+              } else {
+                console.log(`[Workflow] extData 为空，不设置 messageData.ext`);
               }
               
-              await saveMessage(sessionId, messageData);
-              console.log('[Workflow] Saved assistant message to database:', assistantMessageId);
+              console.log('[Workflow] 保存消息数据到数据库:', {
+                hasExt: !!messageData.ext,
+                extKeys: messageData.ext ? Object.keys(messageData.ext) : [],
+                mediaCount: messageData.ext?.media?.length || 0,
+                messageData: JSON.stringify(messageData).substring(0, 200) + '...'
+              });
+              const saveResult = await saveMessage(sessionId, messageData);
+              console.log('[Workflow] Saved assistant message to database:', saveResult.message_id);
+
+              // 更新消息的实际 message_id（后端生成）
+              setMessages(prev => prev.map(msg =>
+                msg.id === assistantMessageId
+                  ? { ...msg, message_id: saveResult.message_id }
+                  : msg
+              ));
             } catch (error) {
               console.error('[Workflow] Failed to save assistant message:', error);
             }
@@ -3254,6 +3278,8 @@ const Workflow: React.FC<WorkflowProps> = ({
               if (response.media && response.media.length > 0) {
                 extData.media = response.media;
                 console.log(`[Workflow] 保存 ${response.media.length} 个 AI 生成的媒体文件到数据库`);
+              } else {
+                console.log(`[Workflow] 响应中没有媒体内容: response.media =`, response.media);
               }
               // 保存过程步骤（思考和MCP调用历史）
               if (currentProcessSteps.length > 0) {
@@ -3266,13 +3292,36 @@ const Workflow: React.FC<WorkflowProps> = ({
                   status: s.status
                 })));
               }
-              
-              if (Object.keys(extData).length > 0) {
+
+              console.log(`[Workflow] extData keys:`, Object.keys(extData));
+              // 如果有媒体内容，强制创建 ext 字段
+              if (Object.keys(extData).length > 0 || (response.media && response.media.length > 0)) {
+                // 确保媒体内容被包含在 extData 中
+                if (response.media && response.media.length > 0 && !extData.media) {
+                  extData.media = response.media;
+                  console.log(`[Workflow] 强制添加媒体内容到 extData`);
+                }
                 messageData.ext = extData;
+                console.log(`[Workflow] 设置 messageData.ext:`, extData);
+              } else {
+                console.log(`[Workflow] extData 为空，不设置 messageData.ext`);
               }
               
-              await saveMessage(sessionId, messageData);
-              console.log('[Workflow] Saved assistant message to database:', assistantMessageId);
+              console.log('[Workflow] 保存消息数据到数据库:', {
+                hasExt: !!messageData.ext,
+                extKeys: messageData.ext ? Object.keys(messageData.ext) : [],
+                mediaCount: messageData.ext?.media?.length || 0,
+                messageData: JSON.stringify(messageData).substring(0, 200) + '...'
+              });
+              const saveResult = await saveMessage(sessionId, messageData);
+              console.log('[Workflow] Saved assistant message to database:', saveResult.message_id);
+
+              // 更新消息的实际 message_id（后端生成）
+              setMessages(prev => prev.map(msg =>
+                msg.id === assistantMessageId
+                  ? { ...msg, message_id: saveResult.message_id }
+                  : msg
+              ));
             } catch (error) {
               console.error('[Workflow] Failed to save assistant message:', error);
             }
@@ -3533,11 +3582,14 @@ const Workflow: React.FC<WorkflowProps> = ({
         
         // 如果有多模态输出（图片等），添加到消息
         if (response.media && response.media.length > 0) {
-          setMessages(prev => prev.map(msg => 
+          console.log(`[Workflow] 非流式模式设置媒体到消息状态:`, response.media.map(m => `${m.type}(${m.mimeType}, ${Math.round(m.data?.length / 1024)}KB)`).join(', '));
+          setMessages(prev => prev.map(msg =>
             msg.id === messageId ? { ...msg, media: response.media } : msg
           ));
+        } else {
+          console.log(`[Workflow] 非流式响应中没有媒体: response.media =`, response.media);
         }
-        
+
         if (finalThinking && finalThinking.trim().length > 0) {
           setCollapsedThinking(prev => new Set(prev).add(messageId));
         }

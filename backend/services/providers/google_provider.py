@@ -66,6 +66,17 @@ class GoogleProvider(BaseLLMProvider):
     def _is_image_generation_model(self) -> bool:
         """检查是否是图片生成模型"""
         return self.model and 'image' in self.model.lower()
+
+    def _requires_thought_signature_workaround(self) -> bool:
+        """
+        部分 Gemini 图像/多模态模型在“回灌历史 model 输出”时，会要求每个 part 都携带 thoughtSignature，
+        但历史数据通常没有保存 text part 的 thoughtSignature，导致 400 INVALID_ARGUMENT。
+
+        这里做一个保守的兼容策略：当使用图像相关模型时，把历史 assistant/tool 的文本降级为 user role 发送，
+        以避免触发 thoughtSignature 强校验，同时不影响用户上传图片（图生图）。
+        """
+        m = (self.model or '').lower()
+        return ('image' in m) or ('image-preview' in m)
     
     def _chat_sdk(self, messages: List[LLMMessage], **kwargs) -> LLMResponse:
         """使用 SDK 的非流式聊天"""
@@ -323,59 +334,44 @@ class GoogleProvider(BaseLLMProvider):
         contents = []
         system_instruction = None
         
-        # 预检查：过滤掉包含没有thoughtSignature图片的消息
+        # 预检查：打印哪些消息包含 thoughtSignature
         self._log("=== ThoughtSignature 检查 ===")
-        filtered_messages = []
         content_idx = 0
-
-        for msg in messages:
+        for i, msg in enumerate(messages):
             if msg.role == 'system':
-                filtered_messages.append(msg)
                 continue
-
-            # 检查消息中的媒体是否都有thoughtSignature（仅对助手消息要求）
-            has_invalid_media = False
-            media_count = len(msg.media) if msg.media else 0
+            has_sig = False
             sig_count = 0
-
             if msg.media:
                 for media_item in msg.media:
-                    if isinstance(media_item, dict) and media_item.get('type') == 'image':
-                        has_sig = bool(media_item.get('thoughtSignature') or media_item.get('thought_signature'))
-
-                        # 只有助手消息（model）中的图片才需要thoughtSignature
-                        if msg.role == 'assistant' and not has_sig:
-                            has_invalid_media = True
-                        elif has_sig:
+                    if isinstance(media_item, dict):
+                        if media_item.get('thoughtSignature') or media_item.get('thought_signature'):
+                            has_sig = True
                             sig_count += 1
-
-            if has_invalid_media:
-                self._log(f"  Content[{content_idx}] {msg.role}: 跳过消息（助手图片缺少thoughtSignature）")
-                continue
-            else:
-                filtered_messages.append(msg)
-                if media_count > 0:
-                    status = f"✅ {sig_count} sig"
-                    self._log(f"  Content[{content_idx}] {msg.role}: {media_count}张图 {status}")
-
+            media_count = len(msg.media) if msg.media else 0
+            status = f"✅ {sig_count} sig" if has_sig else (f"⚠️ 无sig ({media_count}图)" if media_count > 0 else "")
+            if media_count > 0:
+                self._log(f"  Content[{content_idx}] {msg.role}: {media_count}张图 {status}")
             content_idx += 1
-
-        self._log(f"过滤后消息数量: {len(filtered_messages)}/{len(messages)}")
         self._log("=============================")
-
-        # 使用过滤后的消息
-        messages = filtered_messages
         
         for msg in messages:
             if msg.role == 'system':
                 system_instruction = msg.content
             else:
-                role = 'user' if msg.role == 'user' else 'model'
+                # 兼容：图像模型下历史 assistant/tool 文本可能要求 thoughtSignature（我们没有），降级为 user
+                if msg.role == 'user':
+                    role = 'user'
+                else:
+                    role = 'user' if self._requires_thought_signature_workaround() else 'model'
                 parts = []
                 
                 # 添加文本
                 if msg.content:
-                    parts.append(self._types.Part.from_text(text=msg.content))
+                    if role == 'user' and msg.role != 'user' and self._requires_thought_signature_workaround():
+                        parts.append(self._types.Part.from_text(text=f"[历史助手消息] {msg.content}"))
+                    else:
+                        parts.append(self._types.Part.from_text(text=msg.content))
                 
                 # 添加媒体
                 if msg.media:
@@ -386,6 +382,27 @@ class GoogleProvider(BaseLLMProvider):
                         media_data = media_item.get('data') or media_item.get('url', '')
                         mime_type = media_item.get('mimeType') or media_item.get('mime_type', 'image/jpeg')
                         
+                        # 运行时兜底：media_data 可能是 bytes/bytearray（会导致后续 JSON/处理失败）
+                        # - SDK 路径：可以直接使用原始 bytes
+                        if isinstance(media_data, (bytes, bytearray)):
+                            image_bytes = bytes(media_data)
+                            thought_sig = media_item.get('thoughtSignature') or media_item.get('thought_signature')
+                            if thought_sig:
+                                self._log(f"Including thoughtSignature for image ({len(thought_sig)} chars)")
+                                parts.append(self._types.Part(
+                                    inline_data=self._types.Blob(mime_type=mime_type, data=image_bytes),
+                                    thought_signature=thought_sig
+                                ))
+                            else:
+                                if role == 'user':
+                                    parts.append(self._types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
+                                else:
+                                    self._log("⚠️ Model image missing thoughtSignature, omitting image and adding placeholder text")
+                                    parts.append(self._types.Part.from_text(
+                                        text='[图片已省略：缺少 thoughtSignature（旧历史数据），无法发送给 Gemini 2.5+]'
+                                    ))
+                            continue
+
                         # 处理 base64 数据
                         if isinstance(media_data, str):
                             if media_data.startswith('data:'):
@@ -398,9 +415,9 @@ class GoogleProvider(BaseLLMProvider):
                         if media_data and mime_type:
                             try:
                                 image_bytes = base64.b64decode(media_data)
+                                # Gemini 2.5+：如果“把模型生成的图片”再喂回模型，必须带 thought_signature；
+                                # 但“用户上传的图片”通常没有 thought_signature，仍应允许用于图生图。
                                 thought_sig = media_item.get('thoughtSignature') or media_item.get('thought_signature')
-
-                                # 只有助手消息（model）中的图片才需要thoughtSignature
                                 if thought_sig:
                                     # 使用 SDK 原生 thought_signature 支持
                                     self._log(f"Including thoughtSignature for image ({len(thought_sig)} chars)")
@@ -408,14 +425,16 @@ class GoogleProvider(BaseLLMProvider):
                                         inline_data=self._types.Blob(mime_type=mime_type, data=image_bytes),
                                         thought_signature=thought_sig
                                     ))
-                                elif role == 'model':
-                                    # 助手消息中的图片没有thoughtSignature，跳过
-                                    self._log(f"Skipping assistant image without thoughtSignature")
-                                    continue
                                 else:
-                                    # 用户消息中的图片不需要thoughtSignature，直接包含
-                                    self._log(f"Including user image without thoughtSignature")
-                                    parts.append(self._types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
+                                    if role == 'user':
+                                        # 用户图片：允许无 thoughtSignature（用于图生图）
+                                        parts.append(self._types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
+                                    else:
+                                        # assistant/model 图片：无 thoughtSignature 会触发 400，降级为文本占位
+                                        self._log("⚠️ Model image missing thoughtSignature, omitting image and adding placeholder text")
+                                        parts.append(self._types.Part.from_text(
+                                            text='[图片已省略：缺少 thoughtSignature（旧历史数据），无法发送给 Gemini 2.5+]'
+                                        ))
                             except Exception as e:
                                 self._log_error(f"Failed to decode image: {e}")
                 
@@ -429,58 +448,43 @@ class GoogleProvider(BaseLLMProvider):
         contents = []
         system_instruction = None
         
-        # 预检查：过滤掉包含没有thoughtSignature图片的消息
+        # 预检查：打印哪些消息包含 thoughtSignature
         self._log("=== ThoughtSignature 检查 (REST) ===")
-        filtered_messages = []
         content_idx = 0
-
-        for msg in messages:
+        for i, msg in enumerate(messages):
             if msg.role == 'system':
-                filtered_messages.append(msg)
                 continue
-
-            # 检查消息中的媒体是否都有thoughtSignature（仅对助手消息要求）
-            has_invalid_media = False
-            media_count = len(msg.media) if msg.media else 0
+            has_sig = False
             sig_count = 0
-
             if msg.media:
                 for media_item in msg.media:
-                    if isinstance(media_item, dict) and media_item.get('type') == 'image':
-                        has_sig = bool(media_item.get('thoughtSignature') or media_item.get('thought_signature'))
-
-                        # 只有助手消息（model）中的图片才需要thoughtSignature
-                        if msg.role == 'assistant' and not has_sig:
-                            has_invalid_media = True
-                        elif has_sig:
+                    if isinstance(media_item, dict):
+                        if media_item.get('thoughtSignature') or media_item.get('thought_signature'):
+                            has_sig = True
                             sig_count += 1
-
-            if has_invalid_media:
-                self._log(f"  Content[{content_idx}] {msg.role}: 跳过消息（助手图片缺少thoughtSignature）")
-                continue
-            else:
-                filtered_messages.append(msg)
-                if media_count > 0:
-                    status = f"✅ {sig_count} sig"
-                    self._log(f"  Content[{content_idx}] {msg.role}: {media_count}张图 {status}")
-
+            media_count = len(msg.media) if msg.media else 0
+            status = f"✅ {sig_count} sig" if has_sig else (f"⚠️ 无sig ({media_count}图)" if media_count > 0 else "")
+            if media_count > 0:
+                self._log(f"  Content[{content_idx}] {msg.role}: {media_count}张图 {status}")
             content_idx += 1
-
-        self._log(f"过滤后消息数量: {len(filtered_messages)}/{len(messages)}")
         self._log("=====================================")
-
-        # 使用过滤后的消息
-        messages = filtered_messages
         
         for msg in messages:
             if msg.role == 'system':
                 system_instruction = {'parts': [{'text': msg.content}]}
             else:
-                role = 'user' if msg.role == 'user' else 'model'
+                # 兼容：图像模型下历史 assistant/tool 文本可能要求 thoughtSignature（我们没有），降级为 user
+                if msg.role == 'user':
+                    role = 'user'
+                else:
+                    role = 'user' if self._requires_thought_signature_workaround() else 'model'
                 parts = []
                 
                 if msg.content:
-                    parts.append({'text': msg.content})
+                    if role == 'user' and msg.role != 'user' and self._requires_thought_signature_workaround():
+                        parts.append({'text': f"[历史助手消息] {msg.content}"})
+                    else:
+                        parts.append({'text': msg.content})
                 
                 if msg.media:
                     for media_item in msg.media:
@@ -490,6 +494,10 @@ class GoogleProvider(BaseLLMProvider):
                         media_data = media_item.get('data') or media_item.get('url', '')
                         mime_type = media_item.get('mimeType') or media_item.get('mime_type', 'image/jpeg')
                         
+                        # 运行时兜底：REST payload 必须是 JSON，可序列化；bytes/bytearray 必须转 base64 字符串
+                        if isinstance(media_data, (bytes, bytearray)):
+                            media_data = base64.b64encode(bytes(media_data)).decode('utf-8')
+
                         if isinstance(media_data, str):
                             if media_data.startswith('data:'):
                                 if ';base64,' in media_data:
@@ -499,8 +507,8 @@ class GoogleProvider(BaseLLMProvider):
                             media_data = media_data.strip().replace('\n', '').replace('\r', '').replace(' ', '')
                         
                         if media_data and mime_type:
+                            # Gemini 2.5+：模型生成的图片回灌必须带 thoughtSignature；用户上传图片可无签名用于图生图。
                             thought_sig = media_item.get('thoughtSignature') or media_item.get('thought_signature')
-
                             if thought_sig:
                                 part_data = {
                                     'inlineData': {
@@ -511,20 +519,19 @@ class GoogleProvider(BaseLLMProvider):
                                 }
                                 self._log(f"Including thoughtSignature for image ({len(thought_sig)} chars)")
                                 parts.append(part_data)
-                            elif role == 'model':
-                                # 助手消息中的图片没有thoughtSignature，跳过
-                                self._log(f"Skipping assistant image without thoughtSignature")
-                                continue
                             else:
-                                # 用户消息中的图片不需要thoughtSignature，直接包含
-                                self._log(f"Including user image without thoughtSignature")
-                                part_data = {
-                                    'inlineData': {
-                                        'mimeType': mime_type,
-                                        'data': media_data
-                                    }
-                                }
-                                parts.append(part_data)
+                                if role == 'user':
+                                    # 用户图片：允许无 thoughtSignature（用于图生图）
+                                    parts.append({
+                                        'inlineData': {
+                                            'mimeType': mime_type,
+                                            'data': media_data
+                                        }
+                                    })
+                                else:
+                                    # assistant/model 图片：无 thoughtSignature 会触发 400，降级为文本占位
+                                    self._log("⚠️ Model image missing thoughtSignature, omitting image and adding placeholder text")
+                                    parts.append({'text': '[图片已省略：缺少 thoughtSignature（旧历史数据），无法发送给 Gemini 2.5+]'})
                 
                 if parts:
                     contents.append({'role': role, 'parts': parts})

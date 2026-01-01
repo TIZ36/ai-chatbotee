@@ -40,8 +40,12 @@ function mapSessionMedia(msg: Message): UnifiedMedia[] | undefined {
         type: m.type,
         mimeType: m.mimeType,
         url: mediaUrl,
-        thoughtSignature: m.thoughtSignature,
       };
+
+      // 保存 thoughtSignature（用于 Gemini 图片）
+      if (m.thoughtSignature) {
+        (mediaItem as any).thoughtSignature = m.thoughtSignature;
+      }
 
       media.push(mediaItem);
     }

@@ -12,8 +12,6 @@ export interface UnifiedMedia {
   id?: string;
   /** 可选：缩略图（如视频封面） */
   thumbnailUrl?: string;
-  /** 可选：Gemini图片签名 */
-  thoughtSignature?: string;
 }
 
 export interface UnifiedMessage {

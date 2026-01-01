@@ -244,7 +244,6 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
         mimeType: m.mimeType || (m.type === 'image' ? 'image/png' : m.type === 'video' ? 'video/mp4' : 'audio/mpeg'),
         data: data || url || '', // 确保有 data
         url: url || data, // 确保有 url
-        thoughtSignature: (m as any).thoughtSignature, // Gemini图片签名
       };
     });
   }, [message.media]);
