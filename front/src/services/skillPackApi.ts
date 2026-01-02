@@ -243,6 +243,66 @@ export async function unassignSkillPack(
 }
 
 /**
+ * 创建纯文本SOP技能包（用户手动输入）
+ */
+export async function createSopSkillPack(params: {
+  name: string;
+  sop_text: string;
+  assign_to_session_id?: string;
+  set_as_current?: boolean;
+}): Promise<SkillPack & { assigned_to?: string; is_current_sop?: boolean }> {
+  const response = await fetch(`${API_BASE}/skill-packs/sop`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(params),
+  });
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || `Failed to create SOP skill pack: ${response.statusText}`);
+  }
+  
+  return await response.json();
+}
+
+/**
+ * 设置会话的当前SOP
+ */
+export async function setCurrentSop(sessionId: string, skillPackId: string | null): Promise<void> {
+  const response = await fetch(`${API_BASE}/sessions/${sessionId}/current-sop`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ skill_pack_id: skillPackId }),
+  });
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || `Failed to set current SOP: ${response.statusText}`);
+  }
+}
+
+/**
+ * 获取会话的当前SOP
+ */
+export async function getCurrentSop(sessionId: string): Promise<SkillPack | null> {
+  try {
+    const response = await fetch(`${API_BASE}/sessions/${sessionId}/current-sop`);
+    if (!response.ok) {
+      return null;
+    }
+    const data = await response.json();
+    return data.skill_pack || null;
+  } catch (error) {
+    console.warn('Error fetching current SOP:', error);
+    return null;
+  }
+}
+
+/**
  * 获取某会话已分配的技能包列表
  */
 export async function getSessionSkillPacks(sessionId: string): Promise<SessionSkillPack[]> {

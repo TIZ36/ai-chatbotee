@@ -8566,6 +8566,104 @@ def save_skill_pack():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/skill-packs/sop', methods=['POST', 'OPTIONS'])
+def create_sop_skill_pack():
+    """创建纯文本SOP技能包（用户手动输入）"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        data = request.json
+        name = data.get('name')
+        sop_text = data.get('sop_text')
+        assign_to_session_id = data.get('assign_to_session_id')  # 可选：分配到某个会话
+        set_as_current = data.get('set_as_current', False)  # 可选：设为该会话的当前SOP
+        
+        if not name or not sop_text:
+            return jsonify({'error': 'name and sop_text are required'}), 400
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 生成技能包ID并保存
+            skill_pack_id = str(uuid.uuid4())
+            
+            # 构建扩展数据（标记为SOP类型）
+            ext_data = json.dumps({'type': 'sop'})
+            
+            cursor.execute("""
+                INSERT INTO skill_packs 
+                (skill_pack_id, name, summary, ext)
+                VALUES (%s, %s, %s, %s)
+            """, (
+                skill_pack_id,
+                name,
+                sop_text,
+                ext_data
+            ))
+            
+            # 如果指定了分配目标，创建分配记录
+            if assign_to_session_id:
+                assignment_id = str(uuid.uuid4())
+                cursor.execute("""
+                    INSERT INTO skill_pack_assignments 
+                    (assignment_id, skill_pack_id, target_session_id)
+                    VALUES (%s, %s, %s)
+                """, (
+                    assignment_id,
+                    skill_pack_id,
+                    assign_to_session_id
+                ))
+                
+                # 如果要设为当前SOP，更新会话的ext
+                if set_as_current:
+                    # 先获取当前会话的ext
+                    cursor.execute("""
+                        SELECT ext FROM sessions WHERE session_id = %s
+                    """, (assign_to_session_id,))
+                    row = cursor.fetchone()
+                    current_ext = {}
+                    if row and row.get('ext'):
+                        try:
+                            current_ext = json.loads(row['ext']) if isinstance(row['ext'], str) else row['ext']
+                        except:
+                            current_ext = {}
+                    
+                    # 更新currentSopSkillPackId
+                    current_ext['currentSopSkillPackId'] = skill_pack_id
+                    cursor.execute("""
+                        UPDATE sessions SET ext = %s WHERE session_id = %s
+                    """, (json.dumps(current_ext), assign_to_session_id))
+            
+            conn.commit()
+            
+            return jsonify({
+                'skill_pack_id': skill_pack_id,
+                'name': name,
+                'summary': sop_text,
+                'ext': {'type': 'sop'},
+                'assigned_to': assign_to_session_id,
+                'is_current_sop': set_as_current and assign_to_session_id is not None,
+            }), 201
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[SkillPack API] Error creating SOP skill pack: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/skill-packs/optimize', methods=['POST', 'OPTIONS'])
 def optimize_skill_pack_summary():
     """优化技能包总结"""
@@ -9104,6 +9202,150 @@ def get_session_skill_packs(session_id):
                 
     except Exception as e:
         print(f"[SkillPack API] Error getting session skill packs: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/sessions/<session_id>/current-sop', methods=['GET', 'OPTIONS'])
+def get_current_sop(session_id):
+    """获取会话的当前SOP"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 获取会话的ext
+            cursor.execute("""
+                SELECT ext FROM sessions WHERE session_id = %s
+            """, (session_id,))
+            row = cursor.fetchone()
+            
+            if not row:
+                return jsonify({'error': 'Session not found'}), 404
+            
+            current_ext = {}
+            if row.get('ext'):
+                try:
+                    current_ext = json.loads(row['ext']) if isinstance(row['ext'], str) else row['ext']
+                except:
+                    current_ext = {}
+            
+            current_sop_id = current_ext.get('currentSopSkillPackId')
+            
+            if not current_sop_id:
+                return jsonify({'skill_pack': None})
+            
+            # 获取技能包详情
+            cursor.execute("""
+                SELECT skill_pack_id, name, summary, source_session_id, ext,
+                       created_at, updated_at
+                FROM skill_packs
+                WHERE skill_pack_id = %s
+            """, (current_sop_id,))
+            
+            skill_pack = cursor.fetchone()
+            
+            if skill_pack:
+                if skill_pack['created_at']:
+                    skill_pack['created_at'] = skill_pack['created_at'].isoformat()
+                if skill_pack['updated_at']:
+                    skill_pack['updated_at'] = skill_pack['updated_at'].isoformat()
+                if skill_pack['ext']:
+                    try:
+                        skill_pack['ext'] = json.loads(skill_pack['ext']) if isinstance(skill_pack['ext'], str) else skill_pack['ext']
+                    except:
+                        skill_pack['ext'] = {}
+            
+            return jsonify({'skill_pack': skill_pack})
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Session API] Error getting current SOP: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/sessions/<session_id>/current-sop', methods=['PUT', 'OPTIONS'])
+def set_current_sop(session_id):
+    """设置会话的当前SOP"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'MySQL not available'}), 503
+        
+        data = request.json
+        skill_pack_id = data.get('skill_pack_id')  # 为null则取消当前SOP
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            
+            # 获取当前会话的ext
+            cursor.execute("""
+                SELECT ext, session_type FROM sessions WHERE session_id = %s
+            """, (session_id,))
+            row = cursor.fetchone()
+            
+            if not row:
+                return jsonify({'error': 'Session not found'}), 404
+            
+            current_ext = {}
+            if row.get('ext'):
+                try:
+                    current_ext = json.loads(row['ext']) if isinstance(row['ext'], str) else row['ext']
+                except:
+                    current_ext = {}
+            
+            # 更新currentSopSkillPackId
+            if skill_pack_id:
+                # 验证技能包存在
+                cursor.execute("""
+                    SELECT skill_pack_id FROM skill_packs WHERE skill_pack_id = %s
+                """, (skill_pack_id,))
+                if not cursor.fetchone():
+                    return jsonify({'error': 'Skill pack not found'}), 404
+                    
+                current_ext['currentSopSkillPackId'] = skill_pack_id
+            else:
+                # 取消当前SOP
+                current_ext.pop('currentSopSkillPackId', None)
+            
+            cursor.execute("""
+                UPDATE sessions SET ext = %s WHERE session_id = %s
+            """, (json.dumps(current_ext), session_id))
+            
+            conn.commit()
+            
+            return jsonify({
+                'message': 'Current SOP updated',
+                'current_sop_skill_pack_id': skill_pack_id
+            })
+            
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+                
+    except Exception as e:
+        print(f"[Session API] Error setting current SOP: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500

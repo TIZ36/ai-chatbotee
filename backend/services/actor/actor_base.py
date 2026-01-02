@@ -492,18 +492,28 @@ class ActorBase(ABC):
         ctx.topic_id = topic_id
         ctx.reply_message_id = reply_message_id
 
-        # 提取用户选择的模型信息（优先于session默认配置）
-        # 1. 优先检查 ext.user_llm_config_id（前端直接传递的配置ID）
+        # 获取话题类型，用于决定是否使用用户选择的模型
+        from services.topic_service import get_topic_service
+        topic = get_topic_service().get_topic(topic_id)
+        session_type = topic.get('session_type') if topic else None
+        
+        # 提取用户选择的模型信息
+        # 重要：仅在 agent 私聊模式下允许用户覆盖模型
+        # topic_general 话题群中，每个Agent应使用自己的默认模型
         ext = msg_data.get('ext', {}) or {}
-        if ext.get('user_llm_config_id'):
-            ctx.user_selected_llm_config_id = ext['user_llm_config_id']
-            print(f"[ActorBase:{self.agent_id}] 用户选择了LLM配置ID: {ctx.user_selected_llm_config_id}")
-        # 2. 其次检查 model 字段（前端传递的模型名称）
-        elif msg_data.get('model'):
-            ctx.user_selected_model = msg_data['model']
-            # 如果消息包含模型名称，我们需要找到对应的llm_config_id
-            # 这里先设置model，后面再处理config_id映射
-            print(f"[ActorBase:{self.agent_id}] 用户选择了模型: {ctx.user_selected_model}")
+        
+        if session_type == 'agent':
+            # 私聊模式：允许用户选择模型覆盖Agent默认
+            if ext.get('user_llm_config_id'):
+                ctx.user_selected_llm_config_id = ext['user_llm_config_id']
+                print(f"[ActorBase:{self.agent_id}] 私聊模式，用户选择了LLM配置ID: {ctx.user_selected_llm_config_id}")
+            elif msg_data.get('model'):
+                ctx.user_selected_model = msg_data['model']
+                print(f"[ActorBase:{self.agent_id}] 私聊模式，用户选择了模型: {ctx.user_selected_model}")
+        else:
+            # topic_general 或其他模式：使用Agent自己的默认模型
+            agent_default_model = self._config.get('llm_config_id')
+            print(f"[ActorBase:{self.agent_id}] 话题群模式，使用Agent默认模型: {agent_default_model}")
         
         # 添加激活步骤
         ctx.add_step(
@@ -608,14 +618,28 @@ class ActorBase(ABC):
         # 设置步骤变更回调（自动通知前端并记录日志）
         ctx.set_step_callback(self._on_step_change, self.agent_id)
 
-        # 提取用户选择的模型信息（优先于session默认配置）
+        # 获取话题类型，用于决定是否使用用户选择的模型
+        from services.topic_service import get_topic_service
+        topic = get_topic_service().get_topic(topic_id)
+        session_type = topic.get('session_type') if topic else None
+        
+        # 提取用户选择的模型信息
+        # 重要：仅在 agent 私聊模式下允许用户覆盖模型
+        # topic_general 话题群中，每个Agent应使用自己的默认模型
         ext = msg_data.get('ext', {}) or {}
-        if ext.get('user_llm_config_id'):
-            ctx.user_selected_llm_config_id = ext['user_llm_config_id']
-            logger.info(f"[ActorBase:{self.agent_id}] 用户选择了LLM配置ID: {ctx.user_selected_llm_config_id}")
-        elif msg_data.get('model'):
-            ctx.user_selected_model = msg_data['model']
-            logger.info(f"[ActorBase:{self.agent_id}] 用户选择了模型: {ctx.user_selected_model}")
+        
+        if session_type == 'agent':
+            # 私聊模式：允许用户选择模型覆盖Agent默认
+            if ext.get('user_llm_config_id'):
+                ctx.user_selected_llm_config_id = ext['user_llm_config_id']
+                logger.info(f"[ActorBase:{self.agent_id}] 私聊模式(V2)，用户选择了LLM配置ID: {ctx.user_selected_llm_config_id}")
+            elif msg_data.get('model'):
+                ctx.user_selected_model = msg_data['model']
+                logger.info(f"[ActorBase:{self.agent_id}] 私聊模式(V2)，用户选择了模型: {ctx.user_selected_model}")
+        else:
+            # topic_general 或其他模式：使用Agent自己的默认模型
+            agent_default_model = self._config.get('llm_config_id')
+            logger.info(f"[ActorBase:{self.agent_id}] 话题群模式(V2)，使用Agent默认模型: {agent_default_model}")
         
         # 添加激活步骤
         ctx.add_step(
@@ -2399,6 +2423,52 @@ class ActorBase(ABC):
             ctx.mark_error(str(e))
             raise
     
+    def _get_topic_current_sop(self, topic_id: str) -> Optional[str]:
+        """获取话题的当前SOP文本（仅对 topic_general 生效）"""
+        try:
+            from services.topic_service import get_topic_service
+            topic = get_topic_service().get_topic(topic_id)
+            if not topic or topic.get('session_type') != 'topic_general':
+                return None
+            
+            ext = topic.get('ext', {}) or {}
+            if isinstance(ext, str):
+                try:
+                    ext = json.loads(ext)
+                except:
+                    ext = {}
+            
+            sop_id = ext.get('currentSopSkillPackId')
+            if not sop_id:
+                return None
+            
+            # 从数据库获取SOP内容
+            conn = get_mysql_connection()
+            if not conn:
+                return None
+            
+            try:
+                import pymysql
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute("""
+                    SELECT name, summary FROM skill_packs WHERE skill_pack_id = %s
+                """, (sop_id,))
+                row = cursor.fetchone()
+                cursor.close()
+                conn.close()
+                
+                if row:
+                    return f"【{row.get('name', 'SOP')}】\n{row.get('summary', '')}"
+                return None
+            except Exception as e:
+                logger.error(f"[ActorBase:{self.agent_id}] Error loading SOP: {e}")
+                if conn:
+                    conn.close()
+                return None
+        except Exception as e:
+            logger.error(f"[ActorBase:{self.agent_id}] Error getting topic SOP: {e}")
+            return None
+
     def _build_system_prompt(self, ctx: IterationContext) -> str:
         """构建 system prompt"""
         system_prompt = self._config.get('system_prompt', '你是一个AI助手。')
@@ -2407,6 +2477,14 @@ class ActorBase(ABC):
         cap_desc = self.capabilities.get_capability_description()
         if cap_desc:
             system_prompt += f"\n\n{cap_desc}"
+        
+        # 注入话题级SOP（仅对 topic_general 生效）
+        topic_id = ctx.topic_id or self.topic_id
+        if topic_id:
+            sop_text = self._get_topic_current_sop(topic_id)
+            if sop_text:
+                system_prompt += f"\n\n【当前话题SOP（标准作业流程）】\n请严格按照以下流程处理用户请求：\n{sop_text}"
+                logger.info(f"[ActorBase:{self.agent_id}] Injected topic SOP into system prompt")
         
         # 添加历史消息利用提示
         history_count = len(self.state.history)

@@ -5,7 +5,7 @@
 
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Send, Loader, Bot, Wrench, AlertCircle, CheckCircle, Brain, Plug, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Sparkles, Workflow as WorkflowIcon, Play, ArrowRight, Trash2, X, Edit2, RotateCw, Database, Paperclip, Music, HelpCircle, Package, CheckSquare, Square, Quote, Lightbulb, Eye, Volume2, Paintbrush, Image } from 'lucide-react';
+import { Send, Loader, Loader2, Bot, Wrench, AlertCircle, CheckCircle, Brain, Plug, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Sparkles, Workflow as WorkflowIcon, Play, ArrowRight, Trash2, X, Edit2, RotateCw, Database, Paperclip, Music, HelpCircle, Package, CheckSquare, Square, Quote, Lightbulb, Eye, Volume2, Paintbrush, Image, Plus } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Virtuoso } from 'react-virtuoso';
@@ -16,7 +16,7 @@ import { getMCPServers, MCPServerConfig } from '../services/mcpApi';
 import { getSessions, getAgents, getSession, createSession, getSessionMessages, saveMessage, summarizeSession, getSessionSummaries, deleteSession, clearSummarizeCache, deleteMessage, executeMessageComponent, updateSessionAvatar, updateSessionName, updateSessionSystemPrompt, updateSessionMediaOutputPath, updateSessionLLMConfig, upgradeToAgent, updateSessionType, Session, Summary, MessageExt } from '../services/sessionApi';
 import { getUserAccess, createOrUpdateUserAccess, UserAccess } from '../services/userAccessApi';
 import { createRole } from '../services/roleApi';
-import { createSkillPack, saveSkillPack, optimizeSkillPackSummary, getSkillPacks, getSessionSkillPacks, SkillPack, SessionSkillPack, SkillPackCreationResult, SkillPackProcessInfo } from '../services/skillPackApi';
+import { createSkillPack, saveSkillPack, optimizeSkillPackSummary, getSkillPacks, getSessionSkillPacks, createSopSkillPack, setCurrentSop, getCurrentSop, SkillPack, SessionSkillPack, SkillPackCreationResult, SkillPackProcessInfo } from '../services/skillPackApi';
 import { getBackendUrl } from '../utils/backendUrl';
 import { estimate_messages_tokens, get_model_max_tokens, estimate_tokens } from '../services/tokenCounter';
 import { getWorkflows, getWorkflow, Workflow as WorkflowType, WorkflowNode, WorkflowConnection } from '../services/workflowApi';
@@ -34,7 +34,11 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
 } from './ui/Dialog';
+import { Label } from './ui/Label';
+import { Input } from './ui/Input';
+import { Textarea } from './ui/Textarea';
 import { ScrollArea } from './ui/ScrollArea';
 import { DataListItem } from './ui/DataListItem';
 import { toast } from './ui/use-toast';
@@ -368,6 +372,13 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [selectedMCPForOptimization, setSelectedMCPForOptimization] = useState<string[]>([]); // 选中的MCP服务器ID列表
   const [currentSessionSkillPacks, setCurrentSessionSkillPacks] = useState<SessionSkillPack[]>([]);
   const [_pendingSkillPackUse, setPendingSkillPackUse] = useState<{ skillPack: SessionSkillPack; messageId: string } | null>(null);
+  
+  // SOP相关状态
+  const [showAddSopDialog, setShowAddSopDialog] = useState(false);
+  const [sopName, setSopName] = useState('');
+  const [sopText, setSopText] = useState('');
+  const [isCreatingSop, setIsCreatingSop] = useState(false);
+  const [currentSopSkillPack, setCurrentSopSkillPack] = useState<SkillPack | null>(null);
   
   // LLM配置
   const [llmConfigs, setLlmConfigs] = useState<LLMConfigFromDB[]>([]);
@@ -1449,6 +1460,18 @@ const Workflow: React.FC<WorkflowProps> = ({
         }).catch(err => {
           console.error('[Workflow] Failed to load skill packs:', err);
         });
+        
+        // 加载当前SOP（话题群专用）
+        if (session?.session_type === 'topic_general') {
+          getCurrentSop(currentSessionId).then(sop => {
+            setCurrentSopSkillPack(sop);
+          }).catch(err => {
+            console.error('[Workflow] Failed to load current SOP:', err);
+            setCurrentSopSkillPack(null);
+          });
+        } else {
+          setCurrentSopSkillPack(null);
+        }
       }
     } else {
       // 新会话，清空消息（保留系统消息）
@@ -3799,6 +3822,76 @@ const Workflow: React.FC<WorkflowProps> = ({
     }
   };
 
+  // 创建SOP技能包
+  const handleCreateSop = async () => {
+    if (!sopName.trim() || !sopText.trim()) {
+      toast({ title: 'SOP名称和内容不能为空', variant: 'destructive' });
+      return;
+    }
+    
+    setIsCreatingSop(true);
+    try {
+      const result = await createSopSkillPack({
+        name: sopName.trim(),
+        sop_text: sopText.trim(),
+        assign_to_session_id: currentSessionId && currentSessionType === 'topic_general' ? currentSessionId : undefined,
+        set_as_current: currentSessionId && currentSessionType === 'topic_general',
+      });
+      
+      toast({ title: `SOP "${result.name}" 创建成功`, variant: 'success' });
+      setShowAddSopDialog(false);
+      setSopName('');
+      setSopText('');
+      
+      // 刷新技能包列表和当前SOP
+      loadSkillPacks();
+      if (currentSessionId) {
+        getSessionSkillPacks(currentSessionId).then(packs => {
+          setCurrentSessionSkillPacks(packs);
+        });
+        if (currentSessionType === 'topic_general') {
+          getCurrentSop(currentSessionId).then(sop => {
+            setCurrentSopSkillPack(sop);
+          });
+        }
+      }
+    } catch (error: any) {
+      console.error('[Workflow] Failed to create SOP:', error);
+      toast({ title: `创建SOP失败: ${error.message}`, variant: 'destructive' });
+    } finally {
+      setIsCreatingSop(false);
+    }
+  };
+
+  // 设置当前SOP
+  const handleSetCurrentSop = async (skillPackId: string) => {
+    if (!currentSessionId) return;
+    
+    try {
+      await setCurrentSop(currentSessionId, skillPackId);
+      const sop = await getCurrentSop(currentSessionId);
+      setCurrentSopSkillPack(sop);
+      toast({ title: `已设置当前SOP: ${sop?.name || skillPackId}`, variant: 'success' });
+    } catch (error: any) {
+      console.error('[Workflow] Failed to set current SOP:', error);
+      toast({ title: `设置SOP失败: ${error.message}`, variant: 'destructive' });
+    }
+  };
+
+  // 取消当前SOP
+  const handleClearCurrentSop = async () => {
+    if (!currentSessionId) return;
+    
+    try {
+      await setCurrentSop(currentSessionId, null);
+      setCurrentSopSkillPack(null);
+      toast({ title: '已取消当前SOP', variant: 'success' });
+    } catch (error: any) {
+      console.error('[Workflow] Failed to clear current SOP:', error);
+      toast({ title: `取消SOP失败: ${error.message}`, variant: 'destructive' });
+    }
+  };
+
   // 切换消息选择状态
   const toggleMessageSelection = (messageId: string) => {
     if (!skillPackSelectionMode) return;
@@ -5420,6 +5513,31 @@ const Workflow: React.FC<WorkflowProps> = ({
               
             </div>
             <div className="flex items-center space-x-2">
+              {/* 当前SOP状态显示（话题群专用） */}
+              {currentSessionType === 'topic_general' && currentSopSkillPack && (
+                <div className="flex items-center gap-1 px-2 py-1 text-xs bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 rounded">
+                  <Package className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">SOP: {currentSopSkillPack.name}</span>
+                  <button
+                    onClick={handleClearCurrentSop}
+                    className="ml-1 hover:text-red-500 transition-colors"
+                    title="取消当前SOP"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+              
+              {/* 添加SOP按钮 */}
+              <button
+                onClick={() => setShowAddSopDialog(true)}
+                className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 dark:text-[#a0a0a0] hover:text-primary-600 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-[#363636] rounded transition-colors"
+                title="添加SOP技能包"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">添加SOP</span>
+              </button>
+              
               {/* 制作技能包按钮 - 在有消息时显示 */}
               {currentSessionId && !isTemporarySession && messages.filter(m => m.role !== 'system').length > 0 && !skillPackSelectionMode && (
                 <button
@@ -6874,6 +6992,72 @@ const Workflow: React.FC<WorkflowProps> = ({
             onOptimize={handleOptimizeSkillPack}
             onSave={handleSaveSkillPack}
           />
+          
+          {/* 添加SOP对话框 */}
+          <Dialog open={showAddSopDialog} onOpenChange={setShowAddSopDialog}>
+            <DialogContent className="sm:max-w-[600px]">
+              <DialogHeader>
+                <DialogTitle>添加 SOP 技能包</DialogTitle>
+                <DialogDescription>
+                  创建一个纯文本的 SOP（标准作业流程）技能包，可用于指导话题群中的所有 Agent。
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div>
+                  <Label htmlFor="sop-name">SOP 名称</Label>
+                  <Input
+                    id="sop-name"
+                    value={sopName}
+                    onChange={(e) => setSopName(e.target.value)}
+                    placeholder="例如：客服回复流程"
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="sop-text">SOP 内容</Label>
+                  <Textarea
+                    id="sop-text"
+                    value={sopText}
+                    onChange={(e) => setSopText(e.target.value)}
+                    placeholder="请输入详细的 SOP 流程说明..."
+                    rows={12}
+                    className="mt-1 font-mono text-sm"
+                  />
+                </div>
+                {currentSessionType === 'topic_general' && currentSessionId && (
+                  <div className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-md">
+                    创建后将自动分配到当前话题群并设为当前 SOP。
+                  </div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setShowAddSopDialog(false);
+                    setSopName('');
+                    setSopText('');
+                  }}
+                >
+                  取消
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={handleCreateSop}
+                  disabled={isCreatingSop || !sopName.trim() || !sopText.trim()}
+                >
+                  {isCreatingSop ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      创建中...
+                    </>
+                  ) : (
+                    '创建 SOP'
+                  )}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
           </div>
         </div>
       </div>
