@@ -2455,14 +2455,25 @@ class ActorBase(ABC):
         logger.info(f"[ActorBase:{self.agent_id}] get_recent_history returned {len(history_msgs)} messages")
         
         # 处理历史消息中的媒体占位符（按需获取最近 N 条有媒体的消息）
-        media_load_limit = 3  # 最多为最近 3 条消息加载实际媒体
+        # 生图开关：用户可在前端选择是否“回灌历史生成图片（含 thoughtSignature）”
+        # - 开启：用于图生图/基于上次修改继续（默认）
+        # - 关闭：更适合“全新生图”，避免历史媒体干扰/触发 thoughtSignature 约束
+        orig_ext = (ctx.original_message or {}).get('ext', {}) or {}
+        use_thoughtsig = True
+        try:
+          use_thoughtsig = bool(((orig_ext.get('imageGen') or {}).get('useThoughtSignature', True)))
+        except Exception:
+          use_thoughtsig = True
+
+        media_load_limit = 3 if use_thoughtsig else 0  # 最多为最近 3 条消息加载实际媒体；关闭则不加载
         media_loaded = 0
-        for msg in reversed(history_msgs):
-            if msg.get('has_media') and msg.get('message_id') and media_loaded < media_load_limit:
-                media = self.state.get_media_by_message_id(msg['message_id'])
-                if media:
-                    msg['media'] = media
-                    media_loaded += 1
+        if media_load_limit > 0:
+            for msg in reversed(history_msgs):
+                if msg.get('has_media') and msg.get('message_id') and media_loaded < media_load_limit:
+                    media = self.state.get_media_by_message_id(msg['message_id'])
+                    if media:
+                        msg['media'] = media
+                        media_loaded += 1
         
         messages.extend(history_msgs)
         
@@ -2484,7 +2495,7 @@ class ActorBase(ABC):
         media = ext.get('media')
         if media:
             user_msg['media'] = media
-        elif self.state.should_attach_last_media(user_content):
+        elif use_thoughtsig and self.state.should_attach_last_media(user_content):
             last_media = self.state.get_last_media()
             if last_media:
                 user_msg['media'] = last_media

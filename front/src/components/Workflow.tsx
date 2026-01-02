@@ -200,6 +200,10 @@ const Workflow: React.FC<WorkflowProps> = ({
     data: string; // base64 编码的数据
     preview?: string; // 预览 URL（用于显示）
   }>>([]);
+
+  // 生图：是否在上下文中回灌“模型生成图片的 thoughtSignature”（用于图生图/基于上次修改继续）
+  // 关闭时：仍会发送当前用户上传图片，但不再自动携带历史生成图片进入上下文（更适合“全新生图”）。
+  const [useThoughtSignature, setUseThoughtSignature] = useState(true);
   
   // 媒体预览（弹窗）
   const [mediaPreviewOpen, setMediaPreviewOpen] = useState(false);
@@ -2425,6 +2429,17 @@ const Workflow: React.FC<WorkflowProps> = ({
           messageData.ext = {
             ...(messageData.ext || {}),
             media: userMessage.media,
+          };
+        }
+
+        // 生图开关：写入 ext，供后端 AgentActor 决定是否回灌历史媒体（thoughtSignature）
+        const isImageGenModel = (selectedLLMConfig?.model || '').toLowerCase().includes('image');
+        if (isImageGenModel) {
+          messageData.ext = {
+            ...(messageData.ext || {}),
+            imageGen: {
+              useThoughtSignature,
+            },
           };
         }
 
@@ -6369,6 +6384,25 @@ const Workflow: React.FC<WorkflowProps> = ({
                       <Send className="w-3.5 h-3.5" />
                       <span className="hidden sm:inline">{editingMessageId ? '重发' : '发送'}</span>
                     </Button>
+
+                    {/* 生图开关：仅在 image / image-preview 模型下显示 */}
+                    {(() => {
+                      const isImageGenModel = (selectedLLMConfig?.model || '').toLowerCase().includes('image');
+                      if (!isImageGenModel) return null;
+                      return (
+                        <Button
+                          onClick={() => setUseThoughtSignature(v => !v)}
+                          variant={useThoughtSignature ? 'secondary' : 'outline'}
+                          size="sm"
+                          className="h-7 px-2 text-xs flex-shrink-0"
+                          title={useThoughtSignature
+                            ? '已开启：会回灌历史生成图片的 thoughtSignature（用于基于上次修改继续）'
+                            : '已关闭：不回灌历史生成图片（更适合全新生图）'}
+                        >
+                          {useThoughtSignature ? '签名:开' : '签名:关'}
+                        </Button>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
