@@ -163,23 +163,33 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
 
   // 过程面板（堆叠在模型输出之上）
   // 默认规则：
+  // - 流式输出期间：始终展开过程（实时显示步骤）
   // - 模型还没有输出时：默认展开过程
-  // - 模型输出后：默认折叠过程
+  // - 模型输出完成后：默认折叠过程
   const userToggledRef = useRef(false);
-  const [processExpanded, setProcessExpanded] = useState<boolean>(() => !hasContent);
+  const [processExpanded, setProcessExpanded] = useState<boolean>(() => !hasContent || isStreaming);
   useEffect(() => {
     if (!shouldShowSidePanel) return;
+    
+    // 流式输出期间强制展开过程面板（实时显示执行轨迹）
+    if (isStreaming) {
+      if (!userToggledRef.current) {
+        setProcessExpanded(true);
+      }
+      return;
+    }
+    
     if (!hasContent) {
-      // 没输出时强制展示过程（符合“默认展示过程”）
+      // 没输出时强制展示过程（符合"默认展示过程"）
       userToggledRef.current = false;
       setProcessExpanded(true);
       return;
     }
-    // 有输出后，如果用户没有手动展开过，则自动折叠
+    // 有输出后且不在流式输出，如果用户没有手动操作过，则自动折叠
     if (!userToggledRef.current) {
       setProcessExpanded(false);
     }
-  }, [hasContent, shouldShowSidePanel]);
+  }, [hasContent, shouldShowSidePanel, isStreaming]);
 
   // 用户消息不显示分栏
   const isUserMessage = role === 'user';
@@ -301,6 +311,7 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
                   mcpDetail={mcpDetail}
                   toolCalls={hasToolCalls ? (toolCalls as Array<{ name: string; arguments: any; result?: any }>) : undefined}
                   role={role}
+                  hideTitle={true}
                   workflowInfo={hasWorkflow ? {
                     id: workflowId,
                     name: workflowName,
@@ -355,17 +366,27 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
               </div>
             )}
 
-            {/* Assistant消息的 MCP 详情按钮 - 显示在气泡上方 */}
-            {role === 'assistant' && mcpDetail && onViewMCPDetail && (
-              <div className="absolute -top-7 right-0 flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button
-                  onClick={onViewMCPDetail}
-                  className="px-2 py-1 text-xs font-medium text-emerald-600 dark:text-emerald-400 bg-white dark:bg-[#2d2d2d] hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded-lg transition-all flex items-center space-x-1.5 border border-gray-200 dark:border-[#404040] shadow-md"
-                  title="查看 MCP 详情"
-                >
-                  <Plug className="w-3.5 h-3.5" />
-                  <span>MCP 详情</span>
-                </button>
+            {/* Assistant消息的操作按钮（引用 + MCP 详情） - 显示在气泡上方 */}
+            {role === 'assistant' && !isLoading && (onQuote || (mcpDetail && onViewMCPDetail)) && (
+              <div className="absolute -top-7 right-0 flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-[#2d2d2d] rounded-lg shadow-md border border-gray-200 dark:border-[#404040] px-1 py-0.5">
+                {onQuote && (
+                  <button
+                    onClick={onQuote}
+                    className="p-1.5 text-gray-500 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-all"
+                    title="引用此消息"
+                  >
+                    <Quote className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                {mcpDetail && onViewMCPDetail && (
+                  <button
+                    onClick={onViewMCPDetail}
+                    className="p-1.5 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded transition-all flex items-center space-x-1"
+                    title="查看 MCP 详情"
+                  >
+                    <Plug className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             )}
 

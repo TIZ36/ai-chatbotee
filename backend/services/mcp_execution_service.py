@@ -1022,11 +1022,49 @@ def execute_mcp_with_llm(
             else:
                 log(f"跳过 MCP 会话初始化，使用已有 session_id")
             
-            # 3. 获取工具列表
+            # 3. 获取工具列表（带自动重连和重试机制）
             log("Step 2/3: tools/list")
             # Actor 场景优先不走缓存：避免 tools/list 的短期缓存掩盖 session-id/权限变更
-            tools_response = get_mcp_tools_list(server_url, headers, use_cache=False)
+            # auto_reconnect=True 会在失败时自动清理旧连接并重试
+            max_retries = 0  # 最多重试2次（加上第一次共3次）
+            tools_response = None
+            last_error = None
+            
+            for retry_attempt in range(max_retries + 1):
+                if retry_attempt > 0:
+                    log(f"⚠️ 获取工具列表失败，第 {retry_attempt + 1} 次尝试...")
+                    # 清理旧连接和 session-id，准备重新初始化
+                    from mcp_server.mcp_common_logic import invalidate_mcp_connection
+                    invalidate_mcp_connection(server_url)
+                    if 'mcp-session-id' in headers:
+                        del headers['mcp-session-id']
+                    # 重新初始化会话
+                    init_response = initialize_mcp_session(server_url, headers)
+                    if init_response:
+                        log(f"✅ 重新初始化 MCP 会话成功，session_id: {headers.get('mcp-session-id', 'N/A')[:16]}...")
+                    else:
+                        log("⚠️ 重新初始化 MCP 会话失败，但继续尝试获取工具列表")
+                    # 等待一段时间再重试
+                    import time
+                    time.sleep(0.5 * retry_attempt)
+                
+                tools_response = get_mcp_tools_list(server_url, headers, use_cache=False, auto_reconnect=True)
+                if tools_response and 'result' in tools_response:
+                    # 成功获取工具列表
+                    break
+                else:
+                    # 记录错误信息
+                    if tools_response:
+                        last_error = f"Invalid response: {str(tools_response)[:200]}"
+                    else:
+                        last_error = "No response from MCP server"
+                    log(f"❌ 获取工具列表失败: {last_error}")
+            
             if not tools_response or 'result' not in tools_response:
+                # 导入健康状态函数
+                from mcp_server.mcp_common_logic import get_mcp_health_status
+                health_status = get_mcp_health_status(server_url)
+                log(f"❌ 获取工具列表失败（已重试 {max_retries} 次）: {last_error}")
                 return {
                     "error": "Failed to get MCP tools list",
                     "logs": logs,
@@ -1034,6 +1072,10 @@ def execute_mcp_with_llm(
                         "server_url": server_url,
                         "mcp_session_id": headers.get("mcp-session-id"),
                         "tools_response_preview": _truncate_deep(tools_response, max_str=1200),
+                        "health_status": health_status,
+                        "last_error": last_error,
+                        "retry_attempts": max_retries + 1,
+                        "hint": "MCP 服务可能已重启或不可用，系统已尝试自动重连和重试。请检查 MCP 服务状态。",
                     },
                 }
 

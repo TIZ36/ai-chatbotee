@@ -641,12 +641,17 @@ class ActorBase(ABC):
             agent_default_model = self._config.get('llm_config_id')
             logger.info(f"[ActorBase:{self.agent_id}] 话题群模式(V2)，使用Agent默认模型: {agent_default_model}")
         
-        # 添加激活步骤
+        # 初始化迭代轮次
+        ctx.iteration = 1
+        
+        # 添加激活步骤（包含轮次信息）
         ctx.add_step(
             'agent_activated',
-            thinking='开始处理消息（V2流程）...',
+            thinking='开始处理消息...',
             agent_id=self.agent_id,
             agent_name=self.info.get('name', 'Agent'),
+            iteration=ctx.iteration,
+            max_iterations=ctx.max_iterations,
         )
         ctx.update_last_step(status='completed')
         
@@ -659,6 +664,7 @@ class ActorBase(ABC):
         })
         
         try:
+            
             # 步骤 1: 加载 LLM 配置和 MCP 工具
             ctx.add_step('load_llm_tool', thinking='加载 LLM 配置和工具...')
             if not self._load_llm_and_tools(ctx):
@@ -707,8 +713,6 @@ class ActorBase(ABC):
                 logger.info(f"[ActorBase:{self.agent_id}] Tool call triggered, waiting for next message")
             else:
                 # 发送完成事件（包含 media，用于前端显示 thoughtSignature 状态）
-                from services.topic_service import get_topic_service
-                
                 # 获取 media 数据（来自 ext_data）
                 ext_data = ctx.build_ext_data()
                 media_data = ext_data.get('media') if ext_data else None
@@ -869,6 +873,43 @@ class ActorBase(ABC):
         except Exception as e:
             print(f"{RED}[MCP DEBUG] 查找模型配置失败: {e}，使用后备配置{RESET}")
             return fallback_config_id
+
+    def _check_is_thinking_model(self, provider: str, model: str) -> bool:
+        """
+        判断是否是思考模型（会输出思考过程的模型）
+        
+        Args:
+            provider: Provider 类型
+            model: 模型名称
+            
+        Returns:
+            是否是思考模型
+        """
+        # 已知的思考模型列表
+        thinking_models = [
+            # Claude 系列
+            'claude-3-5-sonnet', 'claude-3-opus', 'claude-3-sonnet',
+            # OpenAI o1 系列
+            'o1-preview', 'o1-mini', 'o1',
+            # Gemini 系列（部分支持）
+            'gemini-2.0-flash-thinking', 'gemini-exp',
+            # DeepSeek 系列
+            'deepseek-reasoner', 'deepseek-r1',
+        ]
+        
+        # 检查模型名称是否包含思考模型关键词
+        model_lower = (model or '').lower()
+        for thinking_model in thinking_models:
+            if thinking_model.lower() in model_lower:
+                return True
+        
+        # 检查 provider 特殊情况
+        provider_lower = (provider or '').lower()
+        if provider_lower == 'anthropic':
+            # Anthropic 的模型通常支持思考输出
+            return True
+        
+        return False
 
     def _check_interruption(self, ctx: IterationContext) -> bool:
         """
@@ -1707,17 +1748,38 @@ class ActorBase(ABC):
         print(f"{CYAN}{BOLD}[MCP DEBUG] ========== 开始 MCP 调用 =========={RESET}")
         print(f"{CYAN}[MCP DEBUG] Agent: {self.agent_id}, Server: {server_id}{RESET}")
         
-        # 添加处理步骤（但不立即发送实时更新，以加速 MCP 过程）
+        # 获取 MCP 服务器名称
+        mcp_server_name = server_id  # 默认使用 ID
+        try:
+            from database import get_mysql_connection
+            import pymysql
+            conn = get_mysql_connection()
+            if conn:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute(
+                    "SELECT name FROM mcp_servers WHERE server_id = %s LIMIT 1",
+                    (server_id,)
+                )
+                row = cursor.fetchone()
+                cursor.close()
+                conn.close()
+                if row and row.get('name'):
+                    mcp_server_name = row['name']
+        except Exception as e:
+            print(f"{YELLOW}[MCP DEBUG] 获取 MCP 名称失败: {e}{RESET}")
+        
+        # 添加处理步骤（包含参数信息和轮次信息）
         ctx.add_step(
             'mcp_call',
-            thinking=f'调用 MCP {server_id}...',
+            thinking=f'调用 MCP {mcp_server_name}...',
             mcpServer=server_id,
+            mcpServerName=mcp_server_name,  # MCP 服务器名称（别名）
             toolName=action.mcp_tool_name or 'auto',
+            arguments=action.params or {},  # 包含调用参数
+            iteration=ctx.iteration,
         )
         
-        # 不发送实时更新，等待 MCP 调用完成后再发送
-        # 这样可以减少网络开销，加速 MCP 过程
-        print(f"{GREEN}[MCP DEBUG] 开始 MCP 调用（已跳过实时更新以加速）{RESET}")
+        print(f"{GREEN}[MCP DEBUG] 开始 MCP 调用{RESET}")
         
         try:
             from services.mcp_execution_service import execute_mcp_with_llm
@@ -1875,7 +1937,6 @@ class ActorBase(ABC):
                 # 之前的逻辑：当 MCP 出错时，触发自处理：发送一个特殊的消息让 Agent 处理错误
                 # 现在直接返回错误，不触发自动分析
                 print(f"{YELLOW}[MCP DEBUG] ⚠️ MCP 调用失败，但未触发自动分析（功能已禁用）{RESET}")
-                
                 print(f"{RED}[MCP DEBUG] ========== MCP 调用失败 =========={RESET}")
                 return ActionResult.error_result(
                     action_type='mcp',
@@ -2243,6 +2304,7 @@ class ActorBase(ABC):
             })
         except Exception as e:
             logger.warning(f"[ActorBase:{self.agent_id}] Failed to notify step change: {e}")
+    
 
     # ========== 消息同步 ==========
 
@@ -2344,11 +2406,16 @@ class ActorBase(ABC):
         provider = config.get('provider', 'unknown')
         model = config.get('model', 'unknown')
         
+        # 判断是否是思考模型（会输出思考过程的模型）
+        is_thinking_model = self._check_is_thinking_model(provider, model)
+        
         ctx.add_step(
             'llm_generating',
-            thinking=f'使用 {provider}/{model} 生成回复...',
+            thinking=f'使用 {provider}/{model} {"思考中..." if is_thinking_model else "生成中..."}',
             llm_provider=provider,
             llm_model=model,
+            is_thinking_model=is_thinking_model,
+            iteration=ctx.iteration,
         )
         
         # 流式生成
@@ -2369,7 +2436,11 @@ class ActorBase(ABC):
                     'processSteps': ctx.to_process_steps_dict(),
                 })
             
-            ctx.update_last_step(status='completed')
+            # 更新步骤：完成，并标记是否为最终轮次
+            ctx.update_last_step(
+                status='completed',
+                is_final_iteration=not ctx.should_continue,  # 是否是最终轮次
+            )
             ctx.final_content = full_content
             
             # 构建扩展数据
@@ -2557,11 +2628,33 @@ class ActorBase(ABC):
         
         # 如果有工具结果，作为助手消息注入（在用户消息之前）
         if ctx.tool_results_text:
-            tool_result_msg = {
-                "role": "assistant",
-                "content": f"【工具执行结果】\n{ctx.tool_results_text}\n\n"
-                           "我已经执行了上述工具调用。现在我将根据工具返回的结果来回答你的问题。",
-            }
+            # 检查是否有MCP调用失败的情况
+            has_mcp_error = False
+            mcp_error_details = []
+            for result in ctx.executed_results:
+                if result.action_type == 'mcp' and not result.success:
+                    has_mcp_error = True
+                    error_msg = result.error or "未知错误"
+                    server_id = result.action.server_id if result.action else "未知服务器"
+                    mcp_error_details.append(f"MCP服务器 {server_id} 调用失败: {error_msg}")
+            
+            if has_mcp_error:
+                # MCP调用失败，明确告诉LLM这是错误，不要基于错误信息生成回答
+                error_summary = "\n".join(mcp_error_details)
+                tool_result_msg = {
+                    "role": "assistant",
+                    "content": f"【工具执行失败】\n\n{error_summary}\n\n"
+                               "⚠️ 重要提示：上述工具调用已失败，无法获取所需信息。"
+                               "请明确告诉用户工具调用失败，并说明可能的原因（如MCP服务不可用、网络问题等）。"
+                               "不要基于错误信息猜测或生成虚假的回答。",
+                }
+            else:
+                # 工具执行成功，正常处理
+                tool_result_msg = {
+                    "role": "assistant",
+                    "content": f"【工具执行结果】\n{ctx.tool_results_text}\n\n"
+                               "我已经执行了上述工具调用。现在我将根据工具返回的结果来回答你的问题。",
+                }
             messages.append(tool_result_msg)
         
         # 添加当前消息

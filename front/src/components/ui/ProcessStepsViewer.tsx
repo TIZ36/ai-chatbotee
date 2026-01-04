@@ -31,6 +31,7 @@ export interface ProcessStep {
   timestamp?: number;
   thinking?: string;
   mcpServer?: string;
+  mcpServerName?: string;  // MCP 服务器别名（优先显示）
   toolName?: string;
   arguments?: any;
   result?: any;
@@ -42,6 +43,10 @@ export interface ProcessStep {
   agent_name?: string;
   llm_provider?: string;
   llm_model?: string;
+  is_thinking_model?: boolean;  // 是否是思考模型
+  iteration?: number;  // 处理轮次
+  is_final_iteration?: boolean;  // 是否是最终轮次
+  max_iterations?: number;  // 最大轮次
   workflowInfo?: {
     id?: string;
     name?: string;
@@ -299,13 +304,13 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
   const getStatusIcon = (status?: string) => {
     switch (status) {
       case 'completed':
-        return <CheckCircle className="w-3.5 h-3.5 text-green-500" />;
+        return <CheckCircle className="w-2.5 h-2.5 text-green-400/70" />;
       case 'error':
-        return <XCircle className="w-3.5 h-3.5 text-red-500" />;
+        return <XCircle className="w-2.5 h-2.5 text-red-400/70" />;
       case 'running':
-        return <Loader className="w-3.5 h-3.5 text-blue-500 animate-spin" />;
+        return <Loader className="w-2.5 h-2.5 text-blue-400/70 animate-spin" />;
       default:
-        return <Clock className="w-3.5 h-3.5 text-gray-400" />;
+        return <Clock className="w-2.5 h-2.5 text-gray-400/60" />;
     }
   };
 
@@ -313,55 +318,69 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
     switch (type) {
       case 'thinking':
       case 'llm_generating':
-        return <Lightbulb className="w-3.5 h-3.5 text-purple-500" />;
+        return <Lightbulb className="w-2.5 h-2.5 text-purple-400/70" />;
       case 'mcp_call':
-        return <Wrench className="w-3.5 h-3.5 text-emerald-500" />;
+        return <Wrench className="w-2.5 h-2.5 text-emerald-400/70" />;
       case 'workflow':
-        return <WorkflowIcon className="w-3.5 h-3.5 text-indigo-500" />;
+        return <WorkflowIcon className="w-2.5 h-2.5 text-indigo-400/70" />;
       case 'agent_activated':
-        return <Zap className="w-3.5 h-3.5 text-yellow-500" />;
+        return <Zap className="w-2.5 h-2.5 text-yellow-400/70" />;
       case 'agent_deciding':
-        return <Brain className="w-3.5 h-3.5 text-indigo-500 animate-pulse" />;
+        return <Brain className="w-2.5 h-2.5 text-indigo-400/70 animate-pulse" />;
       case 'agent_decision':
-        return <Target className="w-3.5 h-3.5 text-green-500" />;
+        return <Target className="w-2.5 h-2.5 text-green-400/70" />;
       case 'agent_will_reply':
-        return <MessageSquare className="w-3.5 h-3.5 text-blue-500" />;
+        return <MessageSquare className="w-2.5 h-2.5 text-blue-400/70" />;
       case 'media_signature':
         // @ts-ignore
         const info = step?.mediaInfo;
         if (info?.withoutSignature > 0) {
-          return <ShieldAlert className="w-3.5 h-3.5 text-orange-500" />;
+          return <ShieldAlert className="w-2.5 h-2.5 text-orange-400/70" />;
         }
-        return <ShieldCheck className="w-3.5 h-3.5 text-green-500" />;
+        return <ShieldCheck className="w-2.5 h-2.5 text-green-400/70" />;
       case 'llm_metadata':
-        return <FileText className="w-3.5 h-3.5 text-blue-500" />;
+        return <FileText className="w-2.5 h-2.5 text-blue-400/70" />;
       case 'llm_media_signature':
         // @ts-ignore
         const llmMediaInfo = step?.mediaInfo;
         if (llmMediaInfo?.withoutSignature > 0) {
-          return <XCircle className="w-3.5 h-3.5 text-red-500" />;
+          return <XCircle className="w-2.5 h-2.5 text-red-400/70" />;
         }
-        return <ShieldCheck className="w-3.5 h-3.5 text-green-500" />;
+        return <ShieldCheck className="w-2.5 h-2.5 text-green-400/70" />;
       default:
-        return <FileText className="w-3.5 h-3.5 text-gray-500" />;
+        return <FileText className="w-2.5 h-2.5 text-gray-400/60" />;
     }
   };
 
-  const getTypeLabel = (type: string, step: ProcessStep) => {
+  const getTypeLabel = (type: string, step: ProcessStep): React.ReactNode => {
     switch (type) {
       case 'thinking':
         return '思考';
-      case 'llm_generating':
-        return `LLM生成 (${step.llm_provider || ''}/${step.llm_model || ''})`;
+      case 'llm_generating': {
+        const modelName = `${step.llm_provider || ''}/${step.llm_model || ''}`;
+        const isThinkingModel = step.is_thinking_model;
+        const status = step.status === 'completed' 
+          ? '生成完成' 
+          : (isThinkingModel ? '思考中...' : '生成中...');
+        return `使用模型: ${modelName}, ${status}`;
+      }
       case 'mcp_call': {
-        const serverName = step.mcpServer || '未知服务';
+        // 优先使用 mcpServerName（别名），其次使用 mcpServer（ID）
+        const serverName = step.mcpServerName || step.mcpServer || '未知服务';
         const toolName = step.toolName === 'auto' ? '自动选择工具' : (step.toolName || 'unknown');
-        return `${serverName} → ${toolName}`;
+        return (
+          <>
+            {serverName} → <strong className="font-semibold">{toolName}</strong>
+          </>
+        );
       }
       case 'workflow':
         return `工作流: ${step.workflowInfo?.name || 'Unknown'}`;
-      case 'agent_activated':
-        return `Agent激活: ${step.agent_name || step.agent_id || 'Agent'}`;
+      case 'agent_activated': {
+        const agentName = step.agent_name || step.agent_id || 'Agent';
+        const maxIter = step.max_iterations;
+        return `Agent激活: ${agentName}${maxIter ? ` (最多${maxIter}轮)` : ''}`;
+      }
       case 'agent_deciding':
         return `决策中: ${step.agent_name || 'Agent'}`;
       case 'agent_decision':
@@ -387,15 +406,15 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
   // 计算步骤数（如果还在思考中但没有步骤，显示为 0）
   const stepCount = steps.length;
 
-  // 渲染内容
+  // 渲染内容（使用小字体和低饱和度颜色）
   const renderContent = () => (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       {/* 正在思考的指示器 */}
       {(isThinking || isStreaming) && steps.filter(s => s.type === 'thinking' && s.status === 'running').length === 0 && (
-        <div className="flex items-center gap-2 text-xs py-1 pl-2">
-          <Lightbulb className="w-3.5 h-3.5 text-purple-500" />
-          <Loader className="w-3.5 h-3.5 text-purple-500 animate-spin" />
-          <span className="text-purple-600 dark:text-purple-400">
+        <div className="flex items-center gap-1.5 text-[10px] py-0.5 pl-1">
+          <Lightbulb className="w-3 h-3 text-purple-400/70" />
+          <Loader className="w-3 h-3 text-purple-400/70 animate-spin" />
+          <span className="text-purple-500/80 dark:text-purple-400/70">
             {isThinking ? '思考中...' : '生成中...'}
           </span>
         </div>
@@ -403,35 +422,49 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
 
       {steps.map((step, idx) => {
         const important = isImportantStep(step.type);
+        // 获取轮次信息
+        const iteration = step.iteration;
+        const isFinal = step.is_final_iteration;
+        
         return (
           <div
             key={`${step.type}-${step.timestamp || idx}`}
-            className={`flex items-start gap-2 text-xs pl-2 py-1 ${
-              important ? 'border-l-2 border-primary-400 dark:border-primary-500 -ml-[2px]' : ''
+            className={`flex items-start gap-1.5 text-[10px] pl-1 py-0.5 ${
+              important ? 'border-l-2 border-primary-300/60 dark:border-primary-400/40 -ml-[2px]' : ''
             }`}
           >
-            <div className="flex items-center gap-1 flex-shrink-0 mt-0.5">
+            <div className="flex items-center gap-0.5 flex-shrink-0 mt-0.5 opacity-70">
               {getTypeIcon(step.type, step)}
               {getStatusIcon(step.status)}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className={`${important ? 'font-semibold' : 'font-medium'} text-gray-700 dark:text-[#d0d0d0]`}>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {/* 轮次标签 */}
+                {iteration && (
+                  <span className={`px-1 py-0.5 rounded text-[9px] ${
+                    isFinal 
+                      ? 'bg-green-100/60 text-green-600/80 dark:bg-green-900/20 dark:text-green-400/70' 
+                      : 'bg-gray-100/60 text-gray-500/80 dark:bg-gray-800/40 dark:text-gray-400/70'
+                  }`}>
+                    轮次{iteration}{isFinal ? ' · 最终' : ''}
+                  </span>
+                )}
+                <span className={`${important ? 'font-medium' : 'font-normal'} text-gray-600/90 dark:text-[#b0b0b0]/80`}>
                   {getTypeLabel(step.type, step)}
                 </span>
                 {step.duration != null && (
-                  <span className="text-gray-400 dark:text-[#606060]">
+                  <span className="text-gray-400/70 dark:text-[#606060]/80 text-[9px]">
                     {formatDuration(step.duration)}
                   </span>
                 )}
               </div>
               {step.thinking && (
-                <div className={`mt-0.5 whitespace-pre-wrap break-words ${
-                  step.status === 'error' ? 'text-red-500 dark:text-red-400' : 'text-gray-600 dark:text-[#a0a0a0]'
+                <div className={`mt-0.5 whitespace-pre-wrap break-words text-[9px] ${
+                  step.status === 'error' ? 'text-red-400/80 dark:text-red-400/70' : 'text-gray-500/80 dark:text-[#909090]/70'
                 }`}>
                   {step.thinking.length > 500 ? (
                     <details>
-                      <summary className="cursor-pointer hover:text-gray-800 dark:hover:text-gray-200">
+                      <summary className="cursor-pointer hover:text-gray-600 dark:hover:text-gray-300">
                         {step.thinking.slice(0, 200)}...
                       </summary>
                       <div className="mt-1">{step.thinking}</div>
@@ -440,41 +473,41 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
                 </div>
               )}
               {step.error && (
-                <div className="text-red-500 dark:text-red-400 mt-0.5 font-semibold">
+                <div className="text-red-400/80 dark:text-red-400/70 mt-0.5 font-medium text-[9px]">
                   ❌ 错误: {step.error}
                 </div>
               )}
               {step.type === 'mcp_call' && step.arguments && (
-                <details className="mt-1">
-                  <summary className="text-gray-400 cursor-pointer hover:text-gray-600 dark:hover:text-[#a0a0a0]">
+                <details className="mt-0.5">
+                  <summary className="text-gray-400/70 cursor-pointer hover:text-gray-500 dark:hover:text-[#909090] text-[9px]">
                     查看参数
                   </summary>
-                  <pre className="mt-1 text-[9px] bg-gray-50 dark:bg-[#2d2d2d] p-2 rounded overflow-auto max-h-24 leading-snug border border-dashed border-gray-200 dark:border-[#404040]">
+                  <pre className="mt-0.5 text-[8px] bg-white/50 dark:bg-[#252525]/50 p-1.5 rounded overflow-auto max-h-20 leading-snug border border-dashed border-gray-200/60 dark:border-[#404040]/50">
                     {truncateBase64Strings(JSON.stringify(step.arguments, null, 2))}
                   </pre>
                 </details>
               )}
               {step.type === 'mcp_call' && step.result && (
-                <div className="mt-1">
-                  <div className="text-[10px] text-gray-500 dark:text-[#808080] font-medium">
+                <div className="mt-0.5">
+                  <div className="text-[9px] text-gray-500/80 dark:text-[#808080]/70">
                     结果：{getMcpResultSummary(step)}
                   </div>
-                  <details className="mt-1">
-                    <summary className="text-gray-400 cursor-pointer hover:text-gray-600 dark:hover:text-[#a0a0a0]">
+                  <details className="mt-0.5">
+                    <summary className="text-gray-400/70 cursor-pointer hover:text-gray-500 dark:hover:text-[#909090] text-[9px]">
                       查看原始结果
                     </summary>
-                    <pre className="mt-1 text-[9px] bg-gray-50 dark:bg-[#2d2d2d] p-2 rounded overflow-auto max-h-24 leading-snug border border-dashed border-gray-200 dark:border-[#404040]">
+                    <pre className="mt-0.5 text-[8px] bg-white/50 dark:bg-[#252525]/50 p-1.5 rounded overflow-auto max-h-20 leading-snug border border-dashed border-gray-200/60 dark:border-[#404040]/50">
                       {truncateBase64Strings(JSON.stringify(step.result, null, 2))}
                     </pre>
                   </details>
                 </div>
               )}
               {step.type === 'workflow' && step.workflowInfo?.result && (
-                <details className="mt-1">
-                  <summary className="text-gray-400 cursor-pointer hover:text-gray-600 dark:hover:text-[#a0a0a0]">
+                <details className="mt-0.5">
+                  <summary className="text-gray-400/70 cursor-pointer hover:text-gray-500 dark:hover:text-[#909090] text-[9px]">
                     查看工作流结果
                   </summary>
-                  <pre className="mt-1 text-[9px] bg-gray-50 dark:bg-[#2d2d2d] p-2 rounded overflow-auto max-h-24 leading-snug border border-dashed border-gray-200 dark:border-[#404040]">
+                  <pre className="mt-0.5 text-[8px] bg-white/50 dark:bg-[#252525]/50 p-1.5 rounded overflow-auto max-h-20 leading-snug border border-dashed border-gray-200/60 dark:border-[#404040]/50">
                     {step.workflowInfo.result.slice(0, 1000)}
                     {step.workflowInfo.result.length > 1000 && '...'}
                   </pre>
@@ -487,10 +520,10 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
     </div>
   );
 
-  // 如果隐藏标题，直接显示内容
+  // 如果隐藏标题，直接显示内容（使用浅色背景和小字体）
   if (hideTitle) {
     return (
-      <div className="pl-2 border-l-2 border-dashed border-gray-300 dark:border-[#505050]">
+      <div className="pl-2 pr-2 py-1.5 rounded-md bg-gray-50/80 dark:bg-[#1a1a1a]/60 border border-gray-100 dark:border-[#2a2a2a]">
         {renderContent()}
       </div>
     );

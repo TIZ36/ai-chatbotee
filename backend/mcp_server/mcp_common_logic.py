@@ -20,6 +20,12 @@ CACHE_TTL = 30  # 缓存30秒
 # 记录每个 MCP URL 最近一次协商得到的 mcp-session-id
 _mcp_session_ids: Dict[str, str] = {}
 
+# 记录每个 MCP URL 的健康状态和重试信息
+_mcp_health_status: Dict[str, Dict[str, Any]] = {}
+# 健康状态结构: { 'healthy': bool, 'last_check': float, 'error_count': int, 'last_error': str }
+HEALTH_CHECK_INTERVAL = 60  # 健康检查间隔（秒）
+MAX_RETRY_COUNT = 3  # 最大重试次数
+
 def get_mcp_session(mcp_url: str) -> requests.Session:
     """
     获取或创建 MCP 服务器的 Session（连接池）
@@ -38,6 +44,185 @@ def get_mcp_session(mcp_url: str) -> requests.Session:
         _mcp_sessions[normalized_url] = session
         print(f"[MCP Common] Created new session for {normalized_url[:50]}...")
     return _mcp_sessions[normalized_url]
+
+
+def invalidate_mcp_connection(mcp_url: str):
+    """
+    清理指定 MCP 的连接、Session ID 和缓存
+    当检测到 MCP 服务不可用时调用此函数
+    
+    Args:
+        mcp_url: MCP 服务器 URL
+    """
+    normalized_url = mcp_url.rstrip('/')
+    
+    # 1. 关闭并移除 Session
+    if normalized_url in _mcp_sessions:
+        try:
+            _mcp_sessions[normalized_url].close()
+        except Exception:
+            pass
+        del _mcp_sessions[normalized_url]
+        print(f"[MCP Common] 🗑️ Removed session for {normalized_url[:50]}...")
+    
+    # 2. 清除 Session ID
+    if normalized_url in _mcp_session_ids:
+        del _mcp_session_ids[normalized_url]
+        print(f"[MCP Common] 🗑️ Removed session-id for {normalized_url[:50]}...")
+    
+    # 3. 清除相关缓存
+    cache_keys_to_remove = [k for k in _response_cache.keys() if normalized_url in k]
+    for key in cache_keys_to_remove:
+        del _response_cache[key]
+        if key in _cache_timestamps:
+            del _cache_timestamps[key]
+    if cache_keys_to_remove:
+        print(f"[MCP Common] 🗑️ Cleared {len(cache_keys_to_remove)} cache entries for {normalized_url[:50]}...")
+    
+    # 4. 更新健康状态
+    _mcp_health_status[normalized_url] = {
+        'healthy': False,
+        'last_check': time.time(),
+        'error_count': _mcp_health_status.get(normalized_url, {}).get('error_count', 0) + 1,
+        'last_error': 'Connection invalidated',
+    }
+
+
+def reset_mcp_connection(mcp_url: str):
+    """
+    重置 MCP 连接（清理旧连接并准备重新建立）
+    
+    Args:
+        mcp_url: MCP 服务器 URL
+    """
+    normalized_url = mcp_url.rstrip('/')
+    
+    # 清理旧连接
+    invalidate_mcp_connection(normalized_url)
+    
+    # 重置健康状态的错误计数
+    if normalized_url in _mcp_health_status:
+        _mcp_health_status[normalized_url]['error_count'] = 0
+    
+    print(f"[MCP Common] 🔄 Reset connection for {normalized_url[:50]}...")
+
+
+def is_mcp_healthy(mcp_url: str) -> bool:
+    """
+    检查 MCP 服务是否被标记为健康
+    
+    Args:
+        mcp_url: MCP 服务器 URL
+        
+    Returns:
+        是否健康
+    """
+    normalized_url = mcp_url.rstrip('/')
+    status = _mcp_health_status.get(normalized_url)
+    
+    if not status:
+        return True  # 未知状态，假设健康
+    
+    # 如果上次检查超过间隔时间，允许重试
+    if time.time() - status.get('last_check', 0) > HEALTH_CHECK_INTERVAL:
+        return True
+    
+    return status.get('healthy', True)
+
+
+def mark_mcp_healthy(mcp_url: str):
+    """
+    标记 MCP 服务为健康状态
+    
+    Args:
+        mcp_url: MCP 服务器 URL
+    """
+    normalized_url = mcp_url.rstrip('/')
+    _mcp_health_status[normalized_url] = {
+        'healthy': True,
+        'last_check': time.time(),
+        'error_count': 0,
+        'last_error': None,
+    }
+    print(f"[MCP Common] ✅ Marked {normalized_url[:50]}... as healthy")
+
+
+def mark_mcp_unhealthy(mcp_url: str, error: str):
+    """
+    标记 MCP 服务为不健康状态
+    
+    Args:
+        mcp_url: MCP 服务器 URL
+        error: 错误信息
+    """
+    normalized_url = mcp_url.rstrip('/')
+    current_status = _mcp_health_status.get(normalized_url, {})
+    error_count = current_status.get('error_count', 0) + 1
+    
+    _mcp_health_status[normalized_url] = {
+        'healthy': False,
+        'last_check': time.time(),
+        'error_count': error_count,
+        'last_error': error,
+    }
+    print(f"[MCP Common] ❌ Marked {normalized_url[:50]}... as unhealthy (error #{error_count}): {error[:100]}")
+
+
+def check_and_recover_mcp(mcp_url: str, headers: Dict[str, str] = None) -> bool:
+    """
+    检查 MCP 服务健康状态，如果不健康则尝试恢复连接
+    使用 tools/list 作为健康检查标准
+    
+    Args:
+        mcp_url: MCP 服务器 URL
+        headers: 请求头（可选，如果不提供则使用默认头）
+        
+    Returns:
+        MCP 是否可用
+    """
+    normalized_url = mcp_url.rstrip('/')
+    
+    if headers is None:
+        headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json, text/event-stream',
+        }
+        # 准备 headers（可能需要添加 OAuth token 等）
+        headers = prepare_mcp_headers(normalized_url, headers, headers)
+    
+    print(f"[MCP Common] 🔍 Checking health of {normalized_url[:50]}...")
+    
+    # 尝试获取工具列表（这会自动处理重连）
+    tools_response = get_mcp_tools_list(normalized_url, headers, use_cache=False, auto_reconnect=True)
+    
+    if tools_response and 'result' in tools_response:
+        print(f"[MCP Common] ✅ MCP {normalized_url[:50]}... is healthy")
+        return True
+    else:
+        print(f"[MCP Common] ❌ MCP {normalized_url[:50]}... health check failed")
+        return False
+
+
+def get_mcp_health_status(mcp_url: str = None) -> Dict[str, Any]:
+    """
+    获取 MCP 服务的健康状态
+    
+    Args:
+        mcp_url: MCP 服务器 URL（可选，如果不提供则返回所有状态）
+        
+    Returns:
+        健康状态信息
+    """
+    if mcp_url:
+        normalized_url = mcp_url.rstrip('/')
+        return _mcp_health_status.get(normalized_url, {
+            'healthy': True,  # 未知状态假设健康
+            'last_check': None,
+            'error_count': 0,
+            'last_error': None,
+        })
+    else:
+        return dict(_mcp_health_status)
 
 def get_cached_response(cache_key: str) -> Optional[Dict[str, Any]]:
     """
@@ -241,80 +426,106 @@ def get_oauth_token_for_server(normalized_url: str, original_url: str) -> Option
     return token_info
 
 
-def initialize_mcp_session(target_url: str, headers: Dict[str, str]) -> Optional[Dict[str, Any]]:
+def initialize_mcp_session(target_url: str, headers: Dict[str, str], auto_reconnect: bool = True) -> Optional[Dict[str, Any]]:
     """
-    初始化 MCP 会话
+    初始化 MCP 会话（带自动重连）
     
     Args:
         target_url: MCP 服务器 URL
         headers: 请求头
+        auto_reconnect: 是否在失败时尝试重连（默认 True）
         
     Returns:
         初始化响应，如果失败则返回 None
     """
-    try:
-        init_request = {
-            'jsonrpc': '2.0',
-            'id': 1,
-            'method': 'initialize',
-            'params': {
-                'protocolVersion': headers.get('mcp-protocol-version', '2025-06-18'),
-                'capabilities': {},
-                'clientInfo': {
-                    'name': 'Workflow Manager',
-                    'version': '1.0.0'
+    normalized_url = target_url.rstrip('/')
+    max_attempts = MAX_RETRY_COUNT if auto_reconnect else 1
+    last_error = None
+    
+    for attempt in range(max_attempts):
+        try:
+            if attempt > 0:
+                print(f"[MCP Common] 🔄 Retry initialize attempt {attempt + 1}/{max_attempts} for {normalized_url[:50]}...")
+                # 重试前清理旧连接
+                invalidate_mcp_connection(normalized_url)
+                # 移除 headers 中的旧 session-id
+                if 'mcp-session-id' in headers:
+                    del headers['mcp-session-id']
+                # 短暂等待
+                time.sleep(0.5 * attempt)
+            
+            init_request = {
+                'jsonrpc': '2.0',
+                'id': 1,
+                'method': 'initialize',
+                'params': {
+                    'protocolVersion': headers.get('mcp-protocol-version', '2025-06-18'),
+                    'capabilities': {},
+                    'clientInfo': {
+                        'name': 'Workflow Manager',
+                        'version': '1.0.0'
+                    }
                 }
             }
-        }
-        
-        # 注意：initialize 不能只靠缓存，因为 mcp-session-id 往往是每次协商/会话相关的
-        # 这里仍允许复用 _mcp_session_ids，但 initialize 本身不再直接用缓存短路。
-        
-        print(f"[MCP Common] Initializing session with {target_url}")
-        print(f"[MCP Common]   Request headers: {headers}")
-        print(f"[MCP Common]   Request body: {init_request}")
-        # 使用连接池，较短的超时（初始化应该很快）
-        session = get_mcp_session(target_url)
-        response = session.post(target_url, json=init_request, headers=headers, timeout=10)
-        print(f"[MCP Common]   Response status: {response.status_code}")
-        
-        if response.ok:
-            # 续传 mcp-session-id（很多 streamable-http server 需要）
-            sid = response.headers.get('mcp-session-id')
-            if sid:
-                headers['mcp-session-id'] = sid
-                try:
-                    _mcp_session_ids[target_url.rstrip('/')] = sid
-                except Exception:
-                    pass
-                print(f"[MCP Common] ✅ Received mcp-session-id: {sid[:12]}...")
+            
+            print(f"[MCP Common] Initializing session with {target_url}")
+            print(f"[MCP Common]   Request headers: {headers}")
+            print(f"[MCP Common]   Request body: {init_request}")
+            # 使用连接池，较短的超时（初始化应该很快）
+            session = get_mcp_session(target_url)
+            response = session.post(target_url, json=init_request, headers=headers, timeout=10)
+            print(f"[MCP Common]   Response status: {response.status_code}")
+            
+            if response.ok:
+                # 续传 mcp-session-id（很多 streamable-http server 需要）
+                sid = response.headers.get('mcp-session-id')
+                if sid:
+                    headers['mcp-session-id'] = sid
+                    try:
+                        _mcp_session_ids[normalized_url] = sid
+                    except Exception:
+                        pass
+                    print(f"[MCP Common] ✅ Received mcp-session-id: {sid[:12]}...")
 
-            # 兼容：initialize 可能返回 SSE
-            content_type = (response.headers.get('Content-Type') or '').lower()
-            if 'text/event-stream' in content_type:
-                init_response = _parse_sse_text_to_jsonrpc(response.text)
+                # 兼容：initialize 可能返回 SSE
+                content_type = (response.headers.get('Content-Type') or '').lower()
+                if 'text/event-stream' in content_type:
+                    init_response = _parse_sse_text_to_jsonrpc(response.text)
+                else:
+                    init_response = response.json()
+
+                # 成功，标记为健康
+                mark_mcp_healthy(normalized_url)
+                print(f"[MCP Common] ✅ Session initialized successfully")
+                return init_response
             else:
-                init_response = response.json()
-
-            # 不缓存 initialize 响应（避免 session-id 丢失/复用错误）
-            print(f"[MCP Common] ✅ Session initialized successfully")
-            return init_response
-        else:
-            # 详细错误诊断
-            print(f"[MCP Common] ❌ Failed to initialize session: {response.status_code}")
-            print(f"[MCP Common]   Response headers: {dict(response.headers)}")
-            print(f"[MCP Common]   Response body: {response.text[:500]}")
-            print(f"[MCP Common]   Request headers sent: {headers}")
-            return None
-    except requests.exceptions.Timeout:
-        print(f"[MCP Common] ❌ Initialize timeout: {target_url}")
-        return None
-    except requests.exceptions.ConnectionError as e:
-        print(f"[MCP Common] ❌ Connection error: {e}")
-        return None
-    except Exception as e:
-        print(f"[MCP Common] ❌ Error initializing session: {e}")
-        return None
+                # 详细错误诊断
+                last_error = f"HTTP {response.status_code}: {response.text[:200]}"
+                print(f"[MCP Common] ❌ Failed to initialize session: {response.status_code}")
+                print(f"[MCP Common]   Response headers: {dict(response.headers)}")
+                print(f"[MCP Common]   Response body: {response.text[:500]}")
+                print(f"[MCP Common]   Request headers sent: {headers}")
+                continue
+                
+        except requests.exceptions.Timeout:
+            last_error = "Timeout"
+            print(f"[MCP Common] ❌ Initialize timeout: {target_url}")
+            continue
+        except requests.exceptions.ConnectionError as e:
+            last_error = f"Connection error: {e}"
+            print(f"[MCP Common] ❌ Connection error: {e}")
+            # 连接错误时清理旧连接
+            invalidate_mcp_connection(normalized_url)
+            continue
+        except Exception as e:
+            last_error = str(e)
+            print(f"[MCP Common] ❌ Error initializing session: {e}")
+            continue
+    
+    # 所有重试都失败，标记为不健康
+    mark_mcp_unhealthy(normalized_url, last_error or "Unknown error")
+    print(f"[MCP Common] ❌ All {max_attempts} initialize attempts failed for {normalized_url[:50]}...")
+    return None
 
 
 def send_mcp_notification(target_url: str, method: str, params: Dict[str, Any], headers: Dict[str, str]) -> bool:
@@ -353,77 +564,122 @@ def send_mcp_notification(target_url: str, method: str, params: Dict[str, Any], 
         return False
 
 
-def get_mcp_tools_list(target_url: str, headers: Dict[str, str], use_cache: bool = True) -> Optional[Dict[str, Any]]:
+def get_mcp_tools_list(target_url: str, headers: Dict[str, str], use_cache: bool = True, auto_reconnect: bool = True) -> Optional[Dict[str, Any]]:
     """
-    获取 MCP 服务器工具列表（带缓存）
+    获取 MCP 服务器工具列表（带缓存和自动重连）
     
     Args:
         target_url: MCP 服务器 URL
         headers: 请求头
         use_cache: 是否使用缓存（默认 True）
+        auto_reconnect: 是否在失败时尝试重连（默认 True）
         
     Returns:
         工具列表响应，如果失败则返回 None
     """
-    try:
-        # 检查缓存
-        cache_key = f"tools_list:{target_url}"
-        if use_cache:
-            cached = get_cached_response(cache_key)
-            if cached:
-                return cached
-        
-        tools_request = {
-            'jsonrpc': '2.0',
-            'id': 2,
-            'method': 'tools/list',
-            'params': {}
-        }
-        
-        print(f"[MCP Common] Getting tools list from {target_url}")
-        # 使用连接池，中等超时（工具列表应该较快）
-        session = get_mcp_session(target_url)
-        response = session.post(target_url, json=tools_request, headers=headers, timeout=15)
-        
-        if response.ok:
-            # 续传 mcp-session-id
-            sid = response.headers.get('mcp-session-id')
-            if sid:
-                headers['mcp-session-id'] = sid
-                try:
-                    _mcp_session_ids[target_url.rstrip('/')] = sid
-                except Exception:
-                    pass
-                print(f"[MCP Common] ✅ Updated mcp-session-id: {sid[:12]}...")
+    normalized_url = target_url.rstrip('/')
+    
+    # 检查缓存
+    cache_key = f"tools_list:{target_url}"
+    if use_cache:
+        cached = get_cached_response(cache_key)
+        if cached:
+            return cached
+    
+    # 检查健康状态
+    if not is_mcp_healthy(normalized_url):
+        print(f"[MCP Common] ⚠️ MCP {normalized_url[:50]}... marked as unhealthy, will try to reconnect")
+        # 清理旧连接，准备重新建立
+        reset_mcp_connection(normalized_url)
+    
+    # 最多重试 MAX_RETRY_COUNT 次
+    max_attempts = MAX_RETRY_COUNT if auto_reconnect else 1
+    last_error = None
+    
+    for attempt in range(max_attempts):
+        try:
+            tools_request = {
+                'jsonrpc': '2.0',
+                'id': 2,
+                'method': 'tools/list',
+                'params': {}
+            }
+            
+            if attempt > 0:
+                print(f"[MCP Common] 🔄 Retry attempt {attempt + 1}/{max_attempts} for {normalized_url[:50]}...")
+                # 重试前清理旧连接和 session-id
+                invalidate_mcp_connection(normalized_url)
+                # 移除 headers 中的旧 session-id
+                if 'mcp-session-id' in headers:
+                    del headers['mcp-session-id']
+                # 短暂等待
+                time.sleep(0.5 * attempt)
+            
+            print(f"[MCP Common] Getting tools list from {target_url}")
+            # 使用连接池，中等超时（工具列表应该较快）
+            session = get_mcp_session(target_url)
+            response = session.post(target_url, json=tools_request, headers=headers, timeout=15)
+            
+            if response.ok:
+                # 续传 mcp-session-id
+                sid = response.headers.get('mcp-session-id')
+                if sid:
+                    headers['mcp-session-id'] = sid
+                    try:
+                        _mcp_session_ids[normalized_url] = sid
+                    except Exception:
+                        pass
+                    print(f"[MCP Common] ✅ Updated mcp-session-id: {sid[:12]}...")
 
-            # 兼容：tools/list 可能返回 SSE（proxy 会转换，但这里直接调用 server 时要自己解析）
-            content_type = (response.headers.get('Content-Type') or '').lower()
-            if 'text/event-stream' in content_type:
-                tools_response = _parse_sse_text_to_jsonrpc(response.text)
+                # 兼容：tools/list 可能返回 SSE（proxy 会转换，但这里直接调用 server 时要自己解析）
+                content_type = (response.headers.get('Content-Type') or '').lower()
+                if 'text/event-stream' in content_type:
+                    tools_response = _parse_sse_text_to_jsonrpc(response.text)
+                else:
+                    tools_response = response.json()
+
+                # 检查响应是否有效
+                if tools_response and 'result' in tools_response:
+                    # 成功，标记为健康
+                    mark_mcp_healthy(normalized_url)
+                    # 缓存响应
+                    if use_cache:
+                        set_cached_response(cache_key, tools_response)
+                    print(f"[MCP Common] ✅ Tools list retrieved successfully")
+                    return tools_response
+                else:
+                    # 响应无效，可能是 session 问题
+                    last_error = f"Invalid response: {str(tools_response)[:200]}"
+                    print(f"[MCP Common] ❌ Invalid tools list response: {last_error}")
+                    continue
             else:
-                tools_response = response.json()
-
-            # 缓存响应
-            if use_cache:
-                set_cached_response(cache_key, tools_response)
-            print(f"[MCP Common] ✅ Tools list retrieved successfully")
-            return tools_response
-        else:
-            # 详细错误诊断
-            print(f"[MCP Common] ❌ Failed to get tools list: {response.status_code}")
-            print(f"[MCP Common]   Response headers: {dict(response.headers)}")
-            print(f"[MCP Common]   Response body: {response.text[:500]}")
-            print(f"[MCP Common]   Request headers sent: {headers}")
-            return None
-    except requests.exceptions.Timeout:
-        print(f"[MCP Common] ❌ Tools list timeout: {target_url}")
-        return None
-    except requests.exceptions.ConnectionError as e:
-        print(f"[MCP Common] ❌ Connection error: {e}")
-        return None
-    except Exception as e:
-        print(f"[MCP Common] ❌ Error getting tools list: {e}")
-        return None
+                # HTTP 错误
+                last_error = f"HTTP {response.status_code}: {response.text[:200]}"
+                print(f"[MCP Common] ❌ Failed to get tools list: {response.status_code}")
+                print(f"[MCP Common]   Response headers: {dict(response.headers)}")
+                print(f"[MCP Common]   Response body: {response.text[:500]}")
+                print(f"[MCP Common]   Request headers sent: {headers}")
+                continue
+                
+        except requests.exceptions.Timeout:
+            last_error = "Timeout"
+            print(f"[MCP Common] ❌ Tools list timeout: {target_url}")
+            continue
+        except requests.exceptions.ConnectionError as e:
+            last_error = f"Connection error: {e}"
+            print(f"[MCP Common] ❌ Connection error: {e}")
+            # 连接错误时清理旧连接
+            invalidate_mcp_connection(normalized_url)
+            continue
+        except Exception as e:
+            last_error = str(e)
+            print(f"[MCP Common] ❌ Error getting tools list: {e}")
+            continue
+    
+    # 所有重试都失败，标记为不健康
+    mark_mcp_unhealthy(normalized_url, last_error or "Unknown error")
+    print(f"[MCP Common] ❌ All {max_attempts} attempts failed for {normalized_url[:50]}...")
+    return None
 
 
 def parse_mcp_jsonrpc_response(data: str) -> Optional[Dict[str, Any]]:

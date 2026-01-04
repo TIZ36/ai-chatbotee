@@ -1041,8 +1041,22 @@ const Workflow: React.FC<WorkflowProps> = ({
             
             setMessages((prev) => {
               // 检查是否已有该消息
-              if (prev.some(m => m.id === data.message_id)) return prev;
+              const existingIndex = prev.findIndex(m => m.id === data.message_id);
+              if (existingIndex >= 0) {
+                // 消息已存在，更新 processSteps（实时步骤更新）
+                const updated = [...prev];
+                updated[existingIndex] = {
+                  ...updated[existingIndex],
+                  processSteps: normalizeIncomingProcessSteps(data.processSteps) || updated[existingIndex].processSteps,
+                  ext: {
+                    ...updated[existingIndex].ext,
+                    processSteps: normalizeIncomingProcessSteps(data.processSteps) || (updated[existingIndex].ext as any)?.processSteps,
+                  }
+                };
+                return updated;
+              }
               
+              // 消息不存在，创建新消息
               const thinkingMessage: Message = {
                 id: data.message_id,
                 role: 'assistant',
@@ -2388,7 +2402,15 @@ const Workflow: React.FC<WorkflowProps> = ({
         const quotedContent = quotedMsg.content.length > 200 
           ? quotedMsg.content.substring(0, 200) + '...' 
           : quotedMsg.content;
-        messageContent = `[引用消息]\n${quotedContent}\n\n---\n\n${messageContent}`;
+        // 如果是 Agent 消息，添加发送者信息
+        const msgExt = (quotedMsg.ext || {}) as Record<string, any>;
+        const senderName = quotedMsg.role === 'assistant'
+          ? (msgExt.sender_name || (quotedMsg as any).sender_name || 'Agent')
+          : '用户';
+        const quoteHeader = quotedMsg.role === 'assistant' 
+          ? `[引用 ${senderName} 的消息]`
+          : '[引用消息]';
+        messageContent = `${quoteHeader}\n${quotedContent}\n\n---\n\n${messageContent}`;
       }
     }
     
@@ -3944,10 +3966,11 @@ const Workflow: React.FC<WorkflowProps> = ({
     setAttachedMedia([]);
   };
 
-  // 引用消息（会同步恢复该消息的媒体附件，确保图片等可正确加载并随新消息发送）
+  // 引用消息（支持引用用户消息和 Agent 消息，会同步恢复该消息的媒体附件）
   const handleQuoteMessage = async (messageId: string) => {
     const message = messages.find(m => m.id === messageId);
-    if (!message || message.role !== 'user') return;
+    // 支持引用 user 和 assistant (agent) 消息
+    if (!message || (message.role !== 'user' && message.role !== 'assistant')) return;
 
     setQuotedMessageId(messageId);
 
@@ -5025,6 +5048,7 @@ const Workflow: React.FC<WorkflowProps> = ({
             llmProvider={selectedLLMConfig?.provider}
             renderContent={renderMessageContent}
             onToggleSelection={() => toggleMessageSelection(message.id)}
+            onQuote={() => handleQuoteMessage(message.id)}
             onViewMCPDetail={() => {
               setSelectedMCPDetail(message.mcpdetail);
               setShowMCPDetailOverlay(true);
@@ -5969,11 +5993,23 @@ const Workflow: React.FC<WorkflowProps> = ({
           {quotedMessageId && (() => {
             const quotedMsg = messages.find(m => m.id === quotedMessageId);
             if (!quotedMsg) return null;
+            // 获取发送者信息（用于显示 Agent 名称）
+            const msgExt = (quotedMsg.ext || {}) as Record<string, any>;
+            const senderName = quotedMsg.role === 'assistant' 
+              ? (msgExt.sender_name || (quotedMsg as any).sender_name || 'Agent')
+              : '用户';
+            const isAgentMessage = quotedMsg.role === 'assistant';
             return (
               <div className="mb-2 p-2 bg-gray-50 dark:bg-[#2d2d2d] border-l-4 border-primary-500 rounded-r-lg">
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs text-gray-500 dark:text-[#b0b0b0] mb-1">引用消息</div>
+                    <div className="text-xs text-gray-500 dark:text-[#b0b0b0] mb-1 flex items-center gap-1">
+                      引用
+                      {isAgentMessage && (
+                        <span className="text-primary-500 dark:text-primary-400 font-medium">{senderName}</span>
+                      )}
+                      {!isAgentMessage && <span>消息</span>}
+                    </div>
                     <div className="text-sm text-gray-700 dark:text-[#ffffff] line-clamp-2">
                       {quotedMsg.content.substring(0, 100)}{quotedMsg.content.length > 100 ? '...' : ''}
                     </div>
