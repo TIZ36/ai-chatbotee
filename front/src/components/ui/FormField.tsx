@@ -20,26 +20,41 @@ export interface FormFieldProps {
 /**
  * 输入框字段 - 封装 Label + Input + 错误提示
  */
-export interface InputFieldProps extends FormFieldProps {
-  inputProps: InputProps;
-}
+// 兼容两种用法：
+// 1) 推荐：<InputField inputProps={{ id, value, onChange, ... }} />
+// 2) 兼容旧代码：<InputField id value onChange ... />
+export type InputFieldProps =
+  & FormFieldProps
+  & (
+    | { inputProps: InputProps }
+    | ({ inputProps?: undefined } & InputProps)
+  );
 
-export const InputField: React.FC<InputFieldProps> = ({
-  label,
-  error,
-  hint,
-  required,
-  className,
-  inputProps,
-}) => {
+export const InputField: React.FC<InputFieldProps> = (props) => {
+  const {
+    label,
+    error,
+    hint,
+    required,
+    className,
+    // @ts-expect-error - legacy prop support: inputProps may not exist
+    inputProps: nestedInputProps,
+    ...legacyInputProps
+  } = props as any;
+
+  const reactId = React.useId();
+  const inputProps: InputProps = nestedInputProps ?? legacyInputProps;
+  const effectiveId = inputProps.id ?? `field-${reactId}`;
+
   return (
     <div className={cn('space-y-1.5', className)}>
-      <Label htmlFor={inputProps.id}>
+      <Label htmlFor={effectiveId}>
         {label}
         {required && <span className="text-destructiveToken ml-1">*</span>}
       </Label>
       <Input
         {...inputProps}
+        id={effectiveId}
         className={cn(error && 'border-destructiveToken', inputProps.className)}
       />
       {error && (
@@ -55,26 +70,41 @@ export const InputField: React.FC<InputFieldProps> = ({
 /**
  * 文本域字段 - 封装 Label + Textarea + 错误提示
  */
-export interface TextareaFieldProps extends FormFieldProps {
-  textareaProps: TextareaProps;
-}
+// 兼容两种用法：
+// 1) 推荐：<TextareaField textareaProps={{ id, value, onChange, ... }} />
+// 2) 兼容旧代码：<TextareaField id value onChange ... />
+export type TextareaFieldProps =
+  & FormFieldProps
+  & (
+    | { textareaProps: TextareaProps }
+    | ({ textareaProps?: undefined } & TextareaProps)
+  );
 
-export const TextareaField: React.FC<TextareaFieldProps> = ({
-  label,
-  error,
-  hint,
-  required,
-  className,
-  textareaProps,
-}) => {
+export const TextareaField: React.FC<TextareaFieldProps> = (props) => {
+  const {
+    label,
+    error,
+    hint,
+    required,
+    className,
+    // @ts-expect-error - legacy prop support: textareaProps may not exist
+    textareaProps: nestedTextareaProps,
+    ...legacyTextareaProps
+  } = props as any;
+
+  const reactId = React.useId();
+  const textareaProps: TextareaProps = nestedTextareaProps ?? legacyTextareaProps;
+  const effectiveId = textareaProps.id ?? `field-${reactId}`;
+
   return (
     <div className={cn('space-y-1.5', className)}>
-      <Label htmlFor={textareaProps.id}>
+      <Label htmlFor={effectiveId}>
         {label}
         {required && <span className="text-destructiveToken ml-1">*</span>}
       </Label>
       <Textarea
         {...textareaProps}
+        id={effectiveId}
         className={cn(error && 'border-destructiveToken', textareaProps.className)}
       />
       {error && (

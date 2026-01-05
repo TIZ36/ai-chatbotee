@@ -14,6 +14,117 @@ from urllib.parse import urlencode
 from database import save_oauth_token, get_oauth_token, is_token_expired, refresh_oauth_token, get_oauth_config, get_mysql_connection
 
 
+def generate_short_hash(workspace_alias: str) -> str:
+    """
+    基于workspace_alias生成8位短hash
+    
+    Args:
+        workspace_alias: Notion工作空间别名
+        
+    Returns:
+        8位16进制短hash字符串
+    """
+    hash_bytes = hashlib.sha256(workspace_alias.encode('utf-8')).digest()
+    return hash_bytes.hex()[:8].lower()
+
+
+def check_workspace_alias_unique(workspace_alias: str, exclude_client_id: Optional[str] = None) -> bool:
+    """
+    检查workspace_alias是否全局唯一
+    
+    Args:
+        workspace_alias: 要检查的工作空间别名
+        exclude_client_id: 可选的client_id，用于更新时排除当前记录
+        
+    Returns:
+        True表示唯一，False表示已存在
+    """
+    try:
+        conn = get_mysql_connection()
+        if not conn:
+            return False
+        
+        cursor = conn.cursor()
+        if exclude_client_id:
+            cursor.execute("""
+                SELECT COUNT(*) FROM notion_registrations 
+                WHERE workspace_alias = %s AND client_id != %s
+            """, (workspace_alias, exclude_client_id))
+        else:
+            cursor.execute("""
+                SELECT COUNT(*) FROM notion_registrations 
+                WHERE workspace_alias = %s
+            """, (workspace_alias,))
+        
+        count = cursor.fetchone()[0]
+        cursor.close()
+        conn.close()
+        return count == 0
+    except Exception as e:
+        print(f"[Notion OAuth] Error checking workspace_alias uniqueness: {e}")
+        return False
+
+
+def get_notion_token_by_short_hash(short_hash: str) -> Optional[Dict[str, Any]]:
+    """
+    根据short_hash从Redis读取Notion token信息
+    
+    Args:
+        short_hash: 8位短hash，对应Redis key: notion_token:{short_hash}
+        
+    Returns:
+        Token信息字典，如果不存在返回None
+    """
+    try:
+        from database import get_redis_client
+        redis_client = get_redis_client()
+        if not redis_client:
+            print(f"[Notion OAuth] Redis client not available")
+            return None
+        
+        redis_key = f"notion_token:{short_hash}"
+        token_data = redis_client.get(redis_key)
+        
+        if not token_data:
+            print(f"[Notion OAuth] No token found in Redis for key: {redis_key}")
+            return None
+        
+        token_info = json.loads(token_data)
+        print(f"[Notion OAuth] ✅ Token found in Redis: {redis_key}")
+        return token_info
+    except Exception as e:
+        print(f"[Notion OAuth] Error reading token from Redis: {e}")
+        return None
+
+
+def save_notion_token_by_short_hash(short_hash: str, token_info: Dict[str, Any], ttl: int = 86400 * 30) -> bool:
+    """
+    根据short_hash保存Notion token到Redis
+    
+    Args:
+        short_hash: 8位短hash
+        token_info: Token信息字典
+        ttl: TTL (默认30天)
+        
+    Returns:
+        True表示保存成功，False表示失败
+    """
+    try:
+        from database import get_redis_client
+        redis_client = get_redis_client()
+        if not redis_client:
+            print(f"[Notion OAuth] Redis client not available")
+            return False
+        
+        redis_key = f"notion_token:{short_hash}"
+        redis_client.setex(redis_key, ttl, json.dumps(token_info))
+        print(f"[Notion OAuth] ✅ Token saved to Redis: {redis_key}")
+        return True
+    except Exception as e:
+        print(f"[Notion OAuth] Error saving token to Redis: {e}")
+        return False
+
+
 def get_notion_registration_from_db(client_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     从数据库获取 Notion 注册信息

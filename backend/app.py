@@ -1474,6 +1474,303 @@ def mcp_oauth_callback_test():
     print("[TEST] OAuth callback test endpoint hit!")
     return jsonify({'status': 'ok', 'message': 'Callback endpoint is working'}), 200
 
+@app.route('/mcp/oauth/callback/<short_hash>', methods=['GET', 'POST', 'OPTIONS'])
+@app.route('/mcp/oauth/callback/<short_hash>/', methods=['GET', 'POST', 'OPTIONS'])
+def mcp_oauth_callback_with_hash(short_hash: str):
+    """处理 OAuth 回调，支持动态hash路由（用于多Notion工作空间）
+    
+    Args:
+        short_hash: 8位短hash，用于识别不同的Notion工作空间
+    """
+    print(f"\n{'='*80}")
+    print(f"==== MCP OAUTH CALLBACK WITH HASH: {short_hash} ====")
+    print(f"Method: {request.method}")
+    print(f"{'='*80}\n")
+    
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        import requests
+        import json
+        
+        # 从 URL 参数获取 code 和 state
+        code = request.args.get('code')
+        state = request.args.get('state')
+        error = request.args.get('error')
+        error_description = request.args.get('error_description')
+        
+        print(f"[OAuth Callback Hash] short_hash: {short_hash}")
+        print(f"[OAuth Callback Hash] Code: {code}")
+        print(f"[OAuth Callback Hash] State: {state}")
+        print(f"[OAuth Callback Hash] Error: {error}")
+        
+        # 检查是否有错误
+        if error:
+            print(f"[OAuth Callback Hash] ❌ ERROR: {error}")
+            error_html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>OAuth 授权失败</title>
+                <meta charset="utf-8">
+                <style>
+                    body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; }}
+                    .error {{ color: #dc2626; }}
+                </style>
+            </head>
+            <body>
+                <h1 class="error">OAuth 授权失败</h1>
+                <p>错误: {error}</p>
+                <p>{error_description or ''}</p>
+                <p><a href="/mcp-config">返回 MCP 配置页面</a></p>
+            </body>
+            </html>
+            """
+            return error_html, 400
+        
+        if not code:
+            print(f"[OAuth Callback Hash] ❌ ERROR: Missing code")
+            error_html = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>OAuth 回调错误</title>
+                <meta charset="utf-8">
+                <style>
+                    body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+                    .error { color: #dc2626; }
+                </style>
+            </head>
+            <body>
+                <h1 class="error">OAuth 回调错误</h1>
+                <p>缺少必要的参数（code）</p>
+                <p><a href="/mcp-config">返回 MCP 配置页面</a></p>
+            </body>
+            </html>
+            """
+            return error_html, 400
+        
+        # 从数据库查询short_hash对应的Notion注册信息
+        from database import get_mysql_connection
+        conn = get_mysql_connection()
+        if not conn:
+            print(f"[OAuth Callback Hash] ❌ Database connection failed")
+            return jsonify({'error': 'Database connection failed'}), 500
+        
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, client_id, client_name, workspace_alias, redirect_uri, registration_data
+            FROM notion_registrations
+            WHERE short_hash = %s
+        """, (short_hash,))
+        
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if not row:
+            print(f"[OAuth Callback Hash] ❌ No Notion registration found for short_hash: {short_hash}")
+            error_html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Notion工作空间未找到</title>
+                <meta charset="utf-8">
+                <style>
+                    body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; }}
+                    .error {{ color: #dc2626; }}
+                </style>
+            </head>
+            <body>
+                <h1 class="error">Notion工作空间未找到</h1>
+                <p>无法找到对应的Notion工作空间配置</p>
+                <p><a href="/mcp-config">返回 MCP 配置页面</a></p>
+            </body>
+            </html>
+            """
+            return error_html, 400
+        
+        reg_id, client_id, client_name, workspace_alias, redirect_uri, reg_data_json = row
+        
+        print(f"[OAuth Callback Hash] ✅ Found registration: client_id={client_id}, workspace_alias={workspace_alias}")
+        
+        # 解析registration_data获取registration_uri（由Notion返回）
+        if isinstance(reg_data_json, str):
+            try:
+                registration_data = json.loads(reg_data_json)
+            except:
+                registration_data = {}
+        else:
+            registration_data = reg_data_json or {}
+        
+        # 从Redis获取OAuth配置（使用state作为key）
+        from database import get_oauth_config, delete_oauth_config
+        oauth_config = get_oauth_config(state)
+        
+        if not oauth_config:
+            print(f"[OAuth Callback Hash] ⚠️ OAuth config not found in Redis for state: {state[:30]}...")
+            error_html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>OAuth 配置过期</title>
+                <meta charset="utf-8">
+                <style>
+                    body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; }}
+                    .error {{ color: #dc2626; }}
+                </style>
+            </head>
+            <body>
+                <h1 class="error">OAuth 配置过期</h1>
+                <p>OAuth 配置已过期。请重新开始授权流程。</p>
+                <p><a href="/mcp-config">返回 MCP 配置页面</a></p>
+            </body>
+            </html>
+            """
+            return error_html, 400
+        
+        # 从Redis配置中提取PKCE信息
+        code_verifier = oauth_config.get('code_verifier')
+        token_endpoint = oauth_config.get('token_endpoint')
+        resource = oauth_config.get('resource')
+        mcp_url = oauth_config.get('mcp_url')
+        
+        print(f"[OAuth Callback Hash] Token endpoint: {token_endpoint}")
+        print(f"[OAuth Callback Hash] Code verifier ready: {bool(code_verifier)}")
+        print(f"[OAuth Callback Hash] MCP URL: {mcp_url}")
+        
+        # 交换token（Notion MCP）
+        try:
+            from mcp_server.well_known.notion import exchange_notion_token
+            token_data = exchange_notion_token(config, code, code_verifier, redirect_uri, client_id)
+            access_token = token_data.get('access_token')
+            refresh_token = token_data.get('refresh_token')
+            expires_in = token_data.get('expires_in')
+        except Exception as e:
+            print(f"[OAuth Callback Hash] ❌ Notion token exchange failed: {e}")
+            import traceback
+            traceback.print_exc()
+            error_html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Token交换失败</title>
+                <meta charset="utf-8">
+                <style>
+                    body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; }}
+                    .error {{ color: #dc2626; }}
+                </style>
+            </head>
+            <body>
+                <h1 class="error">Token交换失败</h1>
+                <p>无法从Notion获取访问令牌。请重试。</p>
+                <p><a href="/mcp-config">返回 MCP 配置页面</a></p>
+            </body>
+            </html>
+            """
+            return error_html, 500
+        
+        print(f"[OAuth Callback Hash] ✅ Token exchanged successfully")
+        print(f"[OAuth Callback Hash] workspace_alias: {workspace_alias}")
+        print(f"[OAuth Callback Hash] Access token length: {len(access_token) if access_token else 0}")
+        
+        # 使用workspace_alias对应的short_hash作为Redis缓存前缀
+        # 保存token到Redis（使用short_hash作为前缀）
+        redis_cache_key = f"notion_token:{short_hash}"
+        
+        # 创建token信息字典
+        token_info = {
+            'client_id': client_id,
+            'access_token': access_token,
+            'refresh_token': refresh_token,
+            'token_type': token_data.get('token_type', 'bearer'),
+            'expires_in': expires_in,
+            'expires_at': int(time.time()) + expires_in if expires_in else None,
+            'scope': token_data.get('scope', ''),
+            'state': state,
+            'mcp_url': mcp_url,
+            'workspace_id': token_data.get('workspace_id'),
+            'workspace_name': token_data.get('workspace_name'),
+            'workspace_alias': workspace_alias,
+            'short_hash': short_hash,
+            'bot_id': token_data.get('bot_id'),
+        }
+        
+        # 保存到Redis
+        from database import get_redis_client
+        redis_client = get_redis_client()
+        if redis_client:
+            redis_client.setex(
+                redis_cache_key,
+                86400 * 30,  # 30天过期
+                json.dumps(token_info)
+            )
+            print(f"[OAuth Callback Hash] ✅ Token saved to Redis: {redis_cache_key}")
+        
+        # 清理OAuth配置（已使用）
+        delete_oauth_config(state)
+        
+        # 返回成功页面
+        success_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Notion连接成功</title>
+            <meta charset="utf-8">
+            <style>
+                body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f3f4f6; }}
+                .container {{ max-width: 600px; margin: 0 auto; background: white; padding: 40px; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
+                .success {{ color: #10b981; font-size: 24px; margin-bottom: 20px; }}
+                .info {{ color: #666; margin: 15px 0; font-size: 14px; }}
+                .details {{ background: #f9fafb; padding: 15px; border-radius: 5px; text-align: left; font-family: monospace; font-size: 12px; margin: 20px 0; }}
+                a {{ color: #3b82f6; text-decoration: none; }}
+                a:hover {{ text-decoration: underline; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="success">✓ Notion连接成功</div>
+                <p class="info">您的Notion工作空间已成功连接</p>
+                <div class="details">
+                    <div>工作空间别名: <strong>{workspace_alias}</strong></div>
+                    <div>工作空间名称: <strong>{token_data.get('workspace_name', 'N/A')}</strong></div>
+                    <div>短Hash: <strong>{short_hash}</strong></div>
+                    <div>缓存前缀: <strong>notion_token:{short_hash}</strong></div>
+                    <div>过期时间: <strong>{expires_in}秒</strong></div>
+                </div>
+                <p class="info">您现在可以关闭此窗口或<a href="/mcp-config">返回MCP配置</a></p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        return success_html, 200
+        
+    except Exception as e:
+        print(f"[OAuth Callback Hash] ❌ Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+        error_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>发生错误</title>
+            <meta charset="utf-8">
+            <style>
+                body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; }}
+                .error {{ color: #dc2626; }}
+            </style>
+        </head>
+        <body>
+            <h1 class="error">发生错误</h1>
+            <p>{str(e)}</p>
+            <p><a href="/mcp-config">返回 MCP 配置页面</a></p>
+        </body>
+        </html>
+        """
+        return error_html, 500
+
 @app.route('/mcp/oauth/callback', methods=['GET', 'POST', 'OPTIONS'])
 @app.route('/mcp/oauth/callback/', methods=['GET', 'POST', 'OPTIONS'])  # 支持末尾斜杠
 def mcp_oauth_callback():
@@ -2514,19 +2811,36 @@ def register_notion_client():
     try:
         data = request.get_json()
         client_name = data.get('client_name', '').strip()
+        workspace_alias = data.get('workspace_alias', '').strip()  # 新增：工作区别名
         redirect_uri_base = data.get('redirect_uri_base', '').strip() or 'http://localhost:3001'
         client_uri = data.get('client_uri', 'https://github.com/TIZ36/youtubemgr')
         
         if not client_name:
             return jsonify({'error': 'client_name is required'}), 400
         
+        if not workspace_alias:
+            return jsonify({'error': 'workspace_alias is required (用于区分不同的Notion工作空间)'}), 400
+        
         # 验证 client_name：只允许英文、数字、下划线、连字符
         import re
         if not re.match(r'^[a-zA-Z0-9_-]+$', client_name):
             return jsonify({'error': 'client_name must contain only letters, numbers, underscores, and hyphens'}), 400
         
-        # 构建完整的 redirect_uri
-        redirect_uri = f"{redirect_uri_base.rstrip('/')}/mcp/oauth/callback/"
+        # 验证 workspace_alias：只允许英文、数字、下划线、连字符
+        if not re.match(r'^[a-zA-Z0-9_-]+$', workspace_alias):
+            return jsonify({'error': 'workspace_alias must contain only letters, numbers, underscores, and hyphens'}), 400
+        
+        # 检查workspace_alias是否全局唯一
+        from mcp_server.well_known.notion import check_workspace_alias_unique, generate_short_hash
+        if not check_workspace_alias_unique(workspace_alias):
+            return jsonify({'error': f'workspace_alias "{workspace_alias}" 已被使用，请使用其他别名'}), 400
+        
+        # 生成8位短hash
+        short_hash = generate_short_hash(workspace_alias)
+        print(f"[Notion Register] Generated short_hash: {short_hash}")
+        
+        # 构建动态的redirect_uri：host + 固定path + 短hash
+        redirect_uri = f"{redirect_uri_base.rstrip('/')}/mcp/oauth/callback/{short_hash}/"
         
         # 调用 Notion 注册 API
         import requests
@@ -2542,7 +2856,9 @@ def register_notion_client():
         }
         
         print(f"[Notion Register] Registering client: {client_name}")
-        print(f"[Notion Register] Redirect URI: {redirect_uri}")
+        print(f"[Notion Register] Workspace Alias: {workspace_alias}")
+        print(f"[Notion Register] Short Hash: {short_hash}")
+        print(f"[Notion Register] Dynamic Redirect URI: {redirect_uri}")
         
         response = requests.post(
             register_url,
@@ -2569,7 +2885,7 @@ def register_notion_client():
         
         print(f"[Notion Register] ✅ Registration successful: {client_id}")
         
-        # 保存到数据库
+        # 保存到数据库（包括workspace_alias和short_hash）
         try:
             from database import get_mysql_connection
             conn = get_mysql_connection()
@@ -2579,10 +2895,12 @@ def register_notion_client():
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO `notion_registrations` 
-                (`client_id`, `client_name`, `redirect_uri`, `redirect_uri_base`, `client_uri`, `registration_data`)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                (`client_id`, `client_name`, `workspace_alias`, `short_hash`, `redirect_uri`, `redirect_uri_base`, `client_uri`, `registration_data`)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     `client_name` = VALUES(`client_name`),
+                    `workspace_alias` = VALUES(`workspace_alias`),
+                    `short_hash` = VALUES(`short_hash`),
                     `redirect_uri` = VALUES(`redirect_uri`),
                     `redirect_uri_base` = VALUES(`redirect_uri_base`),
                     `client_uri` = VALUES(`client_uri`),
@@ -2591,6 +2909,8 @@ def register_notion_client():
             """, (
                 client_id,
                 client_name,
+                workspace_alias,
+                short_hash,
                 redirect_uri,
                 redirect_uri_base,
                 client_uri,
@@ -2611,6 +2931,8 @@ def register_notion_client():
             'success': True,
             'client_id': client_id,
             'client_name': client_name,
+            'workspace_alias': workspace_alias,
+            'short_hash': short_hash,
             'redirect_uri': redirect_uri,
             'registration_data': registration_data
         })
@@ -2672,6 +2994,70 @@ def list_notion_registrations():
         
     except Exception as e:
         print(f"[Notion Registrations] ❌ ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/notion/registrations/<int:registration_id>', methods=['DELETE', 'OPTIONS'])
+def delete_notion_registration(registration_id: int):
+    """删除指定的 Notion 工作空间注册"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from database import get_mysql_connection, get_redis_client
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'Database connection failed'}), 500
+        
+        cursor = conn.cursor()
+        
+        # 首先查询该注册信息，获取 short_hash 以清理 Redis
+        cursor.execute("""
+            SELECT client_id, client_name, workspace_alias, short_hash
+            FROM `notion_registrations`
+            WHERE id = %s
+        """, (registration_id,))
+        
+        row = cursor.fetchone()
+        if not row:
+            cursor.close()
+            conn.close()
+            return jsonify({'error': 'Registration not found'}), 404
+        
+        client_id, client_name, workspace_alias, short_hash = row
+        
+        print(f"[Notion Registration] Deleting registration: id={registration_id}, client_id={client_id}, workspace_alias={workspace_alias}")
+        
+        # 删除数据库记录
+        cursor.execute("""
+            DELETE FROM `notion_registrations`
+            WHERE id = %s
+        """, (registration_id,))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        print(f"[Notion Registration] ✅ Database record deleted")
+        
+        # 清理 Redis 中的 token（如果存在）
+        try:
+            redis_client = get_redis_client()
+            if redis_client and short_hash:
+                redis_key = f"notion_token:{short_hash}"
+                redis_client.delete(redis_key)
+                print(f"[Notion Registration] ✅ Redis token deleted: {redis_key}")
+        except Exception as redis_error:
+            print(f"[Notion Registration] ⚠️ Warning: Failed to delete Redis token: {redis_error}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Registration "{client_name}" deleted successfully'
+        })
+        
+    except Exception as e:
+        print(f"[Notion Registration Delete] ❌ ERROR: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500

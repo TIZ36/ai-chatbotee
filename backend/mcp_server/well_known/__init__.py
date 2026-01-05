@@ -5,6 +5,11 @@ Well-known MCP 服务器实现
 
 from .notion import (
     NotionOAuthHandler,
+    generate_short_hash,
+    check_workspace_alias_unique,
+    get_notion_token_by_short_hash,
+    save_notion_token_by_short_hash,
+    get_notion_registration_from_db,
     get_notion_oauth_config,
     generate_notion_authorization_url,
     exchange_notion_token,
@@ -15,6 +20,11 @@ from .notion import (
 
 __all__ = [
     'NotionOAuthHandler',
+    'generate_short_hash',
+    'check_workspace_alias_unique',
+    'get_notion_token_by_short_hash',
+    'save_notion_token_by_short_hash',
+    'get_notion_registration_from_db',
     'get_notion_oauth_config',
     'generate_notion_authorization_url',
     'exchange_notion_token',

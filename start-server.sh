@@ -229,6 +229,115 @@ except Exception as e:
     print(f'⚠️  DeepSeek 迁移出错: {e}')
 " 2>&1
 
+# ========== Notion 工作空间字段迁移 ==========
+echo ""
+echo "检查 Notion 工作空间数据库迁移..."
+python -c "
+import yaml
+from pathlib import Path
+from database import get_mysql_connection
+
+try:
+    config_path = Path('config.yaml')
+    if not config_path.exists():
+        print('ℹ️  未找到 config.yaml，跳过 Notion 迁移')
+    else:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+        
+        mysql_config = config.get('mysql', {})
+        if not mysql_config.get('enabled', False):
+            print('ℹ️  MySQL 未启用，跳过 Notion 迁移')
+        else:
+            conn = get_mysql_connection()
+            if not conn:
+                print('⚠️  数据库连接失败，跳过 Notion 迁移')
+            else:
+                cursor = conn.cursor()
+                
+                # 检查 workspace_alias 字段是否存在
+                cursor.execute('''
+                    SELECT COUNT(*) 
+                    FROM information_schema.COLUMNS 
+                    WHERE TABLE_SCHEMA = DATABASE() 
+                    AND TABLE_NAME = 'notion_registrations' 
+                    AND COLUMN_NAME = 'workspace_alias'
+                ''')
+                workspace_alias_exists = cursor.fetchone()[0] > 0
+                
+                # 检查 short_hash 字段是否存在
+                cursor.execute('''
+                    SELECT COUNT(*) 
+                    FROM information_schema.COLUMNS 
+                    WHERE TABLE_SCHEMA = DATABASE() 
+                    AND TABLE_NAME = 'notion_registrations' 
+                    AND COLUMN_NAME = 'short_hash'
+                ''')
+                short_hash_exists = cursor.fetchone()[0] > 0
+                
+                if workspace_alias_exists and short_hash_exists:
+                    print('✅ Notion 工作空间字段已存在，跳过迁移')
+                else:
+                    print('🔄 正在添加 Notion 工作空间字段...')
+                    
+                    # 添加 workspace_alias 字段
+                    if not workspace_alias_exists:
+                        cursor.execute('''
+                            ALTER TABLE notion_registrations 
+                            ADD COLUMN workspace_alias VARCHAR(255) DEFAULT NULL 
+                            COMMENT 'Notion工作空间别名（全局唯一）'
+                            AFTER client_name
+                        ''')
+                        print('  ✅ 已添加 workspace_alias 字段')
+                    
+                    # 添加 short_hash 字段
+                    if not short_hash_exists:
+                        cursor.execute('''
+                            ALTER TABLE notion_registrations 
+                            ADD COLUMN short_hash VARCHAR(8) DEFAULT NULL 
+                            COMMENT '8位短hash，用于动态回调地址和redis缓存前缀'
+                            AFTER workspace_alias
+                        ''')
+                        print('  ✅ 已添加 short_hash 字段')
+                    
+                    # 添加唯一索引
+                    try:
+                        cursor.execute('''
+                            ALTER TABLE notion_registrations 
+                            ADD UNIQUE INDEX idx_workspace_alias (workspace_alias)
+                        ''')
+                        print('  ✅ 已添加 workspace_alias 唯一索引')
+                    except Exception as idx_error:
+                        if 'Duplicate key' in str(idx_error):
+                            print('  ℹ️  workspace_alias 唯一索引已存在')
+                        else:
+                            print(f'  ⚠️  添加 workspace_alias 索引失败: {idx_error}')
+                    
+                    try:
+                        cursor.execute('''
+                            ALTER TABLE notion_registrations 
+                            ADD UNIQUE INDEX idx_short_hash (short_hash)
+                        ''')
+                        print('  ✅ 已添加 short_hash 唯一索引')
+                    except Exception as idx_error:
+                        if 'Duplicate key' in str(idx_error):
+                            print('  ℹ️  short_hash 唯一索引已存在')
+                        else:
+                            print(f'  ⚠️  添加 short_hash 索引失败: {idx_error}')
+                    
+                    conn.commit()
+                    print('✅ Notion 工作空间字段迁移完成')
+                
+                cursor.close()
+                conn.close()
+except ImportError as e:
+    print(f'ℹ️  跳过 Notion 迁移（导入错误）: {e}')
+except Exception as e:
+    import traceback
+    print(f'⚠️  Notion 迁移出错: {e}')
+    traceback.print_exc()
+" 2>&1
+
 # ========== 验证模块 ==========
 echo ""
 echo "验证模块..."

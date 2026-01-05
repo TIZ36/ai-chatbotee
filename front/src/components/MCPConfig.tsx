@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Edit2, Save, X, Server, AlertCircle, CheckCircle, Wrench, ExternalLink, Plug } from 'lucide-react';
+import { Plus, Trash2, Edit2, Save, X, Server, AlertCircle, CheckCircle, Wrench, ExternalLink, Plug, RefreshCcw } from 'lucide-react';
 import PageLayout, { Card, Section, Alert, EmptyState } from './ui/PageLayout';
 import { Button } from './ui/Button';
 import { ConfirmDialog } from './ui/ConfirmDialog';
@@ -42,11 +42,53 @@ import {
   authorizeMCPOAuth,
   registerNotionClient,
   getNotionRegistrations,
+  deleteNotionRegistration,
   NotionRegistration,
 } from '../services/mcpApi';
 import { getBackendUrl } from '../utils/backendUrl';
 
 interface MCPConfigProps {}
+
+// Helper: 根据服务器类型渲染图标
+const renderServerIcon = (server: MCPServerConfig, size: 'sm' | 'lg' = 'sm') => {
+  const isNotion = (server as any).ext?.server_type === 'notion';
+  
+  if (isNotion) {
+    // Notion 服务器显示 Notion 图标（使用完整的双层 path 实现主题适配）
+    if (size === 'lg') {
+      return (
+        <div className="w-20 h-20 rounded-2xl bg-transparent flex items-center justify-center shadow-lg">
+          <svg className="w-14 h-14" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M6.017 4.313l55.333 -4.087c6.797 -0.583 8.543 -0.19 12.817 2.917l17.663 12.443c2.913 2.14 3.883 2.723 3.883 5.053v68.243c0 4.277 -1.553 6.807 -6.99 7.193L24.467 99.967c-4.08 0.193 -6.023 -0.39 -8.16 -3.113L3.3 79.94c-2.333 -3.113 -3.3 -5.443 -3.3 -8.167V11.113c0 -3.497 1.553 -6.413 6.017 -6.8z" className="fill-white dark:fill-[#363636]"/>
+            <path fillRule="evenodd" clipRule="evenodd" d="M61.35 0.227l-55.333 4.087C1.553 4.7 0 7.617 0 11.113v60.66c0 2.724 0.967 5.053 3.3 8.167l13.007 16.913c2.137 2.723 4.08 3.307 8.16 3.113l64.257 -3.89c5.433 -0.387 6.99 -2.917 6.99 -7.193V20.64c0 -2.21 -0.873 -2.847 -3.443 -4.733L74.167 3.143c-4.273 -3.107 -6.02 -3.5 -12.817 -2.917zM25.92 19.523c-5.247 0.353 -6.437 0.433 -9.417 -1.99L8.927 11.507c-0.77 -0.78 -0.383 -1.753 1.557 -1.947l53.193 -3.887c4.467 -0.39 6.793 1.167 8.54 2.527l9.123 6.61c0.39 0.197 1.36 1.36 0.193 1.36l-54.933 3.307 -0.68 0.047zM19.803 88.3V30.367c0 -2.53 0.777 -3.697 3.103 -3.893L86 22.78c2.14 -0.193 3.107 1.167 3.107 3.693v57.547c0 2.53 -0.39 4.67 -3.883 4.863l-60.377 3.5c-3.493 0.193 -5.043 -0.97 -5.043 -4.083zm59.6 -54.827c0.387 1.75 0 3.5 -1.75 3.7l-2.91 0.577v42.773c-2.527 1.36 -4.853 2.137 -6.797 2.137 -3.107 0 -3.883 -0.973 -6.21 -3.887l-19.03 -29.94v28.967l6.02 1.363s0 3.5 -4.857 3.5l-13.39 0.777c-0.39 -0.78 0 -2.723 1.357 -3.11l3.497 -0.97v-38.3L30.48 40.667c-0.39 -1.75 0.58 -4.277 3.3 -4.473l14.367 -0.967 19.8 30.327v-26.83l-5.047 -0.58c-0.39 -2.143 1.163 -3.7 3.103 -3.89l13.4 -0.78z" className="fill-black dark:fill-gray-100"/>
+          </svg>
+        </div>
+      );
+    }
+    return (
+      <div className="w-10 h-10 rounded-lg bg-transparent flex items-center justify-center border border-gray-200 dark:border-gray-700">
+        <svg className="w-6 h-6" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M6.017 4.313l55.333 -4.087c6.797 -0.583 8.543 -0.19 12.817 2.917l17.663 12.443c2.913 2.14 3.883 2.723 3.883 5.053v68.243c0 4.277 -1.553 6.807 -6.99 7.193L24.467 99.967c-4.08 0.193 -6.023 -0.39 -8.16 -3.113L3.3 79.94c-2.333 -3.113 -3.3 -5.443 -3.3 -8.167V11.113c0 -3.497 1.553 -6.413 6.017 -6.8z" className="fill-white dark:fill-[#363636]"/>
+          <path fillRule="evenodd" clipRule="evenodd" d="M61.35 0.227l-55.333 4.087C1.553 4.7 0 7.617 0 11.113v60.66c0 2.724 0.967 5.053 3.3 8.167l13.007 16.913c2.137 2.723 4.08 3.307 8.16 3.113l64.257 -3.89c5.433 -0.387 6.99 -2.917 6.99 -7.193V20.64c0 -2.21 -0.873 -2.847 -3.443 -4.733L74.167 3.143c-4.273 -3.107 -6.02 -3.5 -12.817 -2.917zM25.92 19.523c-5.247 0.353 -6.437 0.433 -9.417 -1.99L8.927 11.507c-0.77 -0.78 -0.383 -1.753 1.557 -1.947l53.193 -3.887c4.467 -0.39 6.793 1.167 8.54 2.527l9.123 6.61c0.39 0.197 1.36 1.36 0.193 1.36l-54.933 3.307 -0.68 0.047zM19.803 88.3V30.367c0 -2.53 0.777 -3.697 3.103 -3.893L86 22.78c2.14 -0.193 3.107 1.167 3.107 3.693v57.547c0 2.53 -0.39 4.67 -3.883 4.863l-60.377 3.5c-3.493 0.193 -5.043 -0.97 -5.043 -4.083zm59.6 -54.827c0.387 1.75 0 3.5 -1.75 3.7l-2.91 0.577v42.773c-2.527 1.36 -4.853 2.137 -6.797 2.137 -3.107 0 -3.883 -0.973 -6.21 -3.887l-19.03 -29.94v28.967l6.02 1.363s0 3.5 -4.857 3.5l-13.39 0.777c-0.39 -0.78 0 -2.723 1.357 -3.11l3.497 -0.97v-38.3L30.48 40.667c-0.39 -1.75 0.58 -4.277 3.3 -4.473l14.367 -0.967 19.8 30.327v-26.83l-5.047 -0.58c-0.39 -2.143 1.163 -3.7 3.103 -3.89l13.4 -0.78z" className="fill-black dark:fill-gray-100"/>
+        </svg>
+      </div>
+    );
+  }
+  
+  // 其他服务器显示首字母
+  if (size === 'lg') {
+    return (
+      <div className="w-20 h-20 rounded-2xl bg-blue-600 flex items-center justify-center text-white text-4xl font-bold shadow-lg shadow-blue-500/20">
+        {server.name.charAt(0).toUpperCase()}
+      </div>
+    );
+  }
+  return (
+    <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-600 font-bold text-lg border border-blue-100 dark:border-blue-800">
+      {server.name.charAt(0).toUpperCase()}
+    </div>
+  );
+};
 
 const MCPConfig: React.FC<MCPConfigProps> = () => {
   // MCP 服务器列表
@@ -73,6 +115,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
   const [notionRegistrations, setNotionRegistrations] = useState<NotionRegistration[]>([]);
   const [registrationFormData, setRegistrationFormData] = useState({
     client_name: '',
+    workspace_alias: '',  // 新增：工作空间别名（全局唯一）
     redirect_uri_base: getBackendUrl(),
   });
   const [isRegistering, setIsRegistering] = useState(false);
@@ -93,6 +136,11 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
   const [marketItems, setMarketItems] = useState<MCPMarketItemSummary[]>([]);
   const [marketTotal, setMarketTotal] = useState(0);
   const [showMarketModal, setShowMarketModal] = useState(false);
+
+  // 新增：UI 状态
+  const [selectedServerForDetail, setSelectedServerForDetail] = useState<MCPServerConfig | null>(null);
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [showToolsInDetail, setShowToolsInDetail] = useState(false);
 
   // 清理连接的辅助函数
   const cleanupConnection = (serverId: string) => {
@@ -337,6 +385,11 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
       return;
     }
 
+    if (!registrationFormData.workspace_alias.trim()) {
+      alert('请输入工作空间别名（Workspace Alias）');
+      return;
+    }
+
     // 验证 client_name：只允许英文、数字、下划线、连字符
     const clientNamePattern = /^[a-zA-Z0-9_-]+$/;
     if (!clientNamePattern.test(registrationFormData.client_name)) {
@@ -344,21 +397,32 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
       return;
     }
 
+    // 验证 workspace_alias：只允许英文、数字、下划线、连字符
+    const workspaceAliasPattern = /^[a-zA-Z0-9_-]+$/;
+    if (!workspaceAliasPattern.test(registrationFormData.workspace_alias)) {
+      alert('工作空间别名只能包含英文、数字、下划线和连字符');
+      return;
+    }
+
     setIsRegistering(true);
     try {
       const result = await registerNotionClient({
         client_name: registrationFormData.client_name.trim(),
+        workspace_alias: registrationFormData.workspace_alias.trim(),
         redirect_uri_base: registrationFormData.redirect_uri_base.trim() || getBackendUrl(),
       });
 
       console.log('[Notion] Registration successful:', result);
+      console.log('[Notion] Workspace Alias:', result.workspace_alias);
+      console.log('[Notion] Short Hash:', result.short_hash);
+      console.log('[Notion] Dynamic Redirect URI:', result.redirect_uri);
       
       // 重新加载注册列表
       await loadNotionRegistrations();
       
       // 关闭注册表单，使用新注册的 client_id 进行 OAuth 授权
       setShowRegistrationForm(false);
-      setRegistrationFormData({ client_name: '', redirect_uri_base: getBackendUrl() });
+      setRegistrationFormData({ client_name: '', workspace_alias: '', redirect_uri_base: getBackendUrl() });
       
       // 使用新注册的 client_id 进行 OAuth 授权
       await performNotionOAuth(result.client_id);
@@ -367,6 +431,40 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
       alert('注册失败: ' + (error instanceof Error ? error.message : String(error)));
     } finally {
       setIsRegistering(false);
+    }
+  };
+
+  // 处理删除 Notion 工作空间注册
+  const handleDeleteNotionRegistration = async (registration: NotionRegistration, event: React.MouseEvent) => {
+    // 阻止事件冒泡，防止触发父级的点击事件（连接工作空间）
+    event.stopPropagation();
+    
+    const confirmMessage = `确定要删除工作空间 "${registration.client_name}" 吗？\n\n这将删除注册信息和相关的访问令牌。`;
+    
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
+    try {
+      console.log(`[Notion] Deleting registration: ${registration.id}`);
+      const result = await deleteNotionRegistration(registration.id);
+      console.log('[Notion] Delete result:', result);
+      
+      toast({
+        title: '删除成功',
+        description: result.message || `工作空间 "${registration.client_name}" 已删除`,
+        variant: 'success',
+      });
+      
+      // 重新加载注册列表
+      await loadNotionRegistrations();
+    } catch (error) {
+      console.error('[Notion] Delete failed:', error);
+      toast({
+        title: '删除失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
     }
   };
 
@@ -448,18 +546,35 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
           // 检查后端是否已完成 token 交换
           // 通过尝试创建服务器配置来验证 token 是否已保存
           try {
-            // 先检查是否已有相同URL的服务器配置
+            // 先检查是否已有对应工作空间（按 client_id 匹配）的服务器配置
             const existingServers = await getMCPServers();
-            const existingServer = existingServers.find(s => s.url === mcpUrl);
+            const registration = notionRegistrations.find(r => r.client_id === authorizeResult.client_id);
+            const workspaceName = registration?.client_name || 'Notion';
+
+            const existingServer =
+              existingServers.find(
+                s => s.ext?.server_type === 'notion' && s.ext?.client_id === authorizeResult.client_id
+              ) ||
+              existingServers.find(
+                s =>
+                  s.url === mcpUrl &&
+                  s.ext?.server_type === 'notion' &&
+                  (!s.ext?.client_id || s.ext?.client_id === '')
+              );
             
             if (existingServer) {
-              // 如果服务器已存在，更新它（添加 client_id）
+              // 如果服务器已存在，更新它（写回工作空间名 + client_id）
               console.log('[Notion OAuth] Server config already exists, updating...');
               await updateMCPServer(existingServer.id, {
+                name: workspaceName,
+                display_name: workspaceName,
+                client_name: workspaceName,
+                description: `Notion MCP Server - ${workspaceName}`,
                 ext: {
                   ...existingServer.ext,
                   server_type: 'notion',
                   client_id: authorizeResult.client_id,
+                  client_name: workspaceName,
                   response_format: 'sse',  // Notion MCP 使用 SSE 格式响应
                 },
               });
@@ -474,6 +589,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
             tokenExchangeCompleted = true;
             setNotionAuthState('authenticated');
             setShowWorkspaceSelection(false);
+            setShowRegistrationForm(false);
             alert('Notion MCP 服务器配置成功！Token 已保存到服务器。');
             return; // 成功，退出循环
             
@@ -540,6 +656,8 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
       // Token 已保存在 Redis，MCP 代理会自动从 Redis 获取并刷新
       const notionServerConfig: Partial<MCPServerConfig> = {
         name: displayName,  // 使用 client_name 作为显示名称
+        display_name: displayName,
+        client_name: displayName,
         url: mcpUrl,
         type: 'http-stream',
         enabled: true,
@@ -790,9 +908,15 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
     const connectedClient = connectedClients.get(server.id);
 
     if (!result?.connected || !connectedClient) {
-      console.error(`[MCP Config] Cannot fetch tools: server ${server.id} is not connected`);
-      alert('请先测试连接，确保服务器已成功连接');
-      return;
+      console.log(`[MCP Config] Server not connected, testing first...`);
+      await handleTestConnection(server);
+      // 测试完后重新获取状态
+      const newResult = testResults.get(server.id);
+      const newClient = connectedClients.get(server.id);
+      if (!newResult?.connected || !newClient) {
+        toast({ title: '连接失败，无法获取工具', variant: 'destructive' });
+        return;
+      }
     }
 
     setTestingServers(prev => new Set(prev).add(server.id));
@@ -870,6 +994,12 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
     }
   };
 
+  const handleViewDetail = (server: MCPServerConfig) => {
+    setSelectedServerForDetail(server);
+    setShowDetailModal(true);
+    setShowToolsInDetail(false);
+  };
+
   const cancelEdit = () => {
     setIsAdding(false);
     setEditingId(null);
@@ -885,700 +1015,628 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
   };
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">MCP 服务器配置</h1>
-          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">选择公开的 MCP 服务器或添加自定义服务器</p>
-        </div>
-        <Button
-          variant="primary"
-          onClick={() => setShowMarketModal(true)}
-          className="flex items-center gap-2"
-        >
-          <Plug className="w-4 h-4" />
-          <span>MCP 市场</span>
-        </Button>
-      </div>
-
-      <PageLayout
-        title="MCP 服务器配置"
-        description="选择公开的 MCP 服务器或添加自定义服务器"
-        icon={Plug}
-        hideHeader
-      >
-      {/* 公开 MCP 服务器 */}
-      <Section title="公开 MCP 服务器" description="一键连接热门 MCP 服务"  className="mb-6">
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
-          {/* Notion */}
-          <div className="flex flex-col items-center justify-center p-4 bg-white dark:bg-[#363636] border-2 border-gray-200 dark:border-[#505050] rounded-lg hover:border-gray-400 dark:hover:border-[#606060] hover:shadow-md transition-all duration-200 group">
-            <svg className="w-16 h-16 mb-3 transition-transform group-hover:scale-110" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M6.017 4.313l55.333 -4.087c6.797 -0.583 8.543 -0.19 12.817 2.917l17.663 12.443c2.913 2.14 3.883 2.723 3.883 5.053v68.243c0 4.277 -1.553 6.807 -6.99 7.193L24.467 99.967c-4.08 0.193 -6.023 -0.39 -8.16 -3.113L3.3 79.94c-2.333 -3.113 -3.3 -5.443 -3.3 -8.167V11.113c0 -3.497 1.553 -6.413 6.017 -6.8z" className="fill-white dark:fill-[#363636]"/>
-              <path fillRule="evenodd" clipRule="evenodd" d="M61.35 0.227l-55.333 4.087C1.553 4.7 0 7.617 0 11.113v60.66c0 2.724 0.967 5.053 3.3 8.167l13.007 16.913c2.137 2.723 4.08 3.307 8.16 3.113l64.257 -3.89c5.433 -0.387 6.99 -2.917 6.99 -7.193V20.64c0 -2.21 -0.873 -2.847 -3.443 -4.733L74.167 3.143c-4.273 -3.107 -6.02 -3.5 -12.817 -2.917zM25.92 19.523c-5.247 0.353 -6.437 0.433 -9.417 -1.99L8.927 11.507c-0.77 -0.78 -0.383 -1.753 1.557 -1.947l53.193 -3.887c4.467 -0.39 6.793 1.167 8.54 2.527l9.123 6.61c0.39 0.197 1.36 1.36 0.193 1.36l-54.933 3.307 -0.68 0.047zM19.803 88.3V30.367c0 -2.53 0.777 -3.697 3.103 -3.893L86 22.78c2.14 -0.193 3.107 1.167 3.107 3.693v57.547c0 2.53 -0.39 4.67 -3.883 4.863l-60.377 3.5c-3.493 0.193 -5.043 -0.97 -5.043 -4.083zm59.6 -54.827c0.387 1.75 0 3.5 -1.75 3.7l-2.91 0.577v42.773c-2.527 1.36 -4.853 2.137 -6.797 2.137 -3.107 0 -3.883 -0.973 -6.21 -3.887l-19.03 -29.94v28.967l6.02 1.363s0 3.5 -4.857 3.5l-13.39 0.777c-0.39 -0.78 0 -2.723 1.357 -3.11l3.497 -0.97v-38.3L30.48 40.667c-0.39 -1.75 0.58 -4.277 3.3 -4.473l14.367 -0.967 19.8 30.327v-26.83l-5.047 -0.58c-0.39 -2.143 1.163 -3.7 3.103 -3.89l13.4 -0.78z" className="fill-black dark:fill-gray-100"/>
-            </svg>
-            <span className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">Notion</span>
-            
-            {notionAuthState === 'authenticating' ? (
-              <div className="flex items-center space-x-2 text-xs text-gray-600 dark:text-gray-400">
-                <div className="w-3 h-3 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
-                <span>授权中...</span>
-              </div>
-            ) : (
-              <Button
-                onClick={handleNotionOAuthConnect}
-                disabled={isAdding || editingId !== null}
-                variant="primary"
-                size="sm"
-                className="text-xs"
-              >
-                Connect
-              </Button>
-            )}
-          </div>
-
-          {/* GitHub */}
-          <button
-            onClick={() => alert('GitHub MCP 服务器即将推出')}
-            disabled={isAdding || editingId !== null || isAddingNotion}
-            className="flex flex-col items-center justify-center p-6 bg-white dark:bg-[#363636] border-2 border-gray-200 dark:border-[#505050] rounded-lg hover:border-gray-400 dark:hover:border-[#606060] hover:shadow-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed group"
-          >
-            <svg className="w-16 h-16 mb-3 transition-transform group-hover:scale-110" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path fillRule="evenodd" clipRule="evenodd" d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" className="fill-[#181717] dark:fill-gray-100"/>
-            </svg>
-            <span className="text-sm font-medium text-gray-900 dark:text-gray-100">GitHub</span>
-          </button>
-
-          {/* 更多服务器占位符 */}
-          <div className="flex flex-col items-center justify-center p-4 bg-gray-50 dark:bg-[#363636] border-2 border-dashed border-gray-300 dark:border-[#505050] rounded-lg">
-            <Server className="w-16 h-16 text-gray-400 dark:text-gray-500 mb-3" />
-            <span className="text-sm font-medium text-gray-500 dark:text-gray-400">更多服务器</span>
-            <span className="text-xs text-gray-400 dark:text-gray-500 mt-1">即将推出</span>
+    <div className="flex flex-col h-full">
+      {/* Admin 风格头部 */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-[#2d2d2d]">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <Plug className="w-5 h-5 text-blue-600" />
+            <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">MCP 管理</h1>
           </div>
         </div>
-      </Section>
 
-      {/* Notion 专用添加表单 */}
-      {isAddingNotion && (
-        <Card className="mb-6">
-          <h2 className="text-lg font-semibold mb-3 flex items-center space-x-2">
-            {/* Notion Logo */}
-            <svg className="w-6 h-6" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M6.017 4.313l55.333 -4.087c6.797 -0.583 8.543 -0.19 12.817 2.917l17.663 12.443c2.913 2.14 3.883 2.723 3.883 5.053v68.243c0 4.277 -1.553 6.807 -6.99 7.193L24.467 99.967c-4.08 0.193 -6.023 -0.39 -8.16 -3.113L3.3 79.94c-2.333 -3.113 -3.3 -5.443 -3.3 -8.167V11.113c0 -3.497 1.553 -6.413 6.017 -6.8z" fill="#fff"/>
-              <path fillRule="evenodd" clipRule="evenodd" d="M61.35 0.227l-55.333 4.087C1.553 4.7 0 7.617 0 11.113v60.66c0 2.724 0.967 5.053 3.3 8.167l13.007 16.913c2.137 2.723 4.08 3.307 8.16 3.113l64.257 -3.89c5.433 -0.387 6.99 -2.917 6.99 -7.193V20.64c0 -2.21 -0.873 -2.847 -3.443 -4.733L74.167 3.143c-4.273 -3.107 -6.02 -3.5 -12.817 -2.917zM25.92 19.523c-5.247 0.353 -6.437 0.433 -9.417 -1.99L8.927 11.507c-0.77 -0.78 -0.383 -1.753 1.557 -1.947l53.193 -3.887c4.467 -0.39 6.793 1.167 8.54 2.527l9.123 6.61c0.39 0.197 1.36 1.36 0.193 1.36l-54.933 3.307 -0.68 0.047zM19.803 88.3V30.367c0 -2.53 0.777 -3.697 3.103 -3.893L86 22.78c2.14 -0.193 3.107 1.167 3.107 3.693v57.547c0 2.53 -0.39 4.67 -3.883 4.863l-60.377 3.5c-3.493 0.193 -5.043 -0.97 -5.043 -4.083zm59.6 -54.827c0.387 1.75 0 3.5 -1.75 3.7l-2.91 0.577v42.773c-2.527 1.36 -4.853 2.137 -6.797 2.137 -3.107 0 -3.883 -0.973 -6.21 -3.887l-19.03 -29.94v28.967l6.02 1.363s0 3.5 -4.857 3.5l-13.39 0.777c-0.39 -0.78 0 -2.723 1.357 -3.11l3.497 -0.97v-38.3L30.48 40.667c-0.39 -1.75 0.58 -4.277 3.3 -4.473l14.367 -0.967 19.8 30.327v-26.83l-5.047 -0.58c-0.39 -2.143 1.163 -3.7 3.103 -3.89l13.4 -0.78z" fill="#000"/>
-            </svg>
-            <span>添加 Notion MCP 服务器</span>
-          </h2>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {/* 左侧：输入表单 */}
-            <div className="lg:col-span-2 space-y-3">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Internal Integration Secret *
-                </label>
-                <input
-                  type="password"
-                  value={notionIntegrationSecret}
-                  onChange={(e) => setNotionIntegrationSecret(e.target.value)}
-                  className="input-field font-mono text-sm"
-                  placeholder="secret_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  用于访问 Notion 工作区的 API 密钥
-                </p>
-              </div>
-
-              <div className="flex justify-end space-x-2 mt-4">
-                <Button
-                  onClick={cancelEdit}
-                  variant="secondary"
-                >
-                  <X className="w-4 h-4" />
-                  <span>取消</span>
-                </Button>
-                <Button
-                  onClick={handleAddNotionServer}
-                  variant="primary"
-                  disabled={!notionIntegrationSecret.trim()}
-                >
-                  <Save className="w-4 h-4" />
-                  <span>添加 Notion 服务器</span>
-                </Button>
-              </div>
-            </div>
-
-            {/* 右侧：获取步骤指南 */}
-            <div className="lg:col-span-1">
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                <h3 className="text-sm font-semibold text-blue-900 mb-2 flex items-center">
-                  <AlertCircle className="w-4 h-4 mr-1" />
-                  如何获取 Integration Secret
-                </h3>
-                <ol className="text-xs text-blue-800 space-y-2">
-                  <li className="flex items-start space-x-2">
-                    <span className="flex-shrink-0 w-5 h-5 bg-blue-500 text-white rounded-full flex items-center justify-center font-medium">1</span>
-                    <div>
-                      <p className="font-medium">访问 Notion Integrations</p>
-                      <a 
-                        href="https://www.notion.so/my-integrations" 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="text-blue-600 hover:text-blue-700 underline flex items-center mt-1"
-                      >
-                        打开页面
-                        <ExternalLink className="w-3 h-3 ml-1" />
-                      </a>
-                    </div>
-                  </li>
-                  <li className="flex items-start space-x-2">
-                    <span className="flex-shrink-0 w-5 h-5 bg-blue-500 text-white rounded-full flex items-center justify-center font-medium">2</span>
-                    <div>
-                      <p className="font-medium">创建新的 Integration</p>
-                      <p className="text-gray-600 dark:text-gray-400 mt-1">点击 "New integration" 按钮</p>
-                    </div>
-                  </li>
-                  <li className="flex items-start space-x-2">
-                    <span className="flex-shrink-0 w-5 h-5 bg-blue-500 text-white rounded-full flex items-center justify-center font-medium">3</span>
-                    <div>
-                      <p className="font-medium">配置 Integration</p>
-                      <p className="text-gray-600 dark:text-gray-400 mt-1">填写名称，选择工作区</p>
-                    </div>
-                  </li>
-                  <li className="flex items-start space-x-2">
-                    <span className="flex-shrink-0 w-5 h-5 bg-blue-500 text-white rounded-full flex items-center justify-center font-medium">4</span>
-                    <div>
-                      <p className="font-medium">获取 Secret</p>
-                      <p className="text-gray-600 dark:text-gray-400 mt-1">在 "Secrets" 标签页中复制 "Internal Integration Secret"</p>
-                    </div>
-                  </li>
-                  <li className="flex items-start space-x-2">
-                    <span className="flex-shrink-0 w-5 h-5 bg-blue-500 text-white rounded-full flex items-center justify-center font-medium">5</span>
-                    <div>
-                      <p className="font-medium">授权页面访问</p>
-                      <p className="text-gray-600 dark:text-gray-400 mt-1">在需要访问的 Notion 页面中，点击 "..." → "Add connections" → 选择你的 Integration</p>
-                    </div>
-                  </li>
-                </ol>
-                
-                <div className="mt-4 pt-4 border-t border-blue-200">
-                  <p className="text-xs text-blue-700">
-                    <strong>提示：</strong>Integration 需要被授权访问特定的 Notion 页面才能使用
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {/* 添加/编辑表单 */}
-      {(isAdding || editingId) && (
-        <Card className="mb-6">
-          <h2 className="text-lg font-semibold mb-3">
-            {isAdding ? '添加 MCP 服务器' : '编辑 MCP 服务器'}
-          </h2>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                服务器名称 *
-              </label>
-              <input
-                type="text"
-                value={newServer.name || ''}
-                onChange={(e) => setNewServer(prev => ({ ...prev, name: e.target.value }))}
-                className="input-field"
-                placeholder="例如: 小红书 MCP"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                服务器 URL *
-              </label>
-              <input
-                type="text"
-                value={newServer.url || ''}
-                onChange={(e) => setNewServer(prev => ({ ...prev, url: e.target.value }))}
-                className="input-field"
-                placeholder="例如: http://localhost:18060/mcp"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                服务器类型
-              </label>
-              <Select
-                value={newServer.type || 'http-stream'}
-                onValueChange={(value) =>
-                  setNewServer((prev) => ({
-                    ...prev,
-                    type: value as MCPServerConfig['type'],
-                  }))
-                }
-              >
-                <SelectTrigger className="input-field">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="http-stream">HTTP Stream</SelectItem>
-                  <SelectItem value="http-post">HTTP POST</SelectItem>
-                  <SelectItem value="stdio">Stdio</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                状态
-              </label>
-              <Select
-                value={newServer.enabled ? 'enabled' : 'disabled'}
-                onValueChange={(value) =>
-                  setNewServer((prev) => ({
-                    ...prev,
-                    enabled: value === 'enabled',
-                  }))
-                }
-              >
-                <SelectTrigger className="input-field">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="enabled">启用</SelectItem>
-                  <SelectItem value="disabled">禁用</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="mt-4">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              描述
-            </label>
-            <textarea
-              value={newServer.description || ''}
-              onChange={(e) => setNewServer(prev => ({ ...prev, description: e.target.value }))}
-              className="input-field"
-              rows={3}
-              placeholder="服务器功能的简要描述"
-            />
-          </div>
-
-          <div className="flex justify-end space-x-3 mt-6">
-            <Button onClick={cancelEdit} variant="secondary">
-              <X className="w-4 h-4" />
-              <span>取消</span>
-            </Button>
-            <Button
-              onClick={isAdding ? handleAddServer : handleUpdateServer}
-              variant="primary"
-            >
-              <Save className="w-4 h-4" />
-              <span>{isAdding ? '添加' : '保存'}</span>
-            </Button>
-          </div>
-        </Card>
-      )}
-
-      {/* 自定义 MCP 服务器 */}
-      <Section 
-        title="自定义 MCP 服务器" 
-        description="添加和管理您自己的 MCP 服务器"
-        className="mb-6"
-        headerAction={
+        <div className="flex items-center gap-3">
           <Button
-            onClick={() => setIsAdding(true)}
             variant="secondary"
             size="sm"
-            className="text-sm"
-            disabled={isAdding || editingId !== null || isAddingNotion}
+            onClick={() => setShowMarketModal(true)}
+            className="flex items-center gap-2 border-gray-300 dark:border-gray-600"
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>添加自定义服务器</span>
+            <Plug className="w-4 h-4" />
+            <span>市场</span>
           </Button>
-        }
-      >
-
-      {/* 服务器列表 */}
-        <div className="space-y-3">
-        {loading ? (
-            <div className="text-center py-8">
-              <div className="w-6 h-6 border-2 border-gray-300 dark:border-gray-600 border-t-[#7c3aed] rounded-full animate-spin mx-auto mb-3" />
-              <p className="text-sm text-gray-500 dark:text-gray-400">加载中...</p>
-          </div>
-        ) : servers.length === 0 ? (
-          <EmptyState
-            icon={Server}
-            title="还没有自定义 MCP 服务器"
-            description="例如：xiaohongshu-mcp、custom-api 等"
-            action={
-              <Button onClick={() => setIsAdding(true)} variant="primary">
-                <Plus className="w-4 h-4" />
-                <span>添加第一个自定义服务器</span>
-              </Button>
-            }
-          />
-        ) : (
-          servers.map((server) => (
-            <div key={server.id} className="bg-white dark:bg-[#363636] border border-gray-200 dark:border-[#505050] rounded-lg p-3 hover:border-gray-300 dark:hover:border-[#606060] hover:shadow-sm transition-all">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-3 flex-1 min-w-0">
-                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${server.enabled ? 'bg-green-500' : 'bg-gray-400'}`} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center space-x-2">
-                      <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                        {(server as any).display_name || (server as any).client_name || server.name}
-                      </h3>
-                      {server.ext?.server_type && (
-                        <span className="text-xs bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 rounded">
-                          {server.ext.server_type}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">{server.url}</p>
-                    {server.description && (
-                      <p className="text-xs text-gray-400 mt-1 line-clamp-1">{server.description}</p>
-                    )}
-                    {/* 如果是 Notion 服务器，显示 client_name 作为额外标识 */}
-                    {server.ext?.server_type === 'notion' && server.ext?.client_name && (
-                      <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">
-                        工作空间: {server.ext.client_name}
-                      </p>
-                    )}
-                    {server.ext?.integration_secret && (
-                      <p className="text-xs text-gray-400 mt-1 font-mono">
-                        Secret: {server.ext.integration_secret.substring(0, 10)}...{server.ext.integration_secret.substring(server.ext.integration_secret.length - 4)}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex items-center space-x-1 ml-3">
-                  {/* 测试连接 */}
-                  <button
-                    onClick={() => handleTestConnection(server)}
-                    disabled={testingServers.has(server.id)}
-                    className="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded transition-colors flex items-center space-x-1"
-                  >
-                    {testingServers.has(server.id) ? (
-                      <>
-                        <div className="w-3 h-3 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
-                        <span>测试中</span>
-                      </>
-                    ) : (
-                      <>
-                        <Server className="w-3 h-3" />
-                        <span>测试</span>
-                      </>
-                    )}
-                  </button>
-
-                  {/* 编辑 */}
-                  <button
-                    onClick={() => handleEditServer(server.id)}
-                    disabled={isAdding || editingId !== null}
-                    className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors"
-                    title="编辑"
-                  >
-                    <Edit2 className="w-3 h-3" />
-                  </button>
-
-                  {/* 删除 */}
-                  <button
-                    onClick={() => setDeleteTarget(server)}
-                    className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
-                    title="删除"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-
-              {/* 测试结果 */}
-              {testResults.has(server.id) && (
-                <div className="mt-4 space-y-3">
-                  {/* 连接测试结果 */}
-                  <div className={`p-3 rounded-lg flex items-center space-x-2 border ${
-                    testResults.get(server.id)?.success
-                      ? 'ui-status-success'
-                      : 'ui-status-error'
-                  }`} style={{
-                    backgroundColor: testResults.get(server.id)?.success 
-                      ? 'var(--color-success-bg)' 
-                      : 'var(--color-error-bg)'
-                  }}>
-                    {testResults.get(server.id)?.success ? (
-                      <CheckCircle className="w-5 h-5" style={{ color: 'var(--color-success)' }} />
-                    ) : (
-                      <AlertCircle className="w-5 h-5" style={{ color: 'var(--color-error)' }} />
-                    )}
-                    <span className="text-sm" style={{
-                      color: testResults.get(server.id)?.success 
-                        ? 'var(--color-success)' 
-                        : 'var(--color-error)'
-                    }}>
-                      {testResults.get(server.id)?.message}
-                    </span>
-                  </div>
-
-                  {/* 获取工具按钮 */}
-                  {testResults.get(server.id)?.success && testResults.get(server.id)?.connected && !testResults.get(server.id)?.tools && (
-                    <div className="flex justify-center">
-                      <Button
-                        onClick={() => handleFetchTools(server)}
-                        disabled={testingServers.has(server.id)}
-                        variant="primary"
-                        size="sm"
-                      >
-                        {testingServers.has(server.id) ? (
-                          <>
-                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                            <span>获取中...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Wrench className="w-4 h-4" />
-                            <span>获取工具列表</span>
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                  )}
-
-                  {/* 工具列表 */}
-                  {testResults.get(server.id)?.success && testResults.get(server.id)?.tools && testResults.get(server.id)!.tools!.length > 0 && (
-                    <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
-                      <h4 className="text-sm font-semibold text-blue-900 dark:text-blue-300 mb-2 flex items-center">
-                        <Wrench className="w-4 h-4 mr-1" />
-                        可用工具 ({testResults.get(server.id)?.tools?.length})
-                      </h4>
-                      <div className="space-y-2 max-h-40 overflow-y-auto">
-                        {testResults.get(server.id)?.tools?.map((tool, index) => (
-                          <div key={index} className="bg-white dark:bg-[#2d2d2d] rounded border border-gray-200 dark:border-[#404040] p-2">
-                            <div className="flex items-start justify-between">
-                              <div className="flex-1">
-                                <h5 className="text-sm font-medium text-gray-900 dark:text-gray-100">{tool.name}</h5>
-                                <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">{tool.description}</p>
-                                {tool.inputSchema?.properties && (
-                                  <div className="mt-2">
-                                    <p className="text-xs text-gray-500 dark:text-gray-400">参数:</p>
-                                    <div className="flex flex-wrap gap-1 mt-1">
-                                      {Object.keys(tool.inputSchema.properties).map((param) => (
-                                        <span key={param} className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 px-2 py-1 rounded">
-                                          {param}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          ))
-        )}
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => {
+              cancelEdit();
+              setIsAdding(true);
+            }}
+            className="flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            <span>新增自定义</span>
+          </Button>
         </div>
-      </Section>
-
-      {/* 使用说明 */}
-      <div className="mt-8 space-y-4">
-        <Alert variant="info" title="使用说明">
-          <ul className="space-y-1.5 text-sm">
-            <li>• MCP (Model Context Protocol) 允许 LLM 模型调用外部工具和服务</li>
-            <li>• 配置通过后端统一管理，支持 Electron 动态添加 MCP 服务器</li>
-            <li>• 在 Electron 环境中自动使用后端代理，解决 CORS 跨域问题</li>
-            <li>• 在浏览器环境中直接连接到 MCP 服务器（需要服务器支持 CORS）</li>
-            <li>• 配置的服务器将在工作流页面中可用</li>
-            <li>• 确保 MCP 服务器正在运行并可从此应用访问</li>
-            <li>• 可以使用"测试连接"功能验证服务器是否正常工作</li>
-          </ul>
-        </Alert>
-
-        <Alert variant="success" title="协议版本更新">
-          <ul className="space-y-1.5 text-sm">
-            <li>• 已升级到最新的 MCP 协议版本 2025-06-18（兼容 2025-03-26）</li>
-            <li>• 修复了之前的协议版本错误（HTTP 400: Invalid MCP-Protocol-Version）</li>
-            <li>• 所有 MCP 请求现在使用最新的协议标准</li>
-          </ul>
-        </Alert>
       </div>
 
-      {/* Notion 工作空间选择对话框 */}
-      {showWorkspaceSelection && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  选择 Notion 工作空间
-                </h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                  选择已有工作空间进行连接或重新授权
-                </p>
+      <div className="flex-1 overflow-y-auto p-6">
+        <div className="space-y-4">
+          <div
+            className="p-4 bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-gray-800 rounded-xl hover:border-blue-400 transition-all cursor-pointer flex items-center justify-between shadow-sm"
+            onClick={() => {
+              // 需求：始终可点，点击后先进入工作区注册/选择
+              cancelEdit();
+              handleNotionOAuthConnect();
+            }}
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-transparent rounded-lg flex items-center justify-center">
+                <svg className="w-8 h-8" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M6.017 4.313l55.333 -4.087c6.797 -0.583 8.543 -0.19 12.817 2.917l17.663 12.443c2.913 2.14 3.883 2.723 3.883 5.053v68.243c0 4.277 -1.553 6.807 -6.99 7.193L24.467 99.967c-4.08 0.193 -6.023 -0.39 -8.16 -3.113L3.3 79.94c-2.333 -3.113 -3.3 -5.443 -3.3 -8.167V11.113c0 -3.497 1.553 -6.413 6.017 -6.8z" className="fill-white dark:fill-[#363636]"/>
+                  <path fillRule="evenodd" clipRule="evenodd" d="M61.35 0.227l-55.333 4.087C1.553 4.7 0 7.617 0 11.113v60.66c0 2.724 0.967 5.053 3.3 8.167l13.007 16.913c2.137 2.723 4.08 3.307 8.16 3.113l64.257 -3.89c5.433 -0.387 6.99 -2.917 6.99 -7.193V20.64c0 -2.21 -0.873 -2.847 -3.443 -4.733L74.167 3.143c-4.273 -3.107 -6.02 -3.5 -12.817 -2.917zM25.92 19.523c-5.247 0.353 -6.437 0.433 -9.417 -1.99L8.927 11.507c-0.77 -0.78 -0.383 -1.753 1.557 -1.947l53.193 -3.887c4.467 -0.39 6.793 1.167 8.54 2.527l9.123 6.61c0.39 0.197 1.36 1.36 0.193 1.36l-54.933 3.307 -0.68 0.047zM19.803 88.3V30.367c0 -2.53 0.777 -3.697 3.103 -3.893L86 22.78c2.14 -0.193 3.107 1.167 3.107 3.693v57.547c0 2.53 -0.39 4.67 -3.883 4.863l-60.377 3.5c-3.493 0.193 -5.043 -0.97 -5.043 -4.083zm59.6 -54.827c0.387 1.75 0 3.5 -1.75 3.7l-2.91 0.577v42.773c-2.527 1.36 -4.853 2.137 -6.797 2.137 -3.107 0 -3.883 -0.973 -6.21 -3.887l-19.03 -29.94v28.967l6.02 1.363s0 3.5 -4.857 3.5l-13.39 0.777c-0.39 -0.78 0 -2.723 1.357 -3.11l3.497 -0.97v-38.3L30.48 40.667c-0.39 -1.75 0.58 -4.277 3.3 -4.473l14.367 -0.967 19.8 30.327v-26.83l-5.047 -0.58c-0.39 -2.143 1.163 -3.7 3.103 -3.89l13.4 -0.78z" className="fill-black dark:fill-gray-100"/>
+                </svg>
               </div>
-              <button
-                onClick={() => setShowWorkspaceSelection(false)}
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div>
+                <div className="font-bold text-gray-900 dark:text-gray-100">Notion</div>
+                <div className="text-xs text-gray-500">官方推荐 · 录入 Notion 工作区</div>
+              </div>
             </div>
+            <div className="text-xs font-medium text-blue-600">点击录入</div>
+          </div>
+
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">服务器 ({servers.length})</h2>
+          </div>
             
-            <div className="space-y-3 mb-4 max-h-64 overflow-y-auto">
-              {notionRegistrations.map((registration) => {
-                // 检查是否已有对应的服务器配置
-                const existingServer = servers.find(s => 
-                  s.ext?.server_type === 'notion' && 
-                  s.ext?.client_id === registration.client_id
-                );
-                
-                return (
-                  <div
-                    key={registration.id}
-                    className="p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-2">
-                          <div className="font-medium text-gray-900 dark:text-gray-100">
-                            {registration.client_name}
+            {loading ? (
+              <div className="flex flex-col items-center justify-center py-20">
+                <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mb-4" />
+                <p className="text-gray-500">加载中...</p>
+              </div>
+            ) : servers.length === 0 ? (
+              <div className="text-center py-20 bg-gray-50 dark:bg-gray-800/30 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-800">
+                <Server className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                <p className="text-gray-500">暂无服务器</p>
+                <Button variant="link" onClick={() => setShowMarketModal(true)} className="mt-2">去市场看看</Button>
+              </div>
+            ) : (
+              <div className="bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden shadow-sm">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-800">
+                      <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase">服务器</th>
+                      <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase">类型</th>
+                      <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase">状态</th>
+                      <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase text-right">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                    {servers.map((server) => (
+                      <tr 
+                        key={server.id} 
+                        className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors cursor-pointer group"
+                        onClick={() => handleViewDetail(server)}
+                      >
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            {renderServerIcon(server, 'sm')}
+                            <div>
+                              <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                                {(server as any).display_name || (server as any).client_name || server.name}
+                              </div>
+                              <div className="text-xs text-gray-500 truncate max-w-[200px]">{server.url}</div>
+                            </div>
                           </div>
-                          {existingServer && (
-                            <span className="ui-session-active">已连接</span>
-                          )}
-                        </div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                          注册时间: {registration.created_at ? new Date(registration.created_at).toLocaleString('zh-CN') : '未知'}
-                        </div>
-                        {existingServer && (
-                          <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">
-                            点击可重新授权
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 uppercase">
+                            {server.type}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-1.5">
+                            <div className={`w-2 h-2 rounded-full ${server.enabled ? 'bg-green-500' : 'bg-gray-400'}`} />
+                            <span className="text-xs text-gray-600 dark:text-gray-400">{server.enabled ? '已启用' : '已禁用'}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleTestConnection(server);
+                              }}
+                              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-md"
+                              title="测试连接"
+                            >
+                              <RefreshCcw className={`w-4 h-4 ${testingServers.has(server.id) ? 'animate-spin' : ''}`} />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEditServer(server.id);
+                              }}
+                              className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-md"
+                              title="编辑"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDeleteTarget(server);
+                              }}
+                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md"
+                              title="删除"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+        </div>
+      </div>
+
+      {/* 新增/编辑自定义服务器弹框 */}
+      <Dialog
+        open={Boolean(isAdding || editingId)}
+        onOpenChange={(open) => {
+          if (!open) cancelEdit();
+        }}
+      >
+        <DialogContent className="max-w-2xl bg-white dark:bg-[#1e1e1e] border-gray-200 dark:border-gray-800">
+          <DialogHeader>
+            <DialogTitle>{editingId ? '编辑服务器' : '新增服务器'}</DialogTitle>
+            <DialogDescription>填写 MCP 服务器的名称、地址与类型</DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-4">
+              <InputField
+                label="名称"
+                required
+                inputProps={{
+                  id: 'mcp-server-name',
+                  value: newServer.name || '',
+                  onChange: (e) => setNewServer(prev => ({ ...prev, name: e.target.value })),
+                  placeholder: '例如: my-mcp-server',
+                }}
+              />
+              <InputField
+                label="URL"
+                required
+                inputProps={{
+                  id: 'mcp-server-url',
+                  value: newServer.url || '',
+                  onChange: (e) => setNewServer(prev => ({ ...prev, url: e.target.value })),
+                  placeholder: 'http://localhost:8080/mcp',
+                }}
+              />
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">类型</label>
+                <Select
+                  value={newServer.type || 'http-stream'}
+                  onValueChange={(v) => setNewServer(prev => ({ ...prev, type: v as any }))}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="http-stream">HTTP Stream</SelectItem>
+                    <SelectItem value="http-post">HTTP POST</SelectItem>
+                    <SelectItem value="stdio">Stdio</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <TextareaField
+                label="描述"
+                textareaProps={{
+                  id: 'mcp-server-description',
+                  value: newServer.description || '',
+                  onChange: (e) => setNewServer(prev => ({ ...prev, description: e.target.value })),
+                  placeholder: '可选描述...',
+                  rows: 3,
+                }}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="secondary" onClick={cancelEdit}>取消</Button>
+            <Button variant="primary" onClick={editingId ? handleUpdateServer : handleAddServer}>
+              {editingId ? '保存修改' : '立即创建'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 服务器详情弹窗 (明信片样式) */}
+      <Dialog open={showDetailModal} onOpenChange={setShowDetailModal}>
+        <DialogContent className="max-w-4xl p-0 overflow-hidden bg-white dark:bg-[#1e1e1e] border-none shadow-2xl">
+          {selectedServerForDetail && (
+            <div className="flex h-[600px]">
+              {/* 左侧：详情 (明信片正面) */}
+              <div className="flex-1 p-8 flex flex-col border-r border-gray-100 dark:border-gray-800">
+                <div className="flex items-start justify-between mb-8">
+                  {renderServerIcon(selectedServerForDetail, 'lg')}
+                  <div className="text-right">
+                    <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Server ID</div>
+                    <div className="text-xs font-mono text-gray-500">{selectedServerForDetail.id.substring(0, 8)}...</div>
+                  </div>
+                </div>
+
+                <div className="flex-1">
+                  <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">
+                    {(selectedServerForDetail as any).display_name || (selectedServerForDetail as any).client_name || selectedServerForDetail.name}
+                  </h2>
+                  <div className="flex items-center gap-2 mb-6">
+                    <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-xs font-bold rounded uppercase">
+                      {selectedServerForDetail.type}
+                    </span>
+                    <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium ${selectedServerForDetail.enabled ? 'bg-green-50 text-green-600' : 'bg-gray-50 text-gray-500'}`}>
+                      <div className={`w-1.5 h-1.5 rounded-full ${selectedServerForDetail.enabled ? 'bg-green-500' : 'bg-gray-400'}`} />
+                      {selectedServerForDetail.enabled ? 'Active' : 'Disabled'}
+                    </div>
+                  </div>
+
+                  <div className="space-y-6">
+                    <div>
+                      <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Endpoint URL</h4>
+                      <div className="p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-100 dark:border-gray-800 font-mono text-xs break-all text-gray-600 dark:text-gray-400">
+                        {selectedServerForDetail.url}
+                      </div>
+                    </div>
+
+                    <div>
+                      <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Description</h4>
+                      <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
+                        {selectedServerForDetail.description || 'No description provided for this server.'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-auto pt-8 flex items-center justify-between border-t border-gray-50 dark:border-gray-800">
+                  <div className="flex gap-2">
+                    <Button 
+                      variant="secondary" 
+                      size="sm" 
+                      onClick={() => handleTestConnection(selectedServerForDetail)}
+                      disabled={testingServers.has(selectedServerForDetail.id)}
+                    >
+                      <RefreshCcw className={`w-4 h-4 mr-2 ${testingServers.has(selectedServerForDetail.id) ? 'animate-spin' : ''}`} />
+                      测试连接
+                    </Button>
+                  </div>
+                  <Button 
+                    variant="primary" 
+                    size="sm"
+                    onClick={() => {
+                      setShowToolsInDetail(true);
+                      handleFetchTools(selectedServerForDetail);
+                    }}
+                  >
+                    获取工具列表
+                    <ExternalLink className="w-4 h-4 ml-2" />
+                  </Button>
+                </div>
+              </div>
+
+              {/* 右侧：工具列表 (明信片背面/详情页) */}
+              <div className={`w-[380px] bg-gray-50 dark:bg-[#1a1a1a] transition-all duration-500 border-l border-gray-100 dark:border-gray-800 flex flex-col ${showToolsInDetail ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'}`}>
+                <div className="p-6 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between bg-white dark:bg-[#1e1e1e]">
+                  <h3 className="font-bold flex items-center gap-2">
+                    <Wrench className="w-4 h-4 text-blue-600" />
+                    可用工具
+                  </h3>
+                  <span className="text-xs bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full text-gray-500">
+                    {testResults.get(selectedServerForDetail.id)?.tools?.length || 0}
+                  </span>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                  {testingServers.has(selectedServerForDetail.id) ? (
+                    <div className="flex flex-col items-center justify-center h-full text-gray-400">
+                      <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mb-2" />
+                      <span className="text-xs">正在获取工具...</span>
+                    </div>
+                  ) : testResults.get(selectedServerForDetail.id)?.tools ? (
+                    testResults.get(selectedServerForDetail.id)!.tools!.map((tool, idx) => (
+                      <div key={idx} className="p-4 bg-white dark:bg-[#2d2d2d] rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm hover:shadow-md transition-shadow">
+                        <div className="font-bold text-sm text-gray-900 dark:text-gray-100 mb-1">{tool.name}</div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3 line-clamp-2">{tool.description}</p>
+                        
+                        {tool.inputSchema?.properties && (
+                          <div className="space-y-1.5">
+                            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Parameters</div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {Object.entries(tool.inputSchema.properties).map(([name, schema]: [string, any]) => (
+                                <div key={name} className="flex items-center gap-1 px-1.5 py-0.5 bg-gray-50 dark:bg-gray-800 rounded border border-gray-100 dark:border-gray-700">
+                                  <span className="text-[10px] font-mono text-blue-600 dark:text-blue-400">{name}</span>
+                                  <span className="text-[9px] text-gray-400">({schema.type || 'any'})</span>
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         )}
                       </div>
-                      <button
-                        onClick={() => handleUseExistingWorkspace(registration)}
-                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded transition-colors"
+                    ))
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-full text-gray-400 text-center px-8">
+                      <Wrench className="w-12 h-12 mb-4 opacity-20" />
+                      <p className="text-xs">点击左侧“获取工具列表”按钮来查看此服务器提供的功能</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* 市场弹窗 (重新设计) */}
+      <Dialog open={showMarketModal} onOpenChange={setShowMarketModal}>
+        <DialogContent className="max-w-5xl p-0 overflow-hidden bg-white dark:bg-[#1e1e1e] border-none shadow-2xl">
+          <div className="flex flex-col h-[700px]">
+            {/* 市场头部 */}
+            <div className="px-8 py-6 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+              <div>
+                <h2 className="text-2xl font-bold flex items-center gap-3">
+                  <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white">
+                    <Plug className="w-6 h-6" />
+                  </div>
+                  MCP 市场
+                </h2>
+                <p className="text-sm text-gray-500 mt-1">发现并安装官方及社区提供的 MCP 服务器</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={marketQuery}
+                    onChange={(e) => setMarketQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleMarketSearch()}
+                    placeholder="搜索服务器..."
+                    className="w-64 pl-10 pr-4 py-2 bg-gray-100 dark:bg-gray-800 border-none rounded-xl text-sm focus:ring-2 focus:ring-blue-500 transition-all"
+                  />
+                  <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <path d="m21 21-4.35-4.35"></path>
+                  </svg>
+                </div>
+                <Button variant="primary" size="sm" onClick={handleMarketSearch} disabled={marketLoading}>
+                  {marketLoading ? <RefreshCcw className="w-4 h-4 animate-spin" /> : '搜索'}
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-8">
+              {/* 搜索结果 */}
+              <div>
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">
+                  {marketQuery ? `搜索结果 (${marketItems.length})` : '全部服务器'}
+                </h3>
+                
+                {marketLoading ? (
+                  <div className="flex flex-col items-center justify-center py-20">
+                    <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4" />
+                    <p className="text-gray-500">正在检索市场数据...</p>
+                  </div>
+                ) : marketItems.length > 0 ? (
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                    {marketItems.map((item) => (
+                      <div 
+                        key={item.item_id} 
+                        className="p-4 bg-white dark:bg-[#2d2d2d] border border-gray-100 dark:border-gray-800 rounded-2xl hover:border-blue-400 hover:shadow-xl hover:shadow-blue-500/5 transition-all group cursor-pointer"
+                        onClick={() => handleMarketInstall(item)}
                       >
-                        {existingServer ? '重新授权' : '连接'}
+                        <div className="w-12 h-12 bg-gray-50 dark:bg-gray-800 rounded-xl flex items-center justify-center mb-4 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/20 transition-colors">
+                          <div className="text-xl font-bold text-gray-400 group-hover:text-blue-600">
+                            {item.name.charAt(0).toUpperCase()}
+                          </div>
+                        </div>
+                        <div className="font-bold text-sm text-gray-900 dark:text-gray-100 mb-1 truncate">{item.name}</div>
+                        <p className="text-[10px] text-gray-500 line-clamp-2 h-7 mb-4">{item.description || 'No description'}</p>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[9px] px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-gray-400 uppercase">{item.runtime_type}</span>
+                          <Plus className="w-4 h-4 text-gray-300 group-hover:text-blue-600 transition-colors" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-20">
+                    <EmptyState icon={Plug} title="未找到服务器" description="尝试更换关键词搜索" />
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <div className="px-8 py-4 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gray-50 dark:bg-gray-800/30">
+              <div className="text-xs text-gray-400">
+                数据源: {marketSources.find(s => s.source_id === selectedSourceId)?.display_name || '默认'}
+              </div>
+              <Button variant="secondary" size="sm" onClick={() => setShowMarketModal(false)}>关闭</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Notion 工作区：选择/注册（Dialog） */}
+      <Dialog
+        open={showWorkspaceSelection || showRegistrationForm}
+        onOpenChange={(open) => {
+          if (open) return;
+          if (isRegistering || notionAuthState === 'authenticating') return;
+          setShowWorkspaceSelection(false);
+          setShowRegistrationForm(false);
+        }}
+      >
+        <DialogContent className="max-w-md bg-white dark:bg-[#1e1e1e] border-gray-100 dark:border-gray-800">
+          {showWorkspaceSelection ? (
+            <>
+              <DialogHeader>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <DialogTitle>选择 Notion 工作空间</DialogTitle>
+                    <DialogDescription>选择已有工作空间进行连接</DialogDescription>
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (isRegistering || notionAuthState === 'authenticating') return;
+                      setShowWorkspaceSelection(false);
+                    }}
+                    className="text-gray-400 hover:text-gray-600"
+                    disabled={isRegistering || notionAuthState === 'authenticating'}
+                    aria-label="关闭"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </DialogHeader>
+
+              <div className="space-y-3 max-h-64 overflow-y-auto pr-2">
+                {notionRegistrations.map((registration) => (
+                  <div
+                    key={registration.id}
+                    className="p-4 border border-gray-100 dark:border-gray-800 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-all cursor-pointer group flex items-center justify-between"
+                    onClick={() => handleUseExistingWorkspace(registration)}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-transparent rounded-lg flex items-center justify-center">
+                        <svg className="w-6 h-6" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M6.017 4.313l55.333 -4.087c6.797 -0.583 8.543 -0.19 12.817 2.917l17.663 12.443c2.913 2.14 3.883 2.723 3.883 5.053v68.243c0 4.277 -1.553 6.807 -6.99 7.193L24.467 99.967c-4.08 0.193 -6.023 -0.39 -8.16 -3.113L3.3 79.94c-2.333 -3.113 -3.3 -5.443 -3.3 -8.167V11.113c0 -3.497 1.553 -6.413 6.017 -6.8z" className="fill-white dark:fill-[#363636]"/>
+                          <path fillRule="evenodd" clipRule="evenodd" d="M61.35 0.227l-55.333 4.087C1.553 4.7 0 7.617 0 11.113v60.66c0 2.724 0.967 5.053 3.3 8.167l13.007 16.913c2.137 2.723 4.08 3.307 8.16 3.113l64.257 -3.89c5.433 -0.387 6.99 -2.917 6.99 -7.193V20.64c0 -2.21 -0.873 -2.847 -3.443 -4.733L74.167 3.143c-4.273 -3.107 -6.02 -3.5 -12.817 -2.917zM25.92 19.523c-5.247 0.353 -6.437 0.433 -9.417 -1.99L8.927 11.507c-0.77 -0.78 -0.383 -1.753 1.557 -1.947l53.193 -3.887c4.467 -0.39 6.793 1.167 8.54 2.527l9.123 6.61c0.39 0.197 1.36 1.36 0.193 1.36l-54.933 3.307 -0.68 0.047zM19.803 88.3V30.367c0 -2.53 0.777 -3.697 3.103 -3.893L86 22.78c2.14 -0.193 3.107 1.167 3.107 3.693v57.547c0 2.53 -0.39 4.67 -3.883 4.863l-60.377 3.5c-3.493 0.193 -5.043 -0.97 -5.043 -4.083zm59.6 -54.827c0.387 1.75 0 3.5 -1.75 3.7l-2.91 0.577v42.773c-2.527 1.36 -4.853 2.137 -6.797 2.137 -3.107 0 -3.883 -0.973 -6.21 -3.887l-19.03 -29.94v28.967l6.02 1.363s0 3.5 -4.857 3.5l-13.39 0.777c-0.39 -0.78 0 -2.723 1.357 -3.11l3.497 -0.97v-38.3L30.48 40.667c-0.39 -1.75 0.58 -4.277 3.3 -4.473l14.367 -0.967 19.8 30.327v-26.83l-5.047 -0.58c-0.39 -2.143 1.163 -3.7 3.103 -3.89l13.4 -0.78z" className="fill-black dark:fill-gray-100"/>
+                        </svg>
+                      </div>
+                      <div>
+                        <div className="font-bold text-sm">{registration.client_name}</div>
+                        <div className="text-[10px] text-gray-400">ID: {registration.client_id.substring(0, 8)}...</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleUseExistingWorkspace(registration);
+                        }}
+                      >
+                        连接
+                      </Button>
+                      <button
+                        onClick={(e) => handleDeleteNotionRegistration(registration, e)}
+                        className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                        title="删除工作空间"
+                      >
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
-                );
-              })}
-            </div>
-            
-            <div className="flex space-x-2">
-              <button
-                onClick={() => {
-                  setShowWorkspaceSelection(false);
-                  setShowRegistrationForm(true);
-                }}
-                className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded transition-colors"
-              >
-                注册新工作空间
-              </button>
-              <button
-                onClick={() => setShowWorkspaceSelection(false)}
-                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100 font-medium rounded transition-colors"
-              >
-                取消
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+                ))}
+              </div>
 
-      {/* Notion 注册表单对话框 */}
-      {showRegistrationForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                注册新的 Notion 工作空间
-              </h3>
-              <button
-                onClick={() => {
-                  setShowRegistrationForm(false);
-                  setRegistrationFormData({ client_name: '', redirect_uri_base: getBackendUrl() });
-                }}
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Client Name <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={registrationFormData.client_name}
-                  onChange={(e) => setRegistrationFormData({ ...registrationFormData, client_name: e.target.value })}
-                  placeholder="例如: my-notion-workspace"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  只能包含英文、数字、下划线和连字符
-                </p>
+              <div className="flex flex-col gap-3 mt-6">
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    setShowWorkspaceSelection(false);
+                    setShowRegistrationForm(true);
+                  }}
+                >
+                  注册新工作空间
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    if (isRegistering || notionAuthState === 'authenticating') return;
+                    setShowWorkspaceSelection(false);
+                  }}
+                >
+                  取消
+                </Button>
               </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Redirect URI Base (可选)
-                </label>
-                <input
-                  type="text"
-                  value={registrationFormData.redirect_uri_base}
-                  onChange={(e) => setRegistrationFormData({ ...registrationFormData, redirect_uri_base: e.target.value })}
-                  placeholder={getBackendUrl()}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            </>
+          ) : (
+            <>
+              <DialogHeader>
+                <div className="flex items-center justify-between gap-3">
+                  <DialogTitle>注册 Notion 工作空间</DialogTitle>
+                  <button
+                    onClick={() => {
+                      if (isRegistering || notionAuthState === 'authenticating') return;
+                      setShowRegistrationForm(false);
+                    }}
+                    className="text-gray-400 hover:text-gray-600"
+                    disabled={isRegistering || notionAuthState === 'authenticating'}
+                    aria-label="关闭"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </DialogHeader>
+
+              <div className="space-y-5">
+                <InputField
+                  label="Client Name"
+                  required
+                  inputProps={{
+                    id: 'notion-client-name',
+                    value: registrationFormData.client_name,
+                    onChange: (e) =>
+                      setRegistrationFormData({ ...registrationFormData, client_name: e.target.value }),
+                    placeholder: '例如: my-notion-workspace',
+                  }}
                 />
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  回调地址基础部分，默认使用当前后端地址
-                </p>
+                <InputField
+                  label="Workspace Alias (工作空间别名)"
+                  required
+                  description="全局唯一标识，用于区分不同的Notion工作空间。只能包含英文、数字、下划线和连字符。"
+                  inputProps={{
+                    id: 'notion-workspace-alias',
+                    value: registrationFormData.workspace_alias,
+                    onChange: (e) =>
+                      setRegistrationFormData({ ...registrationFormData, workspace_alias: e.target.value }),
+                    placeholder: '例如: workspace-1',
+                  }}
+                />
+                <InputField
+                  label="Redirect URI Base"
+                  inputProps={{
+                    id: 'notion-redirect-uri-base',
+                    value: registrationFormData.redirect_uri_base,
+                    onChange: (e) =>
+                      setRegistrationFormData({ ...registrationFormData, redirect_uri_base: e.target.value }),
+                    placeholder: getBackendUrl(),
+                  }}
+                />
               </div>
-            </div>
-            
-            <div className="flex space-x-2 mt-6">
-              <button
-                onClick={handleRegisterNotion}
-                disabled={isRegistering || !registrationFormData.client_name.trim()}
-                className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-medium rounded transition-colors"
-              >
-                {isRegistering ? '注册中...' : '注册并连接'}
-              </button>
-              <button
-                onClick={() => {
-                  setShowRegistrationForm(false);
-                  setRegistrationFormData({ client_name: '', redirect_uri_base: getBackendUrl() });
-                }}
-                disabled={isRegistering}
-                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 disabled:opacity-50 text-gray-900 dark:text-gray-100 font-medium rounded transition-colors"
-              >
-                取消
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+
+              <div className="flex flex-col gap-3 mt-8">
+                <Button
+                  variant="primary"
+                  onClick={handleRegisterNotion}
+                  disabled={isRegistering || !registrationFormData.client_name.trim() || !registrationFormData.workspace_alias.trim()}
+                >
+                  {isRegistering ? '正在注册...' : '注册并开始授权'}
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    if (isRegistering || notionAuthState === 'authenticating') return;
+                    setShowRegistrationForm(false);
+                  }}
+                >
+                  取消
+                </Button>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDialog
         open={deleteTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) setDeleteTarget(null);
-        }}
-        title="删除 MCP 服务器"
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+        title="删除服务器"
         description={`确定要删除「${deleteTarget?.name}」吗？此操作不可撤销。`}
         variant="destructive"
         onConfirm={async () => {
@@ -1588,133 +1646,6 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
           await handleDeleteServer(id);
         }}
       />
-    </PageLayout>
-
-    {/* MCP 市场弹窗 */}
-    <Dialog open={showMarketModal} onOpenChange={setShowMarketModal}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>MCP 市场</DialogTitle>
-          <DialogDescription>搜索并一键安装 MCP 服务器（优先支持官方 servers 目录的 stdio 服务器）</DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4">
-          {/* 搜索和过滤 */}
-          <div className="flex flex-col md:flex-row gap-3">
-            <div className="flex-1">
-              <InputField
-                label="搜索"
-                inputProps={{
-                  value: marketQuery,
-                  onChange: (e) => setMarketQuery(e.target.value),
-                  placeholder: '例如：@modelcontextprotocol/server-github',
-                }}
-              />
-            </div>
-
-            <div className="min-w-[200px]">
-              <label className="block text-xs font-mono tracking-wide text-gray-600 dark:text-gray-400 mb-2">
-                市场源
-              </label>
-              <Select value={selectedSourceId} onValueChange={setSelectedSourceId}>
-                <SelectTrigger className="input-field">
-                  <SelectValue placeholder="选择市场源" />
-                </SelectTrigger>
-                <SelectContent>
-                  {marketSources.map((s) => (
-                    <SelectItem key={s.source_id} value={s.source_id}>
-                      {s.display_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* 操作按钮 */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <Button 
-              variant="secondary" 
-              onClick={handleMarketSync} 
-              disabled={marketSyncing || !selectedSourceId}
-              size="sm"
-            >
-              {marketSyncing ? '同步中...' : '同步市场源'}
-            </Button>
-            <Button 
-              variant="primary" 
-              onClick={handleMarketSearch} 
-              disabled={marketLoading}
-              size="sm"
-            >
-              {marketLoading ? '搜索中...' : '搜索'}
-            </Button>
-            <div className="text-xs text-gray-500 dark:text-gray-400 ml-auto">
-              {marketTotal > 0 ? `共 ${marketTotal} 条，展示 ${marketItems.length} 条` : ''}
-            </div>
-            {selectedSourceId && marketSources.find(s => s.source_id === selectedSourceId)?.last_sync_at && (
-              <div className="text-[10px] text-gray-500 dark:text-gray-400 w-full">
-                最后同步: {new Date(marketSources.find(s => s.source_id === selectedSourceId)!.last_sync_at! * 1000).toLocaleString()}
-              </div>
-            )}
-          </div>
-
-          {/* 市场列表 */}
-          {marketItems.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[60vh] overflow-y-auto pr-3">
-              {marketItems.map((item) => (
-                <div
-                  key={item.item_id}
-                  className="bg-white dark:bg-[#363636] border border-gray-200 dark:border-[#505050] rounded-lg p-3 hover:border-gray-400 dark:hover:border-[#606060] transition-colors"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                        {item.name}
-                      </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">
-                        {item.description || '—'}
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        <span className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 px-2 py-0.5 rounded">
-                          {item.runtime_type}
-                        </span>
-                        {(item.tags || []).slice(0, 4).map((t) => (
-                          <span
-                            key={t}
-                            className="text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded"
-                          >
-                            {t}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                    <Button 
-                      variant="primary" 
-                      size="sm" 
-                      onClick={() => handleMarketInstall(item)}
-                      className="flex-shrink-0"
-                    >
-                      安装
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-              {marketLoading ? '搜索中...' : '没有找到结果，请尝试搜索'}
-            </div>
-          )}
-        </div>
-
-        <DialogFooter>
-          <Button variant="secondary" onClick={() => setShowMarketModal(false)}>
-            关闭
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
     </div>
   );
 };

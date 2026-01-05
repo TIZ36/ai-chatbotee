@@ -399,12 +399,15 @@ export interface NotionRegistration {
  */
 export async function registerNotionClient(params: {
   client_name: string;
+  workspace_alias: string;  // 新增：Notion工作空间别名（全局唯一）
   redirect_uri_base?: string;
   client_uri?: string;
 }): Promise<{
   success: boolean;
   client_id: string;
   client_name: string;
+  workspace_alias: string;
+  short_hash: string;
   redirect_uri: string;
   registration_data: any;
 }> {
@@ -444,6 +447,29 @@ export async function getNotionRegistrations(): Promise<NotionRegistration[]> {
   
   const data = await response.json();
   return data.registrations || [];
+}
+
+/**
+ * 删除指定的 Notion 工作空间注册
+ */
+export async function deleteNotionRegistration(registrationId: number): Promise<{
+  success: boolean;
+  message: string;
+}> {
+  const backendUrl = getBackendUrl();
+  const response = await fetch(`${backendUrl}/api/notion/registrations/${registrationId}`, {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || error.message || `HTTP ${response.status}: ${response.statusText}`);
+  }
+  
+  return await response.json();
 }
 
 /**
