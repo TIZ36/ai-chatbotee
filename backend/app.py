@@ -3013,13 +3013,29 @@ def delete_notion_registration(registration_id: int):
         cursor = conn.cursor()
         
         # 首先查询该注册信息，获取 short_hash 以清理 Redis
-        cursor.execute("""
-            SELECT client_id, client_name, workspace_alias, short_hash
-            FROM `notion_registrations`
-            WHERE id = %s
-        """, (registration_id,))
-        
-        row = cursor.fetchone()
+        # 兼容旧数据库：可能没有 workspace_alias / short_hash 字段
+        try:
+            cursor.execute("""
+                SELECT client_id, client_name, workspace_alias, short_hash
+                FROM `notion_registrations`
+                WHERE id = %s
+            """, (registration_id,))
+            row = cursor.fetchone()
+        except Exception as schema_error:
+            schema_error_message = str(schema_error)
+            if 'Unknown column' in schema_error_message and ('workspace_alias' in schema_error_message or 'short_hash' in schema_error_message):
+                cursor.execute("""
+                    SELECT client_id, client_name
+                    FROM `notion_registrations`
+                    WHERE id = %s
+                """, (registration_id,))
+                row = cursor.fetchone()
+                if row:
+                    client_id, client_name = row
+                    workspace_alias, short_hash = None, None
+                    row = (client_id, client_name, workspace_alias, short_hash)
+            else:
+                raise
         if not row:
             cursor.close()
             conn.close()
