@@ -92,6 +92,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
   const [marketSyncing, setMarketSyncing] = useState(false);
   const [marketItems, setMarketItems] = useState<MCPMarketItemSummary[]>([]);
   const [marketTotal, setMarketTotal] = useState(0);
+  const [showMarketModal, setShowMarketModal] = useState(false);
 
   // 清理连接的辅助函数
   const cleanupConnection = (serverId: string) => {
@@ -884,109 +885,28 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
   };
 
   return (
-    <PageLayout
-      title="MCP 服务器配置"
-      description="选择公开的 MCP 服务器或添加自定义服务器"
-      icon={Plug}
-    >
-      {/* MCP 市场 */}
-      <Section
-        title="MCP 市场"
-        description="搜索并一键安装（第一版：优先支持官方 servers 目录的 stdio 服务器）"
-        className="mb-6"
-      >
-        <div className="space-y-3">
-          <div className="flex flex-col md:flex-row gap-2">
-            <div className="flex-1">
-              <InputField
-                label="搜索"
-                inputProps={{
-                  value: marketQuery,
-                  onChange: (e) => setMarketQuery(e.target.value),
-                  placeholder: '例如：@modelcontextprotocol/server-github',
-                }}
-              />
-            </div>
-
-            <div className="min-w-[220px]">
-              <label className="block text-xs font-mono tracking-wide text-mutedToken-foreground mb-1">
-                市场源
-              </label>
-              <Select value={selectedSourceId} onValueChange={setSelectedSourceId}>
-                <SelectTrigger className="input-field">
-                  <SelectValue placeholder="选择市场源" />
-                </SelectTrigger>
-                <SelectContent>
-                  {marketSources.map((s) => (
-                    <SelectItem key={s.source_id} value={s.source_id}>
-                      {s.display_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button variant="secondary" onClick={handleMarketSync} disabled={marketSyncing || !selectedSourceId}>
-              {marketSyncing ? '同步中...' : '同步市场源'}
-            </Button>
-            <Button variant="primary" onClick={handleMarketSearch} disabled={marketLoading}>
-              {marketLoading ? '搜索中...' : '搜索'}
-            </Button>
-            <div className="text-xs text-gray-500 dark:text-gray-400 flex flex-col gap-0.5">
-              <div>
-              {marketTotal > 0 ? `共 ${marketTotal} 条，展示 ${marketItems.length} 条` : ''}
-              </div>
-              {selectedSourceId && marketSources.find(s => s.source_id === selectedSourceId)?.last_sync_at && (
-                <div className="text-[10px] opacity-70">
-                  最后同步: {new Date(marketSources.find(s => s.source_id === selectedSourceId)!.last_sync_at! * 1000).toLocaleString()}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {marketItems.length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {marketItems.map((item) => (
-                <div
-                  key={item.item_id}
-                  className="bg-white dark:bg-[#363636] border border-gray-200 dark:border-[#505050] rounded-lg p-3"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                        {item.name}
-                      </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">
-                        {item.description || '—'}
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        <span className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 px-2 py-0.5 rounded">
-                          {item.runtime_type}
-                        </span>
-                        {(item.tags || []).slice(0, 6).map((t) => (
-                          <span
-                            key={t}
-                            className="text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded"
-                          >
-                            {t}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      <Button variant="primary" size="sm" onClick={() => handleMarketInstall(item)}>
-                        安装
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">MCP 服务器配置</h1>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">选择公开的 MCP 服务器或添加自定义服务器</p>
         </div>
-      </Section>
+        <Button
+          variant="primary"
+          onClick={() => setShowMarketModal(true)}
+          className="flex items-center gap-2"
+        >
+          <Plug className="w-4 h-4" />
+          <span>MCP 市场</span>
+        </Button>
+      </div>
+
+      <PageLayout
+        title="MCP 服务器配置"
+        description="选择公开的 MCP 服务器或添加自定义服务器"
+        icon={Plug}
+        hideHeader
+      >
       {/* 公开 MCP 服务器 */}
       <Section title="公开 MCP 服务器" description="一键连接热门 MCP 服务"  className="mb-6">
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
@@ -1669,6 +1589,133 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
         }}
       />
     </PageLayout>
+
+    {/* MCP 市场弹窗 */}
+    <Dialog open={showMarketModal} onOpenChange={setShowMarketModal}>
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>MCP 市场</DialogTitle>
+          <DialogDescription>搜索并一键安装 MCP 服务器（优先支持官方 servers 目录的 stdio 服务器）</DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {/* 搜索和过滤 */}
+          <div className="flex flex-col md:flex-row gap-3">
+            <div className="flex-1">
+              <InputField
+                label="搜索"
+                inputProps={{
+                  value: marketQuery,
+                  onChange: (e) => setMarketQuery(e.target.value),
+                  placeholder: '例如：@modelcontextprotocol/server-github',
+                }}
+              />
+            </div>
+
+            <div className="min-w-[200px]">
+              <label className="block text-xs font-mono tracking-wide text-gray-600 dark:text-gray-400 mb-2">
+                市场源
+              </label>
+              <Select value={selectedSourceId} onValueChange={setSelectedSourceId}>
+                <SelectTrigger className="input-field">
+                  <SelectValue placeholder="选择市场源" />
+                </SelectTrigger>
+                <SelectContent>
+                  {marketSources.map((s) => (
+                    <SelectItem key={s.source_id} value={s.source_id}>
+                      {s.display_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* 操作按钮 */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button 
+              variant="secondary" 
+              onClick={handleMarketSync} 
+              disabled={marketSyncing || !selectedSourceId}
+              size="sm"
+            >
+              {marketSyncing ? '同步中...' : '同步市场源'}
+            </Button>
+            <Button 
+              variant="primary" 
+              onClick={handleMarketSearch} 
+              disabled={marketLoading}
+              size="sm"
+            >
+              {marketLoading ? '搜索中...' : '搜索'}
+            </Button>
+            <div className="text-xs text-gray-500 dark:text-gray-400 ml-auto">
+              {marketTotal > 0 ? `共 ${marketTotal} 条，展示 ${marketItems.length} 条` : ''}
+            </div>
+            {selectedSourceId && marketSources.find(s => s.source_id === selectedSourceId)?.last_sync_at && (
+              <div className="text-[10px] text-gray-500 dark:text-gray-400 w-full">
+                最后同步: {new Date(marketSources.find(s => s.source_id === selectedSourceId)!.last_sync_at! * 1000).toLocaleString()}
+              </div>
+            )}
+          </div>
+
+          {/* 市场列表 */}
+          {marketItems.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[60vh] overflow-y-auto pr-3">
+              {marketItems.map((item) => (
+                <div
+                  key={item.item_id}
+                  className="bg-white dark:bg-[#363636] border border-gray-200 dark:border-[#505050] rounded-lg p-3 hover:border-gray-400 dark:hover:border-[#606060] transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                        {item.name}
+                      </div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">
+                        {item.description || '—'}
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        <span className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 px-2 py-0.5 rounded">
+                          {item.runtime_type}
+                        </span>
+                        {(item.tags || []).slice(0, 4).map((t) => (
+                          <span
+                            key={t}
+                            className="text-xs bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded"
+                          >
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <Button 
+                      variant="primary" 
+                      size="sm" 
+                      onClick={() => handleMarketInstall(item)}
+                      className="flex-shrink-0"
+                    >
+                      安装
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+              {marketLoading ? '搜索中...' : '没有找到结果，请尝试搜索'}
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="secondary" onClick={() => setShowMarketModal(false)}>
+            关闭
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </div>
   );
 };
 

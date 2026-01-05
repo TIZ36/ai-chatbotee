@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
-import { Brain, Plug, Workflow as WorkflowIcon, Settings, Code, Terminal, MessageCircle, Globe, Sparkles, Bot, Users, BookOpen, Shield, Activity, Plus, FolderOpen, Image as ImageIcon } from 'lucide-react';
+import { Brain, Plug, Workflow as WorkflowIcon, Settings, Code, MessageCircle, Globe, Sparkles, Bot, Users, BookOpen, Shield, Activity, Plus, FolderOpen, Image as ImageIcon } from 'lucide-react';
 import appLogoDark from '../assets/app_logo_dark.png';
 import appLogoLight from '../assets/app_logo_light.png';
 import { Button } from './components/ui/Button';
@@ -15,8 +15,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from './components/ui/Dialog';
-import TerminalPanel from './components/TerminalPanel';
-import { setTerminalExecutor } from './utils/terminalExecutor';
 import SettingsPanel from './components/SettingsPanel';
 import LLMConfigPanel from './components/LLMConfig';
 import MCPConfig from './components/MCPConfig';
@@ -87,9 +85,6 @@ interface Settings {
 const App: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const [isTerminalOpen, setIsTerminalOpen] = useState(false);
-  const [, setTerminalState] = useState({ isMinimized: false, isMaximized: false });
-  const terminalExecuteCommandRef = React.useRef<((command: string) => void) | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(() => {
     // 从 localStorage 恢复上次选择的会话
     const saved = localStorage.getItem('chatee_last_open_chat');
@@ -190,7 +185,6 @@ const App: React.FC = () => {
   };
 
   // 判断是否显示terminal独占页面
-  const isTerminalPage = location.pathname === '/terminal';
   
   // 判断是否为聊天页面
   const isChatPage = location.pathname === '/';
@@ -393,26 +387,6 @@ const App: React.FC = () => {
             title="系统状态"
             isActive={location.pathname === '/system-status'}
           />
-          
-          {/* 终端按钮 - 点击时独占右侧 */}
-          <div className="relative group">
-            <Link
-              to="/terminal"
-              className={`
-                w-8 h-8 flex items-center justify-center rounded-lg 
-                transition-all duration-200 ease-out relative
-                ${isTerminalPage
-                  ? 'bg-[var(--color-accent)]/90 text-white backdrop-blur-sm' 
-                  : 'text-gray-500 dark:text-[#a0a0a0] hover:bg-white/50 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white'
-                }
-              `}
-              title="终端"
-            >
-              <div className={`transition-transform duration-200 ${isTerminalPage ? '' : 'group-hover:scale-105'}`}>
-                <Terminal className="w-4 h-4" strokeWidth={1.5} />
-              </div>
-            </Link>
-          </div>
 
           {/* DevTools 按钮 */}
           <div className="relative group">
@@ -667,29 +641,10 @@ const App: React.FC = () => {
 
         {/* 页面内容区域 */}
         <main
-          className={`flex flex-col flex-1 min-h-0 transition-all duration-200 relative ${
-            isTerminalPage ? 'overflow-visible' : 'overflow-hidden'
-          }`}
+          className={`flex flex-col flex-1 min-h-0 transition-all duration-200 relative overflow-hidden`}
         >
           
-          {isTerminalPage ? (
-          /* Terminal 独占页面 */
-          <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-visible m-1">
-            <div className="flex-1 rounded-lg glass-panel overflow-visible">
-              <TerminalPanel
-                isOpen={true}
-                onClose={() => navigate('/')}
-                onStateChange={(isMinimized, isMaximized) => {
-                  setTerminalState({ isMinimized, isMaximized });
-                }}
-                onExecuteCommandReady={(executeCommand) => {
-                  terminalExecuteCommandRef.current = executeCommand;
-                  setTerminalExecutor(executeCommand);
-                }}
-              />
-            </div>
-          </div>
-        ) : isChatPage ? (
+          {isChatPage ? (
           /* 聊天页面 - 毛玻璃效果 */
           <div className="relative flex flex-1 min-h-0 min-w-0 p-0">
             <div className="flex-1 relative overflow-hidden">
@@ -738,9 +693,6 @@ const App: React.FC = () => {
                     {/* 系统状态页面 */}
                     <Route path="/system-status" element={<SystemStatusPanel />} />
 
-                  {/* Terminal 页面 */}
-                  <Route path="/terminal" element={<div />} />
-
                     {/* 设置页面 */}
                     <Route path="/settings" element={
                       <SettingsPanel
@@ -762,22 +714,6 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* 右侧终端区域 - 毛玻璃效果 */}
-            {isTerminalOpen && !isTerminalPage && (
-              <div className="w-[45%] min-w-[400px] flex flex-col min-h-0 min-w-0 flex-shrink-0 rounded-lg glass-panel overflow-visible slide-in-right">
-                <TerminalPanel
-                  isOpen={true}
-                  onClose={() => setIsTerminalOpen(false)}
-                  onStateChange={(isMinimized, isMaximized) => {
-                    setTerminalState({ isMinimized, isMaximized });
-                  }}
-                  onExecuteCommandReady={(executeCommand) => {
-                    terminalExecuteCommandRef.current = executeCommand;
-                    setTerminalExecutor(executeCommand);
-                  }}
-                />
-              </div>
-            )}
           </div>
         )}
         </main>
