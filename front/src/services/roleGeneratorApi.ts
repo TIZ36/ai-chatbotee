@@ -101,12 +101,24 @@ export async function refineRoleProperty(currentRole: RoleGenerationResult, type
 }
 
 /**
- * 为角色生成头像（目前通过提示词引导模型返回描述或直接由支持图片生成的模型处理）
+ * 为角色生成头像（支持指定 LLM 配置）
+ * @param role 角色信息
+ * @param llmConfigId 指定 LLM 配置 ID（可选，不指定时使用当前配置）
+ * @param llmClient 指定 LLM 客户端（可选，用于自定义配置）
  */
-export async function generateRoleAvatar(role: RoleGenerationResult): Promise<string> {
-  const client = getCurrentLLMClient();
+export async function generateRoleAvatar(
+  role: RoleGenerationResult,
+  llmConfigId?: string,
+  llmClient?: any
+): Promise<string> {
+  let client = llmClient;
+  
   if (!client) {
-    throw new Error('未配置有效的 LLM 模型');
+    // 如果未提供客户端，使用当前配置
+    client = getCurrentLLMClient();
+    if (!client) {
+      throw new Error('未配置有效的 LLM 模型');
+    }
   }
 
   // 如果模型支持图片生成（如 Gemini 2.0 Flash Image），则可以尝试直接生成

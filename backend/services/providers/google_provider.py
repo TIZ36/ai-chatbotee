@@ -23,6 +23,7 @@ class GoogleProvider(BaseLLMProvider):
                  model: Optional[str] = None, **kwargs):
         self._client = None
         self._types = None
+        self.use_thoughtsig = kwargs.get('use_thoughtsig', True)  # 签名开关，默认开启
         super().__init__(api_key, api_url, model, **kwargs)
     
     def _init_sdk(self):
@@ -135,6 +136,9 @@ class GoogleProvider(BaseLLMProvider):
                                 # 保存 thoughtSignature（如果存在），供后续请求使用
                                 if thought_sig:
                                     media_item['thoughtSignature'] = thought_sig
+                                    self._log(f"✅ 图片包含 thoughtSignature ({len(thought_sig)} 字符)")
+                                else:
+                                    self._log(f"⚠️ 图片不包含 thoughtSignature")
                                 media.append(media_item)
                                 self._log(f"Received image: {mime_type} ({len(data)} chars)")
             
@@ -145,7 +149,8 @@ class GoogleProvider(BaseLLMProvider):
             )
         except Exception as e:
             self._log_error(f"SDK chat error: {e}", e)
-            raise RuntimeError(f"Google API error: {str(e)}")
+            detail = str(e) or repr(e)
+            raise RuntimeError(f"Google API error: {detail}")
     
     def _chat_stream_sdk(self, messages: List[LLMMessage], **kwargs) -> Generator[str, None, LLMResponse]:
         """使用 SDK 的流式聊天"""
@@ -204,6 +209,9 @@ class GoogleProvider(BaseLLMProvider):
                                     }
                                     if thought_sig:
                                         media_item['thoughtSignature'] = thought_sig
+                                        self._log(f"✅ 图片包含 thoughtSignature ({len(thought_sig)} 字符)")
+                                    else:
+                                        self._log(f"⚠️ 图片不包含 thoughtSignature")
                                     media.append(media_item)
                                     self._log(f"[Stream] Received image: {mime_type} ({len(data)} chars)")
                         if candidate.finish_reason:
@@ -216,7 +224,8 @@ class GoogleProvider(BaseLLMProvider):
             )
         except Exception as e:
             self._log_error(f"SDK stream error: {e}", e)
-            raise RuntimeError(f"Google API error: {str(e)}")
+            detail = str(e) or repr(e)
+            raise RuntimeError(f"Google API error: {detail}")
     
     def _chat_rest(self, messages: List[LLMMessage], **kwargs) -> LLMResponse:
         """使用 REST API 的非流式聊天"""
@@ -225,7 +234,8 @@ class GoogleProvider(BaseLLMProvider):
         
         payload = {'contents': contents}
         if system_instruction:
-            payload['system_instruction'] = system_instruction
+            # Gemini REST API 使用 systemInstruction（camelCase）
+            payload['systemInstruction'] = system_instruction
         
         # 图片生成模型配置
         if self._is_image_generation_model():
@@ -262,6 +272,9 @@ class GoogleProvider(BaseLLMProvider):
                     if thought_sig:
                         media_item['thoughtSignature'] = thought_sig
                         self._log(f"[REST] Found thoughtSignature in image: {len(thought_sig)} chars")
+                        self._log(f"✅ 图片包含 thoughtSignature ({len(thought_sig)} 字符)")
+                    else:
+                        self._log(f"⚠️ 图片不包含 thoughtSignature")
                     media.append(media_item)
         
         return LLMResponse(
@@ -277,7 +290,8 @@ class GoogleProvider(BaseLLMProvider):
         
         payload = {'contents': contents}
         if system_instruction:
-            payload['system_instruction'] = system_instruction
+            # Gemini REST API 使用 systemInstruction（camelCase）
+            payload['systemInstruction'] = system_instruction
         
         response = requests.post(url, json=payload, stream=True, timeout=120)
         
@@ -329,10 +343,35 @@ class GoogleProvider(BaseLLMProvider):
         
         return url
     
+    def _find_recent_thought_signature(self, messages: List[LLMMessage]) -> Optional[str]:
+        """
+        查找最近的 LLM 输出的带有 thought signature 的图片的签名
+        
+        Args:
+            messages: 消息列表
+            
+        Returns:
+            最近的 thought signature，如果没找到返回 None
+        """
+        # 从后往前查找（最近的优先）
+        for msg in reversed(messages):
+            if msg.role in ('assistant', 'model') and msg.media:
+                for media_item in msg.media:
+                    if isinstance(media_item, dict):
+                        thought_sig = media_item.get('thoughtSignature') or media_item.get('thought_signature')
+                        if thought_sig:
+                            return thought_sig
+        return None
+    
     def _convert_messages_for_gemini_sdk(self, messages: List[LLMMessage]) -> tuple:
         """转换消息格式为 Gemini SDK 格式"""
         contents = []
         system_instruction = None
+        
+        # 查找最近的 thought signature（用于签名开关打开时的参考）
+        recent_thought_sig = self._find_recent_thought_signature(messages)
+        if recent_thought_sig:
+            self._log(f"找到最近的 thoughtSignature 参考: {len(recent_thought_sig)} 字符")
         
         # 预检查：打印哪些消息包含 thoughtSignature
         self._log("=== ThoughtSignature 检查 ===")
@@ -387,6 +426,12 @@ class GoogleProvider(BaseLLMProvider):
                         if isinstance(media_data, (bytes, bytearray)):
                             image_bytes = bytes(media_data)
                             thought_sig = media_item.get('thoughtSignature') or media_item.get('thought_signature')
+                            
+                            # 如果签名开关打开且没有签名，尝试使用最近的签名作为参考
+                            if not thought_sig and self.use_thoughtsig and role != 'user' and recent_thought_sig:
+                                thought_sig = recent_thought_sig
+                                self._log(f"🔄 使用最近的 thoughtSignature 作为参考 ({len(thought_sig)} chars)")
+                            
                             if thought_sig:
                                 self._log(f"Including thoughtSignature for image ({len(thought_sig)} chars)")
                                 parts.append(self._types.Part(
@@ -418,6 +463,12 @@ class GoogleProvider(BaseLLMProvider):
                                 # Gemini 2.5+：如果“把模型生成的图片”再喂回模型，必须带 thought_signature；
                                 # 但“用户上传的图片”通常没有 thought_signature，仍应允许用于图生图。
                                 thought_sig = media_item.get('thoughtSignature') or media_item.get('thought_signature')
+                                
+                                # 如果签名开关打开且没有签名，尝试使用最近的签名作为参考
+                                if not thought_sig and self.use_thoughtsig and role != 'user' and recent_thought_sig:
+                                    thought_sig = recent_thought_sig
+                                    self._log(f"🔄 使用最近的 thoughtSignature 作为参考 ({len(thought_sig)} chars)")
+                                
                                 if thought_sig:
                                     # 使用 SDK 原生 thought_signature 支持
                                     self._log(f"Including thoughtSignature for image ({len(thought_sig)} chars)")
@@ -447,6 +498,11 @@ class GoogleProvider(BaseLLMProvider):
         """转换消息格式为 Gemini REST API 格式"""
         contents = []
         system_instruction = None
+        
+        # 查找最近的 thought signature（用于签名开关打开时的参考）
+        recent_thought_sig = self._find_recent_thought_signature(messages)
+        if recent_thought_sig:
+            self._log(f"找到最近的 thoughtSignature 参考: {len(recent_thought_sig)} 字符")
         
         # 预检查：打印哪些消息包含 thoughtSignature
         self._log("=== ThoughtSignature 检查 (REST) ===")
@@ -509,6 +565,12 @@ class GoogleProvider(BaseLLMProvider):
                         if media_data and mime_type:
                             # Gemini 2.5+：模型生成的图片回灌必须带 thoughtSignature；用户上传图片可无签名用于图生图。
                             thought_sig = media_item.get('thoughtSignature') or media_item.get('thought_signature')
+                            
+                            # 如果签名开关打开且没有签名，尝试使用最近的签名作为参考
+                            if not thought_sig and self.use_thoughtsig and role != 'user' and recent_thought_sig:
+                                thought_sig = recent_thought_sig
+                                self._log(f"🔄 使用最近的 thoughtSignature 作为参考 ({len(thought_sig)} chars)")
+                            
                             if thought_sig:
                                 part_data = {
                                     'inlineData': {
@@ -542,6 +604,11 @@ class GoogleProvider(BaseLLMProvider):
         """解析错误响应"""
         try:
             error_data = response.json()
-            return error_data.get('error', {}).get('message', '') or response.text
+            msg = (error_data.get('error', {}) or {}).get('message', '')
+            if msg:
+                return msg
+            if response.text:
+                return response.text
+            return f"HTTP {response.status_code}"
         except:
             return response.text or f"HTTP {response.status_code}"

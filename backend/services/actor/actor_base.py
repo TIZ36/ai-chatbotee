@@ -27,9 +27,7 @@ from typing import Any, Callable, Dict, Generator, List, Optional, TYPE_CHECKING
 
 from database import get_mysql_connection, get_redis_client
 from token_counter import estimate_messages_tokens, get_model_max_tokens
-
-if TYPE_CHECKING:
-    from services.llm_service import LLMService
+from models.llm_config import LLMConfigRepository
 
 from .actor_state import ActorState
 from .iteration_context import IterationContext, DecisionContext, MessageType, ProcessPhase, LLMDecision
@@ -352,11 +350,12 @@ class ActorBase(ABC):
         if not llm_config_id:
             return
         
-        from services.llm_service import get_llm_service
-        
-        llm_service = get_llm_service()
-        llm_cfg = llm_service.get_config(llm_config_id, include_api_key=False) or {}
-        model = llm_cfg.get('model') or 'gpt-4'
+        # 直接使用 Repository 获取配置
+        repository = LLMConfigRepository(get_mysql_connection)
+        config = repository.find_by_id(llm_config_id)
+        if not config:
+            return
+        model = config.model or 'gpt-4'
         
         history = self.state.history
         if not isinstance(history, list) or len(history) < 20:
@@ -397,17 +396,56 @@ class ActorBase(ABC):
         user = "\n".join(lines)
         
         try:
-            resp = llm_service.chat_completion(
-                config_id=llm_config_id,
-                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-                stream=False,
+            # ANSI 颜色码（Actor 模式使用青色）
+            CYAN = '\033[96m'
+            RESET = '\033[0m'
+            BOLD = '\033[1m'
+            
+            print(f"{CYAN}{BOLD}[Actor Mode] ========== 记忆摘要 LLM 调用 =========={RESET}")
+            print(f"{CYAN}[Actor Mode] Agent: {self.agent_id}{RESET}")
+            print(f"{CYAN}[Actor Mode] Provider: {config.provider}, Model: {model}{RESET}")
+            print(f"{CYAN}[Actor Mode] Config ID: {llm_config_id}{RESET}")
+            
+            # 直接使用 Provider SDK
+            from services.providers import create_provider
+            from services.providers.base import LLMMessage
+            
+            # 打印提示词
+            system_preview = system[:300] + '...' if len(system) > 300 else system
+            user_preview = user[:500] + '...' if len(user) > 500 else user
+            print(f"{CYAN}[Actor Mode] SYSTEM 提示词 ({len(system)} 字符): {system_preview}{RESET}")
+            print(f"{CYAN}[Actor Mode] USER 提示词 ({len(user)} 字符): {user_preview}{RESET}")
+            
+            provider = create_provider(
+                provider_type=config.provider,
+                api_key=config.api_key,
+                api_url=config.api_url,
+                model=model,
             )
-            summary = (resp.get('content') or '').strip()
+            
+            llm_messages = [
+                LLMMessage(role='system', content=system),
+                LLMMessage(role='user', content=user),
+            ]
+            
+            print(f"{CYAN}[Actor Mode] 调用 Provider SDK 进行记忆摘要...{RESET}")
+            response = provider.chat(llm_messages)
+            summary = (response.content or '').strip()
             if summary:
                 self.state.summary = summary
                 self.state.summary_until = last_id
+                print(f"{CYAN}[Actor Mode] ✅ 记忆摘要完成，摘要长度: {len(summary)} 字符{RESET}")
+                print(f"{CYAN}{BOLD}[Actor Mode] ========== 记忆摘要 LLM 调用完成 =========={RESET}\n")
                 logger.info(f"[ActorBase:{self.agent_id}] Memory summarized ({len(summary)} chars)")
+            else:
+                print(f"{CYAN}[Actor Mode] ⚠️ 记忆摘要为空{RESET}")
+                print(f"{CYAN}{BOLD}[Actor Mode] ========== 记忆摘要 LLM 调用完成 =========={RESET}\n")
         except Exception as e:
+            CYAN = '\033[96m'
+            RESET = '\033[0m'
+            BOLD = '\033[1m'
+            print(f"{CYAN}[Actor Mode] ❌ 记忆摘要失败: {str(e)}{RESET}")
+            print(f"{CYAN}{BOLD}[Actor Mode] ========== 记忆摘要 LLM 调用完成 =========={RESET}\n")
             logger.error(f"[ActorBase:{self.agent_id}] Summarize failed: {e}")
     
     # ========== 消息处理（迭代器模式）==========
@@ -438,11 +476,21 @@ class ActorBase(ABC):
         # 2. 记录到历史
         self.state.append_history(msg_data)
         
-        # 3. 自己的消息不处理
-        if sender_id == self.agent_id:
+        # 3. 自己的消息不处理（除非是自动触发的重试消息）
+        ext = msg_data.get('ext', {}) or {}
+        if sender_id == self.agent_id and not (ext.get('auto_trigger') and ext.get('retry')):
             return
         
+        # ANSI 颜色码（蓝色加粗）
+        CYAN = '\033[96m'
+        BOLD = '\033[1m'
+        RESET = '\033[0m'
+        
         logger.info(f"[ActorBase:{self.agent_id}] Received: {content[:50]}...")
+        if ext.get('auto_trigger') and ext.get('retry'):
+            print(f"{CYAN}{BOLD}[ActorBase] 📥 收到重试消息，开始处理...{RESET}")
+        else:
+            print(f"{CYAN}{BOLD}[ActorBase] 📥 收到新消息，开始处理...{RESET}")
         
         # 4. 检查记忆预算
         if self._check_memory_budget():
@@ -822,6 +870,10 @@ class ActorBase(ABC):
         Returns:
             True 表示继续
         """
+        # ANSI 颜色码
+        YELLOW = '\033[93m'
+        RESET = '\033[0m'
+        
         # 默认：执行完所有规划的行动后结束
         if ctx.has_pending_actions():
             return True
@@ -830,7 +882,26 @@ class ActorBase(ABC):
         if ctx.executed_results:
             last_result = ctx.executed_results[-1]
             if not last_result.success:
-                # 失败了，不继续
+                # 检查是否是参数错误，如果是，触发新一轮迭代让 LLM 分析并修复
+                error_msg = last_result.error or ''
+                error_lower = error_msg.lower()
+                
+                # 参数错误关键词
+                param_error_keywords = [
+                    'required', 'missing', 'invalid', '参数', '必需', '缺少', '无效',
+                    'parameter', 'field', '字段', 'must', 'should', 'validation', '验证失败'
+                ]
+                
+                # 检查是否是参数相关错误
+                is_param_error = any(kw in error_lower for kw in param_error_keywords)
+                
+                if is_param_error and last_result.action_type == 'mcp':
+                    # 参数错误，触发新一轮迭代
+                    logger.info(f"[ActorBase:{self.agent_id}] 检测到参数错误，触发新一轮迭代以修复参数")
+                    print(f"{YELLOW}[ActorBase] 🔄 检测到参数错误，触发新一轮迭代以修复参数{RESET}")
+                    return True
+                
+                # 其他类型的错误，不继续
                 return False
         
         return False
@@ -867,10 +938,16 @@ class ActorBase(ABC):
             if result:
                 return result['config_id']
             else:
+                # ANSI 颜色码
+                YELLOW = '\033[93m'
+                RESET = '\033[0m'
                 print(f"{YELLOW}[MCP DEBUG] 未找到模型 '{model_name}' 对应的配置，使用后备配置{RESET}")
                 return fallback_config_id
 
         except Exception as e:
+            # ANSI 颜色码
+            RED = '\033[91m'
+            RESET = '\033[0m'
             print(f"{RED}[MCP DEBUG] 查找模型配置失败: {e}，使用后备配置{RESET}")
             return fallback_config_id
 
@@ -940,7 +1017,6 @@ class ActorBase(ABC):
             True 表示加载成功，False 表示失败
         """
         from services.topic_service import get_topic_service, ProcessEventPhase
-        from services.llm_service import get_llm_service
         
         ctx.set_phase(ProcessPhase.LOAD_LLM_TOOL, 'running')
         
@@ -971,9 +1047,17 @@ class ActorBase(ABC):
                 self._publish_process_event(ctx, ProcessPhase.LOAD_LLM_TOOL, 'error', {'error': error_msg})
                 return False
             
-            # 加载 LLM 配置详情
-            llm_service = get_llm_service()
-            llm_config = llm_service.get_config(final_llm_config_id, include_api_key=True) or {}
+            # 直接使用 Repository 获取配置
+            repository = LLMConfigRepository(get_mysql_connection)
+            config_obj = repository.find_by_id(final_llm_config_id)
+            if not config_obj:
+                error_msg = f"LLM config not found: {final_llm_config_id}"
+                ctx.update_phase(status='error', error=error_msg)
+                self._publish_process_event(ctx, ProcessPhase.LOAD_LLM_TOOL, 'error', {'error': error_msg})
+                return False
+            
+            # 转换为字典格式（兼容现有代码）
+            llm_config = config_obj.to_dict(include_api_key=True)
             ctx.set_llm_config(llm_config, final_llm_config_id)
             
             # 2. 加载 MCP 工具列表
@@ -1183,11 +1267,12 @@ class ActorBase(ABC):
         if not llm_config_id:
             return
         
-        from services.llm_service import get_llm_service
-        
-        llm_service = get_llm_service()
-        llm_cfg = llm_service.get_config(llm_config_id, include_api_key=False) or {}
-        model = llm_cfg.get('model') or 'gpt-4'
+        # 直接使用 Repository 获取配置
+        repository = LLMConfigRepository(get_mysql_connection)
+        config = repository.find_by_id(llm_config_id)
+        if not config:
+            return
+        model = config.model or 'gpt-4'
         
         history = self.state.history
         if not isinstance(history, list) or len(history) <= keep_recent:
@@ -1227,17 +1312,57 @@ class ActorBase(ABC):
         user = "\n".join(lines)
         
         try:
-            resp = llm_service.chat_completion(
-                config_id=llm_config_id,
-                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-                stream=False,
+            # ANSI 颜色码（Actor 模式使用青色）
+            CYAN = '\033[96m'
+            RESET = '\033[0m'
+            BOLD = '\033[1m'
+            
+            print(f"{CYAN}{BOLD}[Actor Mode] ========== 记忆摘要（保留 {keep_recent} 条）LLM 调用 =========={RESET}")
+            print(f"{CYAN}[Actor Mode] Agent: {self.agent_id}{RESET}")
+            print(f"{CYAN}[Actor Mode] Provider: {config.provider}, Model: {model}{RESET}")
+            print(f"{CYAN}[Actor Mode] Config ID: {llm_config_id}{RESET}")
+            print(f"{CYAN}[Actor Mode] 保留最近消息数: {keep_recent}{RESET}")
+            
+            # 直接使用 Provider SDK
+            from services.providers import create_provider
+            from services.providers.base import LLMMessage
+            
+            # 打印提示词
+            system_preview = system[:300] + '...' if len(system) > 300 else system
+            user_preview = user[:500] + '...' if len(user) > 500 else user
+            print(f"{CYAN}[Actor Mode] SYSTEM 提示词 ({len(system)} 字符): {system_preview}{RESET}")
+            print(f"{CYAN}[Actor Mode] USER 提示词 ({len(user)} 字符): {user_preview}{RESET}")
+            
+            provider = create_provider(
+                provider_type=config.provider,
+                api_key=config.api_key,
+                api_url=config.api_url,
+                model=model,
             )
-            summary = (resp.get('content') or '').strip()
+            
+            llm_messages = [
+                LLMMessage(role='system', content=system),
+                LLMMessage(role='user', content=user),
+            ]
+            
+            print(f"{CYAN}[Actor Mode] 调用 Provider SDK 进行记忆摘要...{RESET}")
+            response = provider.chat(llm_messages)
+            summary = (response.content or '').strip()
             if summary:
                 self.state.summary = summary
                 self.state.summary_until = last_id
+                print(f"{CYAN}[Actor Mode] ✅ 记忆摘要完成，摘要长度: {len(summary)} 字符{RESET}")
+                print(f"{CYAN}{BOLD}[Actor Mode] ========== 记忆摘要 LLM 调用完成 =========={RESET}\n")
                 logger.info(f"[ActorBase:{self.agent_id}] Memory summarized with keep_recent={keep_recent} ({len(summary)} chars)")
+            else:
+                print(f"{CYAN}[Actor Mode] ⚠️ 记忆摘要为空{RESET}")
+                print(f"{CYAN}{BOLD}[Actor Mode] ========== 记忆摘要 LLM 调用完成 =========={RESET}\n")
         except Exception as e:
+            CYAN = '\033[96m'
+            RESET = '\033[0m'
+            BOLD = '\033[1m'
+            print(f"{CYAN}[Actor Mode] ❌ 记忆摘要失败: {str(e)}{RESET}")
+            print(f"{CYAN}{BOLD}[Actor Mode] ========== 记忆摘要 LLM 调用完成 =========={RESET}\n")
             logger.error(f"[ActorBase:{self.agent_id}] Summarize with keep failed: {e}")
     
     def _classify_msg_type(self, ctx: IterationContext) -> str:
@@ -1312,15 +1437,26 @@ class ActorBase(ABC):
         msg_type = ctx.msg_type
         
         try:
-            # 1. agent_msg from self: 跳过
+            # 1. agent_msg from self: 跳过（除非是自动触发的重试消息）
+            ext = msg_data.get('ext', {}) or {}
             if msg_type == MessageType.AGENT_MSG and sender_id == self.agent_id:
-                ctx.update_phase(status='completed', action='skip', reason='self_message')
-                self._publish_process_event(ctx, ProcessPhase.MSG_PRE_DEAL, 'completed', {
-                    'action': 'skip',
-                    'reason': 'self_message',
-                })
-                logger.debug(f"[ActorBase:{self.agent_id}] Skipping self agent message")
-                return False
+                # 如果是自动触发的重试消息，允许处理
+                if ext.get('auto_trigger') and ext.get('retry'):
+                    logger.info(f"[ActorBase:{self.agent_id}] Processing retry message from self")
+                    ctx.update_phase(status='completed', action='retry_message', reason='parameter_error_retry')
+                    self._publish_process_event(ctx, ProcessPhase.MSG_PRE_DEAL, 'completed', {
+                        'action': 'retry_message',
+                        'reason': 'parameter_error_retry',
+                    })
+                    return True  # 继续处理
+                else:
+                    ctx.update_phase(status='completed', action='skip', reason='self_message')
+                    self._publish_process_event(ctx, ProcessPhase.MSG_PRE_DEAL, 'completed', {
+                        'action': 'skip',
+                        'reason': 'self_message',
+                    })
+                    logger.debug(f"[ActorBase:{self.agent_id}] Skipping self agent message")
+                    return False
             
             # 2. agent_toolcall_msg: 执行 MCP 调用
             if msg_type == MessageType.AGENT_TOOLCALL_MSG:
@@ -1407,9 +1543,9 @@ class ActorBase(ABC):
             llm_input = self._build_llm_input_for_msg_deal(ctx)
             
             # 2. 调用 LLM 处理
-            from services.llm_service import get_llm_service
+            from services.providers import create_provider
+            from services.providers.base import LLMMessage
             
-            llm_service = get_llm_service()
             llm_config_id = ctx.llm_config_id or self._config.get('llm_config_id')
             
             if not llm_config_id:
@@ -1418,14 +1554,55 @@ class ActorBase(ABC):
                 self._publish_process_event(ctx, ProcessPhase.MSG_DEAL, 'error', {'error': error_msg})
                 return False
             
-            # 非流式调用，获取决策
-            resp = llm_service.chat_completion(
-                config_id=llm_config_id,
-                messages=llm_input,
-                stream=False,
+            # 直接使用 Repository 获取配置
+            repository = LLMConfigRepository(get_mysql_connection)
+            config_obj = repository.find_by_id(llm_config_id)
+            if not config_obj:
+                error_msg = f"LLM config not found: {llm_config_id}"
+                ctx.update_phase(status='error', error=error_msg)
+                self._publish_process_event(ctx, ProcessPhase.MSG_DEAL, 'error', {'error': error_msg})
+                return False
+            
+            # ANSI 颜色码（Actor 模式使用青色）
+            CYAN = '\033[96m'
+            RESET = '\033[0m'
+            BOLD = '\033[1m'
+            
+            print(f"{CYAN}{BOLD}[Actor Mode] ========== 消息处理决策 LLM 调用 =========={RESET}")
+            print(f"{CYAN}[Actor Mode] Agent: {self.agent_id}{RESET}")
+            print(f"{CYAN}[Actor Mode] Provider: {config_obj.provider}, Model: {config_obj.model}{RESET}")
+            print(f"{CYAN}[Actor Mode] Config ID: {llm_config_id}{RESET}")
+            
+            # 转换消息格式并打印提示词
+            llm_messages = []
+            for msg in llm_input:
+                role = msg.get('role', 'user')
+                content = msg.get('content', '')
+                llm_messages.append(LLMMessage(
+                    role=role,
+                    content=content,
+                    media=msg.get('media'),
+                ))
+                
+                # 打印提示词（只打印前 500 字符，避免过长）
+                content_preview = content[:500] + '...' if len(content) > 500 else content
+                print(f"{CYAN}[Actor Mode] {role.upper()} 提示词 ({len(content)} 字符): {content_preview}{RESET}")
+            
+            # 创建 Provider 并调用
+            provider = create_provider(
+                provider_type=config_obj.provider,
+                api_key=config_obj.api_key,
+                api_url=config_obj.api_url,
+                model=config_obj.model,
             )
             
-            content = (resp.get('content') or '').strip()
+            # 非流式调用，获取决策
+            print(f"{CYAN}[Actor Mode] 调用 Provider SDK 进行消息处理决策...{RESET}")
+            response = provider.chat(llm_messages)
+            content = (response.content or '').strip()
+            
+            print(f"{CYAN}[Actor Mode] ✅ 决策完成，返回内容长度: {len(content)} 字符{RESET}")
+            print(f"{CYAN}{BOLD}[Actor Mode] ========== 消息处理决策 LLM 调用完成 =========={RESET}\n")
             
             # 3. 解析 LLM 决策
             decision, decision_data = self._parse_llm_decision(content, ctx)
@@ -1593,6 +1770,10 @@ class ActorBase(ABC):
         ctx.set_phase(ProcessPhase.POST_MSG_DEAL, 'running')
         self._publish_process_event(ctx, ProcessPhase.POST_MSG_DEAL, 'running')
         
+        # ANSI 颜色码
+        YELLOW = '\033[93m'
+        RESET = '\033[0m'
+        
         try:
             from services.topic_service import get_topic_service
             
@@ -1627,6 +1808,54 @@ class ActorBase(ABC):
                 })
                 
                 logger.info(f"[ActorBase:{self.agent_id}] Tool call message sent")
+            
+            # 1.5. 如果检测到参数错误且需要继续，自动触发新一轮迭代
+            if ctx.should_continue and not ctx.next_tool_call and ctx.tool_results_text:
+                # 检查是否是参数错误
+                tool_results_lower = ctx.tool_results_text.lower()
+                param_error_keywords = [
+                    'required', 'missing', 'invalid', '参数', '必需', '缺少', '无效',
+                    'parameter', 'field', '字段', 'must', 'should', 'validation', '验证失败'
+                ]
+                is_param_error = any(kw in tool_results_lower for kw in param_error_keywords)
+                
+                if is_param_error:
+                    # ANSI 颜色码（蓝色加粗）
+                    CYAN = '\033[96m'
+                    BOLD = '\033[1m'
+                    RESET = '\033[0m'
+                    
+                    logger.info(f"[ActorBase:{self.agent_id}] 检测到参数错误，自动触发新一轮迭代以修复参数")
+                    print(f"{CYAN}{BOLD}[ActorBase] 🔄 检测到参数错误，自动触发新一轮迭代以修复参数{RESET}")
+                    
+                    # 发送包含错误信息的消息，让 LLM 分析并重新调用工具
+                    retry_msg_id = get_topic_service().send_message(
+                        topic_id=topic_id,
+                        sender_id=self.agent_id,
+                        sender_type='agent',
+                        content=f"工具调用失败，需要修复参数。错误信息：\n{ctx.tool_results_text}",
+                        role='assistant',
+                        sender_name=self.info.get('name'),
+                        sender_avatar=self.info.get('avatar'),
+                        ext={
+                            'mcp_error': True,
+                            'auto_trigger': True,
+                            'processSteps': ctx.to_process_steps_dict(),
+                            'retry': True,  # 标记为重试
+                        }
+                    )
+                    
+                    print(f"{CYAN}{BOLD}[ActorBase] 📤 发布重试消息 (message_id: {retry_msg_id.get('message_id') if retry_msg_id else 'N/A'}){RESET}")
+                    
+                    ctx.update_phase(status='completed', action='retry_triggered')
+                    self._publish_process_event(ctx, ProcessPhase.POST_MSG_DEAL, 'completed', {
+                        'action': 'retry_triggered',
+                        'reason': 'parameter_error',
+                    })
+                    
+                    logger.info(f"[ActorBase:{self.agent_id}] Retry message sent for parameter error")
+                    print(f"{CYAN}{BOLD}[ActorBase] ✅ 重试消息已发布，等待处理...{RESET}")
+                    return True  # 已触发重试，返回成功
             
             # 2. 如果决策是完成
             elif decision == LLMDecision.COMPLETE:
@@ -1928,15 +2157,35 @@ class ActorBase(ABC):
                 detailed_error = "\n".join(error_details) if error_details else error_msg
                 print(f"{RED}[MCP DEBUG] 详细错误: {detailed_error}{RESET}")
                 
+                # 检查是否是参数错误（用于触发 ReAct 自修复）
+                is_param_error = False
+                error_lower = detailed_error.lower()
+                param_error_keywords = [
+                    'required', 'missing', 'invalid', '参数', '必需', '缺少', '无效',
+                    'parameter', 'field', '字段', 'must', 'should', 'validation', '验证失败'
+                ]
+                is_param_error = any(kw in error_lower for kw in param_error_keywords)
+                
+                # 将错误信息追加到工具结果中，供 LLM 分析
+                if is_param_error:
+                    error_context = f"""
+【工具调用失败 - 需要修复参数】
+
+工具: {action.mcp_tool_name or 'auto'}
+服务器: {server_id}
+错误信息: {detailed_error}
+
+请分析上述错误信息，找出缺失或错误的参数，然后重新调用工具并传递正确的参数。
+"""
+                    ctx.append_tool_result(f"MCP:{server_id}", error_context)
+                    print(f"{YELLOW}[MCP DEBUG] 🔄 参数错误已添加到工具结果，将触发新一轮迭代{RESET}")
+                
                 ctx.update_last_step(
                     status='error',
                     error=detailed_error,
                 )
                 
-                # MCP 错误自动分析功能已禁用
-                # 之前的逻辑：当 MCP 出错时，触发自处理：发送一个特殊的消息让 Agent 处理错误
-                # 现在直接返回错误，不触发自动分析
-                print(f"{YELLOW}[MCP DEBUG] ⚠️ MCP 调用失败，但未触发自动分析（功能已禁用）{RESET}")
+                print(f"{YELLOW}[MCP DEBUG] ⚠️ MCP 调用失败，{'将触发 ReAct 自修复' if is_param_error else '不继续迭代'}{RESET}")
                 print(f"{RED}[MCP DEBUG] ========== MCP 调用失败 =========={RESET}")
                 return ActionResult.error_result(
                     action_type='mcp',
@@ -2347,7 +2596,6 @@ class ActorBase(ABC):
         Args:
             ctx: 迭代上下文
         """
-        from services.llm_service import get_llm_service
         from services.topic_service import get_topic_service
         
         topic_id = ctx.topic_id or self.topic_id
@@ -2370,6 +2618,7 @@ class ActorBase(ABC):
         YELLOW = '\033[93m'
         GREEN = '\033[92m'
         CYAN = '\033[96m'
+        RED = '\033[91m'
         RESET = '\033[0m'
         
         # 如果 user_selected_llm_config_id 与 session_llm_config_id 相同，说明用户没有主动选择，使用默认配置
@@ -2399,12 +2648,20 @@ class ActorBase(ABC):
                     process_steps=ctx.to_process_steps_dict(),
                 )
         
-        # 添加 LLM 生成步骤
-        llm_service = get_llm_service()
-        config = llm_service.get_config(final_llm_config_id, include_api_key=True) or {}
+        # 直接使用 Repository 获取配置
+        repository = LLMConfigRepository(get_mysql_connection)
+        config_obj = repository.find_by_id(final_llm_config_id)
+        if not config_obj:
+            error_msg = f"LLM config not found: {final_llm_config_id}"
+            return ActionResult(
+                success=False,
+                error=error_msg,
+                thinking="无法生成回复：LLM配置不存在",
+                process_steps=ctx.to_process_steps_dict(),
+            )
         
-        provider = config.get('provider', 'unknown')
-        model = config.get('model', 'unknown')
+        provider = config_obj.provider or 'unknown'
+        model = config_obj.model or 'unknown'
         
         # 判断是否是思考模型（会输出思考过程的模型）
         is_thinking_model = self._check_is_thinking_model(provider, model)
@@ -2683,16 +2940,23 @@ class ActorBase(ABC):
     ) -> Generator[str, None, None]:
         """流式调用 LLM"""
         from services.providers import create_provider, LLMMessage
-        from services.llm_service import get_llm_service
+        
+        # ANSI 颜色码（Actor 模式使用青色）
+        CYAN = '\033[96m'
+        RESET = '\033[0m'
+        BOLD = '\033[1m'
 
         # 如果指定了 llm_config_id，使用指定的配置；否则使用 session 默认配置
         if llm_config_id:
-            llm_service = get_llm_service()
-            config = llm_service.get_config(llm_config_id, include_api_key=True) or {}
-            provider = config.get('provider')
-            api_key = config.get('api_key')
-            api_url = config.get('api_url')
-            model = config.get('model')
+            # 直接使用 Repository 获取配置
+            repository = LLMConfigRepository(get_mysql_connection)
+            config_obj = repository.find_by_id(llm_config_id)
+            if not config_obj:
+                raise ValueError(f"LLM config not found: {llm_config_id}")
+            provider = config_obj.provider
+            api_key = config_obj.api_key
+            api_url = config_obj.api_url
+            model = config_obj.model
         else:
             # 回退到 session 默认配置
             provider = self._config.get('provider')
@@ -2700,28 +2964,54 @@ class ActorBase(ABC):
             api_url = self._config.get('api_url')
             model = self._config.get('model')
 
-        # 转换消息格式
+        print(f"{CYAN}{BOLD}[Actor Mode] ========== 流式生成回复 LLM 调用 =========={RESET}")
+        print(f"{CYAN}[Actor Mode] Agent: {self.agent_id}{RESET}")
+        print(f"{CYAN}[Actor Mode] Provider: {provider}, Model: {model}{RESET}")
+        if llm_config_id:
+            print(f"{CYAN}[Actor Mode] Config ID: {llm_config_id}{RESET}")
+
+        # 转换消息格式并打印提示词
         llm_messages = []
         for msg in messages:
+            role = msg.get('role', 'user')
+            content = msg.get('content', '')
             llm_messages.append(LLMMessage(
-                role=msg.get('role', 'user'),
-                content=msg.get('content', ''),
+                role=role,
+                content=content,
                 media=msg.get('media'),
             ))
+            
+            # 打印提示词（只打印前 500 字符，避免过长）
+            content_preview = content[:500] + '...' if len(content) > 500 else content
+            print(f"{CYAN}[Actor Mode] {role.upper()} 提示词 ({len(content)} 字符): {content_preview}{RESET}")
 
-        # 创建 Provider
+        # 获取签名开关配置
+        orig_ext = (ctx.original_message or {}).get('ext', {}) or {} if ctx else {}
+        use_thoughtsig = True
+        try:
+            use_thoughtsig = bool(((orig_ext.get('imageGen') or {}).get('useThoughtSignature', True)))
+        except Exception:
+            use_thoughtsig = True
+        
+        # 创建 Provider（传递签名开关配置）
         llm_provider = create_provider(
             provider_type=provider,
             api_key=api_key,
             api_url=api_url,
             model=model,
+            use_thoughtsig=use_thoughtsig,  # 传递签名开关
         )
 
         # 流式调用
+        print(f"{CYAN}[Actor Mode] 调用 Provider SDK 进行流式生成...{RESET}")
         stream = llm_provider.chat_stream(llm_messages)
+        chunk_count = 0
+        total_length = 0
         while True:
             try:
                 chunk = next(stream)
+                chunk_count += 1
+                total_length += len(chunk)
                 yield chunk
             except StopIteration as e:
                 resp = getattr(e, "value", None)
@@ -2736,6 +3026,9 @@ class ActorBase(ABC):
                         finish_reason=getattr(resp, "finish_reason", None),
                         raw_response=getattr(resp, "raw", None),
                     )
+                
+                print(f"{CYAN}[Actor Mode] ✅ 流式生成完成，共 {chunk_count} 个 chunk，总长度: {total_length} 字符{RESET}")
+                print(f"{CYAN}{BOLD}[Actor Mode] ========== 流式生成回复 LLM 调用完成 =========={RESET}\n")
                 break
     
     # ========== 消息操作 ==========

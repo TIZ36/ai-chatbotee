@@ -49,6 +49,7 @@ const RoleGeneratorPage: React.FC<RoleGeneratorPageProps> = ({ isEmbedded = fals
   const [selectedConfigId, setSelectedSessionConfigId] = useState<string>('');
   const [isAvatarGenerating, setIsAvatarGenerating] = useState(false);
   const [isSaving, setIsAvatarSaving] = useState(false);
+  const isSavingRef = useRef(false);
   
   // 基础表单状态（用于手动模式或生成后的微调）
   const [name, setName] = useState('');
@@ -84,9 +85,9 @@ const RoleGeneratorPage: React.FC<RoleGeneratorPageProps> = ({ isEmbedded = fals
       setAvatar(result.avatar || null);
       
       // 自动滚动到结果区域
-      if (!isEmbedded) {
+      requestAnimationFrame(() => {
         resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
+      });
     }
   }, [result, isEmbedded]);
 
@@ -150,6 +151,8 @@ const RoleGeneratorPage: React.FC<RoleGeneratorPageProps> = ({ isEmbedded = fals
   };
 
   const handleSave = async () => {
+    if (isSavingRef.current) return;
+
     const finalName = name || result?.name;
     const finalPrompt = systemPrompt || result?.system_prompt;
 
@@ -158,10 +161,16 @@ const RoleGeneratorPage: React.FC<RoleGeneratorPageProps> = ({ isEmbedded = fals
       return;
     }
 
+    if (!selectedConfigId) {
+      toast({ title: '请选择模型配置', description: '请先选择一个默认模型配置', variant: 'destructive' });
+      return;
+    }
+
+    isSavingRef.current = true;
     setIsAvatarSaving(true);
     try {
       // 1. 创建会话
-      const session = await createSession(finalName, 'agent');
+      const session = await createSession(selectedConfigId, finalName, 'agent');
       
       // 2. 更新配置
       await Promise.all([
@@ -186,6 +195,7 @@ const RoleGeneratorPage: React.FC<RoleGeneratorPageProps> = ({ isEmbedded = fals
       toast({ title: '保存失败', description: error.message, variant: 'destructive' });
     } finally {
       setIsAvatarSaving(false);
+      isSavingRef.current = false;
     }
   };
 

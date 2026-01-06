@@ -27,6 +27,273 @@ import pymysql
 
 # ==================== 参数生成辅助函数（两步法）====================
 
+def _retry_with_error_analysis(
+    tool_name: str,
+    tool_info: Dict[str, Any],
+    original_args: Dict[str, Any],
+    error_message: str,
+    user_request: str,
+    full_context: str,
+    llm_config: Dict[str, Any],
+    original_message: Optional[Dict[str, Any]],
+    add_log: Optional[callable] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    分析错误信息并使用 LLM 重新生成参数
+    
+    Args:
+        tool_name: 工具名称
+        tool_info: 工具信息
+        original_args: 原始参数
+        error_message: 错误信息
+        user_request: 用户请求
+        full_context: 完整上下文
+        llm_config: LLM 配置
+        original_message: 原始消息
+        add_log: 日志函数
+    
+    Returns:
+        重新生成的参数字典，如果失败返回 None
+    """
+    props = tool_info.get('props', {})
+    required = tool_info.get('required', [])
+    
+    # 构建参数描述（包含错误信息）
+    param_descriptions = []
+    for param_name, param_info in props.items():
+        param_type = param_info.get('type', 'string')
+        param_desc = param_info.get('description', '')
+        is_required = param_name in required
+        req_mark = "（必需）" if is_required else "（可选）"
+        param_descriptions.append(f"- {param_name} ({param_type}){req_mark}: {param_desc}")
+    
+    # 构建系统提示词（包含错误分析）
+    system_prompt = f"""你是一个参数修复助手。之前的工具调用失败了，请分析错误信息并重新生成正确的参数。
+
+工具名称：{tool_name}
+工具描述：{tool_info.get('description', '')}
+
+需要生成的参数：
+{chr(10).join(param_descriptions)}
+
+之前的调用参数：
+{json.dumps(original_args, ensure_ascii=False, indent=2)}
+
+错误信息：
+{error_message}
+
+重要提示：
+1. 仔细分析错误信息，找出哪些参数有问题（缺失、类型错误、格式错误等）
+2. 从对话历史和用户请求中提取正确的参数值
+3. 确保所有必需参数都有值
+4. 确保参数类型符合要求（string/number/integer/boolean/array/object）
+5. 如果错误信息中提到了具体的参数要求，请严格按照要求填写
+
+返回格式必须是有效的 JSON 对象，只包含参数名和参数值。例如：
+{{
+  "param1": "正确的值",
+  "param2": 123,
+  "param3": ["数组", "值"]
+}}
+
+注意：只返回 JSON 对象，不要包含任何其他文字说明。"""
+    
+    # 调用 LLM
+    if add_log:
+        add_log(f"  使用 LLM 分析错误并重新生成参数...")
+    
+    llm_response = call_llm_api(llm_config, system_prompt, full_context, add_log)
+    if not llm_response:
+        return None
+    
+    # 解析 JSON
+    try:
+        json_match = re.search(r'\{[\s\S]*\}', llm_response)
+        if json_match:
+            args = json.loads(json_match.group())
+            # 验证参数类型
+            validated_args = {}
+            for param_name, param_value in args.items():
+                if param_name not in props:
+                    continue
+                param_info = props[param_name]
+                param_type = param_info.get('type', 'string')
+                
+                try:
+                    validated_value = _validate_and_convert_param(
+                        param_name, param_value, param_info, param_type
+                    )
+                    if validated_value is not None:
+                        validated_args[param_name] = validated_value
+                except Exception as e:
+                    if add_log:
+                        add_log(f"  ⚠️ 参数 {param_name} 类型转换失败: {e}，使用原值")
+                    validated_args[param_name] = param_value
+            
+            # 处理图片参数（从 context 中提取）
+            for param_name in ['images', 'image', 'photos', 'pictures', 'files']:
+                if param_name in props:
+                    images = extract_images_from_context({
+                        'original_message': original_message or {'ext': {}}
+                    })
+                    if images:
+                        param_type = props[param_name].get('type', 'string')
+                        if param_type == 'array':
+                            validated_args[param_name] = images
+                        elif images:
+                            validated_args[param_name] = images[0]
+            
+            # 确保所有必需参数都有值
+            for param_name in required:
+                if param_name not in validated_args or validated_args[param_name] is None:
+                    # 如果缺失必需参数，尝试使用默认值
+                    if param_name in props:
+                        default_val = props[param_name].get('default')
+                        if default_val is not None:
+                            validated_args[param_name] = default_val
+                        elif add_log:
+                            add_log(f"  ⚠️ 必需参数 {param_name} 仍然缺失")
+            
+            if add_log:
+                add_log(f"  ✅ 重新生成 {len(validated_args)} 个参数")
+            
+            return validated_args
+    except json.JSONDecodeError as e:
+        if add_log:
+            add_log(f"  ⚠️ LLM 返回的 JSON 解析失败: {e}")
+        return None
+    except Exception as e:
+        if add_log:
+            add_log(f"  ⚠️ 参数重新生成出错: {e}")
+        return None
+    
+    return None
+
+
+def _validate_and_convert_param(
+    param_name: str,
+    param_value: Any,
+    param_info: Dict[str, Any],
+    param_type: str
+) -> Any:
+    """
+    验证和转换参数类型（支持复杂类型）
+    
+    Args:
+        param_name: 参数名称
+        param_value: 参数值
+        param_info: 参数信息（包含 type, enum, items, properties 等）
+        param_type: 参数类型（string, number, integer, boolean, array, object）
+    
+    Returns:
+        转换后的参数值
+    """
+    # 处理枚举类型
+    if 'enum' in param_info:
+        enum_values = param_info['enum']
+        if param_value in enum_values:
+            return param_value
+        # 尝试大小写不敏感匹配
+        if isinstance(param_value, str):
+            for ev in enum_values:
+                if isinstance(ev, str) and param_value.lower() == ev.lower():
+                    return ev
+        # 如果都不匹配，返回第一个枚举值或原值
+        return enum_values[0] if enum_values else param_value
+    
+    # 处理数组类型
+    if param_type == 'array':
+        if isinstance(param_value, list):
+            # 验证数组元素类型
+            items_schema = param_info.get('items', {})
+            if isinstance(items_schema, dict):
+                item_type = items_schema.get('type', 'string')
+                validated_list = []
+                for item in param_value:
+                    try:
+                        validated_item = _validate_and_convert_param(
+                            f"{param_name}[item]", item, items_schema, item_type
+                        )
+                        validated_list.append(validated_item)
+                    except:
+                        validated_list.append(item)
+                return validated_list
+            return param_value
+        elif param_value:
+            # 单个值转换为数组
+            return [param_value]
+        else:
+            return []
+    
+    # 处理对象类型
+    if param_type == 'object':
+        if isinstance(param_value, dict):
+            # 验证对象属性
+            properties = param_info.get('properties', {})
+            if properties:
+                validated_obj = {}
+                for prop_name, prop_info in properties.items():
+                    if prop_name in param_value:
+                        prop_type = prop_info.get('type', 'string')
+                        try:
+                            validated_obj[prop_name] = _validate_and_convert_param(
+                                prop_name, param_value[prop_name], prop_info, prop_type
+                            )
+                        except:
+                            validated_obj[prop_name] = param_value[prop_name]
+                    elif prop_name in param_info.get('required', []):
+                        # 必需属性缺失，使用默认值或 None
+                        default_val = prop_info.get('default')
+                        if default_val is not None:
+                            validated_obj[prop_name] = default_val
+                return validated_obj
+            return param_value
+        elif isinstance(param_value, str):
+            # 尝试解析 JSON 字符串
+            try:
+                parsed = json.loads(param_value)
+                if isinstance(parsed, dict):
+                    return _validate_and_convert_param(param_name, parsed, param_info, 'object')
+            except:
+                pass
+        # 无法转换，返回原值
+        return param_value
+    
+    # 处理数字类型
+    if param_type in ['number', 'integer']:
+        if isinstance(param_value, (int, float)):
+            return int(param_value) if param_type == 'integer' else float(param_value)
+        elif isinstance(param_value, str):
+            try:
+                # 尝试转换字符串为数字
+                if '.' in param_value:
+                    return float(param_value) if param_type == 'number' else int(float(param_value))
+                else:
+                    return int(param_value) if param_type == 'integer' else float(param_value)
+            except:
+                return param_value
+        else:
+            return param_value
+    
+    # 处理布尔类型
+    if param_type == 'boolean':
+        if isinstance(param_value, bool):
+            return param_value
+        elif isinstance(param_value, str):
+            return param_value.lower() in ('true', '1', 'yes', '是', 'on')
+        elif isinstance(param_value, (int, float)):
+            return bool(param_value)
+        else:
+            return bool(param_value)
+    
+    # 处理字符串类型（默认）
+    if param_type == 'string':
+        return str(param_value) if param_value is not None else ''
+    
+    # 未知类型，返回原值
+    return param_value
+
+
 def extract_user_request_from_input(input_text: str) -> str:
     """从包含【可用工具】【对话历史】【当前请求】的输入中提取用户的实际请求"""
     if not input_text:
@@ -158,7 +425,7 @@ def _extract_args_with_llm(
         json_match = re.search(r'\{[\s\S]*\}', llm_response)
         if json_match:
             args = json.loads(json_match.group())
-            # 验证参数类型
+            # 验证参数类型（支持复杂类型）
             validated_args = {}
             for param_name, param_value in args.items():
                 if param_name not in props:
@@ -167,24 +434,15 @@ def _extract_args_with_llm(
                 param_type = param_info.get('type', 'string')
                 
                 # 类型验证和转换
-                if param_type == 'array' and not isinstance(param_value, list):
-                    if param_value:
-                        validated_args[param_name] = [param_value]
-                    else:
-                        validated_args[param_name] = []
-                elif param_type in ['number', 'integer']:
-                    try:
-                        validated_args[param_name] = int(param_value) if param_type == 'integer' else float(param_value)
-                    except:
-                        validated_args[param_name] = param_value
-                elif param_type == 'boolean':
-                    if isinstance(param_value, bool):
-                        validated_args[param_name] = param_value
-                    elif isinstance(param_value, str):
-                        validated_args[param_name] = param_value.lower() in ('true', '1', 'yes', '是')
-                    else:
-                        validated_args[param_name] = bool(param_value)
-                else:
+                try:
+                    validated_value = _validate_and_convert_param(
+                        param_name, param_value, param_info, param_type
+                    )
+                    if validated_value is not None:
+                        validated_args[param_name] = validated_value
+                except Exception as e:
+                    if add_log:
+                        add_log(f"  ⚠️ 参数 {param_name} 类型转换失败: {e}，使用原值")
                     validated_args[param_name] = param_value
             
             # 处理图片参数（从 context 中提取）
@@ -1886,7 +2144,7 @@ def execute_mcp_with_llm(
                                 # 成功：只记录简要信息
                                 executed_tool_names.add(tool_name_str.lower())
                             else:
-                                # 失败 - 区分错误类型（只记录错误，不记录详细信息）
+                                # 失败 - 区分错误类型并尝试自修复
                                 error_type = tool_result.get('error_type', 'unknown')
                                 error_msg = tool_result.get('error', '未知错误')
                                 error_code = tool_result.get('error_code')
@@ -1899,13 +2157,75 @@ def execute_mcp_with_llm(
                                 else:
                                     error_display = f"[{error_type}] {error_msg}"
                                 
-                                # 只记录错误，不输出详细信息
+                                # 尝试自修复：如果是参数错误，使用 LLM 重新生成参数
+                                should_retry = False
+                                retry_args = None
+                                
+                                # 检查是否是参数相关错误（业务错误通常包含参数要求）
+                                if error_type == 'business' and error_msg:
+                                    # 检查错误信息中是否包含参数提示
+                                    param_error_keywords = [
+                                        'required', 'missing', 'invalid', '参数', '必需', '缺少', '无效',
+                                        'parameter', 'field', '字段', 'must', 'should'
+                                    ]
+                                    is_param_error = any(kw in error_msg.lower() for kw in param_error_keywords)
+                                    
+                                    if is_param_error:
+                                        log(f"🔄 检测到参数错误，尝试自修复: {error_msg[:100]}")
+                                        try:
+                                            # 使用 LLM 分析错误并重新生成参数
+                                            retry_args = _retry_with_error_analysis(
+                                                tool_name_str,
+                                                tool_info,
+                                                tool_args,
+                                                error_msg,
+                                                actual_user_request,
+                                                effective_input,
+                                                llm_config,
+                                                original_message,
+                                                log
+                                            )
+                                            if retry_args and retry_args != tool_args:
+                                                should_retry = True
+                                                log(f"✅ 重新生成参数成功，准备重试")
+                                        except Exception as retry_e:
+                                            log(f"⚠️ 自修复失败: {retry_e}")
+                                
+                                # 如果自修复成功，重试调用
+                                if should_retry and retry_args:
+                                    log(f"🔄 重试工具调用: {tool_name_str}")
+                                    try:
+                                        retry_result = call_mcp_tool(server_url, headers, tool_name_str, retry_args, None)
+                                        
+                                        if isinstance(retry_result, dict) and retry_result.get('success'):
+                                            # 重试成功
+                                            result_data = retry_result.get('data')
+                                            result_text = retry_result.get('text')
+                                            raw_result = retry_result.get('raw_result')
+                                            
+                                            results.append({
+                                                'tool': tool_name_str,
+                                                'result': {
+                                                    'jsonrpc': '2.0',
+                                                    'result': raw_result or {'content': [{'type': 'text', 'text': str(result_data)}]}
+                                                },
+                                                'tool_text': result_text or str(result_data) if result_data else '',
+                                                'retried': True,  # 标记为重试成功
+                                            })
+                                            executed_tool_names.add(tool_name_str.lower())
+                                            log(f"✅ 重试成功: {tool_name_str}")
+                                            continue  # 跳过错误记录
+                                    except Exception as retry_e:
+                                        log(f"⚠️ 重试调用失败: {retry_e}")
+                                
+                                # 记录错误（如果重试失败或未重试）
                                 log(f"❌ {tool_name_str}: {error_display[:100]}")
                                 results.append({
                                     "tool": tool_name_str,
                                     "error": error_display,
                                     "error_type": error_type,
                                     "error_code": error_code,
+                                    "retried": should_retry,  # 标记是否尝试过重试
                                 })
                         else:
                             # 兼容旧格式（直接返回结果）

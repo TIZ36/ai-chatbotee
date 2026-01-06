@@ -11,13 +11,15 @@ import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import { ScrollArea } from '@/components/ui/ScrollArea';
 import { Checkbox } from '@/components/ui/Checkbox';
-import { Image as ImageIcon, Loader2, RefreshCcw, X } from 'lucide-react';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { Image as ImageIcon, Loader2, RefreshCcw, X, Trash2 } from 'lucide-react';
 import type { Session, Message } from '@/services/sessionApi';
-import { getSessionMessagesCursor } from '@/services/sessionApi';
+import { getSessionMessagesCursor, deleteSession } from '@/services/sessionApi';
 import type { SessionMediaItem } from '@/components/ui/SessionMediaPanel';
 import { resolveMediaSrc } from '@/utils/mediaSrc';
 import { VirtuosoGrid } from 'react-virtuoso';
 import { MediaPreviewDialog } from '@/components/ui/MediaPreviewDialog';
+import { toast } from '@/components/ui/use-toast';
 
 type LibraryImage = SessionMediaItem & {
   session_id: string;
@@ -72,15 +74,23 @@ export interface MediaLibraryDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   sessions: Session[];
+  onSessionsChange?: (sessions: Session[]) => void; // 会话列表变化回调
 }
 
-export const MediaLibraryDialog: React.FC<MediaLibraryDialogProps> = ({ open, onOpenChange, sessions }) => {
+export const MediaLibraryDialog: React.FC<MediaLibraryDialogProps> = ({ 
+  open, 
+  onOpenChange, 
+  sessions,
+  onSessionsChange,
+}) => {
   const [query, setQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [images, setImages] = useState<LibraryImage[]>([]);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewItem, setPreviewItem] = useState<SessionMediaItem | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const loadNonceRef = useRef(0);
 
@@ -163,6 +173,42 @@ export const MediaLibraryDialog: React.FC<MediaLibraryDialogProps> = ({ open, on
     setPreviewOpen(true);
   };
 
+  const handleDeleteSession = async () => {
+    if (!deleteTarget) return;
+    
+    setIsDeleting(true);
+    try {
+      await deleteSession(deleteTarget.session_id);
+      
+      // 从列表中移除
+      const updatedSessions = sessions.filter(s => s.session_id !== deleteTarget.session_id);
+      onSessionsChange?.(updatedSessions);
+      
+      // 从选中列表中移除
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        next.delete(deleteTarget.session_id);
+        return next;
+      });
+      
+      toast({
+        title: '删除成功',
+        description: '会话已删除',
+        variant: 'success',
+      });
+      
+      setDeleteTarget(null);
+    } catch (error: any) {
+      toast({
+        title: '删除失败',
+        description: error.message || '删除会话时出现错误',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
@@ -210,7 +256,7 @@ export const MediaLibraryDialog: React.FC<MediaLibraryDialogProps> = ({ open, on
                     return (
                       <div
                         key={s.session_id}
-                        className={`px-2 py-2 rounded-md border transition-colors ${
+                        className={`group px-2 py-2 rounded-md border transition-colors ${
                           checked
                             ? 'border-primary-500/50 bg-primary-500/5'
                             : 'border-transparent hover:bg-gray-50 dark:hover:bg-[#2a2a2a]'
@@ -234,6 +280,17 @@ export const MediaLibraryDialog: React.FC<MediaLibraryDialogProps> = ({ open, on
                               {s.session_type || 'memory'} · {s.session_id.slice(0, 8)}
                             </div>
                           </div>
+                          <IconButton
+                            icon={Trash2}
+                            label="删除会话"
+                            variant="ghost"
+                            size="icon"
+                            className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteTarget(s);
+                            }}
+                          />
                         </div>
                       </div>
                     );
@@ -302,6 +359,24 @@ export const MediaLibraryDialog: React.FC<MediaLibraryDialogProps> = ({ open, on
         }}
         item={previewItem}
         title="图片预览"
+      />
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title="删除会话"
+        description={
+          deleteTarget
+            ? `确定要删除会话"${getSessionDisplayName(deleteTarget)}"吗？此操作不可撤销，将删除该会话的所有消息和媒体。`
+            : ''
+        }
+        variant="destructive"
+        confirmText="删除"
+        cancelText="取消"
+        isLoading={isDeleting}
+        onConfirm={handleDeleteSession}
       />
     </>
   );

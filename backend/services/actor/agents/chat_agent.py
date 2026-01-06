@@ -139,8 +139,6 @@ class ChatAgent(ActorBase):
             响应决策
         """
         try:
-            from services.llm_service import get_llm_service
-            
             # 构建参与者信息
             participants = self.state.participants
             agents = [p for p in participants if p.get('participant_type') == 'agent']
@@ -178,20 +176,56 @@ class ChatAgent(ActorBase):
                 "请基于人设与能力分工做出动作决策。"
             )
             
-            llm_service = get_llm_service()
             config_id = self._config.get('llm_config_id')
             if not config_id:
                 return ResponseDecision(action=default_action)
             
-            resp = llm_service.chat_completion(
-                config_id=config_id,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                stream=False,
+            # 直接使用 Repository 获取配置
+            from models.llm_config import LLMConfigRepository
+            from database import get_mysql_connection
+            from services.providers import create_provider
+            from services.providers.base import LLMMessage
+            
+            repository = LLMConfigRepository(get_mysql_connection)
+            config_obj = repository.find_by_id(config_id)
+            if not config_obj:
+                return ResponseDecision(action=default_action)
+            
+            # ANSI 颜色码（Actor 模式使用青色）
+            CYAN = '\033[96m'
+            RESET = '\033[0m'
+            BOLD = '\033[1m'
+            
+            print(f"{CYAN}{BOLD}[Actor Mode] ========== ChatAgent 决策 LLM 调用 =========={RESET}")
+            print(f"{CYAN}[Actor Mode] Agent: {self.agent_id}{RESET}")
+            print(f"{CYAN}[Actor Mode] Provider: {config_obj.provider}, Model: {config_obj.model}{RESET}")
+            print(f"{CYAN}[Actor Mode] Config ID: {config_id}{RESET}")
+            
+            # 打印提示词
+            system_preview = system[:300] + '...' if len(system) > 300 else system
+            user_preview = user[:500] + '...' if len(user) > 500 else user
+            print(f"{CYAN}[Actor Mode] SYSTEM 提示词 ({len(system)} 字符): {system_preview}{RESET}")
+            print(f"{CYAN}[Actor Mode] USER 提示词 ({len(user)} 字符): {user_preview}{RESET}")
+            
+            # 创建 Provider 并调用
+            provider = create_provider(
+                provider_type=config_obj.provider,
+                api_key=config_obj.api_key,
+                api_url=config_obj.api_url,
+                model=config_obj.model,
             )
-            raw = (resp.get('content') or '').strip()
+            
+            llm_messages = [
+                LLMMessage(role='system', content=system),
+                LLMMessage(role='user', content=user),
+            ]
+            
+            print(f"{CYAN}[Actor Mode] 调用 Provider SDK 进行决策...{RESET}")
+            response = provider.chat(llm_messages)
+            raw = (response.content or '').strip()
+            
+            print(f"{CYAN}[Actor Mode] ✅ 决策完成，返回内容长度: {len(raw)} 字符{RESET}")
+            print(f"{CYAN}{BOLD}[Actor Mode] ========== ChatAgent 决策 LLM 调用完成 =========={RESET}\n")
             
             # 解析 JSON
             start = raw.find('{')
@@ -386,11 +420,21 @@ class ChatAgent(ActorBase):
         # 2. 记录到历史
         self.state.append_history(msg_data)
         
-        # 3. 自己的消息不处理
-        if sender_id == self.agent_id:
+        # 3. 自己的消息不处理（除非是自动触发的重试消息）
+        ext = msg_data.get('ext', {}) or {}
+        if sender_id == self.agent_id and not (ext.get('auto_trigger') and ext.get('retry')):
             return
         
+        # ANSI 颜色码（蓝色加粗）
+        CYAN = '\033[96m'
+        BOLD = '\033[1m'
+        RESET = '\033[0m'
+        
         logger.info(f"[ChatAgent:{self.agent_id}] Received: {content[:50]}...")
+        if ext.get('auto_trigger') and ext.get('retry'):
+            print(f"{CYAN}{BOLD}[ChatAgent] 📥 收到重试消息，开始处理...{RESET}")
+        else:
+            print(f"{CYAN}{BOLD}[ChatAgent] 📥 收到新消息，开始处理...{RESET}")
         
         # 4. 检查记忆预算
         if self._check_memory_budget():

@@ -14,6 +14,7 @@ import { llmConfigManager, LLMConfig } from './llmConfig';
 import { mcpManager, MCPClient, MCPTool } from './mcpClient';
 import { GoogleGenAI, Content, Part } from '@google/genai';
 import { extractMCPMedia, mightContainMedia, ExtractedMedia } from '../utils/mcpMediaExtractor';
+import { getBackendUrl } from '../utils/backendUrl';
 
 export interface LLMMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -269,6 +270,33 @@ export class LLMClient {
   }
 
   /**
+   * 检查是否需要使用代理（外部域名需要代理以避免 CORS）
+   */
+  private shouldUseProxy(apiUrl: string): boolean {
+    try {
+      const url = new URL(apiUrl);
+      const hostname = url.hostname;
+      // 如果是 localhost、127.0.0.1 或同源，不需要代理
+      if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0') {
+        return false;
+      }
+      // 检查是否是当前页面的同源
+      if (typeof window !== 'undefined') {
+        const currentOrigin = window.location.origin;
+        const apiOrigin = `${url.protocol}//${url.host}`;
+        if (currentOrigin === apiOrigin) {
+          return false;
+        }
+      }
+      // 其他情况使用代理
+      return true;
+    } catch {
+      // URL 解析失败，不使用代理
+      return false;
+    }
+  }
+
+  /**
    * 调用OpenAI API（流式响应）
    */
   private async callOpenAIStream(
@@ -286,6 +314,13 @@ export class LLMClient {
     const model = this.config.model || 'gpt-4';
 
     console.log(`[LLM] Using OpenAI Stream API URL: ${apiUrl}`);
+
+    // 检查是否需要使用代理（外部域名需要代理以避免 CORS）
+    const useProxy = this.shouldUseProxy(apiUrl);
+    if (useProxy) {
+      console.log(`[LLM] Using backend proxy for external API: ${apiUrl}`);
+      return this.callOpenAIStreamViaProxy(apiUrl, messages, tools, onChunk, onThinking);
+    }
 
     const controller = new AbortController();
     // 流式响应需要更长的超时时间（10分钟），因为AI可能需要较长时间生成内容
@@ -455,6 +490,82 @@ export class LLMClient {
   }
 
   /**
+   * 通过后端代理调用 OpenAI API（非流式响应）
+   */
+  private async callOpenAIViaProxy(
+    apiUrl: string,
+    messages: LLMMessage[], 
+    tools?: MCPTool[]
+  ): Promise<LLMResponse> {
+    const model = this.config.model || 'gpt-4';
+    const openAiTools = tools ? this.prepareToolsForOpenAI(tools) : undefined;
+    
+    const backendUrl = getBackendUrl();
+    const proxyUrl = `${backendUrl}/api/llm/proxy`;
+    
+    const requestBody = {
+      api_url: apiUrl,
+      api_key: this.config.apiKey,
+      headers: {},
+      body: {
+        model,
+        messages: messages.map(msg => {
+          const message: any = {
+            role: msg.role,
+            content: msg.content,
+          };
+          if (msg.tool_call_id) message.tool_call_id = msg.tool_call_id;
+          if (msg.name) message.name = msg.name;
+          if (msg.tool_calls) message.tool_calls = msg.tool_calls;
+          if (msg.reasoning_content) message.reasoning_content = msg.reasoning_content;
+          return message;
+        }),
+        tools: openAiTools,
+        tool_choice: openAiTools && openAiTools.length > 0 ? 'auto' : undefined,
+      },
+      stream: false,
+    };
+
+    const controller = new AbortController();
+    const timeoutDuration = 10 * 60 * 1000; // 10分钟
+    const timeoutId = setTimeout(() => controller.abort(), timeoutDuration);
+    
+    try {
+      const response = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(`LLM Proxy error: ${error.error || response.statusText}`);
+      }
+
+      const data = await response.json();
+      const choice = data.choices?.[0];
+      
+      return {
+        content: choice?.message?.content || '',
+        thinking: choice?.message?.reasoning_content || undefined,
+        tool_calls: choice?.message?.tool_calls || undefined,
+        finish_reason: choice?.finish_reason,
+      };
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      if (error.name === 'AbortError') {
+        throw new Error(`API request timeout (${timeoutDuration / 1000}s)`);
+      }
+      throw error;
+    }
+  }
+
+  /**
    * 调用OpenAI API（非流式响应）
    */
   private async callOpenAI(messages: LLMMessage[], tools?: MCPTool[]): Promise<LLMResponse> {
@@ -466,6 +577,13 @@ export class LLMClient {
     // 规范化 URL：如果用户只提供了 host，保留默认的 path
     const apiUrl = normalizeOpenAIUrl(this.config.apiUrl, defaultUrl);
     const model = this.config.model || 'gpt-4';
+
+    // 检查是否需要使用代理（外部域名需要代理以避免 CORS）
+    const useProxy = this.shouldUseProxy(apiUrl);
+    if (useProxy) {
+      console.log(`[LLM] Using backend proxy for external API: ${apiUrl}`);
+      return this.callOpenAIViaProxy(apiUrl, messages, tools);
+    }
 
     console.log(`[LLM] Using API URL: ${apiUrl} (original: ${this.config.apiUrl || 'default'})`);
 

@@ -1,14 +1,19 @@
 """
 LLM 服务层
 处理 LLM 配置相关的业务逻辑
+
+职责：
+1. 配置管理（CRUD）
+2. 非 Actor 模式的 LLM 调用（使用 Provider SDK）
+3. 图片生成（使用 Provider SDK）
 """
 
 from typing import List, Optional, Dict, Any
 import uuid
-import requests
-import json
 
 from models.llm_config import LLMConfig, LLMConfigRepository
+from services.providers import create_provider
+from services.providers.base import LLMMessage
 
 
 class LLMService:
@@ -175,186 +180,251 @@ class LLMService:
 
     def chat_completion(self, config_id: str, messages: List[dict], stream: bool = False) -> dict:
         """
-        执行聊天补全
+        执行聊天补全（非 Actor 模式）
+        
+        使用 Provider SDK 统一调用，不再使用 RESTful API
         
         Args:
             config_id: 配置 ID
-            messages: 消息列表
-            stream: 是否使用流式
+            messages: 消息列表（dict 格式，包含 role 和 content）
+            stream: 是否使用流式（暂不支持，返回完整响应）
             
         Returns:
-            响应内容
+            {
+                'content': str,  # 响应内容
+                'raw': dict,     # 原始响应（如果可用）
+            }
         """
+        # ANSI 颜色码（非 Actor 模式使用蓝色）
+        BLUE = '\033[94m'
+        RESET = '\033[0m'
+        BOLD = '\033[1m'
+        
         config = self.get_config(config_id, include_api_key=True)
         if not config:
             raise ValueError(f"LLM config not found: {config_id}")
-            
-        provider = config['provider']
-        api_key = config['api_key']
-        api_url = config.get('api_url') or ''
-        model_name = config.get('model')
         
-        if provider == 'openai':
-            default_url = 'https://api.openai.com/v1/chat/completions'
-            if not api_url:
-                api_url = default_url
-            elif '/chat/completions' not in api_url:
-                base_url = api_url.rstrip('/')
-                if base_url.endswith('/v1'):
-                    api_url = f"{base_url}/chat/completions"
-                else:
-                    api_url = f"{base_url}/v1/chat/completions"
-            
-            response = requests.post(
-                api_url,
-                headers={
-                    'Content-Type': 'application/json',
-                    'Authorization': f'Bearer {api_key}',
-                },
-                json={
-                    'model': model_name,
-                    'messages': messages,
-                    'stream': stream,
-                },
-                timeout=60
-            )
-            
-            if response.status_code != 200:
-                raise RuntimeError(f"OpenAI API error: {response.text}")
-                
-            data = response.json()
-            return {
-                'content': data['choices'][0]['message']['content'],
-                'raw': data
-            }
+        provider_type = config['provider']
+        model = config.get('model', 'unknown')
         
-        elif provider == 'deepseek':
-            # DeepSeek API (OpenAI 兼容)
-            default_url = 'https://api.deepseek.com/v1/chat/completions'
-            if not api_url:
-                api_url = default_url
-            elif '/chat/completions' not in api_url:
-                base_url = api_url.rstrip('/')
-                if base_url.endswith('/v1'):
-                    api_url = f"{base_url}/chat/completions"
-                else:
-                    api_url = f"{base_url}/v1/chat/completions"
+        print(f"{BLUE}{BOLD}[LLM Service - 非 Actor 模式] ========== 开始 LLM 调用 =========={RESET}")
+        print(f"{BLUE}[LLM Service] Provider: {provider_type}, Model: {model}{RESET}")
+        print(f"{BLUE}[LLM Service] Config ID: {config_id}{RESET}")
+        
+        # 转换消息格式并打印提示词
+        llm_messages = []
+        for msg in messages:
+            role = msg.get('role', 'user')
+            content = msg.get('content', '')
+            llm_messages.append(LLMMessage(
+                role=role,
+                content=content,
+                media=msg.get('media'),
+            ))
             
-            response = requests.post(
-                api_url,
-                headers={
-                    'Content-Type': 'application/json',
-                    'Authorization': f'Bearer {api_key}',
-                },
-                json={
-                    'model': model_name,
-                    'messages': messages,
-                    'stream': stream,
-                },
-                timeout=60
+            # 打印提示词（只打印前 500 字符，避免过长）
+            content_preview = content[:500] + '...' if len(content) > 500 else content
+            print(f"{BLUE}[LLM Service] {role.upper()} 提示词 ({len(content)} 字符): {content_preview}{RESET}")
+        
+        # 创建 Provider
+        provider = create_provider(
+            provider_type=provider_type,
+            api_key=config['api_key'],
+            api_url=config.get('api_url'),
+            model=model,
+            **(config.get('metadata') or {})
+        )
+        
+        # 调用 Provider（非流式）
+        # 注意：stream 参数暂不支持，统一返回完整响应
+        print(f"{BLUE}[LLM Service] 调用 Provider SDK...{RESET}")
+        response = provider.chat(llm_messages)
+        
+        content_length = len(response.content or '')
+        print(f"{BLUE}[LLM Service] ✅ 调用成功，返回内容长度: {content_length} 字符{RESET}")
+        print(f"{BLUE}{BOLD}[LLM Service - 非 Actor 模式] ========== LLM 调用完成 =========={RESET}\n")
+        
+        return {
+            'content': response.content or '',
+            'raw': {
+                'thinking': response.thinking,
+                'tool_calls': response.tool_calls,
+                'usage': response.usage,
+            } if hasattr(response, 'thinking') else {}
+        }
+    
+    def generate_avatar(self, config_id: str, name: str, description: str) -> dict:
+        """
+        使用 LLM 生成头像（非 Actor 模式）
+        
+        Args:
+            config_id: LLM 配置 ID
+            name: 角色名称
+            description: 头像描述
+            
+        Returns:
+            {'success': True, 'avatar': 'data:image/png;base64,...'} 或 {'success': False, 'error': '...'}
+        """
+        # ANSI 颜色码（非 Actor 模式使用蓝色）
+        BLUE = '\033[94m'
+        RESET = '\033[0m'
+        BOLD = '\033[1m'
+        
+        try:
+            config = self.get_config(config_id, include_api_key=True)
+            if not config:
+                return {'success': False, 'error': 'Config not found'}
+            
+            provider_type = config['provider']
+            model = config.get('model', 'unknown')
+            
+            print(f"{BLUE}{BOLD}[LLM Service - 非 Actor 模式] ========== 生成头像 =========={RESET}")
+            print(f"{BLUE}[LLM Service] Provider: {provider_type}, Model: {model}{RESET}")
+            print(f"{BLUE}[LLM Service] 角色名称: {name}{RESET}")
+            print(f"{BLUE}[LLM Service] 头像描述: {description}{RESET}")
+            
+            # 目前只有 Gemini 支持图像生成
+            if provider_type not in ['gemini', 'google']:
+                return {'success': False, 'error': f'{provider_type} 不支持图像生成，请选择 Gemini 模型'}
+            
+            api_key = config.get('api_key')
+            if not api_key:
+                return {'success': False, 'error': 'API key not configured'}
+
+            # 构建系统提示词
+            system_prompt = (
+                f'你是一个 AI 画师。请为以下角色设计并生成一张头像：\n'
+                f'名字：{name}\n'
+                f'描述：{description}\n\n'
+                '请根据角色的性格和背景，生成一张高质量、符合气质的头像。'
             )
             
-            if response.status_code != 200:
-                raise RuntimeError(f"DeepSeek API error: {response.text}")
-                
-            data = response.json()
-            return {
-                'content': data['choices'][0]['message']['content'],
-                'raw': data
-            }
+            print(f"{BLUE}[LLM Service] SYSTEM 提示词: {system_prompt[:200]}...{RESET}")
+            print(f"{BLUE}[LLM Service] USER 提示词: 请为我生成头像。{RESET}")
+
+            # 创建 Provider
+            provider = create_provider(
+                provider_type=provider_type,
+                api_key=api_key,
+                api_url=config.get('api_url'),
+                model=model,
+                **(config.get('metadata') or {})
+            )
+
+            # 构建消息
+            llm_messages = [
+                LLMMessage(role='system', content=system_prompt),
+                LLMMessage(role='user', content='请为我生成头像。'),
+            ]
+
+            # 调用 Provider
+            print(f"{BLUE}[LLM Service] 调用 Provider SDK 生成头像...{RESET}")
+            resp = provider.chat(llm_messages)
+            media = getattr(resp, 'media', None) or []
             
-        elif provider == 'ollama':
-            # Ollama 默认地址
-            if not api_url:
-                api_url = 'http://localhost:11434/api/chat'
-            elif not api_url.endswith('/api/chat'):
-                api_url = f"{api_url.rstrip('/')}/api/chat"
-                
-            response = requests.post(
-                api_url,
-                json={
-                    'model': model_name,
-                    'messages': messages,
-                    'stream': False, # 暂时只支持非流式
-                },
-                timeout=60
+            # 查找返回的图像数据
+            for item in media:
+                if (item or {}).get('type') == 'image' and (item or {}).get('data'):
+                    mime_type = (item or {}).get('mimeType') or (item or {}).get('mime_type') or 'image/png'
+                    data = (item or {}).get('data')
+                    print(f"{BLUE}[LLM Service] ✅ 头像生成成功，MIME 类型: {mime_type}{RESET}")
+                    print(f"{BLUE}{BOLD}[LLM Service - 非 Actor 模式] ========== 生成头像完成 =========={RESET}\n")
+                    return {'success': True, 'avatar': f'data:{mime_type};base64,{data}'}
+
+            print(f"{BLUE}[LLM Service] ❌ 模型未返回图像数据{RESET}")
+            print(f"{BLUE}{BOLD}[LLM Service - 非 Actor 模式] ========== 生成头像完成 =========={RESET}\n")
+            return {'success': False, 'error': '模型未返回图像数据'}
+               
+        except Exception as e:
+            print(f"{BLUE}[LLM Service] ❌ 生成头像失败: {str(e)}{RESET}")
+            print(f"{BLUE}{BOLD}[LLM Service - 非 Actor 模式] ========== 生成头像完成 =========={RESET}\n")
+            return {'success': False, 'error': str(e)}
+    
+    def refine_system_prompt(self, config_id: str, current_prompt: str, instruction: str) -> dict:
+        """
+        使用 LLM 优化系统提示词（非 Actor 模式）
+        
+        Args:
+            config_id: LLM 配置 ID
+            current_prompt: 当前提示词
+            instruction: 优化指令（用户输入的优化要求）
+            
+        Returns:
+            {'success': True, 'refined_prompt': '...'} 或 {'success': False, 'error': '...'}
+        """
+        # ANSI 颜色码（非 Actor 模式使用蓝色）
+        BLUE = '\033[94m'
+        RESET = '\033[0m'
+        BOLD = '\033[1m'
+        
+        try:
+            config = self.get_config(config_id, include_api_key=True)
+            if not config:
+                return {'success': False, 'error': 'Config not found'}
+            
+            provider_type = config['provider']
+            model = config.get('model', 'unknown')
+            
+            print(f"{BLUE}{BOLD}[LLM Service - 非 Actor 模式] ========== 优化提示词 =========={RESET}")
+            print(f"{BLUE}[LLM Service] Provider: {provider_type}, Model: {model}{RESET}")
+            print(f"{BLUE}[LLM Service] 当前提示词长度: {len(current_prompt)} 字符{RESET}")
+            print(f"{BLUE}[LLM Service] 优化指令: {instruction}{RESET}")
+            
+            # 构建优化提示词的消息
+            system_message = (
+                "你是一个专业的提示词优化助手。你的任务是根据用户的优化指令，改进和完善系统提示词。\n"
+                "要求：\n"
+                "- 保持原提示词的核心意图和风格\n"
+                "- 根据优化指令进行改进\n"
+                "- 输出优化后的完整提示词，不要只输出修改部分\n"
+                "- 如果优化指令不明确，可以适当扩展和完善提示词"
             )
             
-            if response.status_code != 200:
-                raise RuntimeError(f"Ollama API error: {response.text}")
-                
-            data = response.json()
-            return {
-                'content': data['message']['content'],
-                'raw': data
-            }
-        elif provider == 'anthropic':
-            # Anthropic API
-            target_url = api_url or 'https://api.anthropic.com/v1/messages'
-            headers = {
-                'Content-Type': 'application/json',
-                'x-api-key': api_key,
-                'anthropic-version': '2023-06-01'
-            }
+            user_message = (
+                f"当前提示词：\n{current_prompt}\n\n"
+                f"优化指令：{instruction}\n\n"
+                "请根据优化指令，输出优化后的完整提示词。"
+            )
+            
+            # 打印提示词（截断长内容）
+            current_prompt_preview = current_prompt[:300] + '...' if len(current_prompt) > 300 else current_prompt
+            print(f"{BLUE}[LLM Service] SYSTEM 提示词: {system_message[:200]}...{RESET}")
+            print(f"{BLUE}[LLM Service] USER 提示词 (当前提示词预览): {current_prompt_preview}{RESET}")
+            print(f"{BLUE}[LLM Service] USER 提示词 (优化指令): {instruction}{RESET}")
             
             # 转换消息格式
-            system_msg = next((m['content'] for m in messages if m['role'] == 'system'), None)
-            user_msgs = [m for m in messages if m['role'] != 'system']
+            llm_messages = [
+                LLMMessage(role='system', content=system_message),
+                LLMMessage(role='user', content=user_message),
+            ]
             
-            payload = {
-                'model': model_name,
-                'messages': user_msgs,
-                'max_tokens': 4096,
-            }
-            if system_msg:
-                payload['system'] = system_msg
-                
-            response = requests.post(target_url, headers=headers, json=payload, timeout=60)
-            if response.status_code != 200:
-                raise RuntimeError(f"Anthropic API error: {response.text}")
-                
-            data = response.json()
-            return {
-                'content': data['content'][0]['text'],
-                'raw': data
-            }
-        elif provider in ('google', 'gemini'):
-            # Gemini API
-            # 说明：
-            # - generateContent 支持通过 header 传递 x-goog-api-key
-            # - system prompt 的字段名是 systemInstruction（camelCase），不是 system_instruction
-            target_url = api_url or f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
-                
-            # 转换消息格式
-            contents = []
-            system_instruction = None
-            for m in messages:
-                if m['role'] == 'system':
-                    system_instruction = {'parts': [{'text': m['content']}]}
-                else:
-                    role = 'user' if m['role'] == 'user' else 'model'
-                    contents.append({'role': role, 'parts': [{'text': m['content']}]})
+            # 创建 Provider
+            provider = create_provider(
+                provider_type=provider_type,
+                api_key=config['api_key'],
+                api_url=config.get('api_url'),
+                model=model,
+                **(config.get('metadata') or {})
+            )
             
-            payload = {'contents': contents}
-            if system_instruction:
-                # Gemini REST API 使用 systemInstruction（camelCase）
-                payload['systemInstruction'] = system_instruction
+            # 调用 Provider
+            print(f"{BLUE}[LLM Service] 调用 Provider SDK 优化提示词...{RESET}")
+            response = provider.chat(llm_messages)
+            refined_prompt = (response.content or '').strip()
+            
+            if refined_prompt:
+                print(f"{BLUE}[LLM Service] ✅ 提示词优化成功，新提示词长度: {len(refined_prompt)} 字符{RESET}")
+                print(f"{BLUE}{BOLD}[LLM Service - 非 Actor 模式] ========== 优化提示词完成 =========={RESET}\n")
+                return {'success': True, 'refined_prompt': refined_prompt}
+            else:
+                print(f"{BLUE}[LLM Service] ❌ 模型未返回优化后的提示词{RESET}")
+                print(f"{BLUE}{BOLD}[LLM Service - 非 Actor 模式] ========== 优化提示词完成 =========={RESET}\n")
+                return {'success': False, 'error': '模型未返回优化后的提示词'}
                 
-            headers = {
-                'Content-Type': 'application/json',
-                'x-goog-api-key': api_key,
-            }
-            response = requests.post(target_url, json=payload, headers=headers, timeout=60)
-            if response.status_code != 200:
-                raise RuntimeError(f"Google API error: {response.text}")
-                
-            data = response.json()
-            return {
-                'content': data['candidates'][0]['content']['parts'][0]['text'],
-                'raw': data
-            }
-        else:
-            raise NotImplementedError(f"Provider {provider} not supported for backend chat yet")
+        except Exception as e:
+            print(f"{BLUE}[LLM Service] ❌ 优化提示词失败: {str(e)}{RESET}")
+            print(f"{BLUE}{BOLD}[LLM Service - 非 Actor 模式] ========== 优化提示词完成 =========={RESET}\n")
+            return {'success': False, 'error': str(e)}
 
 
 # 全局服务实例（延迟初始化）

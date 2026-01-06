@@ -33,8 +33,13 @@ class OpenAIProvider(BaseLLMProvider):
             if self.api_url:
                 # 移除 /chat/completions 后缀
                 base_url = self.api_url.replace('/chat/completions', '').rstrip('/')
+                # 确保以 /v1 结尾（OpenAI SDK 需要）
                 if not base_url.endswith('/v1'):
-                    base_url = f"{base_url}/v1"
+                    # 如果已经以 /v1/ 结尾，移除多余的斜杠
+                    if base_url.endswith('/v1/'):
+                        base_url = base_url.rstrip('/')
+                    else:
+                        base_url = f"{base_url}/v1"
             
             self._client = OpenAI(
                 api_key=self.api_key,
@@ -136,10 +141,13 @@ class OpenAIProvider(BaseLLMProvider):
             **filtered_kwargs
         }
 
+        self._log(f"REST API request: {url}")
         response = requests.post(url, headers=headers, json=payload, timeout=120)
 
         if response.status_code != 200:
-            raise RuntimeError(f"{'DeepSeek' if self.provider_type == 'deepseek' else 'OpenAI'} API error: {response.text}")
+            error_msg = response.text
+            self._log_error(f"API request failed: {response.status_code} - {error_msg}")
+            raise RuntimeError(f"{'DeepSeek' if self.provider_type == 'deepseek' else 'OpenAI'} API error ({response.status_code}): {error_msg}")
 
         data = response.json()
         choice = data['choices'][0]
@@ -165,10 +173,13 @@ class OpenAIProvider(BaseLLMProvider):
             **filtered_kwargs
         }
 
+        self._log(f"REST API stream request: {url}")
         response = requests.post(url, headers=headers, json=payload, stream=True, timeout=120)
 
         if response.status_code != 200:
-            raise RuntimeError(f"{'DeepSeek' if self.provider_type == 'deepseek' else 'OpenAI'} API error: {response.text}")
+            error_msg = response.text
+            self._log_error(f"API stream request failed: {response.status_code} - {error_msg}")
+            raise RuntimeError(f"{'DeepSeek' if self.provider_type == 'deepseek' else 'OpenAI'} API error ({response.status_code}): {error_msg}")
 
         full_content = ""
         finish_reason = None
@@ -201,13 +212,26 @@ class OpenAIProvider(BaseLLMProvider):
         if not self.api_url:
             return 'https://api.openai.com/v1/chat/completions'
         
-        if '/chat/completions' not in self.api_url:
-            base = self.api_url.rstrip('/')
-            if base.endswith('/v1'):
-                return f"{base}/chat/completions"
-            return f"{base}/v1/chat/completions"
+        # 如果已经包含完整路径，直接返回
+        if '/chat/completions' in self.api_url:
+            return self.api_url
         
-        return self.api_url
+        # 否则构建完整路径
+        base = self.api_url.rstrip('/')
+        
+        # 处理各种情况
+        if base.endswith('/v1'):
+            # 已经是 /v1 结尾，直接拼接
+            return f"{base}/chat/completions"
+        elif base.endswith('/v1/'):
+            # 以 /v1/ 结尾，移除末尾斜杠后拼接
+            return f"{base.rstrip('/')}/chat/completions"
+        elif '/v1/' in base or base.endswith('/v1'):
+            # 包含 /v1/ 或 /v1，直接拼接
+            return f"{base}/chat/completions"
+        else:
+            # 如果 base 不包含 /v1，添加它
+            return f"{base}/v1/chat/completions"
     
     def _get_headers(self) -> Dict[str, str]:
         """获取请求头"""

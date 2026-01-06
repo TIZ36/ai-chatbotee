@@ -452,7 +452,20 @@ class TopicService:
 
         safe_payload = _json_safe(payload)
         self.redis_client.publish(channel, json.dumps(safe_payload))
-        print(f"[TopicService] Published {event_type} to {channel}")
+        
+        # ANSI 颜色码（蓝色加粗）
+        CYAN = '\033[96m'
+        BOLD = '\033[1m'
+        RESET = '\033[0m'
+        
+        if event_type == 'new_message':
+            ext = data.get('ext', {}) or {}
+            if ext.get('auto_trigger') and ext.get('retry'):
+                print(f"{CYAN}{BOLD}[TopicService] 📤 发布重试消息到 {channel} (message_id: {data.get('message_id', 'N/A')}){RESET}")
+            else:
+                print(f"{CYAN}{BOLD}[TopicService] 📤 发布新消息到 {channel} (message_id: {data.get('message_id', 'N/A')}){RESET}")
+        else:
+            print(f"[TopicService] Published {event_type} to {channel}")
     
     def publish_process_event(
         self,

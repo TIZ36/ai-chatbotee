@@ -9,16 +9,10 @@ import {
 } from '../services/sessionApi';
 import { getLLMConfigs, LLMConfigFromDB } from '../services/llmApi';
 import AgentPersonaDialog from './AgentPersonaDialog';
-import RoleGeneratorPage from './RoleGeneratorPage';
+import CreateAgentDialog from './CreateAgentDialog';
 import { Button } from './ui/Button';
 import { IconButton } from './ui/IconButton';
 import { ConfirmDialog } from './ui/ConfirmDialog';
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-  DialogDescription,
-} from './ui/Dialog';
 import { toast } from './ui/use-toast';
 
 const AgentsPage: React.FC = () => {
@@ -32,12 +26,12 @@ const AgentsPage: React.FC = () => {
   const [deleteAgentTarget, setDeleteAgentTarget] = useState<Session | null>(null);
   const [personaEditAgent, setPersonaEditAgent] = useState<Session | null>(null);
   const [personaDialogInitialTab, setPersonaDialogInitialTab] = useState<'basic' | 'persona'>('basic');
-  const [showRoleGenerator, setShowRoleGenerator] = useState(false);
+  const [showCreateAgent, setShowCreateAgent] = useState(false);
 
   // 处理从外部导航来的新建请求
   useEffect(() => {
     if (location.state?.openGenerator) {
-      setShowRoleGenerator(true);
+      setShowCreateAgent(true);
       // 清除 state 避免刷新页面再次打开
       window.history.replaceState({}, document.title);
     }
@@ -182,7 +176,7 @@ const AgentsPage: React.FC = () => {
             <Button
               variant="primary"
               size="sm"
-              onClick={() => setShowRoleGenerator(true)}
+              onClick={() => setShowCreateAgent(true)}
               className="h-8"
             >
               <Sparkles className="w-3.5 h-3.5 mr-1.5" />
@@ -210,7 +204,7 @@ const AgentsPage: React.FC = () => {
             <p className="text-sm text-gray-500 dark:text-[#858585] mb-6 max-w-xs mx-auto">
               您可以使用角色生成器创建一个智能体，或者从文件导入
             </p>
-            <Button variant="primary" onClick={() => setShowRoleGenerator(true)}>
+            <Button variant="primary" onClick={() => setShowCreateAgent(true)}>
               <Sparkles className="w-4 h-4 mr-2" />
               立即创建
             </Button>
@@ -334,34 +328,15 @@ const AgentsPage: React.FC = () => {
       initialTab={personaDialogInitialTab}
     />
 
-    {/* 角色生成器对话框 */}
-    <Dialog open={showRoleGenerator} onOpenChange={setShowRoleGenerator}>
-      <DialogContent className="max-w-[95vw] w-[1400px] h-[90vh] p-0 overflow-hidden flex flex-col border-none shadow-2xl">
-        <div className="flex-shrink-0 px-6 py-3 border-b border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-purple-600 dark:text-purple-400" />
-            </div>
-            <div>
-              <DialogTitle className="text-lg font-bold">角色生成器</DialogTitle>
-              <DialogDescription className="text-xs">通过生成器快速打造独一无二的 AI 角色</DialogDescription>
-            </div>
-          </div>
-          <Button variant="ghost" size="icon" onClick={() => setShowRoleGenerator(false)} className="h-8 w-8 rounded-full">
-            <X className="w-4 h-4" />
-          </Button>
-        </div>
-        <div className="flex-1 min-h-0">
-          <RoleGeneratorPage 
-            isEmbedded={true} 
-            onSaved={() => {
-              setShowRoleGenerator(false);
-              loadAgents();
-            }}
-          />
-        </div>
-      </DialogContent>
-    </Dialog>
+    {/* 角色生成器对话框（统一弹框风格） */}
+    <CreateAgentDialog
+      open={showCreateAgent}
+      onOpenChange={setShowCreateAgent}
+      onSaved={() => {
+        setShowCreateAgent(false);
+        loadAgents();
+      }}
+    />
     </>
   );
 };
