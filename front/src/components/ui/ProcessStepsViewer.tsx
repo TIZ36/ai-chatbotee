@@ -35,7 +35,7 @@ export interface ProcessStep {
   toolName?: string;
   arguments?: any;
   result?: any;
-  status?: 'pending' | 'running' | 'completed' | 'error';
+  status?: 'pending' | 'running' | 'completed' | 'error' | 'interrupted';
   duration?: number;
   error?: string;
   action?: string;
@@ -54,6 +54,17 @@ export interface ProcessStep {
     result?: string;
     config?: any;
   };
+  // ActionChain 相关字段
+  chain_id?: string;
+  chain_progress?: string;  // 如 "2/5"
+  chain_status?: 'pending' | 'running' | 'completed' | 'error' | 'interrupted';
+  action_type?: string;  // AgentActionType 值
+  step_id?: string;
+  origin_agent_id?: string;
+  target_agent_id?: string;
+  interrupt?: boolean;
+  // Agent 模式
+  agent_mode?: 'normal' | 'persona';
 }
 
 export interface ProcessStepsViewerProps {
@@ -309,6 +320,8 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
         return <XCircle className="w-2.5 h-2.5 text-red-400/70" />;
       case 'running':
         return <Loader className="w-2.5 h-2.5 text-blue-400/70 animate-spin" />;
+      case 'interrupted':
+        return <XCircle className="w-2.5 h-2.5 text-orange-400/70" />;
       default:
         return <Clock className="w-2.5 h-2.5 text-gray-400/60" />;
     }
@@ -347,6 +360,35 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
           return <XCircle className="w-2.5 h-2.5 text-red-400/70" />;
         }
         return <ShieldCheck className="w-2.5 h-2.5 text-green-400/70" />;
+      // ActionChain 相关类型
+      case 'action_chain_started':
+        return <WorkflowIcon className="w-2.5 h-2.5 text-cyan-400/70" />;
+      case 'action_chain_resumed':
+        return <WorkflowIcon className="w-2.5 h-2.5 text-cyan-400/70" />;
+      case 'action_step_start':
+        return <Zap className="w-2.5 h-2.5 text-amber-400/70" />;
+      case 'action_step_done':
+        return step?.status === 'error' 
+          ? <XCircle className="w-2.5 h-2.5 text-red-400/70" />
+          : <CheckCircle className="w-2.5 h-2.5 text-green-400/70" />;
+      case 'action_chain_progress':
+        return <WorkflowIcon className="w-2.5 h-2.5 text-blue-400/70" />;
+      case 'action_chain_interrupt':
+        return <XCircle className="w-2.5 h-2.5 text-orange-400/70" />;
+      case 'ag_use_mcp':
+        return <Wrench className="w-2.5 h-2.5 text-emerald-400/70" />;
+      case 'ag_call_ag':
+        return <MessageSquare className="w-2.5 h-2.5 text-purple-400/70" />;
+      case 'ag_call_human':
+        return <MessageSquare className="w-2.5 h-2.5 text-yellow-400/70" />;
+      case 'ag_accept':
+        return <CheckCircle className="w-2.5 h-2.5 text-green-400/70" />;
+      case 'ag_refuse':
+        return <XCircle className="w-2.5 h-2.5 text-red-400/70" />;
+      case 'ag_self_gen':
+        return <Lightbulb className="w-2.5 h-2.5 text-purple-400/70" />;
+      case 'ag_self_decision':
+        return <Brain className="w-2.5 h-2.5 text-indigo-400/70" />;
       default:
         return <FileText className="w-2.5 h-2.5 text-gray-400/60" />;
     }
@@ -393,6 +435,93 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
         return 'LLM 响应信息';
       case 'llm_media_signature':
         return 'LLM 图片签名';
+      // ActionChain 相关类型标签
+      case 'action_chain_started':
+        return (
+          <>
+            工作链开始 {step.chain_progress && <span className="text-cyan-400">({step.chain_progress})</span>}
+          </>
+        );
+      case 'action_chain_resumed':
+        return (
+          <>
+            接续工作链 {step.chain_progress && <span className="text-cyan-400">({step.chain_progress})</span>}
+            {step.origin_agent_id && <span className="text-gray-400 ml-1">← {step.origin_agent_id}</span>}
+          </>
+        );
+      case 'action_step_start': {
+        const actionTypeMap: Record<string, string> = {
+          'ag_accept': '接受处理',
+          'ag_refuse': '拒绝处理',
+          'ag_self_gen': '自主生成',
+          'ag_self_decision': '自主决策',
+          'ag_use_mcp': 'MCP调用',
+          'ag_call_ag': '调用Agent',
+          'ag_call_human': '请求人类',
+        };
+        const actionLabel = step.action_type ? (actionTypeMap[step.action_type] || step.action_type) : '执行';
+        return (
+          <>
+            <strong className="font-semibold">{actionLabel}</strong> 开始
+            {step.chain_progress && <span className="text-amber-400 ml-1">[{step.chain_progress}]</span>}
+          </>
+        );
+      }
+      case 'action_step_done': {
+        const actionTypeMap: Record<string, string> = {
+          'ag_accept': '接受处理',
+          'ag_refuse': '拒绝处理',
+          'ag_self_gen': '自主生成',
+          'ag_self_decision': '自主决策',
+          'ag_use_mcp': 'MCP调用',
+          'ag_call_ag': '调用Agent',
+          'ag_call_human': '请求人类',
+        };
+        const actionLabel = step.action_type ? (actionTypeMap[step.action_type] || step.action_type) : '执行';
+        const statusText = step.status === 'error' ? '失败' : (step.interrupt ? '(中断后续)' : '完成');
+        return (
+          <>
+            <strong className="font-semibold">{actionLabel}</strong> {statusText}
+            {step.duration && <span className="text-gray-400 ml-1">({formatDuration(step.duration)})</span>}
+          </>
+        );
+      }
+      case 'action_chain_progress':
+        return (
+          <>
+            工作链进度: <span className="text-blue-400 font-semibold">{step.chain_progress || '...'}</span>
+            {step.chain_status && <span className="ml-1">({step.chain_status})</span>}
+          </>
+        );
+      case 'action_chain_interrupt':
+        return (
+          <>
+            <span className="text-orange-400 font-semibold">⚠️ 工作链被中断</span>
+            {step.thinking && <span className="text-gray-400 ml-1">({step.thinking})</span>}
+          </>
+        );
+      case 'ag_use_mcp':
+        return (
+          <>
+            MCP调用: <strong className="font-semibold">{step.toolName || 'unknown'}</strong>
+          </>
+        );
+      case 'ag_call_ag':
+        return (
+          <>
+            调用Agent: <strong className="font-semibold">@{step.target_agent_id || 'unknown'}</strong>
+          </>
+        );
+      case 'ag_call_human':
+        return '请求人类介入';
+      case 'ag_accept':
+        return '✓ 接受处理';
+      case 'ag_refuse':
+        return '✕ 拒绝处理';
+      case 'ag_self_gen':
+        return '自主生成内容';
+      case 'ag_self_decision':
+        return '自主决策';
       default:
         return type;
     }
@@ -400,7 +529,10 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
 
   // 判断是否为重要步骤
   const isImportantStep = (type: string) => {
-    return ['mcp_call', 'workflow', 'agent_decision', 'agent_will_reply', 'llm_media_signature'].includes(type);
+    return [
+      'mcp_call', 'workflow', 'agent_decision', 'agent_will_reply', 'llm_media_signature',
+      'action_step_start', 'action_step_done', 'action_chain_interrupt', 'ag_use_mcp', 'ag_call_ag'
+    ].includes(type);
   };
 
   // 计算步骤数（如果还在思考中但没有步骤，显示为 0）

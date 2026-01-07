@@ -40,6 +40,12 @@ class TopicEventType:
     
     # 处理流程事件（新增）
     PROCESS_EVENT = 'process_event'  # Topic.Event.Process 统一事件
+    
+    # ActionChain 事件
+    ACTION_STEP_START = 'action_step_start'       # ActionStep 开始执行
+    ACTION_STEP_DONE = 'action_step_done'         # ActionStep 执行完成
+    ACTION_CHAIN_PROGRESS = 'action_chain_progress'  # ActionChain 进度更新
+    ACTION_CHAIN_INTERRUPT = 'action_chain_interrupt'  # ActionChain 被中断
 
 
 class ProcessEventPhase:
@@ -499,6 +505,108 @@ class TopicService:
             **(data or {}),
         }
         self._publish_event(topic_id, TopicEventType.PROCESS_EVENT, event_data)
+
+    def publish_interrupt(self, topic_id: str, agent_id: str, reason: str = 'user_interrupt') -> bool:
+        """
+        发布中断信号并设置 Redis 标记
+        
+        Args:
+            topic_id: Topic ID
+            agent_id: 要中断的 Agent ID
+            reason: 中断原因
+            
+        Returns:
+            True if interrupt was published successfully
+        """
+        if not self.redis_client:
+            return False
+        
+        # 设置 Redis 中断标记 (TTL 60秒)
+        interrupt_key = f'interrupt:{topic_id}:{agent_id}'
+        try:
+            self.redis_client.setex(interrupt_key, 60, reason)
+        except Exception as e:
+            print(f"[TopicService] Failed to set interrupt flag: {e}")
+            return False
+        
+        # 发布中断事件
+        event_data = {
+            'agent_id': agent_id,
+            'reason': reason,
+            'timestamp': time.time(),
+        }
+        self._publish_event(topic_id, TopicEventType.ACTION_CHAIN_INTERRUPT, event_data)
+        print(f"[TopicService] 🛑 Published interrupt for agent {agent_id} in {topic_id}")
+        return True
+
+    def check_interrupt(self, topic_id: str, agent_id: str) -> bool:
+        """
+        检查是否有中断信号
+        
+        Args:
+            topic_id: Topic ID
+            agent_id: Agent ID
+            
+        Returns:
+            True if interrupt flag is set
+        """
+        if not self.redis_client:
+            return False
+        
+        interrupt_key = f'interrupt:{topic_id}:{agent_id}'
+        try:
+            return self.redis_client.get(interrupt_key) is not None
+        except Exception:
+            return False
+
+    def clear_interrupt(self, topic_id: str, agent_id: str) -> bool:
+        """
+        清除中断标记
+        
+        Args:
+            topic_id: Topic ID
+            agent_id: Agent ID
+            
+        Returns:
+            True if cleared successfully
+        """
+        if not self.redis_client:
+            return False
+        
+        interrupt_key = f'interrupt:{topic_id}:{agent_id}'
+        try:
+            self.redis_client.delete(interrupt_key)
+            return True
+        except Exception:
+            return False
+
+    def publish_action_chain_progress(self, topic_id: str, agent_id: str,
+                                       chain_id: str, current_index: int,
+                                       total_steps: int, status: str,
+                                       current_step: dict = None):
+        """
+        发布 ActionChain 进度事件
+        
+        Args:
+            topic_id: Topic ID
+            agent_id: Agent ID
+            chain_id: ActionChain ID
+            current_index: 当前步骤索引
+            total_steps: 总步骤数
+            status: 链状态
+            current_step: 当前步骤详情
+        """
+        event_data = {
+            'chain_id': chain_id,
+            'agent_id': agent_id,
+            'current_index': current_index,
+            'total_steps': total_steps,
+            'status': status,
+            'progress_text': f'{current_index}/{total_steps}',
+            'current_step': current_step,
+            'timestamp': time.time(),
+        }
+        self._publish_event(topic_id, TopicEventType.ACTION_CHAIN_PROGRESS, event_data)
 
 # 全局实例
 topic_service: Optional[TopicService] = None

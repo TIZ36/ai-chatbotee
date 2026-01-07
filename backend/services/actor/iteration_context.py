@@ -143,6 +143,17 @@ class IterationContext:
     plan_index: int = 0  # 当前执行到计划的第几步
     plan_accumulated_content: str = ""  # 累积的 LLM 生成内容
     
+    # ========== ActionChain 支持 ==========
+    
+    # ActionChain ID（如果从上游 agent 继承）
+    action_chain_id: Optional[str] = None
+    
+    # 是否继承了 ActionChain（从 @回复中恢复）
+    inherited_chain: bool = False
+    
+    # 当前 ActionChain 进度索引
+    chain_step_index: int = 0
+    
     def add_step(
         self,
         step_type: str,

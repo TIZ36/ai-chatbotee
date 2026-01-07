@@ -33,6 +33,11 @@ from .actor_state import ActorState
 from .iteration_context import IterationContext, DecisionContext, MessageType, ProcessPhase, LLMDecision
 from .actions import Action, ActionResult, ResponseDecision
 from .capability_registry import CapabilityRegistry
+from .action_chain import (
+    ActionChain, ActionStep, ActionChainStore,
+    AgentActionType, ActionStepStatus,
+    create_action_step, create_mcp_step, create_call_agent_step,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -859,6 +864,152 @@ class ActorBase(ABC):
                 duration_ms=duration_ms,
                 action=action,
             )
+
+    def _execute_action_step(self, step: 'ActionStep', ctx: IterationContext) -> 'ActionResult':
+        """
+        执行 ActionChain 中的一个步骤，带 do_before/do_after 回调
+        
+        Args:
+            step: ActionStep 对象
+            ctx: 迭代上下文
+            
+        Returns:
+            ActionResult 执行结果
+        """
+        from services.topic_service import get_topic_service
+        from .action_chain import AgentActionType, ActionStepStatus
+        from .actions import Action, ActionResult
+        
+        topic_service = get_topic_service()
+        
+        # 调用 do_before 回调
+        step.do_before(topic_service, ctx.topic_id, self.agent_id)
+        
+        success = True
+        error_msg = None
+        result_data = {}
+        
+        try:
+            action_type = step.action_type
+            
+            if action_type == AgentActionType.AG_USE_MCP:
+                # MCP 调用
+                action = Action(
+                    type='mcp',
+                    server_id=step.mcp_server_id,
+                    mcp_tool_name=step.mcp_tool_name,
+                    params=step.params,
+                    description=step.description,
+                )
+                action_result = self._execute_action(action, ctx)
+                success = action_result.success
+                error_msg = action_result.error
+                result_data = action_result.data or {}
+                
+            elif action_type == AgentActionType.AG_SELF_GEN:
+                # 自行生成内容（由后续 LLM 调用处理）
+                result_data = {'status': 'ready_for_generation'}
+                
+            elif action_type == AgentActionType.AG_ACCEPT:
+                # 接受处理
+                result_data = {'accepted': True}
+                
+            elif action_type == AgentActionType.AG_REFUSE:
+                # 拒绝处理 - 触发中断
+                step.interrupt = True
+                result_data = {'refused': True, 'reason': step.params.get('reason', '')}
+                
+            elif action_type == AgentActionType.AG_SELF_DECISION:
+                # 自主决策
+                result_data = {'decision': step.params.get('decision', '')}
+                
+            elif action_type == AgentActionType.AG_CALL_HUMAN:
+                # 需要人类介入
+                result_data = {'waiting_for_human': True, 'message': step.params.get('message', '')}
+                
+            elif action_type == AgentActionType.AG_CALL_AG:
+                # 调用其他 Agent - 通过 @ 消息传递
+                result_data = self._handle_call_agent_step(step, ctx)
+                
+            else:
+                error_msg = f"Unknown action type: {action_type}"
+                success = False
+                
+        except Exception as e:
+            success = False
+            error_msg = str(e)
+            logger.error(f"[ActorBase:{self.agent_id}] ActionStep execution error: {e}")
+        
+        # 更新步骤结果
+        step.result = result_data
+        
+        # 调用 do_after 回调
+        step.do_after(topic_service, ctx.topic_id, self.agent_id, success=success, error=error_msg)
+        
+        # 构建 ActionResult
+        return ActionResult(
+            action_type=step.action_type.value,
+            success=success,
+            data=result_data,
+            error=error_msg,
+            action=None,
+        )
+
+    def _handle_call_agent_step(self, step: 'ActionStep', ctx: IterationContext) -> dict:
+        """
+        处理 AG_CALL_AG 步骤 - 通过 @ 消息调用其他 Agent
+        
+        Args:
+            step: ActionStep 对象
+            ctx: 迭代上下文
+            
+        Returns:
+            结果数据字典
+        """
+        from services.topic_service import get_topic_service
+        from .action_chain import ActionChainStore
+        
+        topic_service = get_topic_service()
+        
+        target_agent_id = step.target_agent_id
+        target_topic_id = step.target_topic_id or ctx.topic_id
+        message = step.params.get('message', '')
+        
+        # 保存当前 ActionChain 进度到 Redis
+        chain_id = ctx.action_chain_id
+        if chain_id:
+            chain_store = ActionChainStore(self._redis_client)
+            # Chain 已在外部保存，这里只需要记录进度
+            logger.info(f"[ActorBase:{self.agent_id}] Saving chain progress: {chain_id} at step {ctx.chain_step_index}")
+        
+        # 构造 @ 消息
+        content = f"@{target_agent_id} {message}"
+        
+        # 发送消息到目标 topic
+        ext = {
+            'action_chain_id': chain_id,
+            'chain_step_index': ctx.chain_step_index,
+            'origin_agent_id': self.agent_id,
+            'delegated_to': target_agent_id,
+        }
+        
+        topic_service.send_message(
+            topic_id=target_topic_id,
+            sender_id=self.agent_id,
+            sender_type='agent',
+            content=content,
+            role='assistant',
+            mentions=[target_agent_id],
+            ext=ext,
+        )
+        
+        logger.info(f"[ActorBase:{self.agent_id}] Called agent {target_agent_id} via @ message")
+        
+        return {
+            'called_agent': target_agent_id,
+            'chain_id': chain_id,
+            'message_sent': True,
+        }
     
     def _should_continue(self, ctx: IterationContext) -> bool:
         """
@@ -992,15 +1143,140 @@ class ActorBase(ABC):
         """
         检查是否被打断
         
+        检查 Redis 中断标记或 ActionChain 中断信号
+        
         Args:
             ctx: 迭代上下文
             
         Returns:
             True 表示被打断
         """
-        # 检查 mailbox 是否有新消息（打断信号）
+        # 1. 检查 Redis 中断标记
+        if self.topic_id:
+            from services.topic_service import get_topic_service
+            try:
+                topic_service = get_topic_service()
+                if topic_service.check_interrupt(self.topic_id, self.agent_id):
+                    logger.info(f"[ActorBase:{self.agent_id}] Interrupted via Redis flag")
+                    # 清除中断标记
+                    topic_service.clear_interrupt(self.topic_id, self.agent_id)
+                    return True
+            except Exception as e:
+                logger.warning(f"[ActorBase:{self.agent_id}] Failed to check interrupt: {e}")
+        
+        # 2. 检查 mailbox 是否有新消息（打断信号）
         # 这里简单实现，子类可重写
         return False
+
+    def _check_inherited_chain(self, ctx: IterationContext, msg_data: Dict[str, Any]) -> Optional[ActionChain]:
+        """
+        检查消息是否携带了继承的 ActionChain
+        
+        当其他 Agent 通过 @ 消息传递任务时，会在 ext 中携带 action_chain_id。
+        本方法从 Redis 加载该 chain 并设置上下文。
+        
+        Args:
+            ctx: 迭代上下文
+            msg_data: 消息数据
+            
+        Returns:
+            ActionChain 如果找到并加载成功，否则 None
+        """
+        ext = msg_data.get('ext', {}) or {}
+        chain_id = ext.get('action_chain_id')
+        
+        if not chain_id:
+            return None
+        
+        # 从 Redis 加载 ActionChain
+        chain_store = ActionChainStore(self._redis_client)
+        chain = chain_store.load(chain_id)
+        
+        if not chain:
+            logger.warning(f"[ActorBase:{self.agent_id}] ActionChain {chain_id} not found in Redis")
+            return None
+        
+        # 更新上下文
+        ctx.action_chain_id = chain_id
+        ctx.inherited_chain = True
+        ctx.chain_step_index = ext.get('chain_step_index', chain.current_index)
+        
+        logger.info(f"[ActorBase:{self.agent_id}] Inherited ActionChain {chain_id} at step {ctx.chain_step_index}/{len(chain.steps)}")
+        
+        # 添加思考步骤
+        ctx.add_step(
+            'action_chain_resumed',
+            thinking=f'接续处理 ActionChain，当前进度 {ctx.chain_step_index + 1}/{len(chain.steps)}',
+            chain_id=chain_id,
+            chain_progress=f'{ctx.chain_step_index + 1}/{len(chain.steps)}',
+            origin_agent_id=ext.get('origin_agent_id'),
+        )
+        
+        return chain
+
+    def _create_action_chain(self, ctx: IterationContext, name: str = '') -> ActionChain:
+        """
+        创建新的 ActionChain
+        
+        Args:
+            ctx: 迭代上下文
+            name: 链名称
+            
+        Returns:
+            新创建的 ActionChain
+        """
+        chain = ActionChain(
+            name=name or f'Chain for {ctx.reply_message_id}',
+            origin_agent_id=self.agent_id,
+            origin_topic_id=ctx.topic_id,
+        )
+        
+        # 保存到 Redis
+        chain_store = ActionChainStore(self._redis_client)
+        chain_store.save(chain)
+        
+        # 更新上下文
+        ctx.action_chain_id = chain.chain_id
+        ctx.inherited_chain = False
+        ctx.chain_step_index = 0
+        
+        logger.info(f"[ActorBase:{self.agent_id}] Created ActionChain {chain.chain_id}")
+        
+        return chain
+
+    def _save_action_chain(self, chain: ActionChain) -> bool:
+        """
+        保存 ActionChain 到 Redis
+        
+        Args:
+            chain: ActionChain 对象
+            
+        Returns:
+            是否保存成功
+        """
+        chain_store = ActionChainStore(self._redis_client)
+        return chain_store.save(chain)
+
+    def _publish_chain_progress(self, ctx: IterationContext, chain: ActionChain):
+        """
+        发布 ActionChain 进度事件
+        
+        Args:
+            ctx: 迭代上下文
+            chain: ActionChain 对象
+        """
+        from services.topic_service import get_topic_service
+        
+        progress = chain.get_progress()
+        get_topic_service().publish_action_chain_progress(
+            topic_id=ctx.topic_id,
+            agent_id=self.agent_id,
+            chain_id=chain.chain_id,
+            current_index=progress['current_index'],
+            total_steps=progress['total_steps'],
+            status=progress['status'],
+            current_step=progress['current_step'],
+        )
     
     # ========== 消息处理流程（新增）==========
     

@@ -29,6 +29,11 @@ from .capability_registry import CapabilityRegistry
 from .actor_base import ActorBase
 from .actor_manager import ActorManager, activate_agent, get_active_agents
 from .agents import ChatAgent
+from .action_chain import (
+    ActionChain, ActionStep, ActionChainStore,
+    AgentActionType, ActionStepStatus,
+    create_action_step, create_mcp_step, create_call_agent_step,
+)
 
 # 兼容层（延迟导入避免循环）
 def _get_compat():
@@ -48,6 +53,15 @@ __all__ = [
     'ActorManager',
     # Agent 实现
     'ChatAgent',
+    # ActionChain 系统
+    'ActionChain',
+    'ActionStep',
+    'ActionChainStore',
+    'AgentActionType',
+    'ActionStepStatus',
+    'create_action_step',
+    'create_mcp_step',
+    'create_call_agent_step',
     # 辅助函数
     'activate_agent',
     'get_active_agents',

@@ -4587,6 +4587,26 @@ def add_topic_participant(session_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/topics/<session_id>/interrupt', methods=['POST', 'OPTIONS'])
+@app.route('/api/sessions/<session_id>/interrupt', methods=['POST', 'OPTIONS'])
+def interrupt_agent_processing(session_id):
+    """中断 Agent 处理 - 前端打断生成"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    try:
+        from services.topic_service import get_topic_service
+        data = request.get_json() or {}
+        agent_id = data.get('agent_id')
+        reason = data.get('reason', 'user_interrupt')
+        
+        if not agent_id:
+            return jsonify({'error': 'agent_id is required'}), 400
+        
+        success = get_topic_service().publish_interrupt(session_id, agent_id, reason)
+        return jsonify({'success': success})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/topics/<session_id>/participants/<participant_id>', methods=['DELETE', 'OPTIONS'])
 @app.route('/api/sessions/<session_id>/participants/<participant_id>', methods=['DELETE', 'OPTIONS'])
 def remove_topic_participant(session_id, participant_id):
