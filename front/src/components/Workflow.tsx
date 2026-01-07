@@ -10,7 +10,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Virtuoso } from 'react-virtuoso';
 import { LLMClient, LLMMessage } from '../services/llmClient';
-import { getLLMConfigs, getLLMConfig, getLLMConfigApiKey, LLMConfigFromDB } from '../services/llmApi';
+import { getLLMConfigs, getLLMConfig, getLLMConfigApiKey, LLMConfigFromDB, getProviders, LLMProvider } from '../services/llmApi';
 import { mcpManager, MCPServer, MCPTool } from '../services/mcpClient';
 import { getMCPServers, MCPServerConfig } from '../services/mcpApi';
 import { getSessions, getAgents, getSession, createSession, getSessionMessages, saveMessage, summarizeSession, getSessionSummaries, deleteSession, clearSummarizeCache, deleteMessage, executeMessageComponent, updateSessionAvatar, updateSessionName, updateSessionSystemPrompt, updateSessionMediaOutputPath, updateSessionLLMConfig, upgradeToAgent, updateSessionType, Session, Summary, MessageExt } from '../services/sessionApi';
@@ -104,17 +104,35 @@ const PROVIDER_ICONS: Record<string, { icon: string; color: string }> = {
   custom: { icon: '⚙️', color: '#8B5CF6' },
 };
 
-// 根据 LLM 配置获取提供商图标（优先使用自定义上传的 logo）
-const getProviderIcon = (config: LLMConfigFromDB | null): { 
+// 根据 LLM 配置获取提供商图标（优先使用供应商的 logo，其次使用自定义上传的 logo）
+const getProviderIcon = (config: LLMConfigFromDB | null, providers: LLMProvider[] = []): { 
   icon: string; 
   color: string; 
   customLogo?: string;
+  logoLight?: string;
+  logoDark?: string;
   logoPosition?: { x: number; y: number };
   logoScale?: number;
 } => {
   if (!config) return { icon: '🤖', color: '#6B7280' };
   
-  // 优先使用用户上传的自定义 logo
+  // 1. 优先使用供应商的 logo（根据 provider_type 匹配）
+  const provider = providers.find(p => 
+    p.provider_type === config.provider || 
+    p.provider_id === config.provider ||
+    (config as any).provider_id === p.provider_id
+  );
+  
+  if (provider && (provider.logo_light || provider.logo_dark)) {
+    return {
+      icon: '',
+      color: 'transparent',
+      logoLight: provider.logo_light,
+      logoDark: provider.logo_dark,
+    };
+  }
+  
+  // 2. 其次使用用户上传的自定义 logo
   const customLogo = config.metadata?.providerLogo;
   if (customLogo) {
     return { 
@@ -129,6 +147,7 @@ const getProviderIcon = (config: LLMConfigFromDB | null): {
     };
   }
   
+  // 3. 最后使用默认 emoji 图标
   // 检查 API URL 中是否包含特定提供商
   const apiUrl = config.api_url?.toLowerCase() || '';
   if (apiUrl.includes('deepseek')) return PROVIDER_ICONS.deepseek;
@@ -136,8 +155,8 @@ const getProviderIcon = (config: LLMConfigFromDB | null): {
   if (apiUrl.includes('googleapis') || apiUrl.includes('gemini')) return PROVIDER_ICONS.gemini;
   
   // 然后检查 provider 字段
-  const provider = config.provider?.toLowerCase() || 'openai';
-  return PROVIDER_ICONS[provider] || PROVIDER_ICONS.openai;
+  const providerType = config.provider?.toLowerCase() || 'openai';
+  return PROVIDER_ICONS[providerType] || PROVIDER_ICONS.openai;
 };
 
 /** 单个过程步骤（用于记录多轮思考和MCP调用） */
@@ -382,6 +401,7 @@ const Workflow: React.FC<WorkflowProps> = ({
   
   // LLM配置
   const [llmConfigs, setLlmConfigs] = useState<LLMConfigFromDB[]>([]);
+  const [providers, setProviders] = useState<LLMProvider[]>([]);
   const [selectedLLMConfigId, setSelectedLLMConfigId] = useState<string | null>(null);
   const [selectedLLMConfig, setSelectedLLMConfig] = useState<LLMConfigFromDB | null>(null);
 
@@ -2065,8 +2085,14 @@ const Workflow: React.FC<WorkflowProps> = ({
   const loadLLMConfigs = async () => {
     try {
       console.log('[Workflow] Loading LLM configs...');
-      const configs = await getLLMConfigs();
+      const [configs, providersData] = await Promise.all([
+        getLLMConfigs(),
+        getProviders().catch(() => []) // 如果获取失败，使用空数组
+      ]);
       console.log('[Workflow] Loaded LLM configs:', configs);
+      console.log('[Workflow] Loaded providers:', providersData);
+      
+      setProviders(providersData);
       
       // 过滤启用的配置（确保 enabled 是布尔值）
       const enabledConfigs = configs.filter(c => Boolean(c.enabled));
@@ -2869,13 +2895,16 @@ const Workflow: React.FC<WorkflowProps> = ({
         // 检测思考内容变化，如果有新的思考内容，添加到过程步骤
         const thinkingContent = thinking !== undefined ? thinking : '';
         if (thinkingContent.length > lastThinkingLength && thinkingContent.trim()) {
+          console.log(`[Workflow] 检测到思考内容变化:`, thinkingContent.length, '字符 (之前:', lastThinkingLength, ')');
           // 查找现有的思考步骤
           const existingThinkingStep = currentProcessSteps.find(s => s.type === 'thinking' && !s.mcpServer);
           if (existingThinkingStep) {
             // 更新现有思考步骤的内容
+            console.log(`[Workflow] 更新现有思考步骤`);
             existingThinkingStep.thinking = thinkingContent;
           } else {
             // 创建新的思考步骤
+            console.log(`[Workflow] 创建新的思考步骤`);
             currentProcessSteps.push({
               type: 'thinking',
               timestamp: Date.now(),
@@ -3058,6 +3087,7 @@ const Workflow: React.FC<WorkflowProps> = ({
               
               // 更新思考过程（即使 thinking 是空字符串也要更新，确保UI能正确显示）
               if (thinking !== undefined) {
+                console.log(`[Workflow] 收到思考内容更新:`, thinking.length, '字符', thinking.substring(0, 100));
                 fullThinking = thinking; // 流式更新思考过程
               }
               
@@ -6481,9 +6511,47 @@ const Workflow: React.FC<WorkflowProps> = ({
                         >
                           {selectedLLMConfig ? (
                             (() => {
-                              const providerInfo = getProviderIcon(selectedLLMConfig);
+                              const providerInfo = getProviderIcon(selectedLLMConfig, providers);
+                              // 优先使用供应商的 logo（主题自适应）
+                              if (providerInfo.logoLight || providerInfo.logoDark) {
+                                return (
+                                  <>
+                                    {/* 浅色模式显示 */}
+                                    {providerInfo.logoLight && (
+                                      <img 
+                                        src={providerInfo.logoLight} 
+                                        alt={selectedLLMConfig.provider} 
+                                        className="w-5 h-5 object-cover rounded dark:hidden"
+                                      />
+                                    )}
+                                    {/* 深色模式显示 */}
+                                    {providerInfo.logoDark && (
+                                      <img 
+                                        src={providerInfo.logoDark} 
+                                        alt={selectedLLMConfig.provider} 
+                                        className="w-5 h-5 object-cover rounded hidden dark:block"
+                                      />
+                                    )}
+                                    {/* 如果只有一种logo，则都显示 */}
+                                    {providerInfo.logoLight && !providerInfo.logoDark && (
+                                      <img 
+                                        src={providerInfo.logoLight} 
+                                        alt={selectedLLMConfig.provider} 
+                                        className="w-5 h-5 object-cover rounded hidden dark:block"
+                                      />
+                                    )}
+                                    {!providerInfo.logoLight && providerInfo.logoDark && (
+                                      <img 
+                                        src={providerInfo.logoDark} 
+                                        alt={selectedLLMConfig.provider} 
+                                        className="w-5 h-5 object-cover rounded dark:hidden"
+                                      />
+                                    )}
+                                  </>
+                                );
+                              }
+                              // 其次使用用户上传的自定义 logo（应用位置和缩放设置）
                               if (providerInfo.customLogo) {
-                                // 显示用户上传的自定义 logo（应用位置和缩放设置）
                                 return (
                                   <img 
                                     src={providerInfo.customLogo} 
@@ -6498,7 +6566,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                                   />
                                 );
                               }
-                              // 显示默认的 emoji 图标
+                              // 最后显示默认的 emoji 图标
                               return (
                                 <span className="text-sm" style={{ filter: 'saturate(1.2)' }}>
                                   {providerInfo.icon}
@@ -6930,29 +6998,73 @@ const Workflow: React.FC<WorkflowProps> = ({
                 }}
               >
                 <div className="space-y-1 py-2">
-                  {/* 模型列表 - 使用自定义 logo */}
+                  {/* 模型列表 - 使用供应商 logo 或自定义 logo */}
                   {llmConfigs.map((config) => {
                     const isSelected = selectedLLMConfigId === config.config_id;
-                    const providerInfo = getProviderIcon(config);
+                    const providerInfo = getProviderIcon(config, providers);
                     
-                    // 构建 avatar：优先使用自定义 logo，否则使用 emoji
-                    const avatarContent = providerInfo.customLogo ? (
-                      <img 
-                        src={providerInfo.customLogo} 
-                        alt={config.provider} 
-                        className="w-full h-full object-cover rounded"
-                        style={{ 
-                          objectPosition: providerInfo.logoPosition 
-                            ? `${providerInfo.logoPosition.x}% ${providerInfo.logoPosition.y}%` 
-                            : '50% 50%',
-                          transform: `scale(${(providerInfo.logoScale ?? 100) / 100})`,
-                        }}
-                      />
-                    ) : (
-                      <span className="text-lg" style={{ filter: 'saturate(1.2)' }}>
-                        {providerInfo.icon}
-                      </span>
-                    );
+                    // 构建 avatar：优先使用供应商 logo（主题自适应），其次使用自定义 logo，最后使用 emoji
+                    let avatarContent: React.ReactNode;
+                    if (providerInfo.logoLight || providerInfo.logoDark) {
+                      // 使用供应商的 logo（主题自适应）
+                      avatarContent = (
+                        <>
+                          {/* 浅色模式显示 */}
+                          {providerInfo.logoLight && (
+                            <img 
+                              src={providerInfo.logoLight} 
+                              alt={config.provider} 
+                              className="w-full h-full object-cover rounded dark:hidden"
+                            />
+                          )}
+                          {/* 深色模式显示 */}
+                          {providerInfo.logoDark && (
+                            <img 
+                              src={providerInfo.logoDark} 
+                              alt={config.provider} 
+                              className="w-full h-full object-cover rounded hidden dark:block"
+                            />
+                          )}
+                          {/* 如果只有一种logo，则都显示 */}
+                          {providerInfo.logoLight && !providerInfo.logoDark && (
+                            <img 
+                              src={providerInfo.logoLight} 
+                              alt={config.provider} 
+                              className="w-full h-full object-cover rounded hidden dark:block"
+                            />
+                          )}
+                          {!providerInfo.logoLight && providerInfo.logoDark && (
+                            <img 
+                              src={providerInfo.logoDark} 
+                              alt={config.provider} 
+                              className="w-full h-full object-cover rounded dark:hidden"
+                            />
+                          )}
+                        </>
+                      );
+                    } else if (providerInfo.customLogo) {
+                      // 使用用户上传的自定义 logo
+                      avatarContent = (
+                        <img 
+                          src={providerInfo.customLogo} 
+                          alt={config.provider} 
+                          className="w-full h-full object-cover rounded"
+                          style={{ 
+                            objectPosition: providerInfo.logoPosition 
+                              ? `${providerInfo.logoPosition.x}% ${providerInfo.logoPosition.y}%` 
+                              : '50% 50%',
+                            transform: `scale(${(providerInfo.logoScale ?? 100) / 100})`,
+                          }}
+                        />
+                      );
+                    } else {
+                      // 使用默认 emoji
+                      avatarContent = (
+                        <span className="text-lg" style={{ filter: 'saturate(1.2)' }}>
+                          {providerInfo.icon}
+                        </span>
+                      );
+                    }
                     
                     return (
                       <DataListItem

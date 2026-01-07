@@ -332,3 +332,52 @@ class DeepSeekProvider(OpenAIProvider):
             pass
 
         return filtered
+    
+    def models(self) -> List[str]:
+        """
+        获取可用模型列表
+        优先使用 SDK，回退到 REST API
+        """
+        try:
+            # 优先使用 SDK
+            if self.sdk_available and self._client:
+                try:
+                    models = self._client.models.list()
+                    model_ids = [model.id for model in models.data if hasattr(model, 'id')]
+                    self._log(f"Fetched {len(model_ids)} models via SDK")
+                    return model_ids
+                except Exception as e:
+                    self._log(f"SDK models() failed: {e}, falling back to REST API")
+            
+            # 回退到 REST API
+            base_url = None
+            if self.api_url:
+                base_url = self.api_url.replace('/chat/completions', '').rstrip('/')
+                if not base_url.endswith('/v1'):
+                    if base_url.endswith('/v1/'):
+                        base_url = base_url.rstrip('/')
+                    else:
+                        base_url = f"{base_url}/v1"
+            else:
+                base_url = 'https://api.openai.com/v1'
+            
+            models_url = f"{base_url}/models"
+            headers = self._get_headers()
+            
+            self._log(f"Fetching models via REST API: {models_url}")
+            response = requests.get(models_url, headers=headers, timeout=10)
+            
+            if response.status_code != 200:
+                raise RuntimeError(f"Failed to fetch models: {response.status_code} {response.text}")
+            
+            data = response.json()
+            if isinstance(data, dict) and data.get('object') == 'list' and isinstance(data.get('data'), list):
+                model_ids = [model.get('id') for model in data['data'] if model.get('id')]
+                self._log(f"Fetched {len(model_ids)} models via REST API")
+                return model_ids
+            
+            raise RuntimeError("Invalid response format from models API")
+            
+        except Exception as e:
+            self._log_error(f"Failed to fetch models: {e}", e)
+            raise

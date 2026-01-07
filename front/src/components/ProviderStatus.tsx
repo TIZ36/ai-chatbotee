@@ -11,6 +11,7 @@ import {
 import { Button } from './ui/Button';
 import { Card, Badge } from './ui/PageLayout';
 import { getBackendUrl } from '../services/compat/electron';
+import { getProviders, LLMProvider as LLMProviderType } from '../services/llmApi';
 
 // ============================================================================
 // 类型定义
@@ -51,7 +52,7 @@ interface LLMProviderCardProps {
   onConfigure?: () => void;
 }
 
-const LLMProviderCard: React.FC<LLMProviderCardProps> = ({ provider, onConfigure }) => {
+const LLMProviderCard: React.FC<LLMProviderCardProps & { providers?: LLMProviderType[] }> = ({ provider, onConfigure, providers = [] }) => {
   const getStatusIcon = () => {
     if (!provider.enabled) {
       return <AlertTriangle className="w-4 h-4 text-gray-400" />;
@@ -68,27 +69,74 @@ const LLMProviderCard: React.FC<LLMProviderCardProps> = ({ provider, onConfigure
     return '就绪';
   };
 
+  // 根据 provider.provider 匹配对应的供应商，获取 logo
+  const matchedProvider = providers.find(p => 
+    p.provider_type === provider.provider || 
+    p.provider_id === provider.provider ||
+    (provider as any).provider_id === p.provider_id
+  );
+
   const getProviderIcon = () => {
+    // 优先使用供应商的 logo（主题自适应）
+    if (matchedProvider && (matchedProvider.logo_light || matchedProvider.logo_dark)) {
+      return (
+        <div className="w-6 h-6 rounded flex items-center justify-center overflow-hidden">
+          {/* 浅色模式显示 */}
+          {matchedProvider.logo_light && (
+            <img 
+              src={matchedProvider.logo_light} 
+              alt={provider.provider} 
+              className="w-full h-full object-cover dark:hidden"
+            />
+          )}
+          {/* 深色模式显示 */}
+          {matchedProvider.logo_dark && (
+            <img 
+              src={matchedProvider.logo_dark} 
+              alt={provider.provider} 
+              className="w-full h-full object-cover hidden dark:block"
+            />
+          )}
+          {/* 如果只有一种logo，则都显示 */}
+          {matchedProvider.logo_light && !matchedProvider.logo_dark && (
+            <img 
+              src={matchedProvider.logo_light} 
+              alt={provider.provider} 
+              className="w-full h-full object-cover hidden dark:block"
+            />
+          )}
+          {!matchedProvider.logo_light && matchedProvider.logo_dark && (
+            <img 
+              src={matchedProvider.logo_dark} 
+              alt={provider.provider} 
+              className="w-full h-full object-cover dark:hidden"
+            />
+          )}
+        </div>
+      );
+    }
+    
+    // 回退到 emoji 图标
     switch (provider.provider.toLowerCase()) {
       case 'openai':
-        return '🤖';
+        return <span className="text-xl">🤖</span>;
       case 'deepseek':
-        return '🔮';
+        return <span className="text-xl">🔮</span>;
       case 'anthropic':
-        return '🧠';
+        return <span className="text-xl">🧠</span>;
       case 'gemini':
-        return '✨';
+        return <span className="text-xl">✨</span>;
       case 'ollama':
-        return '🦙';
+        return <span className="text-xl">🦙</span>;
       default:
-        return '💬';
+        return <span className="text-xl">💬</span>;
     }
   };
 
   return (
     <div className="flex items-center justify-between p-3 bg-[var(--color-bg-secondary)] rounded-lg border border-[var(--color-border)] hover:border-[var(--color-accent)] transition-colors">
       <div className="flex items-center gap-3">
-        <span className="text-xl">{getProviderIcon()}</span>
+        {getProviderIcon()}
         <div>
           <div className="flex items-center gap-2">
             <span className="font-medium text-sm">{provider.name}</span>
@@ -220,6 +268,7 @@ const ProviderStatus: React.FC<ProviderStatusProps> = ({
   onNavigateToMCP,
 }) => {
   const [llmProviders, setLlmProviders] = useState<LLMProvider[]>([]);
+  const [providers, setProviders] = useState<LLMProviderType[]>([]);
   const [mcpServers, setMcpServers] = useState<MCPServer[]>([]);
   const [mcpHealth, setMcpHealth] = useState<Record<string, MCPHealth>>({});
   const [isLoading, setIsLoading] = useState(true);
@@ -238,8 +287,9 @@ const ProviderStatus: React.FC<ProviderStatusProps> = ({
     
     try {
       // 并行获取数据
-      const [llmRes, mcpRes, healthRes] = await Promise.all([
+      const [llmRes, providersRes, mcpRes, healthRes] = await Promise.all([
         fetch(`${backendUrl}/api/llm/configs`).catch(() => null),
+        getProviders().catch(() => []), // 获取供应商列表
         fetch(`${backendUrl}/api/mcp/servers`).catch(() => null),
         fetch(`${backendUrl}/api/mcp/health`).catch(() => null),
       ]);
@@ -248,6 +298,10 @@ const ProviderStatus: React.FC<ProviderStatusProps> = ({
         const data = await llmRes.json();
         // 兼容两种返回格式：{ configs: [...] } 或直接 [...]
         setLlmProviders(Array.isArray(data) ? data : (data.configs || []));
+      }
+      
+      if (Array.isArray(providersRes)) {
+        setProviders(providersRes);
       }
 
       if (mcpRes?.ok) {
@@ -353,6 +407,7 @@ const ProviderStatus: React.FC<ProviderStatusProps> = ({
                 key={provider.config_id || `llm-${index}`}
                 provider={provider}
                 onConfigure={onNavigateToLLM}
+                providers={providers}
               />
             ))}
             {compact && llmProviders.length > 3 && (

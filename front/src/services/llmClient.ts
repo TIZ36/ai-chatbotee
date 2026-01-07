@@ -490,6 +490,188 @@ export class LLMClient {
   }
 
   /**
+   * 通过后端代理调用 OpenAI API（流式响应）
+   */
+  private async callOpenAIStreamViaProxy(
+    apiUrl: string,
+    messages: LLMMessage[], 
+    tools?: MCPTool[],
+    onChunk?: (chunk: string) => void,
+    onThinking?: (thinking: string) => void
+  ): Promise<LLMResponse> {
+    const model = this.config.model || 'gpt-4';
+    const openAiTools = tools ? this.prepareToolsForOpenAI(tools) : undefined;
+
+    const backendUrl = getBackendUrl();
+    const proxyUrl = `${backendUrl}/api/llm/proxy`;
+
+    const requestBody = {
+      api_url: apiUrl,
+      api_key: this.config.apiKey,
+      headers: {},
+      body: {
+        model,
+        messages: messages.map(msg => {
+          const message: any = {
+            role: msg.role,
+            content: msg.content,
+          };
+          if (msg.tool_call_id) message.tool_call_id = msg.tool_call_id;
+          if (msg.name) message.name = msg.name;
+          if (msg.tool_calls) message.tool_calls = msg.tool_calls;
+          if (msg.reasoning_content) message.reasoning_content = msg.reasoning_content;
+          return message;
+        }),
+        tools: openAiTools,
+        tool_choice: openAiTools && openAiTools.length > 0 ? 'auto' : undefined,
+      },
+      stream: true,
+    };
+
+    const controller = new AbortController();
+    const timeoutDuration = 10 * 60 * 1000; // 10分钟
+    const timeoutId = setTimeout(() => controller.abort(), timeoutDuration);
+
+    try {
+      const response = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(`LLM Proxy error: ${error.error || response.statusText}`);
+      }
+
+      // 处理流式响应
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let fullContent = '';
+      let fullThinking = '';
+      let toolCalls: LLMToolCall[] = [];
+      let finishReason: string | undefined;
+
+      if (!reader) {
+        throw new Error('Failed to get response stream');
+      }
+
+      // 设置流式读取的超时保护（如果30秒内没有收到新数据，认为超时）
+      const streamTimeoutDuration = 30 * 1000; // 30秒
+      let streamTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+      const resetStreamTimeout = () => {
+        if (streamTimeoutId) {
+          clearTimeout(streamTimeoutId);
+        }
+        streamTimeoutId = setTimeout(() => {
+          reader.cancel();
+          throw new Error(`Stream timeout: no data received for ${streamTimeoutDuration / 1000}s`);
+        }, streamTimeoutDuration);
+      };
+
+      resetStreamTimeout();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        resetStreamTimeout();
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n').filter(line => line.trim() !== '');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') {
+              continue;
+            }
+
+            try {
+              const json = JSON.parse(data);
+              const delta = json.choices?.[0]?.delta;
+              const choice = json.choices?.[0];
+
+              // 处理思考过程（o1 模型）
+              if (delta?.reasoning_content) {
+                fullThinking += delta.reasoning_content;
+                console.log(`[LLM Proxy] 收到思考内容 (delta):`, fullThinking.length, '字符');
+                onThinking?.(fullThinking);
+              } else if (choice?.message?.reasoning_content) {
+                fullThinking = choice.message.reasoning_content;
+                console.log(`[LLM Proxy] 收到思考内容 (choice.message):`, fullThinking.length, '字符');
+                onThinking?.(fullThinking);
+              } else if (json.reasoning_content) {
+                fullThinking = json.reasoning_content;
+                console.log(`[LLM Proxy] 收到思考内容 (json):`, fullThinking.length, '字符');
+                onThinking?.(fullThinking);
+              }
+
+              if (delta?.content) {
+                fullContent += delta.content;
+                onChunk?.(delta.content);
+              }
+
+              // 处理工具调用
+              if (delta?.tool_calls) {
+                for (const toolCall of delta.tool_calls) {
+                  const index = toolCall.index;
+                  if (!toolCalls[index]) {
+                    toolCalls[index] = {
+                      id: toolCall.id || '',
+                      type: 'function',
+                      function: {
+                        name: '',
+                        arguments: '',
+                      },
+                    };
+                  }
+                  if (toolCall.function?.name) {
+                    toolCalls[index].function.name = toolCall.function.name;
+                  }
+                  if (toolCall.function?.arguments) {
+                    toolCalls[index].function.arguments += toolCall.function.arguments;
+                  }
+                }
+              }
+
+              if (json.choices?.[0]?.finish_reason) {
+                finishReason = json.choices[0].finish_reason;
+              }
+            } catch (e) {
+              console.warn('[LLM] Failed to parse SSE chunk:', e);
+            }
+          }
+        }
+      }
+
+      // 清理流式读取超时
+      if (streamTimeoutId) {
+        clearTimeout(streamTimeoutId);
+      }
+
+      return {
+        content: fullContent,
+        thinking: fullThinking || undefined,
+        tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+        finish_reason: finishReason,
+      };
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      if (error.name === 'AbortError') {
+        throw new Error(`API request timeout (${timeoutDuration / 1000}s)`);
+      }
+      throw error;
+    }
+  }
+
+  /**
    * 通过后端代理调用 OpenAI API（非流式响应）
    */
   private async callOpenAIViaProxy(
@@ -2107,6 +2289,7 @@ ${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
       
       // 创建一个包装的 onThinking，用于在流式模式下传递 thinking
       const wrappedOnThinking = stream ? (thinking: string) => {
+        console.log(`[LLM] onThinking 回调被调用，思考内容长度:`, thinking.length);
         accumulatedThinking = thinking;
         // 思考过程流式更新时，立即通过 onChunk 传递（传递空 content，只更新 thinking）
         onChunk?.('', thinking);

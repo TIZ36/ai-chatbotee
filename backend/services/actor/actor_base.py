@@ -1437,7 +1437,7 @@ class ActorBase(ABC):
         msg_type = ctx.msg_type
         
         try:
-            # 1. agent_msg from self: 跳过（除非是自动触发的重试消息）
+            # 1. agent_msg from self: 跳过（除非是自动触发的重试消息或链式执行继续）
             ext = msg_data.get('ext', {}) or {}
             if msg_type == MessageType.AGENT_MSG and sender_id == self.agent_id:
                 # 如果是自动触发的重试消息，允许处理
@@ -1447,6 +1447,25 @@ class ActorBase(ABC):
                     self._publish_process_event(ctx, ProcessPhase.MSG_PRE_DEAL, 'completed', {
                         'action': 'retry_message',
                         'reason': 'parameter_error_retry',
+                    })
+                    return True  # 继续处理
+                # 如果是链式执行继续（chain_append），允许处理
+                elif ext.get('chain_append') and ext.get('auto_trigger'):
+                    # 恢复 action_plan 状态
+                    action_plan = ext.get('action_plan')
+                    plan_index = ext.get('plan_index', 0)
+                    plan_accumulated_content = ext.get('plan_accumulated_content', '')
+                    
+                    if action_plan:
+                        ctx.action_plan = action_plan
+                        ctx.plan_index = plan_index
+                        ctx.plan_accumulated_content = plan_accumulated_content
+                        logger.info(f"[ActorBase:{self.agent_id}] Processing chain_append message, continuing action_plan at step {plan_index}/{len(action_plan)}")
+                    
+                    ctx.update_phase(status='completed', action='chain_append', reason='action_plan_continue')
+                    self._publish_process_event(ctx, ProcessPhase.MSG_PRE_DEAL, 'completed', {
+                        'action': 'chain_append',
+                        'reason': 'action_plan_continue',
                     })
                     return True  # 继续处理
                 else:
@@ -1489,6 +1508,22 @@ class ActorBase(ABC):
                     }
                     ctx.set_result_msg(result_msg)
                     
+                    # 检查是否有 action_plan 需要继续执行
+                    action_plan = ext.get('action_plan')
+                    plan_index = ext.get('plan_index', 0)
+                    plan_accumulated_content = ext.get('plan_accumulated_content', '')
+                    
+                    if action_plan and isinstance(action_plan, list) and plan_index < len(action_plan):
+                        # 恢复 action_plan 状态到 ctx
+                        ctx.action_plan = action_plan
+                        ctx.plan_index = plan_index
+                        ctx.plan_accumulated_content = plan_accumulated_content
+                        
+                        # 工具调用完成，移动到下一步
+                        ctx.plan_index += 1
+                        
+                        logger.info(f"[ActorBase:{self.agent_id}] MCP call completed in action_plan, continuing to step {ctx.plan_index}/{len(action_plan)}")
+                    
                     # 更新消息类型为结果消息
                     ctx.set_msg_type(MessageType.RESULT_MSG)
                     
@@ -1498,6 +1533,7 @@ class ActorBase(ABC):
                         'tool_name': tool_name,
                         'server_id': server_id,
                         'success': result.success,
+                        'has_action_plan': bool(action_plan),
                     })
                     
                     logger.info(f"[ActorBase:{self.agent_id}] MCP call completed: {tool_name}, success={result.success}")
@@ -1646,6 +1682,12 @@ class ActorBase(ABC):
 你正在处理用户或系统的消息。根据消息类型，你需要决定：
 1. 如果需要调用工具来完成任务，返回工具调用请求（JSON格式）
 2. 如果可以直接回答，返回最终回复
+3. 如果需要链式执行（先生成内容，再调用工具，再生成内容），返回执行计划（action_plan）
+
+【重要：上下文权重】
+- 对话历史中，**越是新的消息关联性越强**，权重越高
+- 当用户提到"帮我发布"、"使用这个"等指代性表达时，**优先使用最近一次消息中的相关信息**
+- 例如：如果用户在一个会话中发布了很多图片地址，当用户说"帮我发布"时，应该优先使用最近一次消息中的图片地址
 
 【可处理的消息类型】
 - user_new_msg: 用户新消息
@@ -1665,6 +1707,32 @@ class ActorBase(ABC):
 }
 ```
 
+【链式执行格式】
+如果需要链式执行（例如：先生成内容 → 调用工具 → 再生成内容），返回以下 JSON 格式：
+```json
+{
+  "action": "action_plan",
+  "plan": [
+    {
+      "type": "llm_gen",
+      "content": "生成的内容或说明"
+    },
+    {
+      "type": "tool_call",
+      "tool": {
+        "server_id": "mcp_server_id",
+        "tool_name": "tool_name",
+        "params": {}
+      }
+    },
+    {
+      "type": "llm_gen",
+      "content": "基于工具结果继续生成的内容"
+    }
+  ]
+}
+```
+
 【直接回复格式】
 如果可以直接回答，返回以下 JSON 格式：
 ```json
@@ -1677,9 +1745,21 @@ class ActorBase(ABC):
         
         messages.append({"role": "system", "content": system_prompt})
         
-        # 2. 历史消息
+        # 2. 历史消息（添加权重提示）
         if ctx.history_messages:
-            messages.extend(ctx.history_messages)
+            # 为历史消息添加权重标记，越新的消息权重越高
+            history_count = len(ctx.history_messages)
+            for idx, msg in enumerate(ctx.history_messages):
+                # 计算权重（从0到1，越新权重越高）
+                weight = (idx + 1) / history_count
+                # 为较新的消息（后50%）添加权重标记
+                if weight > 0.5:
+                    original_content = msg.get('content', '')
+                    # 在消息前添加权重提示（仅对user和assistant消息）
+                    if msg.get('role') in ('user', 'assistant'):
+                        weight_marker = "【高权重消息】" if weight > 0.8 else "【中权重消息】"
+                        msg = {**msg, 'content': f"{weight_marker}\n{original_content}"}
+                messages.append(msg)
         
         # 3. 工具结果（如果有）
         if ctx.tool_results_text:
@@ -1702,6 +1782,13 @@ class ActorBase(ABC):
             if result_content:
                 typed_content += f"\n\n【工具返回结果】\n{result_content}"
         
+        # 如果有 action_plan 且正在执行中，添加提示
+        if ctx.action_plan and ctx.plan_index < len(ctx.action_plan):
+            remaining_steps = len(ctx.action_plan) - ctx.plan_index
+            typed_content += f"\n\n【链式执行中】当前执行到第 {ctx.plan_index + 1}/{len(ctx.action_plan)} 步，还有 {remaining_steps} 步待执行。"
+            if ctx.plan_accumulated_content:
+                typed_content += f"\n【已生成内容】\n{ctx.plan_accumulated_content}"
+        
         messages.append({"role": "user", "content": typed_content})
         
         return messages
@@ -1709,6 +1796,11 @@ class ActorBase(ABC):
     def _parse_llm_decision(self, content: str, ctx: IterationContext) -> tuple:
         """
         解析 LLM 决策
+        
+        支持三种决策类型：
+        1. tool_call: 单个工具调用
+        2. action_plan: 链式执行计划（LLM生成 → 工具调用 → LLM生成）
+        3. complete: 完成回复
         
         Args:
             content: LLM 返回的内容
@@ -1735,11 +1827,25 @@ class ActorBase(ABC):
             action = data.get('action', '').lower()
             
             if action == 'tool_call' and data.get('tool'):
+                # 单个工具调用
                 decision = LLMDecision.CONTINUE
                 decision_data = {
                     'content': content,
                     'next_tool_call': data['tool'],
                 }
+            elif action == 'action_plan' and data.get('plan'):
+                # 链式执行计划
+                plan = data['plan']
+                if not isinstance(plan, list) or len(plan) == 0:
+                    # 无效的计划，默认完成
+                    decision_data = {'content': content}
+                else:
+                    decision = LLMDecision.CONTINUE
+                    decision_data = {
+                        'content': content,
+                        'action_plan': plan,
+                        'plan_index': 0,  # 当前执行到计划的第几步
+                    }
             elif action == 'complete':
                 decision = LLMDecision.COMPLETE
                 decision_data = {
@@ -1781,33 +1887,230 @@ class ActorBase(ABC):
             decision = ctx.llm_decision
             decision_data = ctx.llm_decision_data or {}
             
-            # 1. 如果决策是继续（工具调用）
-            if decision == LLMDecision.CONTINUE and ctx.next_tool_call:
-                tool_call = ctx.next_tool_call
+            # 1. 如果决策是继续（工具调用或链式执行计划）
+            if decision == LLMDecision.CONTINUE:
+                # 1.1. 检查是否有链式执行计划（action_plan）
+                if ctx.action_plan and ctx.plan_index < len(ctx.action_plan):
+                    plan = ctx.action_plan[ctx.plan_index]
+                    step_type = plan.get('type', '')
+                    
+                    if step_type == 'llm_gen':
+                        # LLM 生成步骤：累积内容（plan 中的 content 是 LLM 已生成的内容）
+                        content = plan.get('content', '')
+                        if content:
+                            ctx.plan_accumulated_content += content + "\n\n"
+                        
+                        # 移动到下一步
+                        ctx.plan_index += 1
+                        
+                        # 如果还有下一步，继续执行
+                        if ctx.plan_index < len(ctx.action_plan):
+                            next_step = ctx.action_plan[ctx.plan_index]
+                            if next_step.get('type') == 'tool_call':
+                                # 下一步是工具调用，发送工具调用消息
+                                tool = next_step.get('tool', {})
+                                tool_call = {
+                                    'server_id': tool.get('server_id'),
+                                    'tool_name': tool.get('tool_name'),
+                                    'params': tool.get('params', {}),
+                                }
+                                
+                                # 发送工具调用消息，并在 ext 中保存 action_plan 状态
+                                get_topic_service().send_message(
+                                    topic_id=topic_id,
+                                    sender_id=self.agent_id,
+                                    sender_type='agent',
+                                    content=f"正在调用工具: {tool_call.get('tool_name', 'unknown')}",
+                                    role='assistant',
+                                    sender_name=self.info.get('name'),
+                                    sender_avatar=self.info.get('avatar'),
+                                    ext={
+                                        'tool_call': tool_call,
+                                        'auto_trigger': True,
+                                        'processSteps': ctx.to_process_steps_dict(),
+                                        'action_plan': ctx.action_plan,  # 保存计划
+                                        'plan_index': ctx.plan_index,  # 保存当前索引
+                                        'plan_accumulated_content': ctx.plan_accumulated_content,  # 保存累积内容
+                                    }
+                                )
+                                
+                                ctx.update_phase(status='completed', action='action_plan_tool_call_sent')
+                                self._publish_process_event(ctx, ProcessPhase.POST_MSG_DEAL, 'completed', {
+                                    'action': 'action_plan_tool_call_sent',
+                                    'tool_name': tool_call.get('tool_name'),
+                                    'plan_index': ctx.plan_index,
+                                })
+                                
+                                logger.info(f"[ActorBase:{self.agent_id}] Action plan tool call sent (step {ctx.plan_index}/{len(ctx.action_plan)})")
+                            else:
+                                # 下一步还是 llm_gen，但 plan 中的 content 应该已经包含了生成的内容
+                                # 继续累积并检查是否还有更多步骤
+                                next_content = next_step.get('content', '')
+                                if next_content:
+                                    ctx.plan_accumulated_content += next_content + "\n\n"
+                                ctx.plan_index += 1
+                                
+                                # 如果还有更多步骤，继续处理
+                                if ctx.plan_index < len(ctx.action_plan):
+                                    # 还有更多步骤，发送链式追加消息继续执行
+                                    get_topic_service().send_message(
+                                        topic_id=topic_id,
+                                        sender_id=self.agent_id,
+                                        sender_type='agent',
+                                        content=ctx.plan_accumulated_content.strip() or "继续处理...",
+                                        role='assistant',
+                                        sender_name=self.info.get('name'),
+                                        sender_avatar=self.info.get('avatar'),
+                                        ext={
+                                            'chain_append': True,
+                                            'auto_trigger': True,
+                                            'processSteps': ctx.to_process_steps_dict(),
+                                            'action_plan': ctx.action_plan,
+                                            'plan_index': ctx.plan_index,
+                                            'plan_accumulated_content': ctx.plan_accumulated_content,
+                                        }
+                                    )
+                                    
+                                    ctx.update_phase(status='completed', action='action_plan_continue')
+                                    logger.info(f"[ActorBase:{self.agent_id}] Action plan continue (step {ctx.plan_index}/{len(ctx.action_plan)})")
+                                else:
+                                    # 计划执行完成，发送最终内容
+                                    final_content = ctx.plan_accumulated_content.strip() or decision_data.get('content', '')
+                                    
+                                    # 解析媒体
+                                    media = []
+                                    if ctx.mcp_media:
+                                        media.extend(ctx.mcp_media)
+                                    if ctx.final_media:
+                                        media.extend(ctx.final_media)
+                                    
+                                    # 构建 ext
+                                    ext_data = ctx.build_ext_data()
+                                    if media:
+                                        ext_data['media'] = media
+                                    
+                                    # 发送最终回复
+                                    get_topic_service().send_message(
+                                        topic_id=topic_id,
+                                        sender_id=self.agent_id,
+                                        sender_type='agent',
+                                        content=final_content,
+                                        role='assistant',
+                                        message_id=ctx.reply_message_id,
+                                        sender_name=self.info.get('name'),
+                                        sender_avatar=self.info.get('avatar'),
+                                        ext=ext_data,
+                                    )
+                                    
+                                    ctx.mark_complete(final_content, media)
+                                    ctx.update_phase(status='completed', action='action_plan_complete')
+                                    self._publish_process_event(ctx, ProcessPhase.POST_MSG_DEAL, 'completed', {
+                                        'action': 'action_plan_complete',
+                                        'has_media': bool(media),
+                                    })
+                                    
+                                    logger.info(f"[ActorBase:{self.agent_id}] Action plan completed")
+                        else:
+                            # 计划执行完成，发送最终内容
+                            final_content = ctx.plan_accumulated_content.strip() or decision_data.get('content', '')
+                            
+                            # 解析媒体
+                            media = []
+                            if ctx.mcp_media:
+                                media.extend(ctx.mcp_media)
+                            if ctx.final_media:
+                                media.extend(ctx.final_media)
+                            
+                            # 构建 ext
+                            ext_data = ctx.build_ext_data()
+                            if media:
+                                ext_data['media'] = media
+                            
+                            # 发送最终回复
+                            get_topic_service().send_message(
+                                topic_id=topic_id,
+                                sender_id=self.agent_id,
+                                sender_type='agent',
+                                content=final_content,
+                                role='assistant',
+                                message_id=ctx.reply_message_id,
+                                sender_name=self.info.get('name'),
+                                sender_avatar=self.info.get('avatar'),
+                                ext=ext_data,
+                            )
+                            
+                            ctx.mark_complete(final_content, media)
+                            ctx.update_phase(status='completed', action='action_plan_complete')
+                            self._publish_process_event(ctx, ProcessPhase.POST_MSG_DEAL, 'completed', {
+                                'action': 'action_plan_complete',
+                                'has_media': bool(media),
+                            })
+                            
+                            logger.info(f"[ActorBase:{self.agent_id}] Action plan completed")
+                    elif step_type == 'tool_call':
+                        # 工具调用步骤：发送工具调用消息
+                        tool = plan.get('tool', {})
+                        tool_call = {
+                            'server_id': tool.get('server_id'),
+                            'tool_name': tool.get('tool_name'),
+                            'params': tool.get('params', {}),
+                        }
+                        
+                        # 发送工具调用消息，并在 ext 中保存 action_plan 状态
+                        get_topic_service().send_message(
+                            topic_id=topic_id,
+                            sender_id=self.agent_id,
+                            sender_type='agent',
+                            content=f"正在调用工具: {tool_call.get('tool_name', 'unknown')}",
+                            role='assistant',
+                            sender_name=self.info.get('name'),
+                            sender_avatar=self.info.get('avatar'),
+                            ext={
+                                'tool_call': tool_call,
+                                'auto_trigger': True,
+                                'processSteps': ctx.to_process_steps_dict(),
+                                'action_plan': ctx.action_plan,  # 保存计划
+                                'plan_index': ctx.plan_index,  # 保存当前索引
+                                'plan_accumulated_content': ctx.plan_accumulated_content,  # 保存累积内容
+                            }
+                        )
+                        
+                        ctx.update_phase(status='completed', action='action_plan_tool_call_sent')
+                        self._publish_process_event(ctx, ProcessPhase.POST_MSG_DEAL, 'completed', {
+                            'action': 'action_plan_tool_call_sent',
+                            'tool_name': tool_call.get('tool_name'),
+                            'plan_index': ctx.plan_index,
+                        })
+                        
+                        logger.info(f"[ActorBase:{self.agent_id}] Action plan tool call sent (step {ctx.plan_index}/{len(ctx.action_plan)})")
                 
-                # 发送工具调用消息到 topic
-                get_topic_service().send_message(
-                    topic_id=topic_id,
-                    sender_id=self.agent_id,
-                    sender_type='agent',
-                    content=f"正在调用工具: {tool_call.get('tool_name', 'unknown')}",
-                    role='assistant',
-                    sender_name=self.info.get('name'),
-                    sender_avatar=self.info.get('avatar'),
-                    ext={
-                        'tool_call': tool_call,
-                        'auto_trigger': True,
-                        'processSteps': ctx.to_process_steps_dict(),
-                    }
-                )
-                
-                ctx.update_phase(status='completed', action='tool_call_sent')
-                self._publish_process_event(ctx, ProcessPhase.POST_MSG_DEAL, 'completed', {
-                    'action': 'tool_call_sent',
-                    'tool_name': tool_call.get('tool_name'),
-                })
-                
-                logger.info(f"[ActorBase:{self.agent_id}] Tool call message sent")
+                # 1.2. 单个工具调用（兼容旧逻辑）
+                elif ctx.next_tool_call:
+                    tool_call = ctx.next_tool_call
+                    
+                    # 发送工具调用消息到 topic
+                    get_topic_service().send_message(
+                        topic_id=topic_id,
+                        sender_id=self.agent_id,
+                        sender_type='agent',
+                        content=f"正在调用工具: {tool_call.get('tool_name', 'unknown')}",
+                        role='assistant',
+                        sender_name=self.info.get('name'),
+                        sender_avatar=self.info.get('avatar'),
+                        ext={
+                            'tool_call': tool_call,
+                            'auto_trigger': True,
+                            'processSteps': ctx.to_process_steps_dict(),
+                        }
+                    )
+                    
+                    ctx.update_phase(status='completed', action='tool_call_sent')
+                    self._publish_process_event(ctx, ProcessPhase.POST_MSG_DEAL, 'completed', {
+                        'action': 'tool_call_sent',
+                        'tool_name': tool_call.get('tool_name'),
+                    })
+                    
+                    logger.info(f"[ActorBase:{self.agent_id}] Tool call message sent")
             
             # 1.5. 如果检测到参数错误且需要继续，自动触发新一轮迭代
             if ctx.should_continue and not ctx.next_tool_call and ctx.tool_results_text:
@@ -1857,44 +2160,254 @@ class ActorBase(ABC):
                     print(f"{CYAN}{BOLD}[ActorBase] ✅ 重试消息已发布，等待处理...{RESET}")
                     return True  # 已触发重试，返回成功
             
+            # 1.3. 如果工具调用结果返回后，有 action_plan 需要继续执行
+            # 注意：这个逻辑在工具调用结果返回后执行，此时 ctx.result_msg 已设置
+            if ctx.action_plan and ctx.plan_index < len(ctx.action_plan) and ctx.result_msg:
+                # 继续执行 action_plan 的下一步
+                plan = ctx.action_plan[ctx.plan_index]
+                step_type = plan.get('type', '')
+                
+                if step_type == 'llm_gen':
+                    # LLM 生成步骤：发送链式追加消息，让 LLM 基于工具结果继续生成
+                    # 注意：plan 中的 content 只是说明，实际内容需要 LLM 生成
+                    get_topic_service().send_message(
+                        topic_id=topic_id,
+                        sender_id=self.agent_id,
+                        sender_type='agent',
+                        content=ctx.plan_accumulated_content.strip() or "继续处理...",
+                        role='assistant',
+                        sender_name=self.info.get('name'),
+                        sender_avatar=self.info.get('avatar'),
+                        ext={
+                            'chain_append': True,
+                            'auto_trigger': True,
+                            'processSteps': ctx.to_process_steps_dict(),
+                            'action_plan': ctx.action_plan,
+                            'plan_index': ctx.plan_index,
+                            'plan_accumulated_content': ctx.plan_accumulated_content,
+                        }
+                    )
+                    
+                    ctx.update_phase(status='completed', action='action_plan_continue_llm')
+                    logger.info(f"[ActorBase:{self.agent_id}] Action plan continuing: llm_gen after tool result (step {ctx.plan_index}/{len(ctx.action_plan)})")
+                elif step_type == 'tool_call':
+                    # 工具调用步骤：发送工具调用消息
+                    tool = plan.get('tool', {})
+                    tool_call = {
+                        'server_id': tool.get('server_id'),
+                        'tool_name': tool.get('tool_name'),
+                        'params': tool.get('params', {}),
+                    }
+                    
+                    # 发送工具调用消息，并在 ext 中保存 action_plan 状态
+                    get_topic_service().send_message(
+                        topic_id=topic_id,
+                        sender_id=self.agent_id,
+                        sender_type='agent',
+                        content=f"正在调用工具: {tool_call.get('tool_name', 'unknown')}",
+                        role='assistant',
+                        sender_name=self.info.get('name'),
+                        sender_avatar=self.info.get('avatar'),
+                        ext={
+                            'tool_call': tool_call,
+                            'auto_trigger': True,
+                            'processSteps': ctx.to_process_steps_dict(),
+                            'action_plan': ctx.action_plan,
+                            'plan_index': ctx.plan_index,
+                            'plan_accumulated_content': ctx.plan_accumulated_content,
+                        }
+                    )
+                    
+                    ctx.update_phase(status='completed', action='action_plan_tool_call_sent')
+                    logger.info(f"[ActorBase:{self.agent_id}] Action plan continuing: tool call (step {ctx.plan_index}/{len(ctx.action_plan)})")
+            
             # 2. 如果决策是完成
             elif decision == LLMDecision.COMPLETE:
                 content = decision_data.get('content', '')
                 
-                # 解析媒体
-                media = []
-                if ctx.mcp_media:
-                    media.extend(ctx.mcp_media)
-                if ctx.final_media:
-                    media.extend(ctx.final_media)
-                
-                # 构建 ext
-                ext_data = ctx.build_ext_data()
-                if media:
-                    ext_data['media'] = media
-                
-                # 发送最终回复
-                get_topic_service().send_message(
-                    topic_id=topic_id,
-                    sender_id=self.agent_id,
-                    sender_type='agent',
-                    content=content,
-                    role='assistant',
-                    message_id=ctx.reply_message_id,
-                    sender_name=self.info.get('name'),
-                    sender_avatar=self.info.get('avatar'),
-                    ext=ext_data,
-                )
-                
-                ctx.mark_complete(content, media)
-                
-                ctx.update_phase(status='completed', action='reply_sent')
-                self._publish_process_event(ctx, ProcessPhase.POST_MSG_DEAL, 'completed', {
-                    'action': 'reply_sent',
-                    'has_media': bool(media),
-                })
-                
-                logger.info(f"[ActorBase:{self.agent_id}] Final reply sent")
+                # 检查是否有 action_plan 正在执行中（链式追加消息后的 LLM 生成）
+                if ctx.action_plan and ctx.plan_index < len(ctx.action_plan):
+                    # 累积当前 LLM 生成的内容
+                    if content:
+                        ctx.plan_accumulated_content += content + "\n\n"
+                    
+                    # 移动到下一步
+                    ctx.plan_index += 1
+                    
+                    # 如果还有下一步，继续执行
+                    if ctx.plan_index < len(ctx.action_plan):
+                        next_step = ctx.action_plan[ctx.plan_index]
+                        if next_step.get('type') == 'tool_call':
+                            # 下一步是工具调用，发送工具调用消息
+                            tool = next_step.get('tool', {})
+                            tool_call = {
+                                'server_id': tool.get('server_id'),
+                                'tool_name': tool.get('tool_name'),
+                                'params': tool.get('params', {}),
+                            }
+                            
+                            # 发送工具调用消息，并在 ext 中保存 action_plan 状态
+                            get_topic_service().send_message(
+                                topic_id=topic_id,
+                                sender_id=self.agent_id,
+                                sender_type='agent',
+                                content=f"正在调用工具: {tool_call.get('tool_name', 'unknown')}",
+                                role='assistant',
+                                sender_name=self.info.get('name'),
+                                sender_avatar=self.info.get('avatar'),
+                                ext={
+                                    'tool_call': tool_call,
+                                    'auto_trigger': True,
+                                    'processSteps': ctx.to_process_steps_dict(),
+                                    'action_plan': ctx.action_plan,
+                                    'plan_index': ctx.plan_index,
+                                    'plan_accumulated_content': ctx.plan_accumulated_content,
+                                }
+                            )
+                            
+                            ctx.update_phase(status='completed', action='action_plan_tool_call_sent')
+                            logger.info(f"[ActorBase:{self.agent_id}] Action plan continuing: tool call after llm_gen (step {ctx.plan_index}/{len(ctx.action_plan)})")
+                        else:
+                            # 下一步还是 llm_gen，但 plan 中的 content 应该已经包含了生成的内容
+                            # 继续累积并检查是否还有更多步骤
+                            next_content = next_step.get('content', '')
+                            if next_content:
+                                ctx.plan_accumulated_content += next_content + "\n\n"
+                            ctx.plan_index += 1
+                            
+                            # 如果还有更多步骤，继续处理
+                            if ctx.plan_index < len(ctx.action_plan):
+                                # 还有更多步骤，发送链式追加消息继续执行
+                                get_topic_service().send_message(
+                                    topic_id=topic_id,
+                                    sender_id=self.agent_id,
+                                    sender_type='agent',
+                                    content=ctx.plan_accumulated_content.strip() or "继续处理...",
+                                    role='assistant',
+                                    sender_name=self.info.get('name'),
+                                    sender_avatar=self.info.get('avatar'),
+                                    ext={
+                                        'chain_append': True,
+                                        'auto_trigger': True,
+                                        'processSteps': ctx.to_process_steps_dict(),
+                                        'action_plan': ctx.action_plan,
+                                        'plan_index': ctx.plan_index,
+                                        'plan_accumulated_content': ctx.plan_accumulated_content,
+                                    }
+                                )
+                                
+                                ctx.update_phase(status='completed', action='action_plan_continue')
+                                logger.info(f"[ActorBase:{self.agent_id}] Action plan continue (step {ctx.plan_index}/{len(ctx.action_plan)})")
+                            else:
+                                # 计划执行完成，发送最终内容
+                                final_content = ctx.plan_accumulated_content.strip() or content
+                                
+                                # 解析媒体
+                                media = []
+                                if ctx.mcp_media:
+                                    media.extend(ctx.mcp_media)
+                                if ctx.final_media:
+                                    media.extend(ctx.final_media)
+                                
+                                # 构建 ext
+                                ext_data = ctx.build_ext_data()
+                                if media:
+                                    ext_data['media'] = media
+                                
+                                # 发送最终回复
+                                get_topic_service().send_message(
+                                    topic_id=topic_id,
+                                    sender_id=self.agent_id,
+                                    sender_type='agent',
+                                    content=final_content,
+                                    role='assistant',
+                                    message_id=ctx.reply_message_id,
+                                    sender_name=self.info.get('name'),
+                                    sender_avatar=self.info.get('avatar'),
+                                    ext=ext_data,
+                                )
+                                
+                                ctx.mark_complete(final_content, media)
+                                ctx.update_phase(status='completed', action='action_plan_complete')
+                                self._publish_process_event(ctx, ProcessPhase.POST_MSG_DEAL, 'completed', {
+                                    'action': 'action_plan_complete',
+                                    'has_media': bool(media),
+                                })
+                                
+                                logger.info(f"[ActorBase:{self.agent_id}] Action plan completed")
+                    else:
+                        # 计划执行完成，发送最终内容
+                        final_content = ctx.plan_accumulated_content.strip() or content
+                        
+                        # 解析媒体
+                        media = []
+                        if ctx.mcp_media:
+                            media.extend(ctx.mcp_media)
+                        if ctx.final_media:
+                            media.extend(ctx.final_media)
+                        
+                        # 构建 ext
+                        ext_data = ctx.build_ext_data()
+                        if media:
+                            ext_data['media'] = media
+                        
+                        # 发送最终回复
+                        get_topic_service().send_message(
+                            topic_id=topic_id,
+                            sender_id=self.agent_id,
+                            sender_type='agent',
+                            content=final_content,
+                            role='assistant',
+                            message_id=ctx.reply_message_id,
+                            sender_name=self.info.get('name'),
+                            sender_avatar=self.info.get('avatar'),
+                            ext=ext_data,
+                        )
+                        
+                        ctx.mark_complete(final_content, media)
+                        ctx.update_phase(status='completed', action='action_plan_complete')
+                        self._publish_process_event(ctx, ProcessPhase.POST_MSG_DEAL, 'completed', {
+                            'action': 'action_plan_complete',
+                            'has_media': bool(media),
+                        })
+                        
+                        logger.info(f"[ActorBase:{self.agent_id}] Action plan completed")
+                else:
+                    # 没有 action_plan，正常完成
+                    # 解析媒体
+                    media = []
+                    if ctx.mcp_media:
+                        media.extend(ctx.mcp_media)
+                    if ctx.final_media:
+                        media.extend(ctx.final_media)
+                    
+                    # 构建 ext
+                    ext_data = ctx.build_ext_data()
+                    if media:
+                        ext_data['media'] = media
+                    
+                    # 发送最终回复
+                    get_topic_service().send_message(
+                        topic_id=topic_id,
+                        sender_id=self.agent_id,
+                        sender_type='agent',
+                        content=content,
+                        role='assistant',
+                        message_id=ctx.reply_message_id,
+                        sender_name=self.info.get('name'),
+                        sender_avatar=self.info.get('avatar'),
+                        ext=ext_data,
+                    )
+                    
+                    ctx.mark_complete(content, media)
+                    
+                    ctx.update_phase(status='completed', action='reply_sent')
+                    self._publish_process_event(ctx, ProcessPhase.POST_MSG_DEAL, 'completed', {
+                        'action': 'reply_sent',
+                        'has_media': bool(media),
+                    })
+                    
+                    logger.info(f"[ActorBase:{self.agent_id}] Final reply sent")
             
             else:
                 # 未知决策，标记完成

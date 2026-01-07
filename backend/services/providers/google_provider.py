@@ -612,3 +612,68 @@ class GoogleProvider(BaseLLMProvider):
             return f"HTTP {response.status_code}"
         except:
             return response.text or f"HTTP {response.status_code}"
+    
+    def models(self) -> List[str]:
+        """
+        获取可用模型列表
+        优先使用 SDK，回退到 REST API
+        """
+        try:
+            # 优先使用 SDK
+            if self.sdk_available and self._client:
+                try:
+                    # Google GenAI SDK 可能没有直接的 models.list() 方法
+                    # 尝试使用 REST API
+                    pass
+                except Exception as e:
+                    self._log(f"SDK models() not available: {e}, using REST API")
+            
+            # 使用 REST API
+            # Gemini API: https://generativelanguage.googleapis.com/v1beta/models?key=API_KEY
+            base_url = self.api_url or 'https://generativelanguage.googleapis.com'
+            if '/v1beta' not in base_url and '/v1' not in base_url:
+                base_url = f"{base_url.rstrip('/')}/v1beta"
+            elif base_url.endswith('/v1'):
+                base_url = base_url.replace('/v1', '/v1beta')
+            
+            models_url = f"{base_url}/models"
+            params = {'key': self.api_key}
+            
+            self._log(f"Fetching models via REST API: {models_url}")
+            response = requests.get(models_url, params=params, timeout=10)
+            
+            if response.status_code != 200:
+                raise RuntimeError(f"Failed to fetch models: {response.status_code} {response.text}")
+            
+            data = response.json()
+            # Gemini 返回格式：{ models: [{ name: "...", ... }] }
+            if isinstance(data, dict) and isinstance(data.get('models'), list):
+                model_names = [model.get('name') for model in data['models'] if model.get('name')]
+                # 提取模型 ID（从完整名称中，如 "models/gemini-2.0-flash-exp" -> "gemini-2.0-flash-exp"）
+                model_ids = []
+                for name in model_names:
+                    if '/' in name:
+                        model_ids.append(name.split('/')[-1])
+                    else:
+                        model_ids.append(name)
+                self._log(f"Fetched {len(model_ids)} models via REST API")
+                return model_ids
+            
+            # 兼容其他格式
+            if isinstance(data, list):
+                model_ids = [item.get('name') if isinstance(item, dict) else item for item in data if item]
+                # 提取模型 ID
+                extracted_ids = []
+                for name in model_ids:
+                    if isinstance(name, str) and '/' in name:
+                        extracted_ids.append(name.split('/')[-1])
+                    elif name:
+                        extracted_ids.append(name)
+                self._log(f"Fetched {len(extracted_ids)} models via REST API (array format)")
+                return extracted_ids
+            
+            raise RuntimeError("Invalid response format from models API")
+            
+        except Exception as e:
+            self._log_error(f"Failed to fetch models: {e}", e)
+            raise

@@ -7,6 +7,52 @@ import { getBackendUrl } from '../utils/backendUrl';
 
 const API_BASE_URL = `${getBackendUrl()}/api/llm`;
 
+// ============================================================================
+// Provider (供应商) 相关类型和API
+// ============================================================================
+
+export interface LLMProvider {
+  provider_id: string;
+  name: string;
+  provider_type: 'openai' | 'deepseek' | 'anthropic' | 'local' | 'custom' | 'ollama' | 'gemini';
+  is_system: boolean;
+  override_url: boolean;
+  default_api_url?: string;
+  logo_light?: string;
+  logo_dark?: string;
+  logo_theme?: 'auto' | 'light' | 'dark';
+  metadata?: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateProviderRequest {
+  name: string;
+  provider_type: 'openai' | 'deepseek' | 'anthropic' | 'local' | 'custom' | 'ollama' | 'gemini';
+  override_url?: boolean;
+  default_api_url?: string;
+  logo_theme?: 'auto' | 'light' | 'dark';
+  metadata?: Record<string, any>;
+}
+
+export interface UpdateProviderRequest {
+  name?: string;
+  provider_type?: 'openai' | 'deepseek' | 'anthropic' | 'local' | 'custom' | 'ollama' | 'gemini';
+  override_url?: boolean;
+  default_api_url?: string;
+  logo_light?: string;
+  logo_dark?: string;
+  logo_theme?: 'auto' | 'light' | 'dark';
+  metadata?: Record<string, any>;
+}
+
+export interface DownloadLogoResponse {
+  logo_light: string;
+  logo_dark: string;
+  theme: string;
+  format: string;
+}
+
 export interface LLMConfigFromDB {
   config_id: string;
   name: string;
@@ -271,5 +317,141 @@ export function importLLMConfigsFromFile(): Promise<LLMConfigExportData> {
     
     input.click();
   });
+}
+
+// ============================================================================
+// Provider API
+// ============================================================================
+
+/**
+ * 获取所有供应商
+ */
+export async function getProviders(): Promise<LLMProvider[]> {
+  const response = await fetch(`${API_BASE_URL}/providers`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch providers: ${response.statusText}`);
+  }
+  const data = await response.json();
+  return data.providers || [];
+}
+
+/**
+ * 获取单个供应商
+ */
+export async function getProvider(providerId: string): Promise<LLMProvider> {
+  const response = await fetch(`${API_BASE_URL}/providers/${providerId}`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch provider: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+/**
+ * 创建供应商
+ */
+export async function createProvider(provider: CreateProviderRequest): Promise<{ provider_id: string; message: string }> {
+  const response = await fetch(`${API_BASE_URL}/providers`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(provider),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(`Failed to create provider: ${error.error || response.statusText}`);
+  }
+  return response.json();
+}
+
+/**
+ * 更新供应商
+ */
+export async function updateProvider(providerId: string, updates: UpdateProviderRequest): Promise<{ message: string }> {
+  const response = await fetch(`${API_BASE_URL}/providers/${providerId}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(updates),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(`Failed to update provider: ${error.error || response.statusText}`);
+  }
+  return response.json();
+}
+
+/**
+ * 删除供应商
+ */
+export async function deleteProvider(providerId: string): Promise<{ message: string }> {
+  const response = await fetch(`${API_BASE_URL}/providers/${providerId}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(`Failed to delete provider: ${error.error || response.statusText}`);
+  }
+  return response.json();
+}
+
+/**
+ * 从 LobeHub CDN 下载供应商 Logo
+ */
+export async function downloadProviderLogo(
+  provider: string,
+  theme: 'auto' | 'light' | 'dark' = 'auto'
+): Promise<DownloadLogoResponse> {
+  const response = await fetch(`${API_BASE_URL}/providers/download-logo?provider=${encodeURIComponent(provider)}&theme=${theme}`);
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(`Failed to download logo: ${error.error || response.statusText}`);
+  }
+  return response.json();
+}
+
+/**
+ * Logo 选项
+ */
+export interface LogoOption {
+  type: string;
+  url: string;
+  preview: string;
+}
+
+/**
+ * Logo 选项响应
+ */
+export interface LogoOptionsResponse {
+  light_options: LogoOption[];
+  dark_options: LogoOption[];
+  slug: string;
+}
+
+/**
+ * 获取供应商的 Logo 选项（浅色和深色两组）
+ */
+export async function getProviderLogoOptions(provider: string): Promise<LogoOptionsResponse> {
+  const response = await fetch(`${API_BASE_URL}/providers/logo-options?provider=${encodeURIComponent(provider)}`);
+  if (!response.ok) {
+    let errorData: any = { error: 'Unknown error' };
+    try {
+      errorData = await response.json();
+    } catch {
+      // 如果JSON解析失败，使用默认错误
+    }
+    // 创建一个包含更多信息的错误对象
+    const errorObj: any = new Error(errorData.error || response.statusText);
+    errorObj.response = response;
+    errorObj.errorData = errorData;
+    throw errorObj;
+  }
+  const data = await response.json();
+  return {
+    light_options: data.light_options || [],
+    dark_options: data.dark_options || [],
+    slug: data.slug || ''
+  };
 }
 

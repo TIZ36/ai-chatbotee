@@ -219,3 +219,57 @@ class AnthropicProvider(BaseLLMProvider):
                 })
         
         return system_msg, user_msgs
+    
+    def models(self) -> List[str]:
+        """
+        获取可用模型列表
+        优先使用 SDK，回退到 REST API
+        """
+        try:
+            # 优先使用 SDK
+            if self.sdk_available and self._client:
+                try:
+                    # Anthropic SDK 可能没有直接的 models.list() 方法
+                    # 尝试使用 REST API
+                    pass
+                except Exception as e:
+                    self._log(f"SDK models() not available: {e}, using REST API")
+            
+            # 使用 REST API
+            base_url = self.api_url or 'https://api.anthropic.com'
+            if not base_url.endswith('/v1'):
+                if base_url.endswith('/v1/'):
+                    base_url = base_url.rstrip('/')
+                else:
+                    base_url = f"{base_url}/v1"
+            
+            models_url = f"{base_url}/models"
+            headers = {
+                'x-api-key': self.api_key,
+                'anthropic-version': '2023-06-01'
+            }
+            
+            self._log(f"Fetching models via REST API: {models_url}")
+            response = requests.get(models_url, headers=headers, timeout=10)
+            
+            if response.status_code != 200:
+                raise RuntimeError(f"Failed to fetch models: {response.status_code} {response.text}")
+            
+            data = response.json()
+            # Anthropic 返回格式：{ data: [{ id: "...", ... }] }
+            if isinstance(data, dict) and isinstance(data.get('data'), list):
+                model_ids = [model.get('id') for model in data['data'] if model.get('id')]
+                self._log(f"Fetched {len(model_ids)} models via REST API")
+                return model_ids
+            
+            # 兼容其他格式
+            if isinstance(data, list):
+                model_ids = [item.get('id') if isinstance(item, dict) else item for item in data if item]
+                self._log(f"Fetched {len(model_ids)} models via REST API (array format)")
+                return model_ids
+            
+            raise RuntimeError("Invalid response format from models API")
+            
+        except Exception as e:
+            self._log_error(f"Failed to fetch models: {e}", e)
+            raise

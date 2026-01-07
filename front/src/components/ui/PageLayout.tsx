@@ -54,7 +54,7 @@ const PageLayout: React.FC<PageLayoutProps> = ({
                 )}
                 <div>
                   <h1 className="text-sm font-semibold text-gray-900 dark:text-white">{title}</h1>
-                  {description && (
+                  {description && typeof description === 'string' && description.trim() && description !== '0' && (
                     <p className="text-[10px] text-gray-500 dark:text-[#808080] mt-0.5">{description}</p>
                   )}
                 </div>
@@ -120,7 +120,7 @@ export const Card: React.FC<CardProps> = ({
             {title && (
               <h3 className="text-xs font-semibold text-gray-900 dark:text-white">{title}</h3>
             )}
-            {description && (
+            {description && typeof description === 'string' && description.trim() && description !== '0' && (
               <p className="text-[10px] text-gray-500 dark:text-[#808080] mt-0.5">{description}</p>
             )}
           </div>
@@ -160,7 +160,7 @@ export const Section: React.FC<SectionProps> = ({
             {title && (
               <h2 className="text-sm font-semibold text-gray-900 dark:text-white">{title}</h2>
             )}
-            {description && (
+            {description && typeof description === 'string' && description.trim() && description !== '0' && (
               <p className="text-[10px] text-gray-500 dark:text-[#808080] mt-0.5">{description}</p>
             )}
           </div>

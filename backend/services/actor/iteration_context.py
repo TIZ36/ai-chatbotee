@@ -138,6 +138,11 @@ class IterationContext:
     should_continue: bool = False
     next_tool_call: Optional[Dict[str, Any]] = None  # 下一个工具调用参数
     
+    # 链式执行计划（action_plan）
+    action_plan: Optional[List[Dict[str, Any]]] = None  # 执行计划列表
+    plan_index: int = 0  # 当前执行到计划的第几步
+    plan_accumulated_content: str = ""  # 累积的 LLM 生成内容
+    
     def add_step(
         self,
         step_type: str,

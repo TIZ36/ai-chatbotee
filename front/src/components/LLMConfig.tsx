@@ -4,17 +4,21 @@
  */
 
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { Plus, Trash2, CheckCircle, XCircle, Edit2, Brain, Save, X, Loader2, Eye, EyeOff, Type, Image as ImageIcon, Video, Music, Download, Upload, ChevronDown, ChevronRight, Camera } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, XCircle, Edit2, Brain, Save, X, Loader2, Eye, EyeOff, Type, Image as ImageIcon, Video, Music, Download, Upload, ChevronDown, ChevronRight, Camera, Search, Check } from 'lucide-react';
 import { 
   getLLMConfigs, createLLMConfig, updateLLMConfig, deleteLLMConfig, getLLMConfigApiKey, 
   LLMConfigFromDB, CreateLLMConfigRequest,
-  downloadLLMConfigAsJson, downloadAllLLMConfigsAsJson, importLLMConfigsFromFile, importLLMConfigs
+  downloadLLMConfigAsJson, downloadAllLLMConfigsAsJson, importLLMConfigsFromFile, importLLMConfigs,
+  getProviders, getProvider, createProvider, updateProvider, deleteProvider, downloadProviderLogo, getProviderLogoOptions,
+  LLMProvider, CreateProviderRequest, UpdateProviderRequest, LogoOption
 } from '../services/llmApi';
 import { fetchOllamaModels } from '../services/ollamaService';
+import { fetchModelsForProvider } from '../services/modelListService';
 import PageLayout, { Card, EmptyState } from './ui/PageLayout';
 import { Button } from './ui/Button';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { InputField, TextareaField, FormFieldGroup } from './ui/FormField';
+import { ModelSelectDialog } from './ui/ModelSelectDialog';
 import { toast } from './ui/use-toast';
 import { Checkbox } from './ui/Checkbox';
 import { Switch } from './ui/Switch';
@@ -41,8 +45,16 @@ const PROVIDER_INFO: Record<string, { name: string; color: string; icon: string 
   anthropic: { name: 'Anthropic (Claude)', color: '#D4A574', icon: '🧠' },
   gemini: { name: 'Google Gemini', color: '#4285F4', icon: '✨' },
   ollama: { name: 'Ollama', color: '#1D4ED8', icon: '🦙' },
-  local: { name: '本地模型', color: '#6B7280', icon: '💻' },
-  custom: { name: '自定义', color: '#8B5CF6', icon: '⚙️' },
+};
+
+// Provider 到 LobeHub icon slug 的映射
+const PROVIDER_LOBEHUB_SLUG: Record<string, string> = {
+  openai: 'openai',
+  anthropic: 'anthropic',
+  gemini: 'google', // Google Gemini 使用 google slug
+  deepseek: 'deepseek',
+  ollama: 'ollama',
+  // local 和 custom 没有对应的 LobeHub 图标
 };
 
 // Helper to convert file to base64
@@ -55,7 +67,38 @@ const fileToBase64 = (file: File): Promise<string> => {
   });
 };
 
+// 注意：logo下载现在通过后端API完成，不再需要前端直接下载
+// 保留此函数用于向后兼容（如果有其他地方使用）
+const downloadLogoFromLobeHub = async (provider: string): Promise<string | null> => {
+  // 已废弃：现在使用后端API downloadProviderLogo
+  console.warn('downloadLogoFromLobeHub is deprecated, use downloadProviderLogo from llmApi instead');
+  return null;
+};
+
 const LLMConfigPanel: React.FC = () => {
+  // 供应商相关状态
+  const [providers, setProviders] = useState<LLMProvider[]>([]);
+  const [isLoadingProviders, setIsLoadingProviders] = useState(true);
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
+  const [showCreateProviderDialog, setShowCreateProviderDialog] = useState(false);
+  const [showEditProviderDialog, setShowEditProviderDialog] = useState(false);
+  const [editingProvider, setEditingProvider] = useState<LLMProvider | null>(null);
+  const [deleteProviderTarget, setDeleteProviderTarget] = useState<LLMProvider | null>(null);
+  const [showLogoSelectDialog, setShowLogoSelectDialog] = useState(false);
+  const [logoProviderInput, setLogoProviderInput] = useState('');
+  const [lightLogoOptions, setLightLogoOptions] = useState<Array<{type: string, url: string, preview: string}>>([]);
+  const [darkLogoOptions, setDarkLogoOptions] = useState<Array<{type: string, url: string, preview: string}>>([]);
+  const [isLoadingLogos, setIsLoadingLogos] = useState(false);
+  const [selectedLightLogo, setSelectedLightLogo] = useState<string | null>(null);
+  const [selectedDarkLogo, setSelectedDarkLogo] = useState<string | null>(null);
+  const [newProvider, setNewProvider] = useState<CreateProviderRequest>({
+    name: '',
+    provider_type: 'openai',
+    override_url: false,
+    logo_theme: 'auto',
+  });
+  
+  // 模型配置相关状态
   const [configs, setConfigs] = useState<LLMConfigFromDB[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isAdding, setIsAdding] = useState(false);
@@ -74,9 +117,13 @@ const LLMConfigPanel: React.FC = () => {
   const [ollamaModels, setOllamaModels] = useState<string[]>([]);
   const [isLoadingOllamaModels, setIsLoadingOllamaModels] = useState(false);
   const [ollamaError, setOllamaError] = useState<string | null>(null);
+  const [availableModels, setAvailableModels] = useState<string[]>([]); // 通用模型列表
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const [showOllamaModelDialog, setShowOllamaModelDialog] = useState(false); // 显示 Ollama 模型选择对话框
+  const [showModelSelectDialog, setShowModelSelectDialog] = useState(false); // 显示通用模型选择对话框
   const [showApiKey, setShowApiKey] = useState(false); // 控制API密钥显示/隐藏
   const [loadingApiKey, setLoadingApiKey] = useState(false); // 加载API密钥状态
-  const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set()); // 展开的供应商
   const logoInputRef = useRef<HTMLInputElement>(null); // Logo 上传输入框引用
 
   // Handle logo upload
@@ -176,64 +223,124 @@ const LLMConfigPanel: React.FC = () => {
     );
   };
 
-  // Group configs by provider
-  const configsByProvider = useMemo(() => {
-    const grouped: Record<string, LLMConfigFromDB[]> = {};
-    configs.forEach(config => {
-      const provider = config.provider.toLowerCase();
-      if (!grouped[provider]) {
-        grouped[provider] = [];
+  // 不再需要按provider分组，因为现在使用供应商列表
+
+  // 加载供应商列表
+  const loadProviders = async () => {
+    try {
+      setIsLoadingProviders(true);
+      const data = await getProviders();
+      setProviders(data);
+      
+      // 为没有logo的系统供应商自动下载logo（跳过不支持的类型）
+      const supportedLogoProviders = ['openai', 'anthropic', 'gemini', 'google', 'deepseek', 'ollama'];
+      for (const provider of data) {
+        if (provider.is_system && !provider.logo_light && !provider.logo_dark) {
+          // 只尝试下载支持的供应商类型的logo
+          if (supportedLogoProviders.includes(provider.provider_type)) {
+            try {
+              const logoData = await downloadProviderLogo(provider.provider_type, 'auto');
+              await updateProvider(provider.provider_id, {
+                logo_light: logoData.logo_light,
+                logo_dark: logoData.logo_dark,
+                logo_theme: logoData.theme as 'auto' | 'light' | 'dark',
+              });
+              // 重新加载以更新logo
+              const updatedData = await getProviders();
+              setProviders(updatedData);
+              break; // 一次只处理一个，避免并发问题
+            } catch (logoError) {
+              console.warn(`Failed to download logo for ${provider.name}:`, logoError);
+              // Logo下载失败不影响加载
+            }
+          }
+        }
       }
-      grouped[provider].push(config);
-    });
-    return grouped;
-  }, [configs]);
-
-  // Get sorted provider keys
-  const providerKeys = useMemo(() => {
-    return Object.keys(configsByProvider).sort((a, b) => {
-      // Sort by number of configs (descending), then alphabetically
-      const countDiff = configsByProvider[b].length - configsByProvider[a].length;
-      if (countDiff !== 0) return countDiff;
-      return a.localeCompare(b);
-    });
-  }, [configsByProvider]);
-
-  // Toggle provider expansion
-  const toggleProvider = (provider: string) => {
-    setExpandedProviders(prev => {
-      const next = new Set(prev);
-      if (next.has(provider)) {
-        next.delete(provider);
-      } else {
-        next.add(provider);
+      
+      // 默认选中第一个供应商
+      if (data.length > 0 && !selectedProviderId) {
+        setSelectedProviderId(data[0].provider_id);
       }
-      return next;
-    });
+    } catch (error) {
+      console.error('Failed to load providers:', error);
+      toast({
+        title: '加载供应商失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoadingProviders(false);
+    }
   };
 
-  // Expand all providers
-  const expandAllProviders = () => {
-    setExpandedProviders(new Set(providerKeys));
+  // 加载Logo选项
+  const handleLoadLogoOptions = async () => {
+    if (!logoProviderInput.trim()) {
+      toast({
+        title: '请输入供应商名称',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
+    try {
+      setIsLoadingLogos(true);
+      const result = await getProviderLogoOptions(logoProviderInput.trim().toLowerCase());
+      if (result.light_options.length === 0 && result.dark_options.length === 0) {
+        toast({
+          title: '未找到Logo选项',
+          description: `未找到供应商 "${logoProviderInput}" 的Logo，请尝试其他名称（如 openai, anthropic, google, deepseek, ollama 等）`,
+          variant: 'destructive',
+        });
+        setLightLogoOptions([]);
+        setDarkLogoOptions([]);
+        return;
+      }
+      setLightLogoOptions(result.light_options);
+      setDarkLogoOptions(result.dark_options);
+      // 默认选择第一个选项
+      if (result.light_options.length > 0) {
+        setSelectedLightLogo(result.light_options[0].url);
+      }
+      if (result.dark_options.length > 0) {
+        setSelectedDarkLogo(result.dark_options[0].url);
+      }
+      toast({
+        title: '找到Logo选项',
+        description: `成功找到Logo选项`,
+        variant: 'success',
+      });
+    } catch (error: any) {
+      // 检查是否有建议
+      let errorMessage = error instanceof Error ? error.message : String(error);
+      let suggestions: string[] = [];
+      
+      // 从错误对象中获取建议
+      if (error.errorData && error.errorData.suggestions) {
+        suggestions = error.errorData.suggestions;
+        errorMessage = error.errorData.error || errorMessage;
+      }
+      
+      toast({
+        title: '获取Logo选项失败',
+        description: suggestions.length > 0 
+          ? `${errorMessage}\n建议尝试: ${suggestions.join(', ')}`
+          : errorMessage,
+        variant: 'destructive',
+      });
+      setLightLogoOptions([]);
+      setDarkLogoOptions([]);
+    } finally {
+      setIsLoadingLogos(false);
+    }
   };
 
-  // Collapse all providers
-  const collapseAllProviders = () => {
-    setExpandedProviders(new Set());
-  };
-
-  useEffect(() => {
-    loadConfigs();
-  }, []);
-
+  // 加载模型配置列表
   const loadConfigs = async () => {
     try {
       setIsLoading(true);
       const data = await getLLMConfigs();
       setConfigs(data);
-      // Expand all providers by default
-      const providers = new Set(data.map(c => c.provider.toLowerCase()));
-      setExpandedProviders(providers);
     } catch (error) {
       console.error('Failed to load LLM configs:', error);
       toast({
@@ -245,6 +352,11 @@ const LLMConfigPanel: React.FC = () => {
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    loadProviders();
+    loadConfigs();
+  }, []);
 
   // 获取 Ollama 模型列表
   const loadOllamaModels = useCallback(async (serverUrl: string) => {
@@ -259,11 +371,13 @@ const LLMConfigPanel: React.FC = () => {
 
     try {
       const models = await fetchOllamaModels(serverUrl.trim());
-      setOllamaModels(models);
+      // 去重：使用 Set 去除重复项
+      const uniqueModels = Array.from(new Set(models));
+      setOllamaModels(uniqueModels);
       // 如果当前没有选择模型，且模型列表不为空，自动选择第一个
       setNewConfig(prev => {
-        if (!prev.model && models.length > 0) {
-          return { ...prev, model: models[0] };
+        if (!prev.model && uniqueModels.length > 0) {
+          return { ...prev, model: uniqueModels[0] };
         }
         return prev;
       });
@@ -277,23 +391,59 @@ const LLMConfigPanel: React.FC = () => {
     }
   }, []);
 
-  // 当 Ollama 服务器地址改变时，自动获取模型列表
-  useEffect(() => {
-    if (newConfig.provider === 'ollama' && newConfig.api_url) {
-      // 使用防抖，避免频繁请求
-      const timer = setTimeout(() => {
-        loadOllamaModels(newConfig.api_url || '');
-      }, 500);
-      return () => clearTimeout(timer);
-    } else {
-      setOllamaModels([]);
-      setOllamaError(null);
+  // 加载通用模型列表（OpenAI 兼容 API，如 NVIDIA）
+  const loadModels = useCallback(async (provider: string, apiUrl: string, apiKey?: string) => {
+    if (!apiUrl || !apiUrl.trim()) {
+      setAvailableModels([]);
+      setModelsError(null);
+      return;
     }
-  }, [newConfig.provider, newConfig.api_url, loadOllamaModels]);
+
+    // Ollama 使用单独的逻辑
+    if (provider === 'ollama') {
+      return;
+    }
+
+    setIsLoadingModels(true);
+    setModelsError(null);
+
+    try {
+      const models = await fetchModelsForProvider(provider, apiUrl.trim(), apiKey);
+      // 去重：使用 Set 去除重复项
+      const uniqueModels = Array.from(new Set(models));
+      setAvailableModels(uniqueModels);
+      // 如果当前没有选择模型，且模型列表不为空，自动选择第一个
+      setNewConfig(prev => {
+        if (!prev.model && uniqueModels.length > 0) {
+          return { ...prev, model: uniqueModels[0] };
+        }
+        return prev;
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      setModelsError(errorMessage);
+      setAvailableModels([]);
+      console.error('Failed to fetch models:', error);
+    } finally {
+      setIsLoadingModels(false);
+    }
+  }, []);
+
+  // 不再自动加载 Ollama 模型列表，改为用户点击时手动加载
+
+  // 不再自动加载模型列表，改为用户点击时手动加载
 
   const handleAddConfig = async () => {
+    if (!selectedProvider) {
+      toast({
+        title: '请先选择供应商',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     // Ollama 不需要 API key，其他提供商需要
-    const requiresApiKey = newConfig.provider !== 'ollama';
+    const requiresApiKey = selectedProvider.provider_type !== 'ollama';
     if (!newConfig.name || (requiresApiKey && !newConfig.api_key)) {
       toast({
         title: requiresApiKey ? '请填写配置名称和 API 密钥' : '请填写配置名称',
@@ -303,23 +453,31 @@ const LLMConfigPanel: React.FC = () => {
     }
 
     try {
-      await createLLMConfig(newConfig);
+      // 确保使用选中的供应商类型
+      const configToCreate = {
+        ...newConfig,
+        provider: selectedProvider.provider_type,
+        // 如果供应商设置了override_url，使用供应商的default_api_url（如果模型配置中没有设置）
+        api_url: newConfig.api_url || selectedProvider.default_api_url || getProviderDefaultUrl(selectedProvider.provider_type),
+      };
+      
+      await createLLMConfig(configToCreate);
       await loadConfigs();
       
       // 重置表单
-    setNewConfig({
+      setNewConfig({
         name: '',
         shortname: '',
-      provider: 'openai',
+        provider: selectedProvider.provider_type,
         api_key: '',
-        api_url: '',
+        api_url: selectedProvider.override_url ? (selectedProvider.default_api_url || '') : (selectedProvider.default_api_url || getProviderDefaultUrl(selectedProvider.provider_type)),
         model: '',
-      enabled: true,
+        enabled: true,
         tags: [],
         description: '',
         metadata: {},
-    });
-    setIsAdding(false);
+      });
+      setIsAdding(false);
     } catch (error) {
       console.error('Failed to add config:', error);
       toast({
@@ -399,21 +557,41 @@ const LLMConfigPanel: React.FC = () => {
   };
 
   const handleEditConfig = async (config: LLMConfigFromDB) => {
+    // 查找对应的供应商
+    const provider = providers.find(p => 
+      p.provider_type === config.provider || 
+      p.provider_id === config.provider
+    );
+    
+    if (provider) {
+      setSelectedProviderId(provider.provider_id);
+    }
+    
+    const defaultUrl = provider?.default_api_url || getProviderDefaultUrl(config.provider);
+    
+    // 重置状态
+    setAvailableModels([]);
+    setModelsError(null);
+    setOllamaModels([]);
+    setOllamaError(null);
+    
     setNewConfig({
       name: config.name,
       shortname: config.shortname || '',
       provider: config.provider,
       api_key: '', // 初始为空，用户可以通过点击眼睛图标查看
-      api_url: config.api_url,
-      model: config.model,
+      api_url: config.api_url || defaultUrl,
+      model: config.model || '',
       enabled: config.enabled,
       tags: config.tags || [],
-      description: config.description,
+      description: config.description || '',
       metadata: config.metadata || {},
     });
     setEditingId(config.config_id);
-      setIsAdding(true);
+    setIsAdding(true);
     setShowApiKey(false); // 重置显示状态
+    
+    // 不再自动加载模型列表，改为用户点击时手动加载
   };
 
   // 加载并显示API密钥
@@ -445,17 +623,41 @@ const LLMConfigPanel: React.FC = () => {
     setIsAdding(false);
     setEditingId(null);
     setShowApiKey(false);
-    setNewConfig({
-      name: '',
-      provider: 'openai',
-      api_key: '',
-      api_url: '',
-      model: '',
-      enabled: true,
-      tags: [],
-      description: '',
-      metadata: {},
-    });
+    setAvailableModels([]);
+    setModelsError(null);
+    setOllamaModels([]);
+    setOllamaError(null);
+    setShowOllamaModelDialog(false);
+    setShowModelSelectDialog(false);
+    
+    // 重置表单，使用当前选中供应商的默认值
+    if (selectedProvider) {
+      const defaultModel = getProviderDefaultModel(selectedProvider.provider_type);
+      const defaultUrl = selectedProvider.default_api_url || getProviderDefaultUrl(selectedProvider.provider_type, defaultModel);
+      setNewConfig({
+        name: '',
+        provider: selectedProvider.provider_type,
+        api_key: '',
+        api_url: selectedProvider.override_url ? (selectedProvider.default_api_url || '') : defaultUrl,
+        model: '',
+        enabled: true,
+        tags: [],
+        description: '',
+        metadata: {},
+      });
+    } else {
+      setNewConfig({
+        name: '',
+        provider: 'openai',
+        api_key: '',
+        api_url: '',
+        model: '',
+        enabled: true,
+        tags: [],
+        description: '',
+        metadata: {},
+      });
+    }
   };
 
   // 导出单个配置
@@ -578,7 +780,22 @@ const LLMConfigPanel: React.FC = () => {
     }
   };
 
-  if (isLoading) {
+  // 获取当前选中的供应商（必须在所有 hooks 之后，但在条件返回之前）
+  const selectedProvider = providers.find(p => p.provider_id === selectedProviderId);
+  
+  // 获取当前供应商的模型配置（必须在所有 hooks 之后，但在条件返回之前）
+  const providerConfigs = useMemo(() => {
+    if (!selectedProviderId || !selectedProvider) return [];
+    // 根据provider_type匹配，或者根据provider_id匹配（兼容旧数据）
+    return configs.filter(c => 
+      c.provider === selectedProvider.provider_type || 
+      c.provider === selectedProviderId ||
+      (c as any).provider_id === selectedProviderId
+    );
+  }, [configs, selectedProviderId, selectedProvider]);
+
+  // 条件返回必须在所有 hooks 之后
+  if (isLoading || isLoadingProviders) {
     return (
       <PageLayout
         title="LLM 模型配置"
@@ -593,804 +810,1302 @@ const LLMConfigPanel: React.FC = () => {
     );
   }
 
-  const headerActions = !isAdding ? (
-    <div className="flex items-center space-x-2">
-      {/* 导入按钮 */}
-      <Button
-        onClick={handleImportConfigs}
-        variant="ghost"
-        size="sm"
-        className="text-sm"
-        title="导入配置"
-      >
-        <Upload className="w-4 h-4" />
-        <span>导入</span>
-      </Button>
-      
-      {/* 导出全部按钮 */}
-      <Button
-        onClick={handleExportAllConfigs}
-        variant="ghost"
-        size="sm"
-        className="text-sm"
-        title="导出所有配置"
-      >
-        <Download className="w-4 h-4" />
-        <span>导出全部</span>
-      </Button>
-      
-      <div className="w-px h-6 bg-gray-200 dark:bg-[#404040]" />
-      
-      {/* 添加模型按钮 */}
-      <Button
-        onClick={() => {
-          setIsAdding(true);
-          setEditingId(null);
-          setNewConfig({
-            name: '',
-            provider: 'openai',
-            api_key: '',
-            api_url: '',
-            model: '',
-            enabled: true,
-            tags: [],
-            description: '',
-            metadata: {},
-          });
-        }}
-        variant="primary"
-      >
-        <Plus className="w-4 h-4" />
-        <span>添加模型</span>
-      </Button>
-    </div>
-  ) : null;
-
   return (
     <PageLayout
       title="LLM 模型配置"
       description="管理您的大语言模型 API 配置"
       icon={Brain}
-      headerActions={headerActions}
     >
-      <div className="space-y-4">
-
-      {/* 紧凑的添加/编辑表单 */}
-      {isAdding && (
-        <Card 
-          title={editingId ? '编辑模型配置' : '添加新模型'}
-          headerAction={
-            <Button onClick={handleCancel} variant="ghost" size="icon">
-              <X className="w-5 h-5" />
+      <div className="flex gap-4 h-[calc(100vh-200px)]">
+        {/* 左侧：供应商列表 */}
+        <div className="w-80 flex-shrink-0 border-r border-gray-200 dark:border-[#404040] flex flex-col">
+          <div className="p-4 border-b border-gray-200 dark:border-[#404040]">
+            <Button
+              onClick={() => setShowCreateProviderDialog(true)}
+              variant="primary"
+              size="sm"
+              className="w-full"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              添加自定义供应商
             </Button>
-          }
-        >
+          </div>
           
-          <FormFieldGroup spacing="compact">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {/* 配置名称 */}
-              <InputField
-                label="配置名称"
-                required
-                inputProps={{
-                  id: "config-name",
-                  type: "text",
-                  value: newConfig.name || '',
-                  onChange: (e) => setNewConfig({ ...newConfig, name: e.target.value }),
-                  placeholder: "例如: OpenAI GPT-4",
-                }}
+          <div className="flex-1 overflow-y-auto">
+            {isLoadingProviders ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+              </div>
+            ) : providers.length === 0 ? (
+              <EmptyState
+                icon={Brain}
+                title="暂无供应商"
+                description="点击上方按钮添加供应商"
               />
+            ) : (
+              <div className="p-2 space-y-1">
+                {providers.map(provider => {
+                  // 计算该供应商的模型数量
+                  const providerModelCount = configs.filter(c => 
+                    c.provider === provider.provider_type || 
+                    c.provider === provider.provider_id ||
+                    (c as any).provider_id === provider.provider_id
+                  ).length;
+                  
+                  return (
+                    <div
+                      key={provider.provider_id}
+                      className={`
+                        group flex items-center gap-2 px-3 py-2 rounded-lg transition-colors
+                        ${selectedProviderId === provider.provider_id
+                          ? 'bg-primary-50 dark:bg-primary-900/20'
+                          : 'hover:bg-gray-50 dark:hover:bg-gray-800'
+                        }
+                      `}
+                    >
+                      <button
+                        onClick={() => setSelectedProviderId(provider.provider_id)}
+                        className={`
+                          flex-1 text-left flex items-center space-x-2
+                          ${selectedProviderId === provider.provider_id
+                            ? 'text-primary-700 dark:text-primary-300'
+                            : 'text-gray-700 dark:text-gray-300'
+                          }
+                        `}
+                      >
+                        <div className="w-6 h-6 rounded flex items-center justify-center overflow-hidden flex-shrink-0">
+                          {provider.logo_light || provider.logo_dark ? (
+                            <>
+                              {/* 浅色模式显示 */}
+                              {provider.logo_light && (
+                                <img
+                                  src={provider.logo_light}
+                                  alt={provider.name}
+                                  className="w-full h-full object-cover dark:hidden"
+                                />
+                              )}
+                              {/* 深色模式显示 */}
+                              {provider.logo_dark && (
+                                <img
+                                  src={provider.logo_dark}
+                                  alt={provider.name}
+                                  className="w-full h-full object-cover hidden dark:block"
+                                />
+                              )}
+                              {/* 如果只有一种logo，则都显示 */}
+                              {provider.logo_light && !provider.logo_dark && (
+                                <img
+                                  src={provider.logo_light}
+                                  alt={provider.name}
+                                  className="w-full h-full object-cover hidden dark:block"
+                                />
+                              )}
+                              {!provider.logo_light && provider.logo_dark && (
+                                <img
+                                  src={provider.logo_dark}
+                                  alt={provider.name}
+                                  className="w-full h-full object-cover dark:hidden"
+                                />
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-xs">
+                              {PROVIDER_INFO[provider.provider_type]?.icon || '📦'}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-sm font-medium truncate">{provider.name}</span>
+                        {provider.is_system && (
+                          <span className="text-xs text-gray-400">{}</span>
+                        )}
+                      </button>
+                      <div className="flex items-center gap-2">
+                        {providerModelCount > 0 && (
+                          <span className="text-xs text-gray-400 dark:text-gray-500">
+                            {providerModelCount}
+                          </span>
+                        )}
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingProvider(provider);
+                            setShowEditProviderDialog(true);
+                          }}
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-destructive"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteProviderTarget(provider);
+                          }}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
 
-              <InputField
-                label="短名称 (Shortname)"
-                inputProps={{
-                  id: "config-shortname",
-                  type: "text",
-                  value: newConfig.shortname || '',
-                  onChange: (e) => setNewConfig({ ...newConfig, shortname: e.target.value }),
-                  placeholder: "例如: GPT4",
-                }}
-              />
+        {/* 右侧：供应商详情和模型配置 */}
+        <div className="flex-1 overflow-y-auto">
+          {!selectedProvider ? (
+            <EmptyState
+              icon={Brain}
+              title="请选择供应商"
+              description="从左侧列表中选择一个供应商"
+            />
+          ) : (
+            <div className="space-y-4">
+              {/* 供应商信息卡片 */}
+              <Card 
+                title={selectedProvider.name} 
+                size="compact"
+                description={providerConfigs.length > 0 ? `${providerConfigs.length} 个模型` : undefined}
+              >
+                <div className="flex items-center space-x-4">
+                  {/* Logo */}
+                  <div className="w-16 h-16 rounded-lg flex items-center justify-center overflow-hidden border border-gray-200 dark:border-[#404040] flex-shrink-0">
+                    {selectedProvider.logo_light || selectedProvider.logo_dark ? (
+                      <>
+                        {/* 浅色模式显示 */}
+                        {selectedProvider.logo_light && (
+                          <img
+                            src={selectedProvider.logo_light}
+                            alt={selectedProvider.name}
+                            className="w-full h-full object-cover dark:hidden"
+                          />
+                        )}
+                        {/* 深色模式显示 */}
+                        {selectedProvider.logo_dark && (
+                          <img
+                            src={selectedProvider.logo_dark}
+                            alt={selectedProvider.name}
+                            className="w-full h-full object-cover hidden dark:block"
+                          />
+                        )}
+                        {/* 如果只有一种logo，则都显示 */}
+                        {selectedProvider.logo_light && !selectedProvider.logo_dark && (
+                          <img
+                            src={selectedProvider.logo_light}
+                            alt={selectedProvider.name}
+                            className="w-full h-full object-cover hidden dark:block"
+                          />
+                        )}
+                        {!selectedProvider.logo_light && selectedProvider.logo_dark && (
+                          <img
+                            src={selectedProvider.logo_dark}
+                            alt={selectedProvider.name}
+                            className="w-full h-full object-cover dark:hidden"
+                          />
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-2xl">
+                        {PROVIDER_INFO[selectedProvider.provider_type]?.icon || '📦'}
+                      </span>
+                    )}
+                  </div>
+                  
+                  {/* 供应商信息 */}
+                    <div className="flex-1">
+                      
+                    {selectedProvider.override_url && selectedProvider.default_api_url && (
+                      <div className="text-xs text-gray-400 mt-1">
+                        自定义 URL: {selectedProvider.default_api_url}
+                      </div>
+                    ) || selectedProvider.name}
+                    <div className="text-sm text-gray-500 dark:text-gray-400">
+                     模型类型: {PROVIDER_INFO[selectedProvider.provider_type]?.name}
+                    </div>
+                  </div>
+                  
+                  {/* Logo下载/上传按钮 */}
+                  <div className="flex items-center space-x-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          if (!selectedProvider) return;
+                          // 直接打开logo选择对话框，默认使用当前供应商类型
+                          setLogoProviderInput(selectedProvider.provider_type);
+                          setLightLogoOptions([]);
+                          setDarkLogoOptions([]);
+                          setSelectedLightLogo(null);
+                          setSelectedDarkLogo(null);
+                          setShowLogoSelectDialog(true);
+                        }}
+                      >
+                        <Search className="w-4 h-4 mr-2" />
+                        选择在线Logo
+                      </Button>
+                      <input
+                        ref={logoInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          
+                          // 验证文件类型
+                          if (!file.type.startsWith('image/')) {
+                            toast({
+                              title: '无效的文件类型',
+                              description: '请选择图片文件',
+                              variant: 'destructive',
+                            });
+                            return;
+                          }
+                          
+                          // 验证文件大小（最大 2MB）
+                          if (file.size > 2 * 1024 * 1024) {
+                            toast({
+                              title: '文件过大',
+                              description: 'Logo 文件大小不能超过 2MB',
+                              variant: 'destructive',
+                            });
+                            return;
+                          }
+                          
+                          try {
+                            const reader = new FileReader();
+                            reader.onload = async (event) => {
+                              const base64 = event.target?.result as string;
+                              // 移除 data:image/...;base64, 前缀
+                              const base64Data = base64.split(',')[1];
+                              
+                              // 更新供应商的logo
+                              await updateProvider(selectedProvider.provider_id, {
+                                logo_light: base64Data,
+                                logo_dark: base64Data,
+                                logo_theme: 'auto',
+                              });
+                              await loadProviders();
+                              toast({
+                                title: 'Logo上传成功',
+                                variant: 'success',
+                              });
+                            };
+                            reader.readAsDataURL(file);
+                          } catch (error) {
+                            toast({
+                              title: 'Logo上传失败',
+                              description: error instanceof Error ? error.message : String(error),
+                              variant: 'destructive',
+                            });
+                          }
+                        }}
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => logoInputRef.current?.click()}
+                      >
+                        <Upload className="w-4 h-4 mr-2" />
+                        上传Logo
+                      </Button>
+                    </div>
+                </div>
+              </Card>
 
-            {/* 提供商 */}
+              {/* 已有模型列表 */}
+              <Card 
+                title={providerConfigs.length === 0 ? '已添加的模型' : `已添加的模型 (${providerConfigs.length})`}
+                description={providerConfigs.length === 0 ? '为当前供应商添加模型配置，每个模型可以设置独立的API密钥和参数' : undefined} 
+                size="compact"
+                headerAction={
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={async () => {
+                      if (!selectedProvider) {
+                        toast({
+                          title: '提示',
+                          description: '请先选择供应商',
+                          variant: 'default',
+                        });
+                        return;
+                      }
+                      setIsAdding(true);
+                      setEditingId(null);
+                      setAvailableModels([]);
+                      setModelsError(null);
+                      setOllamaModels([]);
+                      setOllamaError(null);
+                      
+                      // 初始化配置，继承供应商设置
+                      const defaultModel = getProviderDefaultModel(selectedProvider.provider_type);
+                      const defaultUrl = selectedProvider.default_api_url || getProviderDefaultUrl(selectedProvider.provider_type, defaultModel);
+                      
+                      setNewConfig({
+                        name: '',
+                        provider: selectedProvider.provider_type,
+                        api_key: '',
+                        api_url: selectedProvider.override_url ? (selectedProvider.default_api_url || '') : defaultUrl,
+                        model: '',
+                        enabled: true,
+                        tags: [],
+                        description: '',
+                        metadata: {},
+                      });
+                      
+                      // 如果供应商还没有logo，且是第一次添加模型，尝试自动下载logo（包括系统供应商）
+                      // 只尝试下载支持的供应商类型的logo
+                      const supportedLogoProviders = ['openai', 'anthropic', 'gemini', 'google', 'deepseek', 'ollama'];
+                      if (providerConfigs.length === 0 && !selectedProvider.logo_light && !selectedProvider.logo_dark && supportedLogoProviders.includes(selectedProvider.provider_type)) {
+                        try {
+                          const logoData = await downloadProviderLogo(selectedProvider.provider_type, 'auto');
+                          await updateProvider(selectedProvider.provider_id, {
+                            logo_light: logoData.logo_light,
+                            logo_dark: logoData.logo_dark,
+                            logo_theme: logoData.theme as 'auto' | 'light' | 'dark',
+                          });
+                          await loadProviders();
+                        } catch (logoError) {
+                          console.warn('Failed to download logo:', logoError);
+                          // Logo下载失败不影响添加模型，提示用户手动上传
+                          toast({
+                            title: 'Logo下载失败',
+                            description: '可以稍后手动上传logo',
+                            variant: 'default',
+                          });
+                        }
+                      }
+                    }}
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    添加模型
+                  </Button>
+                }
+              >
+                {providerConfigs.length === 0 ? (
+                  <EmptyState
+                    icon={Brain}
+                    title="暂无模型"
+                    description="点击右上角按钮添加第一个模型"
+                  />
+                ) : (
+                  <div className="space-y-2">
+                    {providerConfigs.map(config => (
+                      <div
+                        key={config.config_id}
+                        className="flex items-center justify-between p-3 rounded-lg border border-gray-200 dark:border-[#404040] hover:bg-gray-50 dark:hover:bg-[#363636] transition-colors"
+                      >
+                        <div className="flex items-center space-x-3 flex-1">
+                          <div className="w-8 h-8 rounded flex items-center justify-center overflow-hidden border border-gray-200 dark:border-[#404040]">
+                            {/* 优先使用供应商的logo */}
+                            {selectedProvider && (selectedProvider.logo_light || selectedProvider.logo_dark) ? (
+                              <>
+                                {/* 浅色模式显示 */}
+                                {selectedProvider.logo_light && (
+                                  <img
+                                    src={selectedProvider.logo_light}
+                                    alt={selectedProvider.name}
+                                    className="w-full h-full object-cover dark:hidden"
+                                  />
+                                )}
+                                {/* 深色模式显示 */}
+                                {selectedProvider.logo_dark && (
+                                  <img
+                                    src={selectedProvider.logo_dark}
+                                    alt={selectedProvider.name}
+                                    className="w-full h-full object-cover hidden dark:block"
+                                  />
+                                )}
+                                {/* 如果只有一种logo，则都显示 */}
+                                {selectedProvider.logo_light && !selectedProvider.logo_dark && (
+                                  <img
+                                    src={selectedProvider.logo_light}
+                                    alt={selectedProvider.name}
+                                    className="w-full h-full object-cover hidden dark:block"
+                                  />
+                                )}
+                                {!selectedProvider.logo_light && selectedProvider.logo_dark && (
+                                  <img
+                                    src={selectedProvider.logo_dark}
+                                    alt={selectedProvider.name}
+                                    className="w-full h-full object-cover dark:hidden"
+                                  />
+                                )}
+                              </>
+                            ) : config.metadata?.providerLogo ? (
+                              <img
+                                src={config.metadata.providerLogo}
+                                alt=""
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <span className="text-xs">
+                                {PROVIDER_INFO[config.provider]?.icon || '📦'}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm text-gray-900 dark:text-gray-100">
+                              {config.name}
+                            </div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400">
+                              {config.model || '未设置模型'}
+                            </div>
+                          </div>
+                          {config.enabled ? (
+                            <span className="ui-badge-success text-xs">已启用</span>
+                          ) : (
+                            <span className="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded">
+                              已禁用
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center space-x-2 ml-4">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleEditConfig(config)}
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setDeleteTarget(config)}
+                          >
+                            <Trash2 className="w-4 h-4 text-red-600" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+
+              {/* 添加新模型配置 */}
+              {isAdding && selectedProvider && (
+                <Card 
+                  title={editingId ? '编辑模型配置' : '添加新模型'}
+                  headerAction={
+                    <Button onClick={handleCancel} variant="ghost" size="icon">
+                      <X className="w-5 h-5" />
+                    </Button>
+                  }
+                >
+                  <FormFieldGroup spacing="compact">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {/* 注意：provider 和 override_url 现在从选中的供应商继承，不再需要用户选择 */}
+                      
+                      {/* API URL - 根据供应商设置显示 */}
+                      {selectedProvider && (
+                        <>
+                          {selectedProvider.override_url ? (
+                            // 如果供应商设置了 override_url，显示可编辑的URL输入框
+                            <div className="md:col-span-2">
+                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                API URL <span className="text-red-500">*</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={newConfig.api_url || selectedProvider.default_api_url || ''}
+                                onChange={(e) => {
+                                  setNewConfig({ ...newConfig, api_url: e.target.value, model: '' });
+                                  setAvailableModels([]);
+                                  setModelsError(null);
+                                }}
+                                className="input-field"
+                                placeholder={selectedProvider.default_api_url || '请输入 API URL'}
+                              />
+                            </div>
+                          ) : selectedProvider.provider_type === 'ollama' ? (
+                            // Ollama 需要服务器地址
+                            <div className="md:col-span-2">
+                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                Ollama 服务器地址 <span className="text-red-500">*</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={newConfig.api_url || selectedProvider.default_api_url || getProviderDefaultUrl('ollama') || ''}
+                                onChange={(e) => {
+                                  setNewConfig({ ...newConfig, api_url: e.target.value, model: '' });
+                                  setAvailableModels([]);
+                                  setModelsError(null);
+                                }}
+                                className="input-field"
+                                placeholder={selectedProvider.default_api_url || getProviderDefaultUrl('ollama')}
+                              />
+                              <p className="text-xs text-gray-500 mt-1">
+                                默认: {getProviderDefaultUrl('ollama')}
+                                <span className="block mt-1">
+                                  💡 提示：输入服务器地址后，点击模型名称输入框可以获取可用模型列表
+                                </span>
+                                <span className="block mt-1 text-green-600">
+                                  ✅ Ollama 模型不需要 API 密钥，可以直接使用
+                                </span>
+                              </p>
+                            </div>
+                          ) : (
+                            // 其他供应商使用默认URL（只读显示）
+                            <div className="md:col-span-2">
+                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                API URL <span className="text-xs text-gray-500">(使用默认: {selectedProvider.default_api_url || getProviderDefaultUrl(selectedProvider.provider_type)})</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={newConfig.api_url || selectedProvider.default_api_url || getProviderDefaultUrl(selectedProvider.provider_type) || ''}
+                                onChange={(e) => {
+                                  setNewConfig({ ...newConfig, api_url: e.target.value, model: '' });
+                                  setAvailableModels([]);
+                                  setModelsError(null);
+                                }}
+                                className="input-field"
+                                placeholder={selectedProvider.default_api_url || getProviderDefaultUrl(selectedProvider.provider_type)}
+                                readOnly
+                              />
+                            </div>
+                          )}
+                        </>
+                      )}
+
+                      {/* API密钥 */}
+                      {selectedProvider && selectedProvider.provider_type !== 'ollama' && (
+              <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            API密钥 {!editingId && <span className="text-red-500">*</span>} {editingId && <span className="text-xs text-gray-500">(留空则不更新)</span>}
+                          </label>
+                          <div className="relative">
+                            <input
+                              type={showApiKey ? 'text' : 'password'}
+                              value={newConfig.api_key || ''}
+                              onChange={(e) => {
+                                setNewConfig({ ...newConfig, api_key: e.target.value });
+                                // 清空模型列表，等待重新加载
+                                setAvailableModels([]);
+                                setModelsError(null);
+                              }}
+                              className="input-field pr-10"
+                              placeholder={editingId ? '点击右侧眼睛图标查看或留空不更新' : getProviderPlaceholder(selectedProvider?.provider_type || 'openai')}
+                              readOnly={editingId !== null && !showApiKey && !newConfig.api_key}
+                            />
+                            {editingId && (
+                              <button
+                                type="button"
+                                onClick={handleLoadApiKey}
+                                disabled={loadingApiKey}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors disabled:opacity-50"
+                                title={showApiKey ? '隐藏API密钥' : '显示API密钥'}
+                              >
+                                {loadingApiKey ? (
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : showApiKey ? (
+                                  <EyeOff className="w-4 h-4" />
+                                ) : (
+                                  <Eye className="w-4 h-4" />
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 模型名称 */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          模型名称
+                          {selectedProvider && ((selectedProvider.provider_type === 'ollama' as any || (selectedProvider.provider_type !== 'ollama' && newConfig.api_key))) && (
+                            <span className="text-xs text-gray-500">(点击输入框选择模型)</span>
+                          )}
+                        </label>
+                        {selectedProvider && selectedProvider.provider_type === 'ollama' ? (
+                          <div>
+                            <input
+                              type="text"
+                              value={newConfig.model || ''}
+                              onChange={(e) => {
+                                const model = e.target.value;
+                                setNewConfig(prev => ({
+                                  ...prev,
+                                  model,
+                                  // 如果配置名称为空，自动填充为模型名称
+                                  name: prev.name || model,
+                                }));
+                              }}
+                              className="input-field cursor-pointer"
+                              placeholder={
+                                newConfig.api_url
+                                  ? '点击选择模型'
+                                  : '请先输入服务器地址，然后点击选择模型'
+                              }
+                              onClick={() => {
+                                if (!newConfig.api_url) {
+                                  toast({
+                                    title: '提示',
+                                    description: '请先输入 Ollama 服务器地址',
+                                    variant: 'default',
+                                  });
+                                  return;
+                                }
+                                // 如果模型列表为空，先加载
+                                if (ollamaModels.length === 0 && !isLoadingOllamaModels) {
+                                  loadOllamaModels(newConfig.api_url);
+                                }
+                                setShowOllamaModelDialog(true);
+                              }}
+                              readOnly
+                            />
+                            {isLoadingOllamaModels && (
+                              <div className="flex items-center space-x-2 mt-1 text-xs text-gray-500">
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                                <span>正在获取模型列表...</span>
+                              </div>
+                            )}
+                            {ollamaError && (
+                              <div className="mt-1 text-xs text-red-600">
+                                {ollamaError}
+                              </div>
+                            )}
+                            {!isLoadingOllamaModels && !ollamaError && ollamaModels.length > 0 && (
+                              <div className="mt-1 text-xs text-green-600">
+                                已找到 {ollamaModels.length} 个模型
+                              </div>
+                            )}
+                            <ModelSelectDialog
+                              open={showOllamaModelDialog}
+                              onOpenChange={setShowOllamaModelDialog}
+                              models={ollamaModels}
+                              selectedModel={newConfig.model}
+                              onSelect={(model) => {
+                                setNewConfig(prev => ({
+                                  ...prev,
+                                  model,
+                                  // 如果配置名称为空，自动填充为模型名称
+                                  name: prev.name || model,
+                                }));
+                              }}
+                              title="选择 Ollama 模型"
+                              description={
+                                ollamaModels.length > 0
+                                  ? `从 ${ollamaModels.length} 个可用模型中选择`
+                                  : isLoadingOllamaModels
+                                  ? '正在加载模型列表...'
+                                  : '暂无可用模型，请检查服务器地址'
+                              }
+                              loading={isLoadingOllamaModels}
+                              emptyMessage="暂无可用模型，请先输入服务器地址"
+                            />
+                          </div>
+                        ) : (
+                          <div>
+                            <input
+                              type="text"
+                              value={newConfig.model || ''}
+                              onChange={(e) => {
+                                const model = e.target.value;
+                                setNewConfig(prev => ({
+                                  ...prev,
+                                  model,
+                                  // 如果配置名称为空，自动填充为模型名称
+                                  name: prev.name || model,
+                                }));
+                              }}
+                              className="input-field cursor-pointer"
+                              placeholder={
+                                newConfig.api_key
+                                  ? '点击选择模型'
+                                  : '请先填写 API Key，然后点击选择模型'
+                              }
+                              onClick={() => {
+                                if (!newConfig.api_key) {
+                                  toast({
+                                    title: '提示',
+                                    description: '请先填写 API Key',
+                                    variant: 'default',
+                                  });
+                                  return;
+                                }
+                                // 获取实际的 API URL（从供应商继承或使用默认值）
+                                const actualApiUrl = newConfig.api_url || selectedProvider?.default_api_url || getProviderDefaultUrl(selectedProvider?.provider_type || 'openai');
+                                
+                                // 如果模型列表为空，先加载
+                                if (availableModels.length === 0 && !isLoadingModels && selectedProvider) {
+                                  loadModels(selectedProvider.provider_type, actualApiUrl, newConfig.api_key);
+                                }
+                                setShowModelSelectDialog(true);
+                              }}
+                              readOnly
+                            />
+                            {isLoadingModels && (
+                              <div className="flex items-center space-x-2 mt-1 text-xs text-gray-500">
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                                <span>正在从 API 获取模型列表...</span>
+                              </div>
+                            )}
+                            {modelsError && (
+                              <div className="mt-1 text-xs text-red-600">
+                                {modelsError}
+                              </div>
+                            )}
+                            {!isLoadingModels && !modelsError && availableModels.length > 0 && (
+                              <div className="mt-1 text-xs text-green-600">
+                                已找到 {availableModels.length} 个模型
+                              </div>
+                            )}
+                            <ModelSelectDialog
+                              open={showModelSelectDialog}
+                              onOpenChange={setShowModelSelectDialog}
+                              models={availableModels}
+                              selectedModel={newConfig.model}
+                              onSelect={(model) => {
+                                setNewConfig(prev => ({
+                                  ...prev,
+                                  model,
+                                  // 如果配置名称为空，自动填充为模型名称
+                                  name: prev.name || model,
+                                }));
+                              }}
+                              title="选择模型"
+                              description={
+                                availableModels.length > 0
+                                  ? `从 ${availableModels.length} 个可用模型中选择`
+                                  : isLoadingModels
+                                  ? '正在加载模型列表...'
+                                  : '暂无可用模型'
+                              }
+                              loading={isLoadingModels}
+                              emptyMessage={newConfig.api_key ? '暂无可用模型' : '请先填写 API Key'}
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 描述 */}
+                      <TextareaField
+                        label="描述（可选）"
+                        textareaProps={{
+                          id: "config-description",
+                          value: newConfig.description || '',
+                          onChange: (e) => setNewConfig({ ...newConfig, description: e.target.value }),
+                          rows: 2,
+                          placeholder: "模型描述...",
+                        }}
+                        className="md:col-span-2"
+                      />
+
+                      {/* Thinking 模式配置 */}
+                      <div className="md:col-span-2 flex items-center space-x-2">
+                        <Switch
+                          id="enableThinking"
+                          checked={newConfig.metadata?.enableThinking ?? false}
+                          onCheckedChange={(checked) => {
+                            setNewConfig({
+                              ...newConfig,
+                              metadata: {
+                                ...newConfig.metadata,
+                                enableThinking: checked,
+                              },
+                            });
+                          }}
+                        />
+                        <label
+                          htmlFor="enableThinking"
+                          className="text-sm font-medium text-gray-700 dark:text-gray-300"
+                        >
+                          启用 Thinking 模式（深度思考）
+                        </label>
+                        <span className="text-xs text-gray-500">
+                          （一旦启用，聊天中不允许切换模式。用户可灵活测试后确认）
+                        </span>
+                      </div>
+
+                      {/* 支持的输入类型 */}
+                      <div className="md:col-span-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          支持的输入类型
+                        </label>
+                        <div className="flex flex-wrap gap-3">
+                          {(['text', 'image', 'video', 'audio'] as const).map((type) => {
+                            const supportedInputs = newConfig.metadata?.supportedInputs || [];
+                            const isChecked = supportedInputs.includes(type);
+                            const icons = {
+                              text: Type,
+                              image: ImageIcon,
+                              video: Video,
+                              audio: Music,
+                            };
+                            const labels = {
+                              text: '文字',
+                              image: '图片',
+                              video: '视频',
+                              audio: '音频',
+                            };
+                            const Icon = icons[type];
+                            
+                            return (
+                              <label key={type} className="flex items-center space-x-1.5 cursor-pointer">
+                                <Checkbox
+                                  checked={isChecked}
+                                  onCheckedChange={(checked) => {
+                                    const nextChecked = checked === true;
+                                    const current = newConfig.metadata?.supportedInputs || [];
+                                    const updated = nextChecked
+                                      ? [...current, type]
+                                      : current.filter((t: string) => t !== type);
+                                    setNewConfig({
+                                      ...newConfig,
+                                      metadata: {
+                                        ...newConfig.metadata,
+                                        supportedInputs: updated,
+                                      },
+                                    });
+                                  }}
+                                />
+                                <Icon className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                                <span className="text-sm text-gray-700 dark:text-gray-300">{labels[type]}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* 支持的输出类型 */}
+                      <div className="md:col-span-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          支持的输出类型
+                        </label>
+                        <div className="flex flex-wrap gap-3">
+                          {(['text', 'image', 'video', 'audio'] as const).map((type) => {
+                            const supportedOutputs = newConfig.metadata?.supportedOutputs || [];
+                            const isChecked = supportedOutputs.includes(type);
+                            const icons = {
+                              text: Type,
+                              image: ImageIcon,
+                              video: Video,
+                              audio: Music,
+                            };
+                            const labels = {
+                              text: '文字',
+                              image: '图片',
+                              video: '视频',
+                              audio: '音频',
+                            };
+                            const Icon = icons[type];
+                            
+                            return (
+                              <label key={type} className="flex items-center space-x-1.5 cursor-pointer">
+                                <Checkbox
+                                  checked={isChecked}
+                                  onCheckedChange={(checked) => {
+                                    const nextChecked = checked === true;
+                                    const current = newConfig.metadata?.supportedOutputs || [];
+                                    const updated = nextChecked
+                                      ? [...current, type]
+                                      : current.filter((t: string) => t !== type);
+                                    setNewConfig({
+                                      ...newConfig,
+                                      metadata: {
+                                        ...newConfig.metadata,
+                                        supportedOutputs: updated,
+                                      },
+                                    });
+                                  }}
+                                />
+                                <Icon className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                                <span className="text-sm text-gray-700 dark:text-gray-300">{labels[type]}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* 启用状态 */}
+                      <div className="md:col-span-2 flex items-center space-x-2">
+                        <Switch
+                          id="enabled"
+                          checked={newConfig.enabled ?? true}
+                          onCheckedChange={(checked) =>
+                            setNewConfig({ ...newConfig, enabled: checked })
+                          }
+                        />
+                        <label
+                          htmlFor="enabled"
+                          className="text-sm font-medium text-gray-700 dark:text-gray-300"
+                        >
+                          启用此配置
+                        </label>
+                      </div>
+
+                      {/* 配置名称 */}
+                      <InputField
+                        label="配置名称"
+                        required
+                        inputProps={{
+                          id: "config-name",
+                          type: "text",
+                          value: newConfig.name || '',
+                          onChange: (e) => setNewConfig({ ...newConfig, name: e.target.value }),
+                          placeholder: "例如: OpenAI GPT-4",
+                        }}
+                      />
+
+                      {/* 段名称 (Shortname) */}
+                      <InputField
+                        label="短名称 (Shortname)"
+                        inputProps={{
+                          id: "config-shortname",
+                          type: "text",
+                          value: newConfig.shortname || '',
+                          onChange: (e) => setNewConfig({ ...newConfig, shortname: e.target.value }),
+                          placeholder: "例如: GPT4",
+                        }}
+                      />
+                    </div>
+                  </FormFieldGroup>
+
+                  {/* 操作按钮 */}
+                  <div className="flex space-x-2 mt-4 pt-4 border-t border-gray-200 dark:border-[#404040]">
+                    <Button
+                      onClick={editingId ? handleUpdateConfig : handleAddConfig}
+                      variant="primary"
+                    >
+                      <Save className="w-4 h-4" />
+                      <span>{editingId ? '保存' : '添加'}</span>
+                    </Button>
+                    <Button
+                      onClick={handleCancel}
+                      variant="secondary"
+                    >
+                      取消
+                    </Button>
+                  </div>
+                </Card>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 创建自定义供应商对话框 */}
+      <Dialog open={showCreateProviderDialog} onOpenChange={setShowCreateProviderDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>添加自定义供应商</DialogTitle>
+            <DialogDescription>
+              添加一个自定义供应商，用于兼容模式的非主流供应商（如 DeepSeek、NVIDIA 等）
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <InputField
+              label="供应商名称"
+              required
+              inputProps={{
+                id: "provider-name",
+                type: "text",
+                value: newProvider.name,
+                onChange: (e) => setNewProvider({ ...newProvider, name: e.target.value }),
+                placeholder: "例如: NVIDIA",
+              }}
+            />
+
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                提供商 *
+                兼容的供应商类型 *
               </label>
               <Select
-                value={newConfig.provider || 'openai'}
+                value={newProvider.provider_type}
                 onValueChange={(value) => {
-                  const provider =
-                    value as CreateLLMConfigRequest['provider'];
-                  const defaultModel = getProviderDefaultModel(provider);
-                  const defaultUrl = getProviderDefaultUrl(provider, defaultModel);
-
-                  setNewConfig({
-                    ...newConfig,
-                    provider,
-                    api_url: defaultUrl,
-                    model: defaultModel,
-                    api_key: provider === 'ollama' ? '' : newConfig.api_key,
+                  setNewProvider({
+                    ...newProvider,
+                    provider_type: value as CreateProviderRequest['provider_type'],
                   });
                 }}
               >
                 <SelectTrigger className="input-field">
-                  <div className="flex items-center gap-2">
-                    {(() => {
-                      const provider = (newConfig.provider || 'openai').toLowerCase();
-                      switch (provider) {
-                        case 'openai':
-                          return <Brain className="w-4 h-4 text-[#10A37F]" />;
-                        case 'deepseek':
-                          return <Brain className="w-4 h-4 text-[#5B68DF]" />;
-                        case 'anthropic':
-                          return <Brain className="w-4 h-4 text-[#D4A574]" />;
-                        case 'gemini':
-                          return <Brain className="w-4 h-4 text-[#4285F4]" />;
-                        case 'ollama':
-                          return <Brain className="w-4 h-4 text-[#1D4ED8]" />;
-                        default:
-                          return <Brain className="w-4 h-4 text-gray-400" />;
-                      }
-                    })()}
-                    <SelectValue />
-                  </div>
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="openai">OpenAI</SelectItem>
+                  <SelectItem value="openai">OpenAI (兼容 OpenAI API)</SelectItem>
                   <SelectItem value="deepseek">DeepSeek</SelectItem>
                   <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
                   <SelectItem value="gemini">Google Gemini</SelectItem>
                   <SelectItem value="ollama">Ollama</SelectItem>
-                  <SelectItem value="local">本地模型</SelectItem>
-                  <SelectItem value="custom">自定义</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
-            {/* 供应商 Logo */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                供应商 Logo <span className="text-xs text-gray-500 font-normal">(可选，≤500KB)</span>
-              </label>
-              <div className="flex items-start space-x-3">
-                {/* Logo 预览 */}
-                <div 
-                  className="w-12 h-12 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600 flex items-center justify-center overflow-hidden bg-gray-50 dark:bg-[#363636] flex-shrink-0"
-                  style={{ 
-                    backgroundColor: newConfig.metadata?.providerLogo 
-                      ? 'transparent' 
-                      : PROVIDER_INFO[newConfig.provider || 'openai']?.color || '#6B7280'
-                  }}
-                >
-                  {newConfig.metadata?.providerLogo ? (
-                    <img 
-                      src={newConfig.metadata.providerLogo} 
-                      alt="Provider logo" 
-                      className="w-full h-full object-cover"
-                      style={{ 
-                        objectPosition: `${newConfig.metadata?.logoPositionX ?? 50}% ${newConfig.metadata?.logoPositionY ?? 50}%`,
-                        transform: `scale(${(newConfig.metadata?.logoScale ?? 100) / 100})`,
-                      }}
-                    />
-                  ) : (
-                    <span className="text-xl text-white">
-                      {PROVIDER_INFO[newConfig.provider || 'openai']?.icon || '📦'}
-                    </span>
-                  )}
-                </div>
-                
-                {/* 上传/移除按钮 + 位置调整 */}
-                <div className="flex flex-col space-y-2 flex-1">
-                  <div className="flex items-center space-x-2">
-                    <input
-                      ref={logoInputRef}
-                      type="file"
-                      accept="image/*"
-                      onChange={handleLogoUpload}
-                      className="hidden"
-                      id="logo-upload"
-                    />
-                    <label
-                      htmlFor="logo-upload"
-                      className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-[#404040] hover:bg-gray-200 dark:hover:bg-[#4a4a4a] rounded-lg cursor-pointer transition-colors"
-                    >
-                      <Camera className="w-3.5 h-3.5" />
-                      <span>上传 Logo</span>
-                    </label>
-                    {newConfig.metadata?.providerLogo && (
-                      <button
-                        type="button"
-                        onClick={handleRemoveLogo}
-                        className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>移除</span>
-                      </button>
-                    )}
-                  </div>
-                  
-                  {/* Logo 位置和缩放调整 - 仅在有 logo 时显示 */}
-                  {newConfig.metadata?.providerLogo && (
-                    <div className="space-y-1.5 pt-1">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-[10px] text-gray-500 dark:text-gray-400 w-6">水平</span>
-                        <input
-                          type="range"
-                          min="0"
-                          max="100"
-                          value={newConfig.metadata?.logoPositionX ?? 50}
-                          onChange={(e) => setNewConfig(prev => ({
-                            ...prev,
-                            metadata: {
-                              ...prev.metadata,
-                              logoPositionX: parseInt(e.target.value),
-                            },
-                          }))}
-                          className="flex-1 h-1 bg-gray-200 dark:bg-gray-600 rounded-lg appearance-none cursor-pointer accent-primary-500"
-                        />
-                        <span className="text-[10px] text-gray-400 w-6 text-right">{newConfig.metadata?.logoPositionX ?? 50}%</span>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <span className="text-[10px] text-gray-500 dark:text-gray-400 w-6">垂直</span>
-                        <input
-                          type="range"
-                          min="0"
-                          max="100"
-                          value={newConfig.metadata?.logoPositionY ?? 50}
-                          onChange={(e) => setNewConfig(prev => ({
-                            ...prev,
-                            metadata: {
-                              ...prev.metadata,
-                              logoPositionY: parseInt(e.target.value),
-                            },
-                          }))}
-                          className="flex-1 h-1 bg-gray-200 dark:bg-gray-600 rounded-lg appearance-none cursor-pointer accent-primary-500"
-                        />
-                        <span className="text-[10px] text-gray-400 w-6 text-right">{newConfig.metadata?.logoPositionY ?? 50}%</span>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <span className="text-[10px] text-gray-500 dark:text-gray-400 w-6">缩放</span>
-                        <input
-                          type="range"
-                          min="50"
-                          max="200"
-                          step="5"
-                          value={newConfig.metadata?.logoScale ?? 100}
-                          onChange={(e) => setNewConfig(prev => ({
-                            ...prev,
-                            metadata: {
-                              ...prev.metadata,
-                              logoScale: parseInt(e.target.value),
-                            },
-                          }))}
-                          className="flex-1 h-1 bg-gray-200 dark:bg-gray-600 rounded-lg appearance-none cursor-pointer accent-primary-500"
-                        />
-                        <span className="text-[10px] text-gray-400 w-8 text-right">{newConfig.metadata?.logoScale ?? 100}%</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* API密钥 */}
-            {newConfig.provider !== 'ollama' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  API密钥 {!editingId && <span className="text-red-500">*</span>} {editingId && <span className="text-xs text-gray-500">(留空则不更新)</span>}
-                </label>
-                <div className="relative">
-                <input
-                    type={showApiKey ? 'text' : 'password'}
-                  value={newConfig.api_key || ''}
-                  onChange={(e) => setNewConfig({ ...newConfig, api_key: e.target.value })}
-                    className="input-field pr-10"
-                    placeholder={editingId ? '点击右侧眼睛图标查看或留空不更新' : getProviderPlaceholder(newConfig.provider || 'openai')}
-                    readOnly={editingId !== null && !showApiKey && !newConfig.api_key}
-                  />
-                  {editingId && (
-                    <button
-                      type="button"
-                      onClick={handleLoadApiKey}
-                      disabled={loadingApiKey}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors disabled:opacity-50"
-                      title={showApiKey ? '隐藏API密钥' : '显示API密钥'}
-                    >
-                      {loadingApiKey ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : showApiKey ? (
-                        <EyeOff className="w-4 h-4" />
-                      ) : (
-                        <Eye className="w-4 h-4" />
-                      )}
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* 模型名称 */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                模型名称 {newConfig.provider === 'ollama' && <span className="text-xs text-gray-500">(从服务器自动获取)</span>}
-              </label>
-              {newConfig.provider === 'ollama' ? (
-                <div>
-                  <Select
-                    value={newConfig.model || ''}
-                    onValueChange={(value) =>
-                      setNewConfig({ ...newConfig, model: value })
-                    }
-                  >
-                    <SelectTrigger
-                      className="input-field"
-                      disabled={isLoadingOllamaModels || ollamaModels.length === 0}
-                    >
-                      <SelectValue
-                        placeholder={
-                          isLoadingOllamaModels
-                            ? '正在加载模型列表...'
-                            : ollamaModels.length === 0
-                            ? '请先输入服务器地址'
-                            : '请选择模型'
-                        }
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {ollamaModels.map((model) => (
-                        <SelectItem key={model} value={model}>
-                          {model}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {isLoadingOllamaModels && (
-                    <div className="flex items-center space-x-2 mt-1 text-xs text-gray-500">
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                      <span>正在获取模型列表...</span>
-                    </div>
-                  )}
-                  {ollamaError && (
-                    <div className="mt-1 text-xs text-red-600">
-                      {ollamaError}
-                    </div>
-                  )}
-                  {!isLoadingOllamaModels && !ollamaError && ollamaModels.length > 0 && (
-                    <div className="mt-1 text-xs text-green-600">
-                      已找到 {ollamaModels.length} 个模型
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <input
-                  type="text"
-                  value={newConfig.model || ''}
-                  onChange={(e) => setNewConfig({ ...newConfig, model: e.target.value })}
-                  className="input-field"
-                  placeholder={getProviderDefaultModel(newConfig.provider || 'openai')}
-                />
-              )}
-            </div>
-
-            {/* API URL */}
-            {(newConfig.provider === 'local' || newConfig.provider === 'custom' || newConfig.provider === 'openai' || newConfig.provider === 'deepseek' || newConfig.provider === 'gemini' || newConfig.provider === 'ollama') && (
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  {newConfig.provider === 'ollama' ? 'Ollama 服务器地址' : 'API URL'}
-                  <span className="text-gray-500 text-xs font-normal ml-1">
-                    {newConfig.provider === 'ollama' ? '*' : '(可选，覆盖默认地址)'}
-                  </span>
-                </label>
-                <input
-                  type="text"
-                  value={newConfig.api_url || ''}
-                  onChange={(e) => setNewConfig({ ...newConfig, api_url: e.target.value, model: '' })}
-                  className="input-field"
-                  placeholder={getProviderUrlPlaceholder(newConfig.provider || 'openai')}
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  {newConfig.provider === 'ollama' ? (
-                    <>
-                      默认: {getProviderDefaultUrl('ollama')}
-                      <span className="block mt-1">
-                        💡 提示：输入服务器地址后，系统会自动获取可用模型列表。系统会自动添加路径 /api/chat
-                      </span>
-                      <span className="block mt-1 text-green-600">
-                        ✅ Ollama 模型不需要 API 密钥，可以直接使用
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      默认: {getProviderDefaultUrl(newConfig.provider || 'openai')}
-                      {(newConfig.provider === 'openai' || newConfig.provider === 'deepseek') && (
-                        <span className="block mt-1">
-                          💡 提示：OpenAI兼容的API可以只输入host，系统会自动添加路径 /v1/chat/completions
-                        </span>
-                      )}
-                    </>
-                  )}
-                </p>
-              </div>
-            )}
-
-            {/* 描述 */}
-            <TextareaField
-              label="描述（可选）"
-              textareaProps={{
-                id: "config-description",
-                value: newConfig.description || '',
-                onChange: (e) => setNewConfig({ ...newConfig, description: e.target.value }),
-                rows: 2,
-                placeholder: "模型描述...",
-              }}
-              className="md:col-span-2"
-            />
-
-            {/* Thinking 模式配置 */}
-            <div className="md:col-span-2 flex items-center space-x-2">
+            <div className="flex items-center space-x-2">
               <Switch
-                id="enableThinking"
-                checked={newConfig.metadata?.enableThinking ?? false}
+                id="provider-override-url"
+                checked={newProvider.override_url || false}
                 onCheckedChange={(checked) => {
-                  setNewConfig({
-                    ...newConfig,
-                    metadata: {
-                      ...newConfig.metadata,
-                      enableThinking: checked,
-                    },
-                  });
+                  setNewProvider({ ...newProvider, override_url: checked });
                 }}
               />
               <label
-                htmlFor="enableThinking"
+                htmlFor="provider-override-url"
                 className="text-sm font-medium text-gray-700 dark:text-gray-300"
               >
-                启用 Thinking 模式（深度思考）
+                覆盖默认 API URL
               </label>
-              <span className="text-xs text-gray-500">
-                （一旦启用，聊天中不允许切换模式。用户可灵活测试后确认）
-              </span>
             </div>
 
-            {/* 支持的输入类型 */}
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                支持的输入类型
-              </label>
-              <div className="flex flex-wrap gap-3">
-                {(['text', 'image', 'video', 'audio'] as const).map((type) => {
-                  const supportedInputs = newConfig.metadata?.supportedInputs || [];
-                  const isChecked = supportedInputs.includes(type);
-                  const icons = {
-                    text: Type,
-                    image: ImageIcon,
-                    video: Video,
-                    audio: Music,
-                  };
-                  const labels = {
-                    text: '文字',
-                    image: '图片',
-                    video: '视频',
-                    audio: '音频',
-                  };
-                  const Icon = icons[type];
-                  
-                  return (
-                    <label key={type} className="flex items-center space-x-1.5 cursor-pointer">
-                      <Checkbox
-                        checked={isChecked}
-                        onCheckedChange={(checked) => {
-                          const nextChecked = checked === true;
-                          const current = newConfig.metadata?.supportedInputs || [];
-                          const updated = nextChecked
-                            ? [...current, type]
-                            : current.filter((t: string) => t !== type);
-                          setNewConfig({
-                            ...newConfig,
-                            metadata: {
-                              ...newConfig.metadata,
-                              supportedInputs: updated,
-                            },
-                          });
-                        }}
-                      />
-                      <Icon className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-                      <span className="text-sm text-gray-700 dark:text-gray-300">{labels[type]}</span>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* 支持的输出类型 */}
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                支持的输出类型
-              </label>
-              <div className="flex flex-wrap gap-3">
-                {(['text', 'image', 'video', 'audio'] as const).map((type) => {
-                  const supportedOutputs = newConfig.metadata?.supportedOutputs || [];
-                  const isChecked = supportedOutputs.includes(type);
-                  const icons = {
-                    text: Type,
-                    image: ImageIcon,
-                    video: Video,
-                    audio: Music,
-                  };
-                  const labels = {
-                    text: '文字',
-                    image: '图片',
-                    video: '视频',
-                    audio: '音频',
-                  };
-                  const Icon = icons[type];
-                  
-                  return (
-                    <label key={type} className="flex items-center space-x-1.5 cursor-pointer">
-                      <Checkbox
-                        checked={isChecked}
-                        onCheckedChange={(checked) => {
-                          const nextChecked = checked === true;
-                          const current = newConfig.metadata?.supportedOutputs || [];
-                          const updated = nextChecked
-                            ? [...current, type]
-                            : current.filter((t: string) => t !== type);
-                          setNewConfig({
-                            ...newConfig,
-                            metadata: {
-                              ...newConfig.metadata,
-                              supportedOutputs: updated,
-                            },
-                          });
-                        }}
-                      />
-                      <Icon className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-                      <span className="text-sm text-gray-700 dark:text-gray-300">{labels[type]}</span>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* 启用状态 */}
-            <div className="md:col-span-2 flex items-center space-x-2">
-              <Switch
-                id="enabled"
-                checked={newConfig.enabled ?? true}
-                onCheckedChange={(checked) =>
-                  setNewConfig({ ...newConfig, enabled: checked })
-                }
+            {newProvider.override_url && (
+              <InputField
+                label="默认 API URL"
+                inputProps={{
+                  id: "provider-api-url",
+                  type: "text",
+                  value: newProvider.default_api_url || '',
+                  onChange: (e) => setNewProvider({ ...newProvider, default_api_url: e.target.value }),
+                  placeholder: "例如: https://integrate.api.nvidia.com/v1",
+                }}
               />
-              <label
-                htmlFor="enabled"
-                className="text-sm font-medium text-gray-700 dark:text-gray-300"
-              >
-                启用此配置
-              </label>
-            </div>
-            </div>
-          </FormFieldGroup>
-
-          {/* 操作按钮 */}
-          <div className="flex space-x-2 mt-4 pt-4 border-t border-gray-200 dark:border-[#404040]">
-              <Button
-                onClick={editingId ? handleUpdateConfig : handleAddConfig}
-                variant="primary"
-              >
-                <Save className="w-4 h-4" />
-                <span>{editingId ? '保存' : '添加'}</span>
-              </Button>
-              <Button
-                onClick={handleCancel}
-                variant="secondary"
-              >
-                取消
-              </Button>
-          </div>
-        </Card>
-      )}
-
-      {/* 按供应商分组显示 */}
-      {configs.length === 0 ? (
-        <Card>
-          <EmptyState
-            icon={Brain}
-            title="暂无LLM配置"
-            description="点击「添加模型」按钮来添加配置"
-            action={
-              <Button
-                onClick={() => setIsAdding(true)}
-                variant="primary"
-              >
-                <Plus className="w-4 h-4" />
-                <span>添加模型</span>
-              </Button>
-            }
-          />
-        </Card>
-      ) : (
-        <>
-          {/* 展开/折叠全部按钮 */}
-          <div className="flex items-center justify-end space-x-2 mb-2">
-            <button
-              onClick={expandAllProviders}
-              className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
-            >
-              展开全部
-            </button>
-            <span className="text-gray-300 dark:text-gray-600">|</span>
-            <button
-              onClick={collapseAllProviders}
-              className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
-            >
-              折叠全部
-            </button>
+            )}
           </div>
 
-          {/* 按供应商分组 */}
-          <div className="space-y-3">
-            {providerKeys.map(provider => {
-              const providerConfigs = configsByProvider[provider];
-              const isExpanded = expandedProviders.has(provider);
-              const info = PROVIDER_INFO[provider] || { name: provider, color: '#6B7280', icon: '📦' };
-              const enabledCount = providerConfigs.filter(c => c.enabled).length;
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setShowCreateProviderDialog(false);
+                setNewProvider({
+                  name: '',
+                  provider_type: 'openai',
+                  override_url: false,
+                  logo_theme: 'auto',
+                });
+              }}
+            >
+              取消
+            </Button>
+            <Button
+              variant="primary"
+              onClick={async () => {
+                if (!newProvider.name || !newProvider.provider_type) {
+                  toast({
+                    title: '请填写供应商名称和兼容类型',
+                    variant: 'destructive',
+                  });
+                  return;
+                }
 
-              return (
-                <div 
-                  key={provider}
-                  className="rounded-xl border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] overflow-hidden shadow-sm"
+                try {
+                  const result = await createProvider(newProvider);
+                  await loadProviders();
+                  setSelectedProviderId(result.provider_id);
+                  setShowCreateProviderDialog(false);
+                  setNewProvider({
+                    name: '',
+                    provider_type: 'openai',
+                    override_url: false,
+                    logo_theme: 'auto',
+                  });
+                  
+                  // 尝试自动下载logo
+                  try {
+                    const logoData = await downloadProviderLogo(newProvider.provider_type, 'auto');
+                    await updateProvider(result.provider_id, {
+                      logo_light: logoData.logo_light,
+                      logo_dark: logoData.logo_dark,
+                      logo_theme: logoData.theme as 'auto' | 'light' | 'dark',
+                    });
+                    await loadProviders();
+                  } catch (logoError) {
+                    console.warn('Failed to download logo:', logoError);
+                    // Logo下载失败不影响供应商创建
+                  }
+
+                  toast({
+                    title: '供应商创建成功',
+                    variant: 'success',
+                  });
+                } catch (error) {
+                  toast({
+                    title: '创建供应商失败',
+                    description: error instanceof Error ? error.message : String(error),
+                    variant: 'destructive',
+                  });
+                }
+              }}
+            >
+              创建
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 编辑供应商对话框 */}
+      <Dialog open={showEditProviderDialog} onOpenChange={setShowEditProviderDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>编辑供应商</DialogTitle>
+            <DialogDescription>
+              修改供应商信息
+            </DialogDescription>
+          </DialogHeader>
+          
+          {editingProvider && (
+            <div className="space-y-4 py-4">
+              <InputField
+                label="供应商名称"
+                required
+                inputProps={{
+                  id: "edit-provider-name",
+                  type: "text",
+                  value: editingProvider.name,
+                  onChange: (e) => setEditingProvider({ ...editingProvider, name: e.target.value }),
+                  placeholder: "例如: NVIDIA",
+                }}
+              />
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  兼容的供应商类型 *
+                </label>
+                <Select
+                  value={editingProvider.provider_type}
+                  onValueChange={(value) => {
+                    setEditingProvider({
+                      ...editingProvider,
+                      provider_type: value as LLMProvider['provider_type'],
+                    });
+                  }}
                 >
-                  {/* 供应商头部 */}
-                  <button
-                    onClick={() => toggleProvider(provider)}
-                    className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-[#363636] transition-colors"
-                  >
-                    <div className="flex items-center space-x-3">
-                      {/* 展开/折叠图标 */}
-                      <div className="text-gray-400 dark:text-gray-500">
-                        {isExpanded ? (
-                          <ChevronDown className="w-5 h-5" />
-                        ) : (
-                          <ChevronRight className="w-5 h-5" />
-                        )}
-                      </div>
-                      {/* 供应商图标和名称 */}
-                      <div 
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-lg overflow-hidden"
-                        style={{ backgroundColor: providerConfigs.some(c => c.metadata?.providerLogo) ? 'transparent' : info.color }}
-                      >
-                        {getProviderGroupLogo(provider, providerConfigs)}
-                      </div>
-                      <div className="text-left">
-                        <div className="font-medium text-gray-900 dark:text-gray-100">
-                          {info.name}
-                        </div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400">
-                          {providerConfigs.length} 个模型 · {enabledCount} 个启用
-                        </div>
-                      </div>
-                    </div>
-                    {/* 状态徽章 */}
-                    <div className="flex items-center space-x-2">
-                      {enabledCount > 0 && (
-                        <span className="ui-badge-success">
-                          {enabledCount} 启用
-                        </span>
-                      )}
-                      {providerConfigs.length - enabledCount > 0 && (
-                        <span className="px-2 py-1 text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-full">
-                          {providerConfigs.length - enabledCount} 禁用
-                        </span>
-                      )}
-                    </div>
-                  </button>
+                  <SelectTrigger className="input-field">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="openai">OpenAI (兼容 OpenAI API)</SelectItem>
+                    <SelectItem value="deepseek">DeepSeek</SelectItem>
+                    <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
+                    <SelectItem value="gemini">Google Gemini</SelectItem>
+                    <SelectItem value="ollama">Ollama</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-                  {/* 模型列表 */}
-                  {isExpanded && (
-                    <div className="border-t border-gray-200 dark:border-[#404040]">
-                      <table className="w-full">
-                        <thead>
-                          <tr className="bg-gray-50 dark:bg-[#363636]">
-                            <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-4 py-2">配置名称</th>
-                            <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-4 py-2">模型</th>
-                            <th className="text-left text-xs font-medium text-gray-500 dark:text-gray-400 px-4 py-2">状态</th>
-                            <th className="text-right text-xs font-medium text-gray-500 dark:text-gray-400 px-4 py-2">操作</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {providerConfigs.map((config, index) => (
-                            <tr 
-                              key={config.config_id} 
-                              className={`
-                                hover:bg-gray-50 dark:hover:bg-[#363636] transition-colors
-                                ${index !== providerConfigs.length - 1 ? 'border-b border-gray-100 dark:border-[#404040]' : ''}
-                              `}
-                            >
-                              <td className="px-4 py-3">
-                                <div className="flex items-center space-x-2.5">
-                                  {/* 小 Logo 显示 */}
-                                  {config.metadata?.providerLogo && (
-                                    <div className="w-6 h-6 rounded flex-shrink-0 overflow-hidden border border-gray-200 dark:border-[#404040]">
-                                      <img 
-                                        src={config.metadata.providerLogo} 
-                                        alt="" 
-                                        className="w-full h-full object-cover"
-                                        style={{ 
-                                          objectPosition: `${config.metadata?.logoPositionX ?? 50}% ${config.metadata?.logoPositionY ?? 50}%`,
-                                          transform: `scale(${(config.metadata?.logoScale ?? 100) / 100})`,
-                                        }}
-                                      />
-                                    </div>
-                                  )}
-                                  <div>
-                                    <div className="font-medium text-sm text-gray-900 dark:text-gray-100">
-                                      {config.name}
-                                    </div>
-                                    {config.description && (
-                                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-1">
-                                        {config.description}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              </td>
-                              <td className="px-4 py-3">
-                                <code className="text-xs bg-gray-100 dark:bg-[#404040] px-2 py-1 rounded text-gray-700 dark:text-gray-300">
-                                  {config.model || '-'}
-                                </code>
-                              </td>
-                              <td className="px-4 py-3">
-                                {config.enabled ? (
-                                  <span className="ui-model-enabled inline-flex items-center space-x-1">
-                                    <CheckCircle className="w-3 h-3" />
-                                    <span>已启用</span>
-                                  </span>
-                                ) : (
-                                  <span className="ui-model-disabled inline-flex items-center space-x-1">
-                                    <XCircle className="w-3 h-3" />
-                                    <span>已禁用</span>
-                                  </span>
-                                )}
-                              </td>
-                              <td className="px-4 py-3">
-                                <div className="flex items-center justify-end space-x-1">
-                                  <button
-                                    onClick={() => handleEditConfig(config)}
-                                    className="p-1.5 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#404040] transition-colors"
-                                    title="编辑"
-                                  >
-                                    <Edit2 className="w-4 h-4" />
-                                  </button>
-                                  <button
-                                    onClick={() => handleExportConfig(config)}
-                                    className="p-1.5 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#404040] transition-colors"
-                                    title="导出"
-                                  >
-                                    <Download className="w-4 h-4" />
-                                  </button>
-                                  <button
-                                    onClick={() => setDeleteTarget(config)}
-                                    className="p-1.5 rounded-lg text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                                    title="删除"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
-      </div>
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="edit-provider-override-url"
+                  checked={editingProvider.override_url || false}
+                  onCheckedChange={(checked) => {
+                    setEditingProvider({ ...editingProvider, override_url: checked });
+                  }}
+                />
+                <label
+                  htmlFor="edit-provider-override-url"
+                  className="text-sm font-medium text-gray-700 dark:text-gray-300"
+                >
+                  覆盖默认 API URL
+                </label>
+              </div>
+
+              {editingProvider.override_url && (
+                <InputField
+                  label="默认 API URL"
+                  inputProps={{
+                    id: "edit-provider-api-url",
+                    type: "text",
+                    value: editingProvider.default_api_url || '',
+                    onChange: (e) => setEditingProvider({ ...editingProvider, default_api_url: e.target.value }),
+                    placeholder: "例如: https://integrate.api.nvidia.com/v1",
+                  }}
+                />
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setShowEditProviderDialog(false);
+                setEditingProvider(null);
+              }}
+            >
+              取消
+            </Button>
+            <Button
+              variant="primary"
+              onClick={async () => {
+                if (!editingProvider || !editingProvider.name || !editingProvider.provider_type) {
+                  toast({
+                    title: '请填写供应商名称和兼容类型',
+                    variant: 'destructive',
+                  });
+                  return;
+                }
+
+                try {
+                  await updateProvider(editingProvider.provider_id, {
+                    name: editingProvider.name,
+                    provider_type: editingProvider.provider_type,
+                    override_url: editingProvider.override_url,
+                    default_api_url: editingProvider.default_api_url,
+                  });
+                  await loadProviders();
+                  setShowEditProviderDialog(false);
+                  setEditingProvider(null);
+                  toast({
+                    title: '供应商更新成功',
+                    variant: 'success',
+                  });
+                } catch (error) {
+                  toast({
+                    title: '更新供应商失败',
+                    description: error instanceof Error ? error.message : String(error),
+                    variant: 'destructive',
+                  });
+                }
+              }}
+            >
+              保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 删除供应商确认对话框 */}
+      <ConfirmDialog
+        open={deleteProviderTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteProviderTarget(null);
+        }}
+        title="删除供应商"
+        description={`确定要删除「${deleteProviderTarget?.name}」吗？此操作不可撤销，且会删除该供应商下的所有模型配置。`}
+        variant="destructive"
+        onConfirm={async () => {
+          if (!deleteProviderTarget) return;
+          const id = deleteProviderTarget.provider_id;
+          setDeleteProviderTarget(null);
+          try {
+            await deleteProvider(id);
+            await loadProviders();
+            if (selectedProviderId === id) {
+              setSelectedProviderId(null);
+            }
+            toast({
+              title: '供应商删除成功',
+              variant: 'success',
+            });
+          } catch (error) {
+            toast({
+              title: '删除供应商失败',
+              description: error instanceof Error ? error.message : String(error),
+              variant: 'destructive',
+            });
+          }
+        }}
+      />
 
       <ConfirmDialog
         open={deleteTarget !== null}
@@ -1407,6 +2122,238 @@ const LLMConfigPanel: React.FC = () => {
           await handleDeleteConfig(id);
         }}
       />
+
+      {/* Logo选择对话框 */}
+      <Dialog open={showLogoSelectDialog} onOpenChange={(open) => {
+        setShowLogoSelectDialog(open);
+        if (!open) {
+          setLogoProviderInput('');
+          setLightLogoOptions([]);
+          setDarkLogoOptions([]);
+          setSelectedLightLogo(null);
+          setSelectedDarkLogo(null);
+        }
+      }}>
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>选择在线Logo</DialogTitle>
+            <DialogDescription>
+              输入供应商名称查询（如 "openai", "claude", "gemini", "deepseek" 等），然后分别为浅色和深色模式选择Logo。
+              <br />
+              <span className="text-xs text-gray-500 mt-1 block">
+                提示：可以尝试不同的名称变体，系统会自动搜索匹配的图标
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="flex-1 overflow-y-auto min-h-0">
+            {/* 输入框 */}
+            <div className="py-4 border-b border-gray-200 dark:border-[#404040]">
+              <div className="flex gap-2">
+                <InputField
+                  label="供应商名称"
+                  inputProps={{
+                    id: "logo-provider-name",
+                    type: "text",
+                    value: logoProviderInput,
+                    onChange: (e) => setLogoProviderInput(e.target.value),
+                    placeholder: "例如: openai, anthropic, google, deepseek, ollama",
+                    autoFocus: true,
+                    onKeyDown: (e) => {
+                      if (e.key === 'Enter' && logoProviderInput.trim()) {
+                        handleLoadLogoOptions();
+                      }
+                    }
+                  }}
+                />
+                <div className="flex items-end pb-0.5">
+                  <Button
+                    variant="primary"
+                    onClick={handleLoadLogoOptions}
+                    disabled={!logoProviderInput.trim() || isLoadingLogos}
+                  >
+                    {isLoadingLogos ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Search className="w-4 h-4 mr-2" />
+                    )}
+                    查询
+                  </Button>
+                </div>
+              </div>
+              {selectedProvider && (
+                <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  提示：默认使用兼容类型名称 "{selectedProvider.provider_type}"，如果查询不到可以尝试其他名称
+                </div>
+              )}
+            </div>
+
+            {/* Logo选项展示区域 */}
+            <div className="py-4">
+              {isLoadingLogos ? (
+                <div className="flex flex-col items-center justify-center py-16">
+                  <div className="relative">
+                    <div className="w-16 h-16 border-4 border-gray-200 dark:border-gray-700 rounded-full"></div>
+                    <div className="w-16 h-16 border-4 border-primary-600 border-t-transparent rounded-full animate-spin absolute top-0 left-0"></div>
+                  </div>
+                  <p className="mt-4 text-sm text-gray-600 dark:text-gray-400">正在加载Logo选项...</p>
+                </div>
+              ) : (lightLogoOptions.length === 0 && darkLogoOptions.length === 0) ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <Search className="w-12 h-12 text-gray-300 dark:text-gray-600 mb-3" />
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    {logoProviderInput.trim() 
+                      ? `未找到供应商 "${logoProviderInput}" 的Logo选项，请检查名称是否正确`
+                      : '请输入供应商名称并点击查询'}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {/* 浅色模式Logo选择 */}
+                  {lightLogoOptions.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">
+                        浅色模式 Logo
+                      </h4>
+                      <div className="flex gap-3">
+                        {lightLogoOptions.map((option, index) => {
+                          const isSelected = selectedLightLogo === option.url;
+                          return (
+                            <button
+                              key={`light-${index}`}
+                              onClick={() => setSelectedLightLogo(option.url)}
+                              className={`
+                                flex flex-col items-center p-4 rounded-lg border-2 transition-all flex-1
+                                ${isSelected 
+                                  ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20' 
+                                  : 'border-gray-200 dark:border-[#404040] hover:border-gray-300 dark:hover:border-gray-600'
+                                }
+                              `}
+                            >
+                              <div className="w-24 h-24 rounded-lg flex items-center justify-center overflow-hidden border border-gray-200 dark:border-[#404040] mb-2 bg-white">
+                                {option.url ? (
+                                  <img
+                                    src={option.preview}
+                                    alt="浅色Logo"
+                                    className="w-full h-full object-contain"
+                                  />
+                                ) : (
+                                  <span className="text-xl">📦</span>
+                                )}
+                              </div>
+                              {isSelected && (
+                                <CheckCircle className="w-5 h-5 text-primary-600 dark:text-primary-400 mt-1" />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 深色模式Logo选择 */}
+                  {darkLogoOptions.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">
+                        深色模式 Logo
+                      </h4>
+                      <div className="flex gap-3">
+                        {darkLogoOptions.map((option, index) => {
+                          const isSelected = selectedDarkLogo === option.url;
+                          return (
+                            <button
+                              key={`dark-${index}`}
+                              onClick={() => setSelectedDarkLogo(option.url)}
+                              className={`
+                                flex flex-col items-center p-4 rounded-lg border-2 transition-all flex-1
+                                ${isSelected 
+                                  ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20' 
+                                  : 'border-gray-200 dark:border-[#404040] hover:border-gray-300 dark:hover:border-gray-600'
+                                }
+                              `}
+                            >
+                              <div className="w-24 h-24 rounded-lg flex items-center justify-center overflow-hidden border border-gray-200 dark:border-[#404040] mb-2 bg-gray-800">
+                                {option.url ? (
+                                  <img
+                                    src={option.preview}
+                                    alt="深色Logo"
+                                    className="w-full h-full object-contain"
+                                  />
+                                ) : (
+                                  <span className="text-xl">📦</span>
+                                )}
+                              </div>
+                              {isSelected && (
+                                <CheckCircle className="w-5 h-5 text-primary-600 dark:text-primary-400 mt-1" />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setShowLogoSelectDialog(false);
+                setLogoProviderInput('');
+                setLightLogoOptions([]);
+                setDarkLogoOptions([]);
+                setSelectedLightLogo(null);
+                setSelectedDarkLogo(null);
+              }}
+            >
+              取消
+            </Button>
+            <Button
+              variant="primary"
+              onClick={async () => {
+                if (!selectedProvider) return;
+                if (!selectedLightLogo && !selectedDarkLogo) {
+                  toast({
+                    title: '请至少选择一个Logo',
+                    variant: 'destructive',
+                  });
+                  return;
+                }
+                try {
+                  await updateProvider(selectedProvider.provider_id, {
+                    logo_light: selectedLightLogo || selectedProvider.logo_light || '',
+                    logo_dark: selectedDarkLogo || selectedProvider.logo_dark || '',
+                    logo_theme: (selectedLightLogo && selectedDarkLogo) ? 'auto' : (selectedDarkLogo ? 'dark' : 'light'),
+                  });
+                  await loadProviders();
+                  setShowLogoSelectDialog(false);
+                  setLogoProviderInput('');
+                  setLightLogoOptions([]);
+                  setDarkLogoOptions([]);
+                  setSelectedLightLogo(null);
+                  setSelectedDarkLogo(null);
+                  toast({
+                    title: 'Logo应用成功',
+                    variant: 'success',
+                  });
+                } catch (error) {
+                  toast({
+                    title: '应用Logo失败',
+                    description: error instanceof Error ? error.message : String(error),
+                    variant: 'destructive',
+                  });
+                }
+              }}
+              disabled={!selectedLightLogo && !selectedDarkLogo}
+            >
+              应用
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageLayout>
   );
 };

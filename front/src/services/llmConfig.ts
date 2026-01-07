@@ -5,7 +5,7 @@
 
 export interface LLMConfig {
   id: string;
-  provider: 'openai' | 'anthropic' | 'ollama' | 'local' | 'custom' | 'gemini';
+  provider: 'openai' | 'anthropic' | 'ollama' | 'local' | 'custom' | 'gemini' | 'deepseek';
   name: string;
   apiKey?: string;
   apiUrl?: string;

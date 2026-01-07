@@ -229,13 +229,26 @@ except Exception as e:
     print(f'⚠️  DeepSeek 迁移出错: {e}')
 " 2>&1
 
+# ========== LLM供应商迁移 ==========
+echo ""
+echo "检查 LLM 供应商迁移..."
+python -c "
+try:
+    from migrate_llm_providers import migrate_llm_providers
+    migrate_llm_providers()
+except ImportError:
+    print('ℹ️  跳过 LLM 供应商迁移（脚本不存在）')
+except Exception as e:
+    print(f'⚠️  LLM 供应商迁移出错: {e}')
+" 2>&1
+
 # ========== Notion 工作空间字段迁移 ==========
 echo ""
 echo "检查 Notion 工作空间数据库迁移..."
 python -c "
 import yaml
 from pathlib import Path
-from database import get_mysql_connection
+from database import get_mysql_connection, init_mysql
 
 try:
     config_path = Path('config.yaml')
@@ -249,7 +262,19 @@ try:
         if not mysql_config.get('enabled', False):
             print('ℹ️  MySQL 未启用，跳过 Notion 迁移')
         else:
-            conn = get_mysql_connection()
+            # 先尝试初始化数据库连接（如果尚未初始化）
+            from database import mysql_pool
+            if mysql_pool is None:
+                print('🔄 正在初始化数据库连接...')
+                success, error = init_mysql(config)
+                if not success:
+                    print(f'⚠️  数据库初始化失败: {error}，跳过 Notion 迁移')
+                    conn = None
+                else:
+                    conn = get_mysql_connection()
+            else:
+                conn = get_mysql_connection()
+            
             if not conn:
                 print('⚠️  数据库连接失败，跳过 Notion 迁移')
             else:

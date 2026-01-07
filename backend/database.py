@@ -190,6 +190,62 @@ def create_tables():
             'shortname',
         )
         
+        # LLM供应商表（支持自定义供应商）
+        create_llm_providers_table = """
+        CREATE TABLE IF NOT EXISTS `llm_providers` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `provider_id` VARCHAR(100) NOT NULL UNIQUE COMMENT '供应商ID',
+            `name` VARCHAR(255) NOT NULL COMMENT '供应商名称',
+            `provider_type` VARCHAR(50) NOT NULL COMMENT '兼容的供应商类型: openai, deepseek, anthropic, gemini, ollama, local, custom',
+            `is_system` TINYINT(1) DEFAULT 0 COMMENT '是否为系统内置供应商',
+            `override_url` TINYINT(1) DEFAULT 0 COMMENT '是否覆盖默认URL',
+            `default_api_url` TEXT DEFAULT NULL COMMENT '默认API地址',
+            `logo_light` TEXT DEFAULT NULL COMMENT '浅色主题Logo (base64)',
+            `logo_dark` TEXT DEFAULT NULL COMMENT '深色主题Logo (base64)',
+            `logo_theme` VARCHAR(10) DEFAULT 'auto' COMMENT 'Logo主题模式: auto, light, dark',
+            `metadata` JSON DEFAULT NULL COMMENT '元数据',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+            INDEX `idx_provider_id` (`provider_id`),
+            INDEX `idx_provider_type` (`provider_type`),
+            INDEX `idx_is_system` (`is_system`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='LLM供应商表';
+        """
+        
+        cursor.execute(create_llm_providers_table)
+        print("✓ Table 'llm_providers' created/verified successfully")
+        
+        # 迁移：为 llm_configs 添加 provider_id 列（如果不存在）
+        _ensure_column(
+            'llm_configs',
+            'provider_id',
+            """
+                ALTER TABLE `llm_configs`
+                ADD COLUMN `provider_id` VARCHAR(100) DEFAULT NULL COMMENT '供应商ID（外键关联llm_providers.provider_id）'
+                AFTER `provider`
+            """,
+            'provider_id',
+        )
+        
+        # 添加外键索引（如果不存在）
+        try:
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM information_schema.STATISTICS 
+                WHERE TABLE_SCHEMA = DATABASE() 
+                AND TABLE_NAME = 'llm_configs' 
+                AND INDEX_NAME = 'idx_provider_id'
+            """)
+            index_exists = cursor.fetchone()[0] > 0
+            if not index_exists:
+                cursor.execute("""
+                    ALTER TABLE `llm_configs`
+                    ADD INDEX `idx_provider_id` (`provider_id`)
+                """)
+                print("  ✓ Added index 'idx_provider_id' to 'llm_configs' table")
+        except Exception as e:
+            print(f"  ⚠️ Warning: Failed to add index 'idx_provider_id': {e}")
+        
         # MCP服务器配置表
         create_mcp_servers_table = """
         CREATE TABLE IF NOT EXISTS `mcp_servers` (
