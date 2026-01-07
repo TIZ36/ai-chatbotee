@@ -182,6 +182,7 @@ fi
 # ========== 初始化数据库 ==========
 echo ""
 echo "初始化数据库..."
+DB_INIT_SUCCESS=false
 python -c "
 import sys
 import yaml
@@ -201,46 +202,101 @@ try:
             success, error = init_mysql(config)
             if success:
                 print('✅ 数据库初始化成功')
+                sys.exit(0)  # 成功
             else:
                 print(f'⚠️  数据库初始化失败: {error}')
                 print('继续启动服务器（无数据库支持）...')
+                sys.exit(1)  # 失败但继续
         else:
             print('ℹ️  MySQL 未启用，跳过数据库初始化')
+            sys.exit(0)  # 未启用不算失败
     else:
         print('⚠️  未找到 config.yaml，跳过数据库初始化')
+        sys.exit(0)  # 无配置文件不算失败
 except ImportError as e:
     print(f'⚠️  导入错误: {e}')
     print('数据库初始化将在服务器启动时进行...')
+    sys.exit(1)  # 导入错误
 except Exception as e:
     print(f'⚠️  数据库初始化出错: {e}')
     print('继续启动服务器...')
+    sys.exit(1)  # 异常
 " 2>&1
+DB_INIT_RESULT=$?
 
 # ========== 运行数据迁移 ==========
 echo ""
 echo "检查数据迁移..."
-python -c "
+
+# 只有在数据库启用且初始化成功时才执行迁移
+if [ "$DB_INIT_RESULT" -eq 0 ]; then
+    echo "执行 DeepSeek 供应商迁移..."
+    python -c "
+import sys
 try:
     from migrate_deepseek_provider import migrate_deepseek_provider
-    migrate_deepseek_provider()
+    success = migrate_deepseek_provider()
+    sys.exit(0 if success else 1)
 except ImportError:
     print('ℹ️  跳过 DeepSeek 迁移（脚本不存在）')
+    sys.exit(0)
 except Exception as e:
-    print(f'⚠️  DeepSeek 迁移出错: {e}')
+    import traceback
+    print(f'❌ DeepSeek 迁移出错: {e}')
+    traceback.print_exc()
+    sys.exit(1)
 " 2>&1
+    DEEPSEEK_MIGRATE_RESULT=$?
+    
+    if [ "$DEEPSEEK_MIGRATE_RESULT" -ne 0 ]; then
+        echo "⚠️  DeepSeek 迁移失败，但继续启动服务器..."
+    fi
+else
+    echo "ℹ️  数据库未初始化，跳过 DeepSeek 迁移"
+fi
 
 # ========== LLM供应商迁移 ==========
 echo ""
 echo "检查 LLM 供应商迁移..."
-python -c "
+
+# 只有在数据库启用且初始化成功时才执行迁移
+if [ "$DB_INIT_RESULT" -eq 0 ]; then
+    echo "执行 LLM 供应商迁移..."
+    python -c "
+import sys
 try:
     from migrate_llm_providers import migrate_llm_providers
-    migrate_llm_providers()
+    success = migrate_llm_providers()
+    if not success:
+        print('❌ LLM 供应商迁移失败')
+        sys.exit(1)
+    sys.exit(0)
 except ImportError:
     print('ℹ️  跳过 LLM 供应商迁移（脚本不存在）')
+    sys.exit(0)
 except Exception as e:
-    print(f'⚠️  LLM 供应商迁移出错: {e}')
+    import traceback
+    print(f'❌ LLM 供应商迁移出错: {e}')
+    traceback.print_exc()
+    sys.exit(1)
 " 2>&1
+    LLM_MIGRATE_RESULT=$?
+    
+    if [ "$LLM_MIGRATE_RESULT" -ne 0 ]; then
+        echo ""
+        echo "⚠️  ⚠️  ⚠️  警告：LLM 供应商迁移失败！"
+        echo "   这可能导致模型供应商功能不正常。"
+        echo "   建议手动运行迁移脚本："
+        echo "   cd backend"
+        echo "   python migrate_llm_providers.py"
+        echo ""
+        echo "   继续启动服务器（迁移失败不影响启动）..."
+    else
+        echo "✅ LLM 供应商迁移完成"
+    fi
+else
+    echo "ℹ️  数据库未初始化，跳过 LLM 供应商迁移"
+fi
 
 # ========== Notion 工作空间字段迁移 ==========
 echo ""

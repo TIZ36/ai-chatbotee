@@ -915,9 +915,6 @@ const LLMConfigPanel: React.FC = () => {
                           )}
                         </div>
                         <span className="text-sm font-medium truncate">{provider.name}</span>
-                        {provider.is_system && (
-                          <span className="text-xs text-gray-400">{}</span>
-                        )}
                       </button>
                       <div className="flex items-center gap-2">
                         {providerModelCount > 0 && (
@@ -2011,7 +2008,7 @@ const LLMConfigPanel: React.FC = () => {
 
               {editingProvider.override_url && (
                 <InputField
-                  label="默认 API URL"
+                  label="自定义 API URL"
                   inputProps={{
                     id: "edit-provider-api-url",
                     type: "text",

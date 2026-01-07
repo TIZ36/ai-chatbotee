@@ -38,7 +38,7 @@ def migrate_deepseek_provider():
     
     # 确保数据库已初始化
     if not _ensure_db_initialized():
-        print("❌ 数据库未启用或初始化失败，跳过迁移")
+        print("ℹ️  数据库未启用或初始化失败，跳过迁移")
         return True  # 返回 True 以免阻止启动
     
     conn = get_mysql_connection()
