@@ -1,0 +1,276 @@
+syntax = "proto3";
+
+package chatee.svr.llm;
+
+option go_package = "chatee-go/proto/svr/llm";
+
+// =============================================================================
+// LLM Service - Large Language Model Management
+// =============================================================================
+
+service LLMService {
+    // Configuration CRUD
+    rpc ListConfigs(ListConfigsRequest) returns (ListConfigsResponse);
+    rpc GetConfig(GetConfigRequest) returns (LLMConfig);
+    rpc CreateConfig(CreateConfigRequest) returns (LLMConfig);
+    rpc UpdateConfig(UpdateConfigRequest) returns (LLMConfig);
+    rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
+    
+    // Provider Management
+    rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse);
+    rpc GetProviderModels(GetProviderModelsRequest) returns (GetProviderModelsResponse);
+    rpc TestConnection(TestConnectionRequest) returns (TestConnectionResponse);
+    
+    // Chat Completion
+    rpc Chat(ChatRequest) returns (ChatResponse);
+    rpc ChatStream(ChatRequest) returns (stream ChatStreamEvent);
+    
+    // Token Counting
+    rpc CountTokens(CountTokensRequest) returns (CountTokensResponse);
+}
+
+// =============================================================================
+// LLM Configuration
+// =============================================================================
+
+message LLMConfig {
+    string config_id = 1;
+    string name = 2;
+    string provider = 3;          // openai, anthropic, deepseek, ollama
+    string model = 4;
+    string api_key = 5;           // Encrypted
+    string api_url = 6;           // Custom endpoint
+    bool enabled = 7;
+    ModelSettings settings = 8;
+    int64 created_at = 9;
+    int64 updated_at = 10;
+}
+
+message ModelSettings {
+    float temperature = 1;
+    int32 max_tokens = 2;
+    float top_p = 3;
+    float frequency_penalty = 4;
+    float presence_penalty = 5;
+    repeated string stop = 6;
+    map<string, string> extra = 7;
+}
+
+// =============================================================================
+// Config CRUD
+// =============================================================================
+
+message ListConfigsRequest {
+    bool enabled_only = 1;
+    string provider = 2;
+}
+
+message ListConfigsResponse {
+    repeated LLMConfig configs = 1;
+}
+
+message GetConfigRequest {
+    string config_id = 1;
+}
+
+message CreateConfigRequest {
+    string name = 1;
+    string provider = 2;
+    string model = 3;
+    string api_key = 4;
+    string api_url = 5;
+    ModelSettings settings = 6;
+}
+
+message UpdateConfigRequest {
+    string config_id = 1;
+    string name = 2;
+    string model = 3;
+    string api_key = 4;
+    string api_url = 5;
+    ModelSettings settings = 6;
+    bool enabled = 7;
+}
+
+message DeleteConfigRequest {
+    string config_id = 1;
+}
+
+message DeleteConfigResponse {
+    bool success = 1;
+}
+
+// =============================================================================
+// Provider Management
+// =============================================================================
+
+message ListProvidersRequest {}
+
+message ListProvidersResponse {
+    repeated Provider providers = 1;
+}
+
+message Provider {
+    string name = 1;              // openai, anthropic, etc.
+    string display_name = 2;
+    string icon_url = 3;
+    bool supports_streaming = 4;
+    bool supports_tools = 5;
+    bool supports_vision = 6;
+    repeated string default_models = 7;
+}
+
+message GetProviderModelsRequest {
+    string provider = 1;
+    string api_key = 2;           // For fetching available models
+    string api_url = 3;
+}
+
+message GetProviderModelsResponse {
+    repeated ModelInfo models = 1;
+}
+
+message ModelInfo {
+    string model_id = 1;
+    string display_name = 2;
+    int32 context_length = 3;
+    bool supports_tools = 4;
+    bool supports_vision = 5;
+    PricingInfo pricing = 6;
+}
+
+message PricingInfo {
+    double input_per_1k = 1;
+    double output_per_1k = 2;
+    string currency = 3;
+}
+
+message TestConnectionRequest {
+    string provider = 1;
+    string api_key = 2;
+    string api_url = 3;
+    string model = 4;
+}
+
+message TestConnectionResponse {
+    bool success = 1;
+    string model_name = 2;
+    int64 latency_ms = 3;
+    string error = 4;
+}
+
+// =============================================================================
+// Chat Completion
+// =============================================================================
+
+message ChatRequest {
+    string config_id = 1;
+    repeated Message messages = 2;
+    repeated Tool tools = 3;
+    string tool_choice = 4;       // auto, none, required, or specific tool
+    ModelSettings settings = 5;   // Override config settings
+    string user_id = 6;           // For tracking
+}
+
+message Message {
+    string role = 1;              // system, user, assistant, tool
+    string content = 2;
+    string name = 3;              // For tool messages
+    repeated ToolCall tool_calls = 4;
+    string tool_call_id = 5;      // For tool result messages
+}
+
+message Tool {
+    string type = 1;              // function
+    FunctionDef function = 2;
+}
+
+message FunctionDef {
+    string name = 1;
+    string description = 2;
+    bytes parameters = 3;         // JSON Schema
+}
+
+message ToolCall {
+    string id = 1;
+    string type = 2;              // function
+    FunctionCall function = 3;
+}
+
+message FunctionCall {
+    string name = 1;
+    string arguments = 2;         // JSON string
+}
+
+message ChatResponse {
+    string id = 1;
+    string model = 2;
+    Message message = 3;
+    string finish_reason = 4;     // stop, tool_calls, length
+    Usage usage = 5;
+    string thinking = 6;          // For models that output thinking
+}
+
+message Usage {
+    int32 prompt_tokens = 1;
+    int32 completion_tokens = 2;
+    int32 total_tokens = 3;
+}
+
+// =============================================================================
+// Streaming
+// =============================================================================
+
+message ChatStreamEvent {
+    oneof event {
+        StreamDelta delta = 1;
+        StreamThinking thinking = 2;
+        StreamToolCall tool_call = 3;
+        StreamComplete complete = 4;
+        StreamError error = 5;
+    }
+}
+
+message StreamDelta {
+    string content = 1;
+    string role = 2;
+}
+
+message StreamThinking {
+    string content = 1;
+    bool is_final = 2;
+}
+
+message StreamToolCall {
+    string id = 1;
+    string name = 2;
+    string arguments_delta = 3;
+    bool is_complete = 4;
+}
+
+message StreamComplete {
+    string finish_reason = 1;
+    Usage usage = 2;
+    string model = 3;
+}
+
+message StreamError {
+    int32 code = 1;
+    string message = 2;
+    bool retryable = 3;
+}
+
+// =============================================================================
+// Token Counting
+// =============================================================================
+
+message CountTokensRequest {
+    string config_id = 1;
+    repeated Message messages = 2;
+}
+
+message CountTokensResponse {
+    int32 total_tokens = 1;
+    int32 messages_tokens = 2;
+    int32 system_tokens = 3;
+}

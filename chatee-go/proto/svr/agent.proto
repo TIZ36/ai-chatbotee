@@ -1,0 +1,324 @@
+syntax = "proto3";
+
+package chatee.svr.agent;
+
+option go_package = "chatee-go/proto/svr/agent";
+
+import "common/common.proto";
+
+// =============================================================================
+// Agent Service - Actor + ActionChain Core
+// =============================================================================
+
+service AgentService {
+    // Actor Lifecycle
+    rpc ActivateActor(ActivateRequest) returns (ActivateResponse);
+    rpc DeactivateActor(DeactivateRequest) returns (DeactivateResponse);
+    rpc GetActorStatus(GetActorStatusRequest) returns (ActorStatus);
+    
+    // Message Processing (streaming events)
+    rpc ProcessMessage(ProcessRequest) returns (stream ProcessEvent);
+    
+    // ActionChain Management
+    rpc InterruptChain(InterruptChainRequest) returns (InterruptChainResponse);
+    rpc GetChainStatus(GetChainStatusRequest) returns (ActionChain);
+    rpc ListChains(ListChainsRequest) returns (ListChainsResponse);
+}
+
+// =============================================================================
+// Actor Messages
+// =============================================================================
+
+message ActivateRequest {
+    string agent_id = 1;
+    string context_type = 2;      // thread, chat
+    string context_id = 3;        // thread_id or chat_key
+    Persona persona = 4;          // Agent persona configuration
+}
+
+message ActivateResponse {
+    bool success = 1;
+    string actor_id = 2;
+    string error = 3;
+}
+
+message DeactivateRequest {
+    string agent_id = 1;
+    string context_id = 2;
+}
+
+message DeactivateResponse {
+    bool success = 1;
+}
+
+message GetActorStatusRequest {
+    string agent_id = 1;
+    string context_id = 2;
+}
+
+message ActorStatus {
+    string agent_id = 1;
+    string context_id = 2;
+    ActorState state = 3;
+    string current_chain_id = 4;
+    int64 last_active_at = 5;
+    int32 pending_messages = 6;
+}
+
+enum ActorState {
+    ACTOR_STATE_UNSPECIFIED = 0;
+    IDLE = 1;
+    PROCESSING = 2;
+    WAITING_TOOL = 3;
+    WAITING_HUMAN = 4;
+    SUSPENDED = 5;
+}
+
+// =============================================================================
+// Persona - Agent Personality System
+// =============================================================================
+
+message Persona {
+    string persona_id = 1;
+    string name = 2;
+    string character = 3;         // Character description/prompt
+    VoiceConfig voice = 4;        // Voice settings
+    MemoryConfig memory = 5;      // Memory settings
+    map<string, string> traits = 6;  // Additional traits
+}
+
+message VoiceConfig {
+    string voice_id = 1;
+    string provider = 2;          // elevenlabs, azure, etc.
+    float speed = 3;
+    float pitch = 4;
+}
+
+message MemoryConfig {
+    int32 short_term_limit = 1;   // Recent messages to keep
+    int32 long_term_limit = 2;    // Summarized memories
+    bool enable_rag = 3;          // Use RAG for memory
+}
+
+// =============================================================================
+// Message Processing
+// =============================================================================
+
+message ProcessRequest {
+    string agent_id = 1;
+    string context_type = 2;
+    string context_id = 3;
+    chatee.common.BaseMessage message = 4;
+    string trigger = 5;           // mention, new_thread, new_chat, scheduled
+    repeated chatee.common.BaseMessage history = 6;  // Recent context
+}
+
+message ProcessEvent {
+    oneof event {
+        ChainStarted chain_started = 1;
+        StepStarted step_started = 2;
+        StepProgress step_progress = 3;
+        StepCompleted step_completed = 4;
+        ThinkingChunk thinking = 5;
+        ContentChunk content = 6;
+        ToolCall tool_call = 7;
+        ToolResult tool_result = 8;
+        ChainCompleted chain_completed = 9;
+        ChainInterrupted chain_interrupted = 10;
+        Error error = 11;
+    }
+}
+
+message ChainStarted {
+    string chain_id = 1;
+    string name = 2;
+    int32 total_steps = 3;
+    int64 started_at = 4;
+}
+
+message StepStarted {
+    string step_id = 1;
+    ActionType action_type = 2;
+    string description = 3;
+    int32 step_index = 4;
+    int64 started_at = 5;
+}
+
+message StepProgress {
+    string step_id = 1;
+    float progress = 2;           // 0.0 - 1.0
+    string status_message = 3;
+}
+
+message StepCompleted {
+    string step_id = 1;
+    bool success = 2;
+    bytes result = 3;
+    string error = 4;
+    int64 duration_ms = 5;
+}
+
+message ThinkingChunk {
+    string content = 1;
+    bool is_final = 2;
+}
+
+message ContentChunk {
+    string content = 1;
+    bool is_final = 2;
+}
+
+message ToolCall {
+    string call_id = 1;
+    string tool_name = 2;
+    string server_id = 3;
+    map<string, string> arguments = 4;
+}
+
+message ToolResult {
+    string call_id = 1;
+    bool success = 2;
+    bytes result = 3;
+    string error = 4;
+}
+
+message ChainCompleted {
+    string chain_id = 1;
+    bool success = 2;
+    int32 completed_steps = 3;
+    int64 total_duration_ms = 4;
+    bytes final_result = 5;
+}
+
+message ChainInterrupted {
+    string chain_id = 1;
+    string reason = 2;
+    int32 completed_steps = 3;
+    string interrupted_by = 4;    // user, agent, system
+}
+
+message Error {
+    int32 code = 1;
+    string message = 2;
+    bool retryable = 3;
+}
+
+// =============================================================================
+// ActionChain
+// =============================================================================
+
+message InterruptChainRequest {
+    string chain_id = 1;
+    string reason = 2;
+    string interrupted_by = 3;
+}
+
+message InterruptChainResponse {
+    bool success = 1;
+    int32 steps_completed = 2;
+}
+
+message GetChainStatusRequest {
+    string chain_id = 1;
+}
+
+message ListChainsRequest {
+    string agent_id = 1;
+    string context_id = 2;
+    ChainStatus status_filter = 3;
+    int32 limit = 4;
+}
+
+message ListChainsResponse {
+    repeated ActionChain chains = 1;
+}
+
+// ActionChain definition
+message ActionChain {
+    string chain_id = 1;
+    string name = 2;
+    string origin_agent_id = 3;
+    string origin_context_id = 4;
+    string origin_context_type = 5;
+    repeated ActionStep steps = 6;
+    ChainStatus status = 7;
+    ChainContext context = 8;
+    int64 created_at = 9;
+    int64 updated_at = 10;
+    int64 completed_at = 11;
+}
+
+// ActionStep definition
+message ActionStep {
+    string step_id = 1;
+    ActionType action_type = 2;
+    string description = 3;
+    map<string, string> params = 4;
+    StepStatus status = 5;
+    bytes result = 6;
+    string error = 7;
+    int64 started_at = 8;
+    int64 completed_at = 9;
+    
+    // For AG_USE_MCP
+    string mcp_server_id = 10;
+    string mcp_tool_name = 11;
+    
+    // For AG_CALL_AG
+    string target_agent_id = 12;
+    string target_context_id = 13;
+    
+    // Callbacks
+    bool has_before_callback = 14;
+    bool has_after_callback = 15;
+}
+
+// ChainContext for passing state between steps
+message ChainContext {
+    string topic_id = 1;
+    string chat_key = 2;
+    string original_message_id = 3;
+    string reply_message_id = 4;
+    map<string, bytes> variables = 5;    // Step output storage
+    repeated string executed_tools = 6;
+    int32 iteration_count = 7;
+    int32 max_iterations = 8;
+}
+
+// =============================================================================
+// Enums
+// =============================================================================
+
+enum ActionType {
+    ACTION_TYPE_UNSPECIFIED = 0;
+    AG_ACCEPT = 1;              // Accept and process
+    AG_REFUSE = 2;              // Refuse to process (interrupt)
+    AG_SELF_GEN = 3;            // Generate content via LLM
+    AG_SELF_DECISION = 4;       // Make autonomous decision
+    AG_USE_MCP = 5;             // Call MCP tool
+    AG_CALL_AG = 6;             // Call another agent
+    AG_CALL_HUMAN = 7;          // Request human intervention
+    AG_RAG = 8;                 // RAG retrieval
+    AG_MEMORY_RECALL = 9;       // Recall from memory
+    AG_MEMORY_STORE = 10;       // Store to memory
+}
+
+enum StepStatus {
+    STEP_STATUS_UNSPECIFIED = 0;
+    STEP_PENDING = 1;
+    STEP_RUNNING = 2;
+    STEP_COMPLETED = 3;
+    STEP_FAILED = 4;
+    STEP_SKIPPED = 5;
+    STEP_CANCELLED = 6;
+}
+
+enum ChainStatus {
+    CHAIN_STATUS_UNSPECIFIED = 0;
+    CHAIN_PENDING = 1;
+    CHAIN_RUNNING = 2;
+    CHAIN_COMPLETED = 3;
+    CHAIN_INTERRUPTED = 4;
+    CHAIN_FAILED = 5;
+    CHAIN_TIMEOUT = 6;
+}

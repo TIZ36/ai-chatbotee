@@ -1,0 +1,102 @@
+# Chatee Configuration
+# Environment: development
+
+service:
+  name: chatee
+  version: 1.0.0
+  environment: dev
+  node_id: "1"
+
+# MySQL Configuration
+mysql:
+  host: localhost
+  port: 3306
+  user: root
+  password: ""  # Override with CHATEE_MYSQL_PASSWORD env var
+  database: chatee
+  max_open_conns: 100
+  max_idle_conns: 10
+  conn_max_lifetime: 1h
+
+# Redis Configuration
+redis:
+  host: localhost
+  port: 6379
+  password: ""  # Override with CHATEE_REDIS_PASSWORD env var
+  db: 0
+  pool_size: 100
+  min_idle_conns: 10
+
+# HBase Configuration
+hbase:
+  zookeeper_quorum: localhost
+  zookeeper_port: 2181
+  table_prefix: chatee_
+
+# ChromaDB Configuration
+chroma:
+  host: localhost
+  port: 8000
+  collection: chatee
+
+# gRPC Configuration
+grpc:
+  host: 0.0.0.0
+  port: 9090
+  max_recv_msg_size: 16777216  # 16MB
+  max_send_msg_size: 16777216
+  keepalive_time: 30s
+  keepalive_timeout: 10s
+
+# HTTP Configuration
+http:
+  host: 0.0.0.0
+  port: 8080
+  read_timeout: 30s
+  write_timeout: 30s
+  idle_timeout: 120s
+  enable_cors: true
+  cors_origins:
+    - "*"
+
+# WebSocket Configuration
+websocket:
+  read_buffer_size: 1024
+  write_buffer_size: 1024
+  ping_interval: 30s
+  pong_wait: 60s
+  max_message_size: 32768  # 32KB
+
+# LLM Configuration
+llm:
+  default_provider: deepseek
+  providers:
+    - name: deepseek
+      type: deepseek
+      api_key: ""  # Override with CHATEE_LLM_DEEPSEEK_API_KEY env var
+      base_url: https://api.deepseek.com
+      enabled: true
+    - name: openai
+      type: openai
+      api_key: ""  # Override with CHATEE_LLM_OPENAI_API_KEY env var
+      base_url: ""
+      enabled: false
+    - name: openrouter
+      type: openrouter
+      api_key: ""  # Override with CHATEE_LLM_OPENROUTER_API_KEY env var
+      base_url: https://openrouter.ai/api/v1
+      enabled: false
+
+# MCP Configuration
+mcp:
+  servers_dir: ./mcp_servers
+  default_timeout: 30s
+
+# Logging Configuration
+log:
+  level: debug
+  format: console  # json or console
+  output_path: stdout
+  max_size: 100
+  max_backups: 3
+  max_age: 30
