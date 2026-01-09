@@ -815,7 +815,7 @@ class ActorBase(ABC):
         """
         pass
     
-    def _plan_actions(self, ctx: IterationContext) -> List[Action]:
+    def _plan_actions(self, ctx: IterationContext) -> List[ActionStep]:
         """
         规划行动 - 默认用 LLM 决策，子类可重写
         
@@ -828,12 +828,12 @@ class ActorBase(ABC):
         # 默认实现：不规划额外行动，直接用 LLM 生成回复
         return []
     
-    def _execute_action(self, action: Action, ctx: IterationContext) -> ActionResult:
+    def _execute_action(self, step: ActionStep, ctx: IterationContext) -> ActionResult:
         """
-        执行行动 - 根据类型分发
+        执行行动 - 根据 ActionStep 类型分发
         
         Args:
-            action: 行动定义
+            step: ActionStep 对象
             ctx: 迭代上下文
             
         Returns:
@@ -841,28 +841,83 @@ class ActorBase(ABC):
         """
         start_time = time.time()
         
+        # 📋 打印 ActionStep 详细信息
+        print(f"\n{'='*60}")
+        print(f"🎯 [ActionStep] Agent: {self.agent_id}")
+        print(f"   ├─ Step ID: {step.step_id}")
+        print(f"   ├─ Action Type: {step.action_type.value}")
+        print(f"   ├─ Description: {step.description}")
+        if step.mcp_server_id:
+            print(f"   ├─ MCP Server: {step.mcp_server_id}")
+        if step.mcp_tool_name:
+            print(f"   ├─ MCP Tool: {step.mcp_tool_name}")
+        if step.target_agent_id:
+            print(f"   ├─ Target Agent: {step.target_agent_id}")
+        if step.params:
+            params_str = json.dumps(step.params, ensure_ascii=False, indent=6)[:200]
+            print(f"   ├─ Params: {params_str}...")
+        print(f"   └─ Status: {step.status.value}")
+        print(f"{'='*60}")
+        
         try:
-            if action.type == 'mcp':
-                return self._call_mcp(action, ctx)
-            elif action.type == 'skill':
-                return self._call_skill(action, ctx)
-            elif action.type == 'tool':
-                return self._call_tool(action, ctx)
-            elif action.type == 'llm':
-                return self._call_llm(action, ctx)
+            action_type = step.action_type
+            
+            if action_type == AgentActionType.AG_USE_MCP:
+                # MCP 调用
+                return self._call_mcp(step, ctx)
+            elif action_type == AgentActionType.AG_SELF_GEN:
+                # 自主生成 (LLM)
+                return self._call_llm(step, ctx)
+            elif action_type == AgentActionType.AG_CALL_AG:
+                # 调用其他 Agent
+                result_data = self._handle_call_agent_step(step, ctx)
+                return ActionResult.success_result(
+                    action_type=action_type.value,
+                    data=result_data,
+                    step=step,
+                )
+            elif action_type == AgentActionType.AG_CALL_HUMAN:
+                # 请求人类介入
+                return ActionResult.success_result(
+                    action_type=action_type.value,
+                    data={'waiting_for_human': True},
+                    step=step,
+                )
+            elif action_type == AgentActionType.AG_ACCEPT:
+                # 接受处理
+                return ActionResult.success_result(
+                    action_type=action_type.value,
+                    data={'accepted': True},
+                    step=step,
+                )
+            elif action_type == AgentActionType.AG_REFUSE:
+                # 拒绝处理
+                step.interrupt = True
+                return ActionResult.success_result(
+                    action_type=action_type.value,
+                    data={'refused': True},
+                    step=step,
+                )
+            elif action_type == AgentActionType.AG_SELF_DECISION:
+                # 自主决策
+                return ActionResult.success_result(
+                    action_type=action_type.value,
+                    data={'decision': step.params.get('decision', '')},
+                    step=step,
+                )
             else:
                 return ActionResult.error_result(
-                    action_type=action.type,
-                    error=f"Unknown action type: {action.type}",
-                    action=action,
+                    action_type=str(action_type),
+                    error=f"Unknown action type: {action_type}",
+                    step=step,
                 )
         except Exception as e:
             duration_ms = int((time.time() - start_time) * 1000)
             return ActionResult.error_result(
-                action_type=action.type,
+                action_type=str(step.action_type),
                 error=str(e),
                 duration_ms=duration_ms,
-                action=action,
+                step=step,
             )
 
     def _execute_action_step(self, step: 'ActionStep', ctx: IterationContext) -> 'ActionResult':
@@ -882,6 +937,26 @@ class ActorBase(ABC):
         
         topic_service = get_topic_service()
         
+        # 📋 打印 ActionChain Step 执行信息
+        chain_info = f"Chain: {ctx.action_chain_id}" if ctx.action_chain_id else "No Chain"
+        print(f"\n{'─'*60}")
+        print(f"⚡ [ActionChain Step] Agent: {self.agent_id}")
+        print(f"   ├─ {chain_info}")
+        print(f"   ├─ Step Index: {ctx.chain_step_index}")
+        print(f"   ├─ Step ID: {step.step_id}")
+        print(f"   ├─ Action Type: {step.action_type.value}")
+        print(f"   ├─ Description: {step.description}")
+        if step.mcp_server_id:
+            print(f"   ├─ MCP Server: {step.mcp_server_id}")
+        if step.mcp_tool_name:
+            print(f"   ├─ MCP Tool: {step.mcp_tool_name}")
+        if step.target_agent_id:
+            print(f"   ├─ Target Agent: {step.target_agent_id}")
+        if step.params:
+            params_str = json.dumps(step.params, ensure_ascii=False)[:150]
+            print(f"   └─ Params: {params_str}...")
+        print(f"{'─'*60}")
+        
         # 调用 do_before 回调
         step.do_before(topic_service, ctx.topic_id, self.agent_id)
         
@@ -893,15 +968,8 @@ class ActorBase(ABC):
             action_type = step.action_type
             
             if action_type == AgentActionType.AG_USE_MCP:
-                # MCP 调用
-                action = Action(
-                    type='mcp',
-                    server_id=step.mcp_server_id,
-                    mcp_tool_name=step.mcp_tool_name,
-                    params=step.params,
-                    description=step.description,
-                )
-                action_result = self._execute_action(action, ctx)
+                # MCP 调用 - 直接使用 step
+                action_result = self._call_mcp(step, ctx)
                 success = action_result.success
                 error_msg = action_result.error
                 result_data = action_result.data or {}
@@ -943,6 +1011,17 @@ class ActorBase(ABC):
         # 更新步骤结果
         step.result = result_data
         
+        # 📋 打印执行结果
+        status_icon = "✅" if success else "❌"
+        print(f"\n{status_icon} [ActionStep Result] {step.action_type.value}")
+        print(f"   ├─ Step ID: {step.step_id}")
+        print(f"   ├─ Success: {success}")
+        if error_msg:
+            print(f"   ├─ Error: {error_msg}")
+        if result_data:
+            result_str = json.dumps(result_data, ensure_ascii=False)[:200]
+            print(f"   └─ Result: {result_str}...")
+        
         # 调用 do_after 回调
         step.do_after(topic_service, ctx.topic_id, self.agent_id, success=success, error=error_msg)
         
@@ -952,7 +1031,7 @@ class ActorBase(ABC):
             success=success,
             data=result_data,
             error=error_msg,
-            action=None,
+            step=step,
         )
 
     def _handle_call_agent_step(self, step: 'ActionStep', ctx: IterationContext) -> dict:
@@ -1239,6 +1318,16 @@ class ActorBase(ABC):
         ctx.action_chain_id = chain.chain_id
         ctx.inherited_chain = False
         ctx.chain_step_index = 0
+        
+        # 📋 打印 ActionChain 创建信息
+        print(f"\n{'🔗'*20}")
+        print(f"🔗 [ActionChain Created]")
+        print(f"   ├─ Chain ID: {chain.chain_id}")
+        print(f"   ├─ Name: {chain.name}")
+        print(f"   ├─ Origin Agent: {chain.origin_agent_id}")
+        print(f"   ├─ Origin Topic: {chain.origin_topic_id}")
+        print(f"   └─ Status: {chain.status.value}")
+        print(f"{'🔗'*20}\n")
         
         logger.info(f"[ActorBase:{self.agent_id}] Created ActionChain {chain.chain_id}")
         
@@ -1763,15 +1852,15 @@ class ActorBase(ABC):
                 params = tool_call.get('params', {})
                 
                 if server_id and tool_name:
-                    # 创建 MCP 调用 Action
-                    action = Action.mcp(
-                        server_id=server_id,
-                        tool_name=tool_name,
+                    # 创建 MCP 调用 ActionStep
+                    step = create_mcp_step(
+                        mcp_server_id=server_id,
+                        mcp_tool_name=tool_name,
                         params=params,
                     )
                     
                     # 执行 MCP 调用
-                    result = self._call_mcp(action, ctx)
+                    result = self._call_mcp(step, ctx)
                     
                     # 将结果存储为 result_msg
                     result_msg = {
@@ -2741,19 +2830,19 @@ class ActorBase(ABC):
     
     # ========== 能力调用 ==========
     
-    def _call_mcp(self, action: Action, ctx: IterationContext) -> ActionResult:
+    def _call_mcp(self, step: ActionStep, ctx: IterationContext) -> ActionResult:
         """
         调用 MCP
         
         Args:
-            action: MCP 行动
+            step: ActionStep 对象 (action_type=AG_USE_MCP)
             ctx: 迭代上下文
             
         Returns:
             行动结果
         """
         start_time = time.time()
-        server_id = action.server_id
+        server_id = step.mcp_server_id
         
         # ANSI 颜色码
         CYAN = '\033[96m'
@@ -2792,8 +2881,8 @@ class ActorBase(ABC):
             thinking=f'调用 MCP {mcp_server_name}...',
             mcpServer=server_id,
             mcpServerName=mcp_server_name,  # MCP 服务器名称（别名）
-            toolName=action.mcp_tool_name or 'auto',
-            arguments=action.params or {},  # 包含调用参数
+            toolName=step.mcp_tool_name or 'auto',
+            arguments=step.params or {},  # 包含调用参数
             iteration=ctx.iteration,
         )
         
@@ -2960,7 +3049,7 @@ class ActorBase(ABC):
                     error_context = f"""
 【工具调用失败 - 需要修复参数】
 
-工具: {action.mcp_tool_name or 'auto'}
+工具: {step.mcp_tool_name or 'auto'}
 服务器: {server_id}
 错误信息: {detailed_error}
 
@@ -3170,26 +3259,26 @@ class ActorBase(ABC):
         
         return "\n".join(lines)
     
-    def _call_skill(self, action: Action, ctx: IterationContext) -> ActionResult:
+    def _call_skill(self, step: ActionStep, ctx: IterationContext) -> ActionResult:
         """
         调用 Skill
         
         Args:
-            action: Skill 行动
+            step: Skill 行动步骤
             ctx: 迭代上下文
             
         Returns:
             行动结果
         """
         start_time = time.time()
-        skill_id = action.skill_id
+        skill_id = step.skill_id
         
         skill = self.capabilities.get_skill(skill_id)
         if not skill:
             return ActionResult.error_result(
                 action_type='skill',
                 error=f"Skill not found: {skill_id}",
-                action=action,
+                step=step,
             )
         
         ctx.add_step(
@@ -3201,10 +3290,10 @@ class ActorBase(ABC):
         try:
             # Skill 可能包含多个步骤
             if skill.execute_fn:
-                result_data = skill.execute_fn(**action.params)
+                result_data = skill.execute_fn(**step.params)
             else:
                 # 如果没有执行函数，按步骤执行
-                result_data = self._execute_skill_steps(skill, action, ctx)
+                result_data = self._execute_skill_steps(skill, step, ctx)
             
             duration_ms = int((time.time() - start_time) * 1000)
             ctx.update_last_step(status='completed')
@@ -3238,29 +3327,29 @@ class ActorBase(ABC):
         for step in skill.steps:
             step_type = step.get('type')
             if step_type == 'mcp_call':
-                sub_action = Action.mcp(
-                    server_id=step.get('mcpServer'),
-                    tool_name=step.get('toolName'),
+                sub_step = create_mcp_step(
+                    mcp_server_id=step.get('mcpServer'),
+                    mcp_tool_name=step.get('toolName'),
                     params=step.get('arguments', {}),
                 )
-                result = self._call_mcp(sub_action, ctx)
+                result = self._call_mcp(sub_step, ctx)
                 results.append(result)
             # 可以扩展其他步骤类型
         return results
     
-    def _call_tool(self, action: Action, ctx: IterationContext) -> ActionResult:
+    def _call_tool(self, step: ActionStep, ctx: IterationContext) -> ActionResult:
         """
         调用内置工具
         
         Args:
-            action: Tool 行动
+            step: Tool 行动步骤
             ctx: 迭代上下文
             
         Returns:
             行动结果
         """
         start_time = time.time()
-        tool_name = action.tool_name
+        tool_name = step.tool_name
         
         ctx.add_step(
             'tool_call',
@@ -3269,7 +3358,7 @@ class ActorBase(ABC):
         )
         
         try:
-            result_data = self.capabilities.execute_tool(tool_name, **action.params)
+            result_data = self.capabilities.execute_tool(tool_name, **step.params)
             duration_ms = int((time.time() - start_time) * 1000)
             
             ctx.update_last_step(status='completed')
@@ -3681,7 +3770,7 @@ class ActorBase(ABC):
                 if result.action_type == 'mcp' and not result.success:
                     has_mcp_error = True
                     error_msg = result.error or "未知错误"
-                    server_id = result.action.server_id if result.action else "未知服务器"
+                    server_id = result.step.mcp_server_id if result.step else "未知服务器"
                     mcp_error_details.append(f"MCP服务器 {server_id} 调用失败: {error_msg}")
             
             if has_mcp_error:

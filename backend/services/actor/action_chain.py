@@ -588,3 +588,180 @@ def create_call_agent_step(target_agent_id: str,
         target_agent_id=target_agent_id,
         target_topic_id=target_topic_id,
     )
+
+
+# =============================================================================
+# Response Decision (from legacy actions.py)
+# =============================================================================
+
+class ResponseAction(str, Enum):
+    """响应决策动作"""
+    REPLY = 'reply'       # 回复
+    SILENT = 'silent'     # 沉默
+    DELEGATE = 'delegate' # 委托给其他 Agent
+    DEFER = 'defer'       # 延迟处理
+
+
+@dataclass
+class ResponseDecision:
+    """
+    响应决策
+    
+    _should_respond 方法的返回值，决定 Agent 如何响应消息
+    """
+    
+    # 决策动作
+    action: str = 'reply'  # 'reply', 'silent', 'delegate', 'defer'
+    
+    # 原因/说明
+    reason: str = ""
+    
+    # 委托目标（当 action='delegate' 时）
+    delegate_to: Optional[str] = None
+    
+    # 延迟时间（毫秒，当 action='defer' 时）
+    defer_ms: int = 0
+    
+    # 是否需要思考（显示 thinking 步骤）
+    needs_thinking: bool = True
+    
+    # 响应优先级（用于多 Agent 竞争）
+    priority: int = 0
+    
+    # 置信度（0-1）
+    confidence: float = 1.0
+    
+    @classmethod
+    def reply(cls, reason: str = "", needs_thinking: bool = True) -> 'ResponseDecision':
+        """创建回复决策"""
+        return cls(action='reply', reason=reason, needs_thinking=needs_thinking)
+    
+    @classmethod
+    def silent(cls, reason: str = "") -> 'ResponseDecision':
+        """创建沉默决策"""
+        return cls(action='silent', reason=reason, needs_thinking=False)
+    
+    @classmethod
+    def delegate(cls, target: str, reason: str = "") -> 'ResponseDecision':
+        """创建委托决策"""
+        return cls(action='delegate', delegate_to=target, reason=reason)
+    
+    @classmethod
+    def defer(cls, delay_ms: int, reason: str = "") -> 'ResponseDecision':
+        """创建延迟决策"""
+        return cls(action='defer', defer_ms=delay_ms, reason=reason)
+
+
+# =============================================================================
+# Action Result (from legacy actions.py)
+# =============================================================================
+
+@dataclass
+class ActionResult:
+    """
+    行动执行结果
+    
+    统一的执行结果结构，用于 ActionStep 和旧版 Action
+    """
+    
+    # 对应的行动类型
+    action_type: str
+    
+    # 执行是否成功
+    success: bool = True
+    
+    # 返回数据
+    data: Any = None
+    
+    # 格式化的文本结果（用于构建 LLM 上下文）
+    text_result: str = ""
+    
+    # 错误信息
+    error: Optional[str] = None
+    error_code: Optional[str] = None
+    
+    # 耗时（毫秒）
+    duration_ms: int = 0
+    
+    # 时间戳
+    timestamp: int = field(default_factory=lambda: int(time.time() * 1000))
+    
+    # 额外元数据
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    # 原始 ActionStep（用于追溯）
+    step: Optional[ActionStep] = None
+    
+    # 工具名称（便于显示）
+    tool_name: Optional[str] = None
+    
+    def __post_init__(self):
+        """初始化后处理"""
+        # 从 step 提取 tool_name
+        if self.step and not self.tool_name:
+            if self.step.action_type == AgentActionType.AG_USE_MCP:
+                self.tool_name = f"{self.step.mcp_server_id}:{self.step.mcp_tool_name}"
+            elif self.step.target_agent_id:
+                self.tool_name = f"@{self.step.target_agent_id}"
+    
+    @classmethod
+    def success_result(
+        cls,
+        action_type: str,
+        data: Any = None,
+        text_result: str = "",
+        duration_ms: int = 0,
+        step: ActionStep = None,
+    ) -> 'ActionResult':
+        """创建成功结果"""
+        return cls(
+            action_type=action_type,
+            success=True,
+            data=data,
+            text_result=text_result,
+            duration_ms=duration_ms,
+            step=step,
+        )
+    
+    @classmethod
+    def error_result(
+        cls,
+        action_type: str,
+        error: str,
+        error_code: str = None,
+        duration_ms: int = 0,
+        step: ActionStep = None,
+    ) -> 'ActionResult':
+        """创建失败结果"""
+        return cls(
+            action_type=action_type,
+            success=False,
+            error=error,
+            error_code=error_code,
+            duration_ms=duration_ms,
+            step=step,
+        )
+    
+    def to_step_dict(self) -> Dict[str, Any]:
+        """转换为 processStep 格式"""
+        step_dict = {
+            'type': f"{self.action_type}_result",
+            'timestamp': self.timestamp,
+            'status': 'completed' if self.success else 'error',
+            'duration': self.duration_ms,
+        }
+        
+        if self.tool_name:
+            step_dict['tool'] = self.tool_name
+        
+        if self.error:
+            step_dict['error'] = self.error
+        
+        if self.text_result:
+            # 截断长文本
+            result = self.text_result
+            if len(result) > 500:
+                result = result[:500] + '...'
+            step_dict['result'] = result
+        
+        return step_dict

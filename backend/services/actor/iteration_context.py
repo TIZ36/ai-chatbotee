@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .actions import Action, ActionResult
+    from .action_chain import ActionStep, ActionResult
 
 
 class MessageType:
@@ -301,7 +301,7 @@ class IterationContext:
         planned_count = len(self.planned_actions)
         return executed_count < planned_count
     
-    def get_next_action(self) -> Optional['Action']:
+    def get_next_action(self) -> Optional['ActionStep']:
         """获取下一个待执行的行动"""
         executed_count = len(self.executed_results)
         if executed_count < len(self.planned_actions):

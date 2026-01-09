@@ -24,7 +24,7 @@ Actor 模块 - Agent Actor 架构重构
 
 from .actor_state import ActorState
 from .iteration_context import IterationContext, DecisionContext
-from .actions import Action, ActionResult, ResponseDecision
+from .actions import Action, ActionResult, ResponseDecision  # Action = ActionStep 别名
 from .capability_registry import CapabilityRegistry
 from .actor_base import ActorBase
 from .actor_manager import ActorManager, activate_agent, get_active_agents

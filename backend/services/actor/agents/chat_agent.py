@@ -15,7 +15,8 @@ import time
 from typing import Any, Dict, List, Optional
 
 from ..actor_base import ActorBase
-from ..actions import Action, ActionResult, ResponseDecision
+from ..actions import ActionResult, ResponseDecision
+from ..action_chain import ActionStep, create_mcp_step
 from ..iteration_context import IterationContext
 
 logger = logging.getLogger(__name__)
@@ -290,11 +291,10 @@ class ChatAgent(ActorBase):
         
         # 为每个 MCP 服务器创建调用行动
         for server_id in mcp_servers[:3]:  # 最多 3 个
-            actions.append(Action.mcp(
-                server_id=server_id,
-                tool_name='auto',
+            actions.append(create_mcp_step(
+                mcp_server_id=server_id,
+                mcp_tool_name='auto',
                 params={'input': ctx.original_message.get('content', '')},
-                timeout_ms=60000,
             ))
         
         return actions
