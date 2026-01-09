@@ -33,34 +33,38 @@
      - `CacheService` - 完整的Redis操作接口
    - **状态**: 完整
 
-4. **`msg/thread.proto`** ✅
+4. **`im/main.proto`** ✅
+   - IM服务入口文件，引入所有IM相关proto
+   - **状态**: 完整
+
+5. **`im/thread.proto`** ✅
    - `ThreadService` - Thread业务服务
    - Thread CRUD、消息发布、回复、订阅、Feed
    - **状态**: 完整
 
-5. **`msg/chat.proto`** ✅
+6. **`im/chat.proto`** ✅
    - `ChatService` - Chat业务服务
    - Chat CRUD、参与者管理、消息发送、订阅、未读计数
    - **状态**: 完整
 
-6. **`svr/agent.proto`** ✅
+7. **`svr/agent.proto`** ✅
    - `AgentService` - AI Agent服务
    - Actor生命周期、消息处理、ActionChain管理
    - **状态**: 完整
 
-7. **`svr/llm.proto`** ✅
+8. **`svr/llm.proto`** ✅
    - `LLMService` - LLM服务
    - 配置管理、Provider管理、Chat Completion、流式响应
    - **状态**: 完整
 
-8. **`svr/mcp.proto`** ✅
+9. **`svr/mcp.proto`** ✅
    - `MCPService` - MCP协议服务
    - 服务器管理、工具调用、资源操作、OAuth、市场
    - **状态**: 完整
 
 ## 🔍 服务映射检查
 
-### chatee-dbc (数据控制层)
+### dbc_rpc (数据控制层)
 - ✅ `dbc.proto` - 提供所有数据访问接口
 - 需要注册的服务：
   - `UserService`
@@ -73,28 +77,29 @@
   - `HBaseChatService`
   - `CacheService`
 
-### chatee-msg (消息服务层)
-- ✅ `msg/thread.proto` - ThreadService
-- ✅ `msg/chat.proto` - ChatService
+### im_rpc (消息服务层)
+- ✅ `im/main.proto` - IM服务入口（引入thread和chat）
+- ✅ `im/thread.proto` - ThreadService
+- ✅ `im/chat.proto` - ChatService
 - **注意**: Fanout服务是内部服务，不对外暴露gRPC接口（通过内部调用实现）
 
-### chatee-svr (业务服务层)
+### svr_rpc (业务服务层)
 - ✅ `svr/agent.proto` - AgentService
 - ✅ `svr/llm.proto` - LLMService
 - ✅ `svr/mcp.proto` - MCPService
 - **注意**: User服务通过DBC的UserService访问，不需要单独的proto
 
-### chatee-conn (连接层)
+### conn_rpc (连接层)
 - ✅ `conn.proto` - WebSocket协议定义
 - **注意**: 这是客户端共享的协议，不是gRPC服务
 
-### chatee-http (HTTP API层)
+### chatee_http (HTTP API层)
 - ❌ 不需要proto - HTTP REST API，通过HTTP调用其他服务
 
 ## ⚠️ 潜在问题
 
 ### 1. 服务注册未完成
-**位置**: `services/chatee-dbc/service/service.go`
+**位置**: `services/dbc_rpc/biz/service.go`
 ```go
 func (s *DBCService) RegisterGRPC(server *grpc.Server) {
     // TODO: Register gRPC service implementations
@@ -117,8 +122,9 @@ func (s *DBCService) RegisterGRPC(server *grpc.Server) {
 所有proto文件都正确引用了`common/common.proto`：
 - ✅ `conn.proto` - 不需要import common
 - ✅ `dbc.proto` - 不需要import common（独立服务）
-- ✅ `msg/thread.proto` - ✅ import "common/common.proto"
-- ✅ `msg/chat.proto` - ✅ import "common/common.proto"
+- ✅ `im/main.proto` - ✅ import "im/thread.proto" 和 "im/chat.proto"
+- ✅ `im/thread.proto` - ✅ import "common/common.proto"
+- ✅ `im/chat.proto` - ✅ import "common/common.proto"
 - ✅ `svr/agent.proto` - ✅ import "common/common.proto"
 - ✅ `svr/llm.proto` - 不需要import common
 - ✅ `svr/mcp.proto` - 不需要import common
@@ -130,7 +136,7 @@ func (s *DBCService) RegisterGRPC(server *grpc.Server) {
 所有需要对外暴露的gRPC服务都有对应的proto定义：
 
 1. ✅ **数据访问层** (DBC) - 9个服务全部定义
-2. ✅ **消息服务层** (MSG) - 2个服务全部定义
+2. ✅ **即时消息服务层** (IM) - 2个服务全部定义（ThreadService, ChatService）
 3. ✅ **业务服务层** (SVR) - 3个服务全部定义
 4. ✅ **连接层** (CONN) - WebSocket协议定义
 5. ✅ **通用类型** (Common) - 基础类型和消息定义

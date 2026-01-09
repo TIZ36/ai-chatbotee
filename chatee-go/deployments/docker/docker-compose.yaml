@@ -40,13 +40,13 @@ services:
       - chatee-network
 
   # Chatee services
-  chatee-dbc:
+  dbc_rpc:
     build:
       context: ../..
       dockerfile: deployments/docker/Dockerfile
       args:
-        SERVICE: chatee-dbc
-    container_name: chatee-dbc
+        SERVICE: dbc_rpc
+    container_name: dbc_rpc
     environment:
       - CHATEE_MYSQL_HOST=mysql
       - CHATEE_MYSQL_PORT=3306
@@ -72,13 +72,13 @@ services:
     networks:
       - chatee-network
 
-  chatee-svr:
+  svr_rpc:
     build:
       context: ../..
       dockerfile: deployments/docker/Dockerfile
       args:
-        SERVICE: chatee-svr
-    container_name: chatee-svr
+        SERVICE: svr_rpc
+    container_name: svr_rpc
     environment:
       - CHATEE_MYSQL_HOST=mysql
       - CHATEE_MYSQL_PORT=3306
@@ -94,7 +94,7 @@ services:
     ports:
       - "9092:9090"
     depends_on:
-      chatee-dbc:
+      dbc_rpc:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "9090"]
@@ -104,13 +104,13 @@ services:
     networks:
       - chatee-network
 
-  chatee-msg:
+  im_rpc:
     build:
       context: ../..
       dockerfile: deployments/docker/Dockerfile
       args:
-        SERVICE: chatee-msg
-    container_name: chatee-msg
+        SERVICE: im_rpc
+    container_name: im_rpc
     environment:
       - CHATEE_MYSQL_HOST=mysql
       - CHATEE_MYSQL_PORT=3306
@@ -124,7 +124,7 @@ services:
     ports:
       - "9093:9090"
     depends_on:
-      chatee-dbc:
+      dbc_rpc:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "9090"]
@@ -134,13 +134,13 @@ services:
     networks:
       - chatee-network
 
-  chatee-conn:
+  conn_rpc:
     build:
       context: ../..
       dockerfile: deployments/docker/Dockerfile
       args:
-        SERVICE: chatee-conn
-    container_name: chatee-conn
+        SERVICE: conn_rpc
+    container_name: conn_rpc
     environment:
       - CHATEE_REDIS_HOST=redis
       - CHATEE_REDIS_PORT=6379
@@ -159,27 +159,27 @@ services:
     networks:
       - chatee-network
 
-  chatee-http:
+  chatee_http:
     build:
       context: ../..
       dockerfile: deployments/docker/Dockerfile
       args:
-        SERVICE: chatee-http
-    container_name: chatee-http
+        SERVICE: chatee_http
+    container_name: chatee_http
     environment:
       - CHATEE_HTTP_PORT=8080
-      - CHATEE_GRPC_DBC_ADDR=chatee-dbc:9090
-      - CHATEE_GRPC_SVR_ADDR=chatee-svr:9090
-      - CHATEE_GRPC_MSG_ADDR=chatee-msg:9090
+      - CHATEE_GRPC_DBC_ADDR=dbc_rpc:9090
+      - CHATEE_GRPC_SVR_ADDR=svr_rpc:9090
+      - CHATEE_GRPC_MSG_ADDR=im_rpc:9090
       - CHATEE_LOG_LEVEL=info
     ports:
       - "8080:8080"
     depends_on:
-      chatee-dbc:
+      dbc_rpc:
         condition: service_healthy
-      chatee-svr:
+      svr_rpc:
         condition: service_healthy
-      chatee-msg:
+      im_rpc:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]

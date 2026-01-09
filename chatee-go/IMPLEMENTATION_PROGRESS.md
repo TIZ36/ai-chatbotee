@@ -46,8 +46,8 @@
 - ✅ MCPServerService
 
 #### 实现文件：
-- `services/chatee-dbc/service/grpc_impl.go` - 包含 UserService 和 SessionService 的实现
-- `services/chatee-dbc/service/service.go` - 已更新 RegisterGRPC 方法
+- `services/dbc_rpc/biz/grpc_impl.go` - 包含 UserService 和 SessionService 的实现
+- `services/dbc_rpc/biz/service.go` - 已更新 RegisterGRPC 方法
 
 ### 3. ChromaDB 服务定义 ✅
 - 已在 `proto/dbc/dbc.proto` 中添加 `ChromaService`
@@ -155,7 +155,7 @@ func (s *DBCService) RegisterGRPC(server *grpc.Server) {
    - 实现 ChromaDB 向量数据库服务（用于RAG功能）
 
 2. **实现 MSG 服务**：
-   - 创建 `services/chatee-msg/service/grpc_impl.go`
+   - 创建 `services/im_rpc/biz/grpc_impl.go`
    - 实现 ThreadService 和 ChatService
 
 3. **实现 SVR 服务**：

@@ -158,11 +158,11 @@ chatee-go/
 │   ├── svr/            # Business logic
 │   └── conn/           # WebSocket
 └── services/           # Microservices
-    ├── chatee-dbc/     # Data access
-    ├── chatee-http/    # HTTP API
-    ├── chatee-conn/    # WebSocket
-    ├── chatee-msg/     # Messaging
-    └── chatee-svr/     # Business
+    ├── dbc_rpc/        # Data access (RPC)
+    ├── chatee_http/    # HTTP API
+    ├── conn_rpc/       # WebSocket (RPC)
+    ├── im_rpc/         # Messaging (RPC)
+    └── svr_rpc/        # Business (RPC)
 ```
 
 ## API Endpoints

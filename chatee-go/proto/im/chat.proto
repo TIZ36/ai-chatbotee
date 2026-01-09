@@ -1,0 +1,344 @@
+syntax = "proto3";
+
+package chatee.im.chat;
+
+option go_package = "chatee-go/proto/im/chat";
+
+import "common/common.proto";
+
+// =============================================================================
+// Chat Service - Private and Group Chat System
+// =============================================================================
+
+service ChatService {
+    // Chat Management
+    rpc CreateChat(CreateChatRequest) returns (CreateChatResponse);
+    rpc GetChat(GetChatRequest) returns (Chat);
+    rpc UpdateChat(UpdateChatRequest) returns (Chat);
+    rpc DeleteChat(DeleteChatRequest) returns (DeleteChatResponse);
+    rpc ListChats(ListChatsRequest) returns (ListChatsResponse);
+    
+    // Participants
+    rpc AddParticipant(AddParticipantRequest) returns (AddParticipantResponse);
+    rpc RemoveParticipant(RemoveParticipantRequest) returns (RemoveParticipantResponse);
+    rpc ListParticipants(ListParticipantsRequest) returns (ListParticipantsResponse);
+    
+    // Messages
+    rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
+    rpc GetMessages(GetMessagesRequest) returns (GetMessagesResponse);
+    rpc DeleteMessage(DeleteMessageRequest) returns (DeleteMessageResponse);
+    
+    // Channel (sub-conversations within a chat)
+    rpc CreateChannel(CreateChannelRequest) returns (Channel);
+    rpc ListChannels(ListChannelsRequest) returns (ListChannelsResponse);
+    rpc DeleteChannel(DeleteChannelRequest) returns (DeleteChannelResponse);
+    
+    // Subscription
+    rpc Subscribe(SubscribeRequest) returns (stream ChatEvent);
+    
+    // Read Status
+    rpc MarkAsRead(MarkAsReadRequest) returns (MarkAsReadResponse);
+    rpc GetUnreadCount(GetUnreadCountRequest) returns (GetUnreadCountResponse);
+}
+
+// =============================================================================
+// Chat Data Model
+// =============================================================================
+
+message Chat {
+    string chat_key = 1;          // Unique chat identifier
+    ChatType chat_type = 2;
+    string title = 3;             // For groups
+    string created_by = 4;
+    ChatStatus status = 5;
+    ChatSettings settings = 6;
+    ChatStats stats = 7;
+    repeated Participant participants = 8;
+    repeated string ai_agents = 9;
+    int64 created_at = 10;
+    int64 updated_at = 11;
+}
+
+enum ChatType {
+    CHAT_TYPE_UNSPECIFIED = 0;
+    PRIVATE = 1;                  // 1:1 chat
+    GROUP = 2;                    // Group chat
+}
+
+enum ChatStatus {
+    CHAT_STATUS_UNSPECIFIED = 0;
+    CHAT_ACTIVE = 1;
+    CHAT_MUTED = 2;
+    CHAT_ARCHIVED = 3;
+}
+
+message ChatSettings {
+    bool mute_notifications = 1;
+    bool only_admin_can_send = 2;
+    int32 max_participants = 3;
+    bool allow_ai = 4;
+}
+
+message ChatStats {
+    int64 message_count = 1;
+    string last_msg_id = 2;
+    int64 last_active_at = 3;
+}
+
+message Participant {
+    string user_id = 1;
+    ParticipantRole role = 2;
+    int64 joined_at = 3;
+    int64 last_read_at = 4;
+    string last_read_msg_id = 5;
+    bool is_ai = 6;
+}
+
+enum ParticipantRole {
+    PARTICIPANT_ROLE_UNSPECIFIED = 0;
+    OWNER = 1;
+    ADMIN = 2;
+    MEMBER = 3;
+}
+
+// =============================================================================
+// Chat CRUD
+// =============================================================================
+
+message CreateChatRequest {
+    ChatType chat_type = 1;
+    string title = 2;
+    string created_by = 3;
+    repeated string participant_ids = 4;
+    repeated string ai_agent_ids = 5;
+    ChatSettings settings = 6;
+}
+
+message CreateChatResponse {
+    string chat_key = 1;
+    Chat chat = 2;
+}
+
+message GetChatRequest {
+    string chat_key = 1;
+}
+
+message UpdateChatRequest {
+    string chat_key = 1;
+    string title = 2;
+    ChatSettings settings = 3;
+    ChatStatus status = 4;
+}
+
+message DeleteChatRequest {
+    string chat_key = 1;
+    string requester_id = 2;
+}
+
+message DeleteChatResponse {
+    bool success = 1;
+}
+
+message ListChatsRequest {
+    string user_id = 1;
+    ChatType chat_type = 2;
+    ChatStatus status = 3;
+    int32 limit = 4;
+    string cursor = 5;
+}
+
+message ListChatsResponse {
+    repeated ChatSummary chats = 1;
+    string next_cursor = 2;
+    bool has_more = 3;
+}
+
+message ChatSummary {
+    string chat_key = 1;
+    ChatType chat_type = 2;
+    string title = 3;
+    string last_message_preview = 4;
+    string last_sender_id = 5;
+    int64 last_active_at = 6;
+    int32 unread_count = 7;
+    bool muted = 8;
+}
+
+// =============================================================================
+// Participants
+// =============================================================================
+
+message AddParticipantRequest {
+    string chat_key = 1;
+    string user_id = 2;
+    ParticipantRole role = 3;
+    bool is_ai = 4;
+    string added_by = 5;
+}
+
+message AddParticipantResponse {
+    bool success = 1;
+    Participant participant = 2;
+}
+
+message RemoveParticipantRequest {
+    string chat_key = 1;
+    string user_id = 2;
+    string removed_by = 3;
+}
+
+message RemoveParticipantResponse {
+    bool success = 1;
+}
+
+message ListParticipantsRequest {
+    string chat_key = 1;
+}
+
+message ListParticipantsResponse {
+    repeated Participant participants = 1;
+}
+
+// =============================================================================
+// Messages
+// =============================================================================
+
+message SendMessageRequest {
+    string chat_key = 1;
+    string sender_id = 2;
+    chatee.common.BaseMessage message = 3;
+    string channel_id = 4;        // Optional: specific channel
+}
+
+message SendMessageResponse {
+    string msg_id = 1;
+    int64 timestamp = 2;
+    FanoutResult fanout = 3;
+}
+
+message FanoutResult {
+    int32 total_recipients = 1;
+    int32 online_pushed = 2;
+    int32 offline_stored = 3;
+    int32 ai_notified = 4;
+}
+
+message GetMessagesRequest {
+    string chat_key = 1;
+    string channel_id = 2;
+    int32 limit = 3;
+    string cursor = 4;
+    bool newest_first = 5;
+    int64 since_timestamp = 6;
+}
+
+message GetMessagesResponse {
+    repeated ChatMessage messages = 1;
+    string next_cursor = 2;
+    bool has_more = 3;
+}
+
+message ChatMessage {
+    chatee.common.BaseMessage base = 1;
+    string chat_key = 2;
+    string channel_id = 3;
+    bool deleted = 4;
+    ReadStatus read_status = 5;
+}
+
+message ReadStatus {
+    int32 read_by_count = 1;
+    repeated string read_by = 2;  // User IDs who have read
+}
+
+message DeleteMessageRequest {
+    string chat_key = 1;
+    string msg_id = 2;
+    string requester_id = 3;
+}
+
+message DeleteMessageResponse {
+    bool success = 1;
+}
+
+// =============================================================================
+// Channels
+// =============================================================================
+
+message Channel {
+    string channel_id = 1;
+    string chat_key = 2;
+    string name = 3;
+    string description = 4;
+    string created_by = 5;
+    int64 created_at = 6;
+    int64 message_count = 7;
+}
+
+message CreateChannelRequest {
+    string chat_key = 1;
+    string name = 2;
+    string description = 3;
+    string created_by = 4;
+}
+
+message ListChannelsRequest {
+    string chat_key = 1;
+}
+
+message ListChannelsResponse {
+    repeated Channel channels = 1;
+}
+
+message DeleteChannelRequest {
+    string chat_key = 1;
+    string channel_id = 2;
+    string requester_id = 3;
+}
+
+message DeleteChannelResponse {
+    bool success = 1;
+}
+
+// =============================================================================
+// Subscription
+// =============================================================================
+
+message SubscribeRequest {
+    string chat_key = 1;
+    string user_id = 2;
+}
+
+message ChatEvent {
+    string event_type = 1;        // new_message, message_deleted, user_joined, user_left, typing
+    string chat_key = 2;
+    string msg_id = 3;
+    bytes payload = 4;
+    int64 timestamp = 5;
+}
+
+// =============================================================================
+// Read Status
+// =============================================================================
+
+message MarkAsReadRequest {
+    string user_id = 1;
+    string chat_key = 2;
+    string msg_id = 3;            // Mark up to this message
+}
+
+message MarkAsReadResponse {
+    bool success = 1;
+    int32 marked_count = 2;
+}
+
+message GetUnreadCountRequest {
+    string user_id = 1;
+    string chat_key = 2;          // Optional: specific chat
+}
+
+message GetUnreadCountResponse {
+    int32 total_unread = 1;
+    map<string, int32> by_chat = 2;  // chat_key -> count
+}
+

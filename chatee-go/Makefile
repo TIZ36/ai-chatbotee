@@ -11,7 +11,7 @@ PROTOC := protoc
 BUILD_DIR := bin
 PROTO_DIR := proto
 GEN_DIR := gen
-SERVICES := chatee-dbc chatee-http chatee-conn chatee-svr chatee-msg
+SERVICES := dbc_rpc chatee_http conn_rpc svr_rpc im_rpc
 DOCKER_COMPOSE := docker-compose -f deployments/docker/docker-compose.yaml
 PID_DIR := .pids
 
@@ -34,30 +34,34 @@ build:
 	@mkdir -p $(BUILD_DIR)
 	@for svc in $(SERVICES); do \
 		echo "Building $$svc..."; \
-		$(GO) build -o $(BUILD_DIR)/$$svc ./services/$$svc/cmd || exit 1; \
+		if [ -d "./services/$$svc/cmd" ]; then \
+			$(GO) build -o $(BUILD_DIR)/$$svc ./services/$$svc/cmd || exit 1; \
+		else \
+			$(GO) build -o $(BUILD_DIR)/$$svc ./services/$$svc || exit 1; \
+		fi \
 	done
 	@echo "$(GREEN)Build complete!$(NC)"
 
 # Build individual services
 build-dbc:
 	@mkdir -p $(BUILD_DIR)
-	$(GO) build -o $(BUILD_DIR)/chatee-dbc ./services/chatee-dbc/cmd
+	$(GO) build -o $(BUILD_DIR)/dbc_rpc ./services/dbc_rpc
 
 build-http:
 	@mkdir -p $(BUILD_DIR)
-	$(GO) build -o $(BUILD_DIR)/chatee-http ./services/chatee-http
+	$(GO) build -o $(BUILD_DIR)/chatee_http ./services/chatee_http
 
 build-conn:
 	@mkdir -p $(BUILD_DIR)
-	$(GO) build -o $(BUILD_DIR)/chatee-conn ./services/chatee-conn
+	$(GO) build -o $(BUILD_DIR)/conn_rpc ./services/conn_rpc
 
 build-svr:
 	@mkdir -p $(BUILD_DIR)
-	$(GO) build -o $(BUILD_DIR)/chatee-svr ./services/chatee-svr/cmd
+	$(GO) build -o $(BUILD_DIR)/svr_rpc ./services/svr_rpc/cmd
 
 build-msg:
 	@mkdir -p $(BUILD_DIR)
-	$(GO) build -o $(BUILD_DIR)/chatee-msg ./services/chatee-msg/cmd
+	$(GO) build -o $(BUILD_DIR)/im_rpc ./services/im_rpc/cmd
 
 # Clean build artifacts
 clean:
@@ -84,7 +88,7 @@ proto-check:
 proto-gen:
 	@echo "$(GREEN)Generating protobuf files...$(NC)"
 	@mkdir -p $(GEN_DIR)
-	@# Generate common proto
+	@# Generate common proto (special case, no domain.proto)
 	@if [ -d "$(PROTO_DIR)/common" ]; then \
 		echo "Processing common protos..."; \
 		$(PROTOC) -I$(PROTO_DIR) \
@@ -92,38 +96,16 @@ proto-gen:
 			--go-grpc_out=$(GEN_DIR) --go-grpc_opt=paths=source_relative \
 			$(PROTO_DIR)/common/*.proto; \
 	fi
-	@# Generate svr protos
-	@if [ -d "$(PROTO_DIR)/svr" ]; then \
-		echo "Processing svr protos..."; \
+	@# Generate all domain protos (process all proto files in each domain directory)
+	@for domain_dir in $(PROTO_DIR)/*/; do \
+		domain=$$(basename "$$domain_dir"); \
+		if [ "$$domain" = "common" ]; then continue; fi; \
+		echo "Processing $$domain protos..."; \
 		$(PROTOC) -I$(PROTO_DIR) \
 			--go_out=$(GEN_DIR) --go_opt=paths=source_relative \
 			--go-grpc_out=$(GEN_DIR) --go-grpc_opt=paths=source_relative \
-			$(PROTO_DIR)/svr/*.proto; \
-	fi
-	@# Generate msg protos
-	@if [ -d "$(PROTO_DIR)/msg" ]; then \
-		echo "Processing msg protos..."; \
-		$(PROTOC) -I$(PROTO_DIR) \
-			--go_out=$(GEN_DIR) --go_opt=paths=source_relative \
-			--go-grpc_out=$(GEN_DIR) --go-grpc_opt=paths=source_relative \
-			$(PROTO_DIR)/msg/*.proto; \
-	fi
-	@# Generate dbc protos
-	@if [ -d "$(PROTO_DIR)/dbc" ]; then \
-		echo "Processing dbc protos..."; \
-		$(PROTOC) -I$(PROTO_DIR) \
-			--go_out=$(GEN_DIR) --go_opt=paths=source_relative \
-			--go-grpc_out=$(GEN_DIR) --go-grpc_opt=paths=source_relative \
-			$(PROTO_DIR)/dbc/*.proto; \
-	fi
-	@# Generate conn protos
-	@if [ -d "$(PROTO_DIR)/conn" ]; then \
-		echo "Processing conn protos..."; \
-		$(PROTOC) -I$(PROTO_DIR) \
-			--go_out=$(GEN_DIR) --go_opt=paths=source_relative \
-			--go-grpc_out=$(GEN_DIR) --go-grpc_opt=paths=source_relative \
-			$(PROTO_DIR)/conn/*.proto; \
-	fi
+			$$domain_dir*.proto; \
+	done
 	@echo "$(GREEN)Protobuf generation complete!$(NC)"
 	@echo "Generated files in $(GEN_DIR)/"
 	@find $(GEN_DIR) -name "*.go" 2>/dev/null | head -20 || echo "No proto files found to generate"
@@ -172,33 +154,33 @@ start: build
 	@echo "$(GREEN)Starting all services locally...$(NC)"
 	@mkdir -p $(PID_DIR)
 	@# Start DBC first
-	@echo "Starting chatee-dbc..."
-	@$(BUILD_DIR)/chatee-dbc > logs/dbc.log 2>&1 & echo $$! > $(PID_DIR)/dbc.pid
+	@echo "Starting dbc_rpc..."
+	@$(BUILD_DIR)/dbc_rpc > logs/dbc.log 2>&1 & echo $$! > $(PID_DIR)/dbc.pid
 	@sleep 2
-	@# Start MSG
-	@echo "Starting chatee-msg..."
-	@$(BUILD_DIR)/chatee-msg > logs/msg.log 2>&1 & echo $$! > $(PID_DIR)/msg.pid
+	@# Start IM
+	@echo "Starting im_rpc..."
+	@$(BUILD_DIR)/im_rpc > logs/im.log 2>&1 & echo $$! > $(PID_DIR)/im.pid
 	@sleep 1
 	@# Start SVR
-	@echo "Starting chatee-svr..."
-	@$(BUILD_DIR)/chatee-svr > logs/svr.log 2>&1 & echo $$! > $(PID_DIR)/svr.pid
+	@echo "Starting svr_rpc..."
+	@$(BUILD_DIR)/svr_rpc > logs/svr.log 2>&1 & echo $$! > $(PID_DIR)/svr.pid
 	@sleep 1
 	@# Start CONN
-	@echo "Starting chatee-conn..."
-	@$(BUILD_DIR)/chatee-conn > logs/conn.log 2>&1 & echo $$! > $(PID_DIR)/conn.pid
+	@echo "Starting conn_rpc..."
+	@$(BUILD_DIR)/conn_rpc > logs/conn.log 2>&1 & echo $$! > $(PID_DIR)/conn.pid
 	@sleep 1
 	@# Start HTTP
-	@echo "Starting chatee-http..."
-	@$(BUILD_DIR)/chatee-http > logs/http.log 2>&1 & echo $$! > $(PID_DIR)/http.pid
+	@echo "Starting chatee_http..."
+	@$(BUILD_DIR)/chatee_http > logs/http.log 2>&1 & echo $$! > $(PID_DIR)/http.pid
 	@sleep 1
 	@echo ""
 	@echo "$(GREEN)All services started!$(NC)"
 	@echo "Services:"
-	@echo "  - chatee-dbc:  gRPC :9091"
-	@echo "  - chatee-msg:  gRPC :9093"
-	@echo "  - chatee-svr:  gRPC :9092"
-	@echo "  - chatee-conn: WS   :8081"
-	@echo "  - chatee-http: HTTP :8080"
+	@echo "  - dbc_rpc:     gRPC :9091"
+	@echo "  - im_rpc:      gRPC :9093"
+	@echo "  - svr_rpc:     gRPC :9092"
+	@echo "  - conn_rpc:    WS   :8081"
+	@echo "  - chatee_http: HTTP :8080"
 	@echo ""
 	@echo "Logs: logs/*.log"
 	@echo "PIDs: $(PID_DIR)/*.pid"
@@ -212,10 +194,10 @@ stop:
 	@if [ -f $(PID_DIR)/http.pid ]; then kill $$(cat $(PID_DIR)/http.pid) 2>/dev/null || true; rm -f $(PID_DIR)/http.pid; fi
 	@if [ -f $(PID_DIR)/conn.pid ]; then kill $$(cat $(PID_DIR)/conn.pid) 2>/dev/null || true; rm -f $(PID_DIR)/conn.pid; fi
 	@if [ -f $(PID_DIR)/svr.pid ]; then kill $$(cat $(PID_DIR)/svr.pid) 2>/dev/null || true; rm -f $(PID_DIR)/svr.pid; fi
-	@if [ -f $(PID_DIR)/msg.pid ]; then kill $$(cat $(PID_DIR)/msg.pid) 2>/dev/null || true; rm -f $(PID_DIR)/msg.pid; fi
+	@if [ -f $(PID_DIR)/im.pid ]; then kill $$(cat $(PID_DIR)/im.pid) 2>/dev/null || true; rm -f $(PID_DIR)/im.pid; fi
 	@if [ -f $(PID_DIR)/dbc.pid ]; then kill $$(cat $(PID_DIR)/dbc.pid) 2>/dev/null || true; rm -f $(PID_DIR)/dbc.pid; fi
 	@# Also kill any remaining processes
-	@pkill -f "chatee-" 2>/dev/null || true
+	@pkill -f "dbc_rpc\|im_rpc\|svr_rpc\|conn_rpc\|chatee_http" 2>/dev/null || true
 	@echo "$(GREEN)All services stopped!$(NC)"
 
 # Restart all services
@@ -226,16 +208,17 @@ status:
 	@echo "$(GREEN)Service Status:$(NC)"
 	@echo ""
 	@echo "PID Files:"
-	@for svc in dbc msg svr conn http; do \
+	@for svc in dbc im svr conn http; do \
+		svc_name=$$(case $$svc in dbc) echo "dbc_rpc" ;; im) echo "im_rpc" ;; svr) echo "svr_rpc" ;; conn) echo "conn_rpc" ;; http) echo "chatee_http" ;; esac); \
 		if [ -f $(PID_DIR)/$$svc.pid ]; then \
 			pid=$$(cat $(PID_DIR)/$$svc.pid); \
 			if ps -p $$pid > /dev/null 2>&1; then \
-				echo "  ✓ chatee-$$svc (PID: $$pid) - $(GREEN)Running$(NC)"; \
+				echo "  ✓ $$svc_name (PID: $$pid) - $(GREEN)Running$(NC)"; \
 			else \
-				echo "  ✗ chatee-$$svc (PID: $$pid) - $(RED)Not Running$(NC)"; \
+				echo "  ✗ $$svc_name (PID: $$pid) - $(RED)Not Running$(NC)"; \
 			fi \
 		else \
-			echo "  ✗ chatee-$$svc - $(RED)Not Started$(NC)"; \
+			echo "  ✗ $$svc_name - $(RED)Not Started$(NC)"; \
 		fi \
 	done
 	@echo ""
@@ -244,7 +227,7 @@ status:
 	@lsof -i :8081 2>/dev/null | grep LISTEN | head -1 || echo "  8081 (WS):   Not listening"
 	@lsof -i :9091 2>/dev/null | grep LISTEN | head -1 || echo "  9091 (DBC):  Not listening"
 	@lsof -i :9092 2>/dev/null | grep LISTEN | head -1 || echo "  9092 (SVR):  Not listening"
-	@lsof -i :9093 2>/dev/null | grep LISTEN | head -1 || echo "  9093 (MSG):  Not listening"
+	@lsof -i :9093 2>/dev/null | grep LISTEN | head -1 || echo "  9093 (IM):   Not listening"
 
 # View logs
 logs:
@@ -253,19 +236,19 @@ logs:
 
 # Run individual services (foreground for development)
 run-dbc:
-	$(GO) run ./services/chatee-dbc/cmd
+	$(GO) run ./services/dbc_rpc
 
 run-http:
-	$(GO) run ./services/chatee-http
+	$(GO) run ./services/chatee_http
 
 run-conn:
-	$(GO) run ./services/chatee-conn
+	$(GO) run ./services/conn_rpc
 
 run-svr:
-	$(GO) run ./services/chatee-svr/cmd
+	$(GO) run ./services/svr_rpc/cmd
 
 run-msg:
-	$(GO) run ./services/chatee-msg/cmd
+	$(GO) run ./services/im_rpc/cmd
 
 # =============================================================================
 # Docker Compose Deployment

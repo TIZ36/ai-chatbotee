@@ -2,6 +2,7 @@ package actor
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"time"
 )
@@ -198,12 +199,18 @@ func (u *UserActor) broadcastToConnections(msg Message) error {
 	u.mu.RLock()
 	defer u.mu.RUnlock()
 
-	// Convert message to bytes (simplified - should use proper serialization)
-	data := []byte{} // TODO: Serialize message
+	// Serialize message to JSON
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
 
 	for _, conn := range u.connections {
 		if conn.IsAlive() {
-			conn.Send(data)
+			if err := conn.Send(data); err != nil {
+				// Log error but continue with other connections
+				continue
+			}
 		}
 	}
 	return nil

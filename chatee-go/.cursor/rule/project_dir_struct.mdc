@@ -1,0 +1,295 @@
+# 项目目录结构规范
+
+## 服务目录命名规则
+
+### RPC 服务命名规范
+
+所有 gRPC 服务（RPC 服务）必须使用 `domain_rpc` 格式命名：
+
+- `conn_rpc` - WebSocket 连接服务
+- `dbc_rpc` - 数据访问控制服务（DataBase Controller）
+- `im_rpc` - 即时消息服务（Instant Messaging）
+- `svr_rpc` - 业务服务层（Service）
+
+**规则**：
+- 格式：`{domain}_rpc`
+- `domain` 使用小写字母和下划线
+- 所有 RPC 服务必须以 `_rpc` 后缀结尾
+
+### HTTP 服务命名规范
+
+HTTP REST API 服务使用固定命名：
+
+- `chatee_http` - 对外 HTTP API 服务（唯一）
+
+**规则**：
+- 格式：`chatee_http`
+- 使用下划线分隔
+- 所有 HTTP 服务统一使用此命名
+
+## Domain 服务统一目录结构
+
+**重要**：所有 domain 服务（无论是 HTTP 还是 RPC）都遵循统一的目录结构和命名规范，不区分服务类型。
+
+### 标准目录结构
+
+```
+{domain}_rpc/ 或 chatee_http/
+├── main.go              # 启动文件，注册服务，注册其他 RPC 服务等
+├── svc.go               # ServiceContext 文件，根句柄初始化
+├── handler/             # 请求处理，上下文构造，请求路由分发
+│   └── handler.go       # HTTP handler 或 RPC handler
+├── biz/                 # 领域业务逻辑处理
+│   ├── service.go        # 服务接口定义和 ServiceContext
+│   ├── grpc_impl.go     # gRPC 服务端实现（RPC 服务）
+│   └── *.go             # 其他业务逻辑实现
+├── middleware/          # HTTP 中间件（仅 HTTP 服务）
+│   └── middleware.go
+├── interceptor/         # gRPC 拦截器（仅 RPC 服务）
+│   └── interceptor.go
+└── repository/          # 数据访问层（可选，如 dbc_rpc）
+    └── *.go
+```
+
+### 目录说明
+
+#### 1. main.go
+- **职责**：服务启动入口
+- **功能**：
+  - 加载配置
+  - 初始化日志、数据库连接池等基础设施
+  - 创建 ServiceContext
+  - 注册 gRPC 服务（RPC）或 HTTP 路由（HTTP）
+  - 注册其他依赖的 RPC 服务客户端
+  - 启动服务监听
+
+#### 2. svc.go
+- **职责**：ServiceContext 定义和初始化
+- **功能**：
+  - 定义 ServiceContext 结构体，包含所有依赖（数据库、缓存、其他服务客户端等）
+  - 提供 NewServiceContext 构造函数
+  - 统一管理服务依赖的生命周期
+
+#### 3. handler/
+- **职责**：请求处理和路由分发
+- **HTTP 服务**：
+  - 定义 HTTP handler 函数
+  - 处理 HTTP 请求/响应
+  - 参数验证和转换
+  - 调用 biz 层处理业务逻辑
+- **RPC 服务**：
+  - 定义 gRPC handler（通常放在 biz/grpc_impl.go）
+  - 处理 gRPC 请求/响应
+  - 参数验证和转换
+
+#### 4. biz/
+- **职责**：领域业务逻辑处理
+- **文件**：
+  - `service.go` - 服务接口定义、ServiceContext 结构
+  - `grpc_impl.go` - gRPC 服务端实现（实现 proto 定义的服务接口）
+  - 其他业务逻辑文件（如 `cache_impl.go`, `hbase_impl.go` 等）
+
+#### 5. middleware/ (HTTP 服务)
+- **职责**：HTTP 中间件
+- **功能**：
+  - 请求日志
+  - 认证授权
+  - 限流
+  - CORS
+  - 错误恢复
+  - 请求 ID 生成
+
+#### 6. interceptor/ (RPC 服务)
+- **职责**：gRPC 拦截器
+- **功能**：
+  - 请求日志
+  - 认证授权
+  - 限流
+  - 链路追踪
+  - 错误处理
+
+#### 7. repository/ (可选)
+- **职责**：数据访问层
+- **适用场景**：数据访问服务（如 `dbc_rpc`）
+- **功能**：
+  - 封装数据库操作
+  - 封装缓存操作
+  - 数据模型定义
+
+## 完整目录结构示例
+
+```
+services/
+├── conn_rpc/              # WebSocket RPC 服务
+│   ├── main.go            # 启动文件，使用 svc.go 初始化
+│   ├── svc.go             # ServiceContext 定义和初始化
+│   ├── handler/           # 请求处理
+│   │   └── websocket.go   # WebSocket 连接处理
+│   ├── biz/               # 业务逻辑
+│   │   └── hub.go         # WebSocket Hub 管理
+│   └── interceptor/       # gRPC 拦截器
+│       └── interceptor.go
+│
+├── dbc_rpc/               # 数据访问 RPC 服务
+│   ├── main.go            # 启动文件，使用 svc.go 初始化
+│   ├── svc.go             # ServiceContext 定义和初始化
+│   ├── biz/               # 业务逻辑实现
+│   │   ├── service.go      # 服务接口定义
+│   │   ├── grpc_impl.go   # gRPC 服务注册
+│   │   ├── cache_impl.go  # Redis 缓存实现
+│   │   ├── hbase_impl.go  # HBase 数据访问实现
+│   │   └── chroma_impl.go # ChromaDB 向量数据库实现
+│   ├── repository/        # 数据访问层
+│   │   ├── repository.go  # Repository 接口定义
+│   │   └── hbase_repository.go # HBase Repository 实现
+│   └── interceptor/       # gRPC 拦截器
+│       └── interceptor.go
+│
+├── im_rpc/                # 即时消息 RPC 服务
+│   ├── main.go            # 启动文件，使用 svc.go 初始化
+│   ├── svc.go             # ServiceContext 定义和初始化
+│   ├── biz/               # 业务逻辑（按领域组织）
+│   │   ├── chat/          # 聊天服务
+│   │   │   ├── service.go
+│   │   │   ├── core_service.go
+│   │   │   └── fanout_service.go
+│   │   ├── thread/        # 话题服务
+│   │   │   ├── service.go
+│   │   │   ├── core_service.go
+│   │   │   └── fanout_service.go
+│   │   ├── fanout/        # 消息分发服务
+│   │   │   └── service.go
+│   │   └── relationship/  # 关系服务
+│   │       └── service.go
+│   └── interceptor/       # gRPC 拦截器
+│       └── interceptor.go
+│
+├── svr_rpc/               # 业务逻辑 RPC 服务
+│   ├── main.go            # 启动文件，使用 svc.go 初始化
+│   ├── svc.go             # ServiceContext 定义和初始化
+│   ├── biz/               # 业务逻辑（按领域组织）
+│   │   ├── agent/         # Agent 服务
+│   │   │   ├── service.go
+│   │   │   └── chain_manager.go
+│   │   ├── llm/           # LLM 服务
+│   │   │   └── service.go
+│   │   ├── mcp/           # MCP 服务
+│   │   │   └── service.go
+│   │   └── user/          # 用户服务
+│   │       └── service.go
+│   └── interceptor/       # gRPC 拦截器
+│       └── interceptor.go
+│
+└── chatee_http/           # HTTP API 服务
+    ├── main.go            # 启动文件，使用 svc.go 初始化
+    ├── svc.go             # ServiceContext 定义和初始化
+    ├── handler/           # HTTP 请求处理
+    │   └── handler.go     # HTTP Handler 实现
+    ├── biz/               # 业务逻辑
+    │   └── service.go     # HTTP Service（包含 gRPC 客户端）
+    └── middleware/        # HTTP 中间件
+        └── middleware.go  # 中间件实现（日志、CORS、认证等）
+```
+
+## Import 路径规范
+
+所有服务代码中的 import 路径必须遵循以下格式：
+
+```go
+// RPC 服务
+import "chatee-go/services/conn_rpc/biz"
+import "chatee-go/services/dbc_rpc/repository"
+import "chatee-go/services/im_rpc/handler"
+import "chatee-go/services/svr_rpc/interceptor"
+
+// HTTP 服务
+import "chatee-go/services/chatee_http/handler"
+import "chatee-go/services/chatee_http/middleware"
+```
+
+## 目录组织原则
+
+### 禁止的目录结构
+
+以下目录结构**禁止使用**，必须重构为标准结构：
+
+- ❌ `cmd/` - 启动文件必须在根目录 `main.go`
+- ❌ `internal/` - 业务逻辑必须在 `service/` 目录
+- ❌ `connection/`, `hub/` 等自定义目录 - 必须归类到 `handler/` 或 `service/`
+- ❌ 任何非标准命名的目录
+
+### 重构规则
+
+1. **从 `cmd/main.go` 迁移**：
+   - 将 `cmd/main.go` 移动到服务根目录 `main.go`
+   - 更新所有导入路径
+
+2. **从 `internal/` 迁移**：
+   - 将 `internal/` 下的所有内容移动到 `biz/` 目录
+   - 保持原有的子目录结构（如 `biz/chat/`, `biz/agent/` 等）
+   - 更新所有导入路径（`internal/` → `biz/`）
+
+3. **自定义目录迁移**：
+   - `connection/` → `handler/`（如果是请求处理）或 `biz/`（如果是业务逻辑）
+   - `hub/` → `biz/`（业务逻辑）
+   - 其他自定义目录按职责归类到标准目录
+
+## Proto 文件组织规则
+
+### Proto 文件结构
+
+**重要**：不使用聚合 proto 设计，每个 domain 目录下只包含真实的业务 proto 文件。
+
+```
+proto/
+├── common/              # 公共定义
+│   └── common.proto
+├── conn/                 # 连接服务
+│   └── conn.proto
+├── dbc/                 # 数据访问服务
+│   └── dbc.proto
+├── im/                  # 即时消息服务
+│   ├── chat.proto       # 聊天服务定义
+│   └── thread.proto     # 话题服务定义
+└── svr/                 # 业务服务层
+    ├── agent.proto      # Agent 服务定义
+    ├── llm.proto        # LLM 服务定义
+    ├── mcp.proto        # MCP 服务定义
+    └── user.proto       # 用户服务定义
+```
+
+### Proto 文件规则
+
+1. **禁止聚合 proto**：
+   - ❌ 不要创建 `domain/domain.proto` 来聚合其他 proto 文件
+   - ✅ 每个业务功能使用独立的 proto 文件
+   - ✅ 每个 proto 文件对应一个具体的服务定义
+
+2. **文件命名**：
+   - 使用小写字母和下划线
+   - 文件名应该清晰表达服务功能（如 `chat.proto`, `thread.proto`）
+
+3. **包路径**：
+   - `go_package` 选项必须指向正确的生成路径
+   - 例如：`option go_package = "chatee-go/gen/svr/user";`
+
+4. **生成规则**：
+   - Makefile 会自动处理每个 domain 目录下的所有 `.proto` 文件
+   - 不需要手动指定聚合文件
+
+## 注意事项
+
+1. **统一结构**：所有 domain 服务（HTTP 和 RPC）都遵循相同的目录结构，不区分服务类型
+2. **禁止使用旧命名**：不要使用 `chatee-conn`, `chatee-dbc`, `chatee-msg`, `chatee-svr`, `chatee-http` 等旧格式
+3. **禁止非标准目录**：不要使用 `cmd/`, `internal/` 或其他非标准目录
+4. **禁止聚合 proto**：不要创建 `domain/domain.proto` 聚合文件，每个业务功能使用独立的 proto 文件
+5. **一致性**：所有配置文件、文档、代码中的服务名称引用必须保持一致
+6. **Makefile**：构建和运行命令中的路径必须使用新命名
+7. **Docker Compose**：容器名称和服务名称必须使用新命名
+8. **ServiceContext**：所有服务必须使用 `svc.go` 统一管理依赖和上下文
+9. **职责分离**：
+   - `handler/` 负责请求处理和路由
+   - `biz/` 负责业务逻辑（可以按领域组织子目录）
+   - `repository/` 负责数据访问（如需要）
+   - `middleware/` 或 `interceptor/` 负责横切关注点
+10. **子目录组织**：`biz/` 目录下可以按业务领域组织子目录（如 `biz/chat/`, `biz/agent/`），但必须保持清晰的职责划分

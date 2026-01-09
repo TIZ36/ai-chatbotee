@@ -1,359 +1,255 @@
 package pool
-package pool
 
 import (
 	"context"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-}	return lastErr	// Close other pools...	}		}			lastErr = err		if err := pm.redis.Close(); err != nil {	if pm.redis != nil {	}		}			lastErr = err		if err := pm.mysql.Close(); err != nil {	if pm.mysql != nil {	var lastErr errorfunc (pm *PoolManager) Close() error {// Close closes all pools.}	return results	}		results["chroma"] = pm.chroma.Health(ctx)	if pm.chroma != nil {	}		results["hbase"] = pm.hbase.Health(ctx)	if pm.hbase != nil {	}		results["redis"] = pm.redis.Health(ctx)	if pm.redis != nil {	}		results["mysql"] = pm.mysql.Health(ctx)	if pm.mysql != nil {	results := make(map[string]error)func (pm *PoolManager) HealthCheck(ctx context.Context) map[string]error {// HealthCheck checks all pool connections.}	return pm.chromafunc (pm *PoolManager) Chroma() *ChromaPool {// Chroma returns the Chroma pool.}	return pm.hbasefunc (pm *PoolManager) HBase() *HBasePool {// HBase returns the HBase pool.}	return pm.redisfunc (pm *PoolManager) Redis() *RedisPool {// Redis returns the Redis pool.}	return pm.mysqlfunc (pm *PoolManager) MySQL() *MySQLPool {// MySQL returns the MySQL pool.}	return pm, nil	}		pm.chroma = pool		}			return nil, fmt.Errorf("Chroma pool: %w", err)		if err != nil {		pool, err := NewChromaPool(*config.Chroma)	if config.Chroma != nil {	}		pm.hbase = pool		}			return nil, fmt.Errorf("HBase pool: %w", err)		if err != nil {		pool, err := NewHBasePool(*config.HBase)	if config.HBase != nil {	}		pm.redis = pool		}			return nil, fmt.Errorf("Redis pool: %w", err)		if err != nil {		pool, err := NewRedisPool(*config.Redis)	if config.Redis != nil {	}		pm.mysql = pool		}			return nil, fmt.Errorf("MySQL pool: %w", err)		if err != nil {		pool, err := NewMySQLPool(*config.MySQL)	if config.MySQL != nil {	pm := &PoolManager{}func NewPoolManager(config PoolManagerConfig) (*PoolManager, error) {// NewPoolManager creates a new pool manager.}	Chroma *ChromaConfig `json:"chroma,omitempty"`	HBase  *HBaseConfig  `json:"hbase,omitempty"`	Redis  *RedisConfig  `json:"redis,omitempty"`	MySQL  *MySQLConfig  `json:"mysql,omitempty"`type PoolManagerConfig struct {// PoolManagerConfig configures all pools.}	chroma *ChromaPool	hbase  *HBasePool	redis  *RedisPool	mysql  *MySQLPooltype PoolManager struct {// PoolManager manages all database connection pools.// =============================================================================// Pool Manager// =============================================================================}	return nil	// TODO: Implement health checkfunc (p *ChromaPool) Health(ctx context.Context) error {// Health checks the connection health.}	}, nil		config: config,	return &ChromaPool{	// TODO: Implement with chroma-gofunc NewChromaPool(config ChromaConfig) (*ChromaPool, error) {// NewChromaPool creates a new ChromaDB connection pool.}	// TODO: Add actual Chroma client	config ChromaConfigtype ChromaPool struct {// ChromaPool wraps ChromaDB client.}	Collection string `json:"collection"`	Port       int    `json:"port"`	Host       string `json:"host"`type ChromaConfig struct {// ChromaConfig configures the ChromaDB connection.// =============================================================================// ChromaDB Pool (vector database)// =============================================================================}	return nil	// TODO: Implement health checkfunc (p *HBasePool) Health(ctx context.Context) error {// Health checks the connection health.}	}, nil		config: config,	return &HBasePool{	// TODO: Implement with gohbasefunc NewHBasePool(config HBaseConfig) (*HBasePool, error) {// NewHBasePool creates a new HBase connection pool.}	// TODO: Add actual HBase client (gohbase)	config HBaseConfigtype HBasePool struct {// HBasePool wraps HBase client.}	TablePrefix     string `json:"table_prefix"`	ZookeeperPort   int    `json:"zookeeper_port"`	ZookeeperQuorum string `json:"zookeeper_quorum"`type HBaseConfig struct {// HBaseConfig configures the HBase connection.// =============================================================================// HBase Pool (placeholder - actual implementation depends on HBase client)// =============================================================================}	return p.PoolStats()func (p *RedisPool) Stats() *redis.PoolStats {// Stats returns connection pool statistics.}	return p.Ping(ctx).Err()func (p *RedisPool) Health(ctx context.Context) error {// Health checks the connection health.}	}, nil		config: config,		Client: client,	return &RedisPool{	}		return nil, fmt.Errorf("failed to connect to Redis: %w", err)	if err := client.Ping(ctx).Err(); err != nil {	defer cancel()	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)	// Test connection	client := redis.NewClient(opts)	}		opts.WriteTimeout = config.WriteTimeout	if config.WriteTimeout > 0 {	}		opts.ReadTimeout = config.ReadTimeout	if config.ReadTimeout > 0 {	}		opts.DialTimeout = config.DialTimeout	if config.DialTimeout > 0 {	}		opts.MinIdleConns = config.MinIdleConns	if config.MinIdleConns > 0 {	}		opts.PoolSize = 100	} else {		opts.PoolSize = config.PoolSize	if config.PoolSize > 0 {	}		DB:       config.DB,		Password: config.Password,		Addr:     addr,	opts := &redis.Options{	addr := fmt.Sprintf("%s:%d", config.Host, config.Port)func NewRedisPool(config RedisConfig) (*RedisPool, error) {// NewRedisPool creates a new Redis connection pool.}	config RedisConfig	*redis.Clienttype RedisPool struct {// RedisPool wraps redis.Client.}	WriteTimeout time.Duration `json:"write_timeout"`	ReadTimeout  time.Duration `json:"read_timeout"`	DialTimeout  time.Duration `json:"dial_timeout"`	MinIdleConns int           `json:"min_idle_conns"`	PoolSize     int           `json:"pool_size"`	DB           int           `json:"db"`	Password     string        `json:"password"`	Port         int           `json:"port"`	Host         string        `json:"host"`type RedisConfig struct {// RedisConfig configures the Redis connection.// =============================================================================// Redis Pool// =============================================================================}	return p.DB.Stats()func (p *MySQLPool) Stats() sql.DBStats {// Stats returns connection pool statistics.}	return p.PingContext(ctx)func (p *MySQLPool) Health(ctx context.Context) error {// Health checks the connection health.}	}, nil		config: config,		DB:     db,	return &MySQLPool{	}		db.SetConnMaxIdleTime(10 * time.Minute)	} else {		db.SetConnMaxIdleTime(config.ConnMaxIdleTime)	if config.ConnMaxIdleTime > 0 {	}		db.SetConnMaxLifetime(time.Hour)	} else {		db.SetConnMaxLifetime(config.ConnMaxLifetime)	if config.ConnMaxLifetime > 0 {	}		db.SetMaxIdleConns(10)	} else {		db.SetMaxIdleConns(config.MaxIdleConns)	if config.MaxIdleConns > 0 {	}		db.SetMaxOpenConns(100)	} else {		db.SetMaxOpenConns(config.MaxOpenConns)	if config.MaxOpenConns > 0 {	// Apply connection pool settings	}		return nil, fmt.Errorf("failed to connect to MySQL: %w", err)	if err != nil {	db, err := sqlx.Connect("mysql", dsn)	)		config.Database,		config.Port,		config.Host,		config.Password,		config.User,	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true&loc=Local&charset=utf8mb4",func NewMySQLPool(config MySQLConfig) (*MySQLPool, error) {// NewMySQLPool creates a new MySQL connection pool.}	config MySQLConfig	*sqlx.DBtype MySQLPool struct {// MySQLPool wraps sqlx.DB with additional functionality.}	ConnMaxIdleTime time.Duration `json:"conn_max_idle_time"`	ConnMaxLifetime time.Duration `json:"conn_max_lifetime"`	MaxIdleConns    int           `json:"max_idle_conns"`	MaxOpenConns    int           `json:"max_open_conns"`	Database        string        `json:"database"`	Password        string        `json:"password"`	User            string        `json:"user"`	Port            int           `json:"port"`	Host            string        `json:"host"`type MySQLConfig struct {// MySQLConfig configures the MySQL connection pool.// =============================================================================// MySQL Pool// =============================================================================)	"github.com/redis/go-redis/v9"	"github.com/jmoiron/sqlx"	_ "github.com/go-sql-driver/mysql"	"time"	"fmt"	"database/sql"
+	"fmt"
+	"sync"
+)
+
+// =============================================================================
+// Worker Type Definitions
+// =============================================================================
+
+// WorkerType represents the type of worker
+type WorkerType string
+
+const (
+	// WorkerTypeGORM represents GORM database worker
+	WorkerTypeGORM WorkerType = "gorm"
+	// WorkerTypeRedis represents Redis client worker
+	WorkerTypeRedis WorkerType = "redis"
+	// WorkerTypeHTTPClient represents HTTP client worker
+	WorkerTypeHTTPClient WorkerType = "httpclient"
+)
+
+// SupportedWorkerTypes returns all supported worker types
+func SupportedWorkerTypes() []WorkerType {
+	return []WorkerType{
+		WorkerTypeGORM,
+		WorkerTypeRedis,
+		WorkerTypeHTTPClient,
+	}
+}
+
+// IsValidWorkerType checks if the given worker type is supported
+func IsValidWorkerType(workerType WorkerType) bool {
+	for _, supported := range SupportedWorkerTypes() {
+		if supported == workerType {
+			return true
+		}
+	}
+	return false
+}
+
+// =============================================================================
+// Worker Interface
+// =============================================================================
+
+// Worker defines the interface for all pool workers
+// Each worker manages a specific resource type (e.g., database connection, HTTP client)
+type Worker interface {
+	// Init initializes the worker with the given configuration
+	// config can be any type, worker implementation should handle type assertion
+	Init(ctx context.Context, config interface{}) error
+
+	// Health checks if the worker is healthy
+	Health(ctx context.Context) error
+
+	// Use executes a function with the worker's resource
+	// The function receives the worker's resource as interface{}
+	// Worker implementation should handle type conversion internally
+	Use(ctx context.Context, fn func(resource interface{}) error) error
+
+	// UseWithData executes a function with both worker resource and input data
+	// This supports binary or generic data processing
+	UseWithData(ctx context.Context, data interface{}, fn func(resource interface{}, data interface{}) error) error
+
+	// Close releases all resources held by the worker
+	Close() error
+
+	// Name returns the worker's name/identifier
+	Name() string
+}
+
+// =============================================================================
+// Pool Manager
+// =============================================================================
+
+// Pool manages multiple workers
+type Pool struct {
+	mu      sync.RWMutex
+	workers map[string]Worker
+}
+
+// NewPool creates a new empty pool
+func NewPool() *Pool {
+	return &Pool{
+		workers: make(map[string]Worker),
+	}
+}
+
+// Register registers a worker with the given name
+func (p *Pool) Register(name string, worker Worker) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if _, exists := p.workers[name]; exists {
+		return fmt.Errorf("worker %s already registered", name)
+	}
+
+	p.workers[name] = worker
+	return nil
+}
+
+// Get retrieves a worker by name
+func (p *Pool) Get(name string) (Worker, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	worker, exists := p.workers[name]
+	if !exists {
+		return nil, fmt.Errorf("worker %s not found", name)
+	}
+
+	return worker, nil
+}
+
+// MustGet retrieves a worker by name, panics if not found
+func (p *Pool) MustGet(name string) Worker {
+	worker, err := p.Get(name)
+	if err != nil {
+		panic(err)
+	}
+	return worker
+}
+
+// Use executes a function with the specified worker
+func (p *Pool) Use(ctx context.Context, name string, fn func(resource interface{}) error) error {
+	worker, err := p.Get(name)
+	if err != nil {
+		return err
+	}
+	return worker.Use(ctx, fn)
+}
+
+// UseWithData executes a function with the specified worker and data
+func (p *Pool) UseWithData(ctx context.Context, name string, data interface{}, fn func(resource interface{}, data interface{}) error) error {
+	worker, err := p.Get(name)
+	if err != nil {
+		return err
+	}
+	return worker.UseWithData(ctx, data, fn)
+}
+
+// HealthCheck checks the health of all registered workers
+func (p *Pool) HealthCheck(ctx context.Context) map[string]error {
+	p.mu.RLock()
+	workers := make(map[string]Worker)
+	for name, worker := range p.workers {
+		workers[name] = worker
+	}
+	p.mu.RUnlock()
+
+	results := make(map[string]error)
+	for name, worker := range workers {
+		results[name] = worker.Health(ctx)
+	}
+	return results
+}
+
+// HealthCheckWorker checks the health of a specific worker
+func (p *Pool) HealthCheckWorker(ctx context.Context, name string) error {
+	worker, err := p.Get(name)
+	if err != nil {
+		return err
+	}
+	return worker.Health(ctx)
+}
+
+// Close closes all workers
+func (p *Pool) Close() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	var errs []error
+	for name, worker := range p.workers {
+		if err := worker.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("failed to close worker %s: %w", name, err))
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("errors closing workers: %v", errs)
+	}
+
+	return nil
+}
+
+// List returns all registered worker names
+func (p *Pool) List() []string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	names := make([]string, 0, len(p.workers))
+	for name := range p.workers {
+		names = append(names, name)
+	}
+	return names
+}
+
+// GetByType returns all workers of the specified type
+func (p *Pool) GetByType(workerType WorkerType) []Worker {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	var result []Worker
+	for _, worker := range p.workers {
+		// Check if worker implements Type() method (optional interface)
+		if typedWorker, ok := worker.(interface{ Type() WorkerType }); ok {
+			if typedWorker.Type() == workerType {
+				result = append(result, worker)
+			}
+		}
+	}
+	return result
+}
+
+// =============================================================================
+// Generic Use Functions (Type-safe helpers)
+// =============================================================================
+
+// UseGeneric is a type-safe wrapper for using a worker with a typed function
+// Example:
+//
+//	err := UseGeneric(ctx, worker, func(db *gorm.DB) error {
+//	    return db.Create(&user).Error
+//	})
+func UseGeneric[T any](ctx context.Context, worker Worker, fn func(resource T) error) error {
+	return worker.Use(ctx, func(resource interface{}) error {
+		typedResource, ok := resource.(T)
+		if !ok {
+			return fmt.Errorf("worker resource type mismatch: expected %T, got %T", *new(T), resource)
+		}
+		return fn(typedResource)
+	})
+}
+
+// UseGenericWithData is a type-safe wrapper for using a worker with data
+// Example:
+//
+//	err := UseGenericWithData(ctx, worker, userData, func(db *gorm.DB, data *User) error {
+//	    return db.Create(data).Error
+//	})
+func UseGenericWithData[TResource any, TData any](ctx context.Context, worker Worker, data TData, fn func(resource TResource, data TData) error) error {
+	return worker.UseWithData(ctx, data, func(resource interface{}, data interface{}) error {
+		typedResource, ok := resource.(TResource)
+		if !ok {
+			return fmt.Errorf("worker resource type mismatch: expected %T, got %T", *new(TResource), resource)
+		}
+		typedData, ok := data.(TData)
+		if !ok {
+			return fmt.Errorf("data type mismatch: expected %T, got %T", *new(TData), data)
+		}
+		return fn(typedResource, typedData)
+	})
+}
