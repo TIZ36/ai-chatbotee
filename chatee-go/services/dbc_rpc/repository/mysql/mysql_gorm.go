@@ -1,4 +1,4 @@
-package repository
+package mysql
 
 import (
 	"context"
@@ -373,7 +373,7 @@ type Repositories struct {
 
 // NewRepositories creates all repositories.
 // db can be *gorm.DB or *sql.DB (will be converted to GORM)
-func NewRepositories(db interface{}, redis *redis.Client) *Repositories {
+func NewRepositories(db interface{}, redis *redis.Client) Repositories {
 	var gormDB *gorm.DB
 
 	switch v := db.(type) {
@@ -392,7 +392,7 @@ func NewRepositories(db interface{}, redis *redis.Client) *Repositories {
 		panic(fmt.Sprintf("unsupported database type: %T", db))
 	}
 
-	return &Repositories{
+	return Repositories{
 		User:      NewMySQLUserRepository(gormDB, redis),
 		Session:   NewMySQLSessionRepository(gormDB, redis),
 		Agent:     NewMySQLAgentRepository(gormDB, redis),

@@ -50,6 +50,41 @@ type HBaseConfig struct {
 	TablePrefix     string `json:"table_prefix" mapstructure:"table_prefix"`
 }
 
+type ThriftHbaseConfig struct {
+	Host              string            `json:"host" mapstructure:"host"`
+	Namespace         string            `json:"namespace" mapstructure:"namespace"`
+	ClientType        int64             `json:"client_type" mapstructure:"client_type"`
+	HbasePoolConfig   HbasePoolConfig   `json:"hbase_pool_config" mapstructure:"hbase_pool_config"`
+	HbaseClientConfig HbaseClientConfig `json:"hbase_client_config" mapstructure:"hbase_client_config"`
+}
+
+type ZookeeperHbaseConfig struct {
+	ZkHosts           string            `json:"zk_hosts" mapstructure:"zk_hosts"`
+	Namespace         string            `json:"namespace" mapstructure:"namespace"`
+	ClientType        string            `json:"client_type" mapstructure:"client_type"`
+	HbasePoolConfig   HbasePoolConfig   `json:"hbase_pool_config" mapstructure:"hbase_pool_config"`
+	HbaseClientConfig HbaseClientConfig `json:"hbase_client_config" mapstructure:"hbase_client_config"`
+}
+
+type HbasePoolConfig struct {
+	InitSize    int           `json:"init_size" mapstructure:"init_size"`
+	MaxSize     int           `json:"max_size" mapstructure:"max_size"`
+	IdleSize    int           `json:"idle_size" mapstructure:"idle_size"`
+	IdleTimeout time.Duration `json:"idle_timeout" mapstructure:"idle_timeout"`
+}
+
+type HbaseClientConfig struct {
+	ConnectTimeout int64           `json:"connect_timeout" mapstructure:"connect_timeout"`
+	SocketTimeout  int64           `json:"socket_timeout" mapstructure:"socket_timeout"`
+	MaxFrameSize   int32           `json:"max_frame_size" mapstructure:"max_frame_size"`
+	Credential     HabseCredential `json:"credential" mapstructure:"credential"`
+}
+
+type HabseCredential struct {
+	User string `json:"user" mapstructure:"user"`
+	Pass string `json:"pass" mapstructure:"pass"`
+}
+
 // ChromaConfig configures ChromaDB.
 type ChromaConfig struct {
 	Host       string `json:"host" mapstructure:"host"`
@@ -121,29 +156,29 @@ type LogConfig struct {
 
 // ConnectionConfig configures connection management.
 type ConnectionConfig struct {
-	EnableDistributed      bool          `json:"enable_distributed" mapstructure:"enable_distributed"`
-	NodeID                 string        `json:"node_id" mapstructure:"node_id"`
-	HeartbeatInterval      time.Duration `json:"heartbeat_interval" mapstructure:"heartbeat_interval"`
-	HeartbeatTimeout       time.Duration `json:"heartbeat_timeout" mapstructure:"heartbeat_timeout"`
-	NodeHeartbeatInterval  time.Duration `json:"node_heartbeat_interval" mapstructure:"node_heartbeat_interval"`
-	NodeHeartbeatTimeout   time.Duration `json:"node_heartbeat_timeout" mapstructure:"node_heartbeat_timeout"`
-	LoadBalancingStrategy  string        `json:"load_balancing_strategy" mapstructure:"load_balancing_strategy"` // round_robin, least_connections, user_affinity
+	EnableDistributed     bool          `json:"enable_distributed" mapstructure:"enable_distributed"`
+	NodeID                string        `json:"node_id" mapstructure:"node_id"`
+	HeartbeatInterval     time.Duration `json:"heartbeat_interval" mapstructure:"heartbeat_interval"`
+	HeartbeatTimeout      time.Duration `json:"heartbeat_timeout" mapstructure:"heartbeat_timeout"`
+	NodeHeartbeatInterval time.Duration `json:"node_heartbeat_interval" mapstructure:"node_heartbeat_interval"`
+	NodeHeartbeatTimeout  time.Duration `json:"node_heartbeat_timeout" mapstructure:"node_heartbeat_timeout"`
+	LoadBalancingStrategy string        `json:"load_balancing_strategy" mapstructure:"load_balancing_strategy"` // round_robin, least_connections, user_affinity
 }
 
 // Config holds all configuration.
 type Config struct {
-	Service    ServiceConfig    `json:"service" mapstructure:"service"`
-	MySQL      MySQLConfig      `json:"mysql" mapstructure:"mysql"`
-	Redis      RedisConfig      `json:"redis" mapstructure:"redis"`
-	HBase      HBaseConfig      `json:"hbase" mapstructure:"hbase"`
-	Chroma     ChromaConfig     `json:"chroma" mapstructure:"chroma"`
-	GRPC       GRPCConfig       `json:"grpc" mapstructure:"grpc"`
-	HTTP       HTTPConfig       `json:"http" mapstructure:"http"`
-	WebSocket  WebSocketConfig  `json:"websocket" mapstructure:"websocket"`
-	LLM        LLMConfig        `json:"llm" mapstructure:"llm"`
-	MCP        MCPConfig        `json:"mcp" mapstructure:"mcp"`
-	Log        LogConfig        `json:"log" mapstructure:"log"`
-	Connection ConnectionConfig `json:"connection" mapstructure:"connection"`
+	Service    ServiceConfig     `json:"service" mapstructure:"service"`
+	MySQL      MySQLConfig       `json:"mysql" mapstructure:"mysql"`
+	Redis      RedisConfig       `json:"redis" mapstructure:"redis"`
+	HBase      ThriftHbaseConfig `json:"hbase" mapstructure:"hbase"`
+	Chroma     ChromaConfig      `json:"chroma" mapstructure:"chroma"`
+	GRPC       GRPCConfig        `json:"grpc" mapstructure:"grpc"`
+	HTTP       HTTPConfig        `json:"http" mapstructure:"http"`
+	WebSocket  WebSocketConfig   `json:"websocket" mapstructure:"websocket"`
+	LLM        LLMConfig         `json:"llm" mapstructure:"llm"`
+	MCP        MCPConfig         `json:"mcp" mapstructure:"mcp"`
+	Log        LogConfig         `json:"log" mapstructure:"log"`
+	Connection ConnectionConfig  `json:"connection" mapstructure:"connection"`
 }
 
 // =============================================================================
@@ -216,7 +251,7 @@ func setDefaults(v *viper.Viper) {
 
 	// gRPC
 	v.SetDefault("grpc.host", "0.0.0.0")
-	v.SetDefault("grpc.port", 9090)
+	v.SetDefault("grpc.port", 50051)
 	v.SetDefault("grpc.max_recv_msg_size", 16*1024*1024) // 16MB
 	v.SetDefault("grpc.max_send_msg_size", 16*1024*1024) // 16MB
 	v.SetDefault("grpc.keepalive_time", "30s")

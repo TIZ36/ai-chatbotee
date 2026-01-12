@@ -10,24 +10,25 @@ import (
 	"google.golang.org/grpc/status"
 
 	"chatee-go/commonlib/log"
+	"chatee-go/commonlib/pool"
 	"chatee-go/commonlib/snowflake"
 	dbc "chatee-go/gen/dbc"
-	"chatee-go/services/dbc_rpc/repository"
+	repository "chatee-go/services/dbc_rpc/repository/mysql"
 )
 
 // MCPServerHandler implements MCPServerService gRPC interface
 type MCPServerHandler struct {
 	dbc.UnimplementedMCPServerServiceServer
-	
-	repo   repository.MCPServerRepository
+
 	logger log.Logger
+	repo   repository.MCPServerRepository
 }
 
 // NewMCPServerHandler creates a new MCP server handler
-func NewMCPServerHandler(repo repository.MCPServerRepository, logger log.Logger) *MCPServerHandler {
+func NewMCPServerHandler(poolMgr *pool.PoolManager, logger log.Logger) *MCPServerHandler {
 	return &MCPServerHandler{
-		repo:   repo,
 		logger: logger,
+		repo:   repository.NewMySQLMCPServerRepository(poolMgr.GetGORM(), poolMgr.GetRedis()),
 	}
 }
 
@@ -40,22 +41,22 @@ func (h *MCPServerHandler) Register(server *grpc.Server) {
 func (h *MCPServerHandler) CreateMCPServer(ctx context.Context, req *dbc.CreateMCPServerRequest) (*dbc.MCPServer, error) {
 	serverID := snowflake.GenerateTypedID("mcp_server")
 	now := time.Now()
-	
+
 	url := sql.NullString{}
 	if req.GetUrl() != "" {
 		url = sql.NullString{String: req.GetUrl(), Valid: true}
 	}
-	
+
 	command := sql.NullString{}
 	if req.GetCommand() != "" {
 		command = sql.NullString{String: req.GetCommand(), Valid: true}
 	}
-	
+
 	description := sql.NullString{}
 	if req.GetDescription() != "" {
 		description = sql.NullString{String: req.GetDescription(), Valid: true}
 	}
-	
+
 	server := &repository.MCPServer{
 		ID:          serverID,
 		UserID:      req.GetUserId(),
@@ -73,12 +74,12 @@ func (h *MCPServerHandler) CreateMCPServer(ctx context.Context, req *dbc.CreateM
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	
+
 	if err := h.repo.Create(ctx, server); err != nil {
 		h.logger.Error("Failed to create MCP server", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to create MCP server: %v", err)
 	}
-	
+
 	return h.toProtoMCPServer(server), nil
 }
 
@@ -92,7 +93,7 @@ func (h *MCPServerHandler) GetMCPServer(ctx context.Context, req *dbc.GetMCPServ
 		h.logger.Error("Failed to get MCP server", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to get MCP server: %v", err)
 	}
-	
+
 	return h.toProtoMCPServer(server), nil
 }
 
@@ -103,12 +104,12 @@ func (h *MCPServerHandler) GetMCPServersByUser(ctx context.Context, req *dbc.Get
 		h.logger.Error("Failed to get MCP servers by user", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to get MCP servers: %v", err)
 	}
-	
+
 	protoServers := make([]*dbc.MCPServer, 0, len(servers))
 	for _, server := range servers {
 		protoServers = append(protoServers, h.toProtoMCPServer(server))
 	}
-	
+
 	return &dbc.GetMCPServersByUserResponse{
 		Servers: protoServers,
 	}, nil
@@ -121,12 +122,12 @@ func (h *MCPServerHandler) ListMCPServers(ctx context.Context, req *dbc.ListMCPS
 		h.logger.Error("Failed to list MCP servers", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to list MCP servers: %v", err)
 	}
-	
+
 	protoServers := make([]*dbc.MCPServer, 0, len(servers))
 	for _, server := range servers {
 		protoServers = append(protoServers, h.toProtoMCPServer(server))
 	}
-	
+
 	return &dbc.ListMCPServersResponse{
 		Servers: protoServers,
 	}, nil
@@ -142,7 +143,7 @@ func (h *MCPServerHandler) UpdateMCPServer(ctx context.Context, req *dbc.UpdateM
 		h.logger.Error("Failed to get MCP server for update", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to get MCP server: %v", err)
 	}
-	
+
 	// Update fields
 	if req.GetName() != "" {
 		server.Name = req.GetName()
@@ -176,12 +177,12 @@ func (h *MCPServerHandler) UpdateMCPServer(ctx context.Context, req *dbc.UpdateM
 	}
 	server.IsEnabled = req.GetIsEnabled()
 	server.UpdatedAt = time.Now()
-	
+
 	if err := h.repo.Update(ctx, server); err != nil {
 		h.logger.Error("Failed to update MCP server", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to update MCP server: %v", err)
 	}
-	
+
 	return h.toProtoMCPServer(server), nil
 }
 
@@ -191,7 +192,7 @@ func (h *MCPServerHandler) DeleteMCPServer(ctx context.Context, req *dbc.DeleteM
 		h.logger.Error("Failed to delete MCP server", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to delete MCP server: %v", err)
 	}
-	
+
 	return &dbc.DeleteMCPServerResponse{Success: true}, nil
 }
 
@@ -201,17 +202,17 @@ func (h *MCPServerHandler) toProtoMCPServer(server *repository.MCPServer) *dbc.M
 	if server.URL.Valid {
 		url = server.URL.String
 	}
-	
+
 	command := ""
 	if server.Command.Valid {
 		command = server.Command.String
 	}
-	
+
 	description := ""
 	if server.Description.Valid {
 		description = server.Description.String
 	}
-	
+
 	return &dbc.MCPServer{
 		Id:          server.ID,
 		UserId:      server.UserID,
@@ -230,4 +231,3 @@ func (h *MCPServerHandler) toProtoMCPServer(server *repository.MCPServer) *dbc.M
 		UpdatedAt:   server.UpdatedAt.Unix(),
 	}
 }
-

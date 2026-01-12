@@ -10,24 +10,25 @@ import (
 	"google.golang.org/grpc/status"
 
 	"chatee-go/commonlib/log"
+	"chatee-go/commonlib/pool"
 	"chatee-go/commonlib/snowflake"
 	dbc "chatee-go/gen/dbc"
-	"chatee-go/services/dbc_rpc/repository"
+	repository "chatee-go/services/dbc_rpc/repository/mysql"
 )
 
 // MessageHandler implements MessageService gRPC interface
 type MessageHandler struct {
 	dbc.UnimplementedMessageServiceServer
-	
-	repo   repository.MessageRepository
+
 	logger log.Logger
+	repo   repository.MessageRepository
 }
 
 // NewMessageHandler creates a new message handler
-func NewMessageHandler(repo repository.MessageRepository, logger log.Logger) *MessageHandler {
+func NewMessageHandler(poolMgr *pool.PoolManager, logger log.Logger) *MessageHandler {
 	return &MessageHandler{
-		repo:   repo,
 		logger: logger,
+		repo:   repository.NewMySQLMessageRepository(poolMgr.GetGORM(), poolMgr.GetRedis()),
 	}
 }
 
@@ -39,23 +40,23 @@ func (h *MessageHandler) Register(server *grpc.Server) {
 // CreateMessage creates a new message
 func (h *MessageHandler) CreateMessage(ctx context.Context, req *dbc.CreateMessageRequest) (*dbc.Message, error) {
 	messageID := snowflake.GenerateTypedID("msg")
-	
+
 	message := &repository.Message{
 		ID:         messageID,
 		SessionID:  req.GetSessionId(),
 		Role:       req.GetRole(),
 		Content:    req.GetContent(),
 		ToolCalls:  req.GetToolCalls(),
-		ToolCallID: req.GetToolCallId(),
+		ToolCallID: sql.NullString{String: req.GetToolCallId(), Valid: req.GetToolCallId() != ""},
 		Metadata:   req.GetMetadata(),
 		CreatedAt:  time.Now(),
 	}
-	
+
 	if err := h.repo.Create(ctx, message); err != nil {
 		h.logger.Error("Failed to create message", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to create message: %v", err)
 	}
-	
+
 	return h.toProtoMessage(message), nil
 }
 
@@ -69,7 +70,7 @@ func (h *MessageHandler) GetMessage(ctx context.Context, req *dbc.GetMessageRequ
 		h.logger.Error("Failed to get message", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to get message: %v", err)
 	}
-	
+
 	return h.toProtoMessage(message), nil
 }
 
@@ -80,18 +81,18 @@ func (h *MessageHandler) GetMessagesBySession(ctx context.Context, req *dbc.GetM
 	if limit <= 0 {
 		limit = 50 // Default limit
 	}
-	
+
 	messages, err := h.repo.GetBySessionID(ctx, req.GetSessionId(), offset, limit)
 	if err != nil {
 		h.logger.Error("Failed to get messages by session", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to get messages: %v", err)
 	}
-	
+
 	protoMessages := make([]*dbc.Message, 0, len(messages))
 	for _, message := range messages {
 		protoMessages = append(protoMessages, h.toProtoMessage(message))
 	}
-	
+
 	return &dbc.GetMessagesBySessionResponse{
 		Messages: protoMessages,
 		Total:    int32(len(protoMessages)), // TODO: Get actual total count
@@ -108,7 +109,7 @@ func (h *MessageHandler) UpdateMessage(ctx context.Context, req *dbc.UpdateMessa
 		h.logger.Error("Failed to get message for update", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to get message: %v", err)
 	}
-	
+
 	// Update fields
 	if req.GetContent() != "" {
 		message.Content = req.GetContent()
@@ -116,12 +117,12 @@ func (h *MessageHandler) UpdateMessage(ctx context.Context, req *dbc.UpdateMessa
 	if req.GetMetadata() != nil {
 		message.Metadata = req.GetMetadata()
 	}
-	
+
 	if err := h.repo.Update(ctx, message); err != nil {
 		h.logger.Error("Failed to update message", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to update message: %v", err)
 	}
-	
+
 	return h.toProtoMessage(message), nil
 }
 
@@ -131,7 +132,7 @@ func (h *MessageHandler) DeleteMessage(ctx context.Context, req *dbc.DeleteMessa
 		h.logger.Error("Failed to delete message", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to delete message: %v", err)
 	}
-	
+
 	return &dbc.DeleteMessageResponse{Success: true}, nil
 }
 
@@ -141,7 +142,7 @@ func (h *MessageHandler) toProtoMessage(message *repository.Message) *dbc.Messag
 	if message.ToolCallID.Valid {
 		toolCallID = message.ToolCallID.String
 	}
-	
+
 	return &dbc.Message{
 		Id:         message.ID,
 		SessionId:  message.SessionID,
@@ -153,4 +154,3 @@ func (h *MessageHandler) toProtoMessage(message *repository.Message) *dbc.Messag
 		CreatedAt:  message.CreatedAt.Unix(),
 	}
 }
-

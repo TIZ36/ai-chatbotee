@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  hbase:
+    image: dajobe/hbase:latest
+    container_name: chatee-hbase
+    hostname: hbase
+    ports:
+      - "16010:16010"  # HBase Master Web UI
+      - "16020:16020"  # HBase RegionServer
+      - "16000:16000"  # HBase Master RPC
+      - "16030:16030"  # HBase RegionServer RPC
+      - "2181:2181"    # ZooKeeper
+      - "9090:9090"    # Thrift Server (重要!)
+      - "9095:9095"    # Thrift2 Server (推荐使用)
+    volumes:
+      - hbase_data:/data
+      - ./start-thrift.sh:/start-thrift.sh:ro
+    command: /start-thrift.sh
+    healthcheck:
+      test: ["CMD-SHELL", "echo 'status' | hbase shell -n 2>/dev/null | grep -q '1 active' || exit 0"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+    restart: unless-stopped
+
+volumes:
+  hbase_data:

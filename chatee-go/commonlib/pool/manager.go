@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"time"
 
-	"chatee-go/commonlib/log"
 	"github.com/redis/go-redis/v9"
 	"github.com/tiz36/ghbase"
 	"github.com/tiz36/ghbase/domain"
 	"gorm.io/gorm"
+
+	"chatee-go/commonlib/log"
 )
 
 // =============================================================================
@@ -38,18 +39,46 @@ type RedisConfig struct {
 }
 
 // HBaseConfig configures HBase connection
-type HBaseConfig struct {
-	ZookeeperQuorum string
-	ZookeeperPort   int
-	PoolSize        int
-	Timeout         int // seconds
+type ThriftHbaseConfig struct {
+	Host              string
+	Namespace         string
+	ClientType        int64
+	HbasePoolConfig   HbasePoolConfig
+	HbaseClientConfig HbaseClientConfig
+}
+
+type ZookeeperHbaseConfig struct {
+	ZkHosts           string
+	Namespace         string
+	ClientType        string
+	HbasePoolConfig   HbasePoolConfig
+	HbaseClientConfig HbaseClientConfig
+}
+
+type HbasePoolConfig struct {
+	InitSize    int
+	MaxSize     int
+	IdleSize    int
+	IdleTimeout time.Duration
+}
+
+type HbaseClientConfig struct {
+	ConnectTimeout int64
+	SocketTimeout  int64
+	MaxFrameSize   int32
+	Credential     HabseCredential
+}
+
+type HabseCredential struct {
+	User string
+	Pass string
 }
 
 // PoolManagerConfig configures the pool manager
 type PoolManagerConfig struct {
-	MySQL *MySQLConfig
-	Redis *RedisConfig
-	HBase *HBaseConfig
+	MySQL       *MySQLConfig
+	Redis       *RedisConfig
+	ThriftHBase *ThriftHbaseConfig
 }
 
 // =============================================================================
@@ -58,11 +87,11 @@ type PoolManagerConfig struct {
 
 // PoolManager manages all connection pools
 type PoolManager struct {
-	pool    *Pool
-	mysqlDB *sql.DB
-	gormDB  *gorm.DB
-	redis   *redis.Client
-	hbase   *ghbase.HbaseClientPool
+	pool *Pool
+
+	gormDB *gorm.DB
+	redis  *redis.Client
+	hbase  *ghbase.HbaseClientPool
 }
 
 // NewPoolManager creates a new pool manager
@@ -73,7 +102,8 @@ func NewPoolManager(cfg PoolManagerConfig) (*PoolManager, error) {
 
 	ctx := context.Background()
 
-	// Initialize MySQL/GORM
+	// Initialize GORM pool worker for MySQL
+	fmt.Print("mysl config:", cfg.MySQL)
 	if cfg.MySQL != nil {
 		gormWorker, err := NewGORMWorkerFromConfig(ctx, "mysql", &GORMWorkerConfig{
 			Host:         cfg.MySQL.Host,
@@ -89,7 +119,6 @@ func NewPoolManager(cfg PoolManagerConfig) (*PoolManager, error) {
 		}
 		pm.pool.Register("mysql", gormWorker)
 		pm.gormDB = gormWorker.GetDB()
-		pm.mysqlDB = gormWorker.GetSQLDB()
 	}
 
 	// Initialize Redis
@@ -108,25 +137,32 @@ func NewPoolManager(cfg PoolManagerConfig) (*PoolManager, error) {
 		pm.redis = redisWorker.GetClient()
 	}
 
-	// Initialize HBase
-	if cfg.HBase != nil {
+	// Initialize HBase, support thrift now
+	if cfg.ThriftHBase != nil {
 		// Create logger adapter
 		logger := log.Default()
 		hbaseLogger := NewHBaseLoggerAdapter(logger)
 
 		// Configure Thrift2GHBaseClientConfig
 		clientConfig := &domain.Thrift2GHBaseClientConfig{
-			ThriftApiHost:      fmt.Sprintf("%s:%d", cfg.HBase.ZookeeperQuorum, cfg.HBase.ZookeeperPort),
-			ConnectTimeout:     time.Duration(cfg.HBase.Timeout) * time.Second,
-			SocketTimeout:      time.Duration(cfg.HBase.Timeout) * time.Second,
+			ThriftApiHost:      cfg.ThriftHBase.Host,
+			ConnectTimeout:     time.Duration(cfg.ThriftHBase.HbaseClientConfig.ConnectTimeout) * time.Second,
+			SocketTimeout:      time.Duration(cfg.ThriftHBase.HbaseClientConfig.SocketTimeout) * time.Second,
 			MaxFrameSize:       1024 * 1024 * 16, // 16MB
 			TBinaryStrictRead:  false,
 			TBinaryStrictWrite: false,
 			NeedCredential:     false,
 		}
 
+		// Set credentials if provided
+		if cfg.ThriftHBase.HbaseClientConfig.Credential.User != "" {
+			clientConfig.NeedCredential = true
+			clientConfig.User = cfg.ThriftHBase.HbaseClientConfig.Credential.User
+			clientConfig.Pass = cfg.ThriftHBase.HbaseClientConfig.Credential.Pass
+		}
+
 		// Configure PoolConf
-		poolSize := cfg.HBase.PoolSize
+		poolSize := cfg.ThriftHBase.HbasePoolConfig.MaxSize
 		if poolSize <= 0 {
 			poolSize = 10 // Default pool size
 		}
@@ -141,7 +177,7 @@ func NewPoolManager(cfg PoolManagerConfig) (*PoolManager, error) {
 		hbasePool, err := ghbase.NewHbaseClientPool(
 			ctx,
 			hbaseLogger,
-			domain.TypeCommonThrift2HbaseTcpClient, // Use TCP client type
+			cfg.ThriftHBase.ClientType, // Use client type from config
 			*clientConfig,
 			*poolConf,
 		)
@@ -161,7 +197,11 @@ func (pm *PoolManager) Pool() *Pool {
 
 // MySQL returns the MySQL sql.DB instance
 func (pm *PoolManager) MySQL() *sql.DB {
-	return pm.mysqlDB
+	sqlDB, err := pm.gormDB.DB()
+	if err != nil {
+		return nil
+	}
+	return sqlDB
 }
 
 // GORM returns the GORM database instance
@@ -181,7 +221,11 @@ func (pm *PoolManager) GetRedis() *redis.Client {
 
 // GetMySQL is an alias for MySQL() for backward compatibility
 func (pm *PoolManager) GetMySQL() *sql.DB {
-	return pm.mysqlDB
+	sqlDB, err := pm.gormDB.DB()
+	if err != nil {
+		return nil
+	}
+	return sqlDB
 }
 
 // GetGORM is an alias for GORM() for backward compatibility

@@ -17,18 +17,19 @@ import (
 	"chatee-go/commonlib/log"
 	"chatee-go/commonlib/snowflake"
 	"chatee-go/services/dbc_rpc/interceptor"
+	"chatee-go/services/dbc_rpc/server"
 )
 
 func main() {
-	// Load configuration
-	cfg, err := config.Load("")
+	// Load configuration (empty path uses default search paths: ./configs/config.yaml)
+	cfg, err := config.Load("./config/config.yaml")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
 		os.Exit(1)
 	}
 
 	// Initialize ServiceContext (includes logger, pools, repos, service)
-	svcCtx, err := NewServiceContext(cfg)
+	svcCtx, err := server.NewServiceContext(cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to init service context: %v\n", err)
 		os.Exit(1)
@@ -68,7 +69,10 @@ func main() {
 	)
 
 	// Register services
-	svcCtx.Service.RegisterGRPC(grpcServer)
+
+	// Create DBC service with service context
+	services := server.NewDBCService(svcCtx)
+	services.RegisterGRPC(grpcServer)
 
 	// Register health service
 	healthServer := health.NewServer()

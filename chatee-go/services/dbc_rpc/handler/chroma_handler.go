@@ -8,23 +8,26 @@ import (
 	"google.golang.org/grpc/status"
 
 	"chatee-go/commonlib/log"
+	"chatee-go/commonlib/pool"
 	dbc "chatee-go/gen/dbc"
-	"chatee-go/services/dbc_rpc/repository"
+	repository "chatee-go/services/dbc_rpc/repository/chromadb"
 )
 
 // ChromaHandler implements ChromaService gRPC interface
 type ChromaHandler struct {
 	dbc.UnimplementedChromaServiceServer
-	
-	repo   repository.ChromaRepository
+
 	logger log.Logger
+	repo   repository.ChromaRepository
 }
 
 // NewChromaHandler creates a new Chroma handler
-func NewChromaHandler(repo repository.ChromaRepository, logger log.Logger) *ChromaHandler {
+func NewChromaHandler(poolMgr *pool.PoolManager, logger log.Logger) *ChromaHandler {
+	// TODO: 当 ChromaDB 配置可用时，使用 HTTPChromaRepository
+	// 目前使用内存实现作为占位符
 	return &ChromaHandler{
-		repo:   repo,
 		logger: logger,
+		repo:   repository.NewMemoryChromaRepository(),
 	}
 }
 
@@ -71,9 +74,9 @@ func (h *ChromaHandler) GetCollection(ctx context.Context, req *dbc.GetCollectio
 	}
 
 	return &dbc.Collection{
-		Name:     collection.Name,
-		Id:       collection.ID,
-		Metadata: collection.Metadata,
+		Name:      collection.Name,
+		Id:        collection.ID,
+		Metadata:  collection.Metadata,
 		CreatedAt: collection.CreatedAt,
 	}, nil
 }
@@ -89,9 +92,9 @@ func (h *ChromaHandler) ListCollections(ctx context.Context, req *dbc.ListCollec
 	protoCollections := make([]*dbc.Collection, len(collections))
 	for i, c := range collections {
 		protoCollections[i] = &dbc.Collection{
-			Name:     c.Name,
-			Id:       c.ID,
-			Metadata: c.Metadata,
+			Name:      c.Name,
+			Id:        c.ID,
+			Metadata:  c.Metadata,
 			CreatedAt: c.CreatedAt,
 		}
 	}
@@ -369,4 +372,3 @@ func contains(slice []string, item string) bool {
 	}
 	return false
 }
-

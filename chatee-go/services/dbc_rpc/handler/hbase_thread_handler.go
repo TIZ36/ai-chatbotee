@@ -8,23 +8,31 @@ import (
 	"google.golang.org/grpc/status"
 
 	"chatee-go/commonlib/log"
+	"chatee-go/commonlib/pool"
 	dbc "chatee-go/gen/dbc"
-	"chatee-go/services/dbc_rpc/repository"
+	repository "chatee-go/services/dbc_rpc/repository/hbase"
 )
 
 // HBaseThreadHandler implements HBaseThreadService gRPC interface
 type HBaseThreadHandler struct {
 	dbc.UnimplementedHBaseThreadServiceServer
 
-	repo   repository.HBaseRepository
 	logger log.Logger
+	repo   repository.HBaseRepository
 }
 
 // NewHBaseThreadHandler creates a new HBase thread handler
-func NewHBaseThreadHandler(repo repository.HBaseRepository, logger log.Logger) *HBaseThreadHandler {
+func NewHBaseThreadHandler(poolMgr *pool.PoolManager, logger log.Logger) *HBaseThreadHandler {
+	var repo repository.HBaseRepository
+	if poolMgr.HBase() != nil {
+		repo = repository.NewGHBaseRepository(poolMgr.HBase(), "chatee_", logger)
+	} else {
+		// 如果 HBase 不可用，使用内存实现
+		repo = repository.NewMemoryHBaseRepository()
+	}
 	return &HBaseThreadHandler{
-		repo:   repo,
 		logger: logger,
+		repo:   repo,
 	}
 }
 

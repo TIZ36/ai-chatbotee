@@ -12,7 +12,7 @@ mysql:
   host: localhost
   port: 3306
   user: root
-  password: ""  # Override with CHATEE_MYSQL_PASSWORD env var
+  password: root
   database: chatee
   max_open_conns: 100
   max_idle_conns: 10

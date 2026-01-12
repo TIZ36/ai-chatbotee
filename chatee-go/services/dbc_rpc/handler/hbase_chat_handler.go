@@ -8,23 +8,32 @@ import (
 	"google.golang.org/grpc/status"
 
 	"chatee-go/commonlib/log"
+	"chatee-go/commonlib/pool"
 	dbc "chatee-go/gen/dbc"
-	"chatee-go/services/dbc_rpc/repository"
+	repository "chatee-go/services/dbc_rpc/repository/hbase"
 )
 
 // HBaseChatHandler implements HBaseChatService gRPC interface
 type HBaseChatHandler struct {
 	dbc.UnimplementedHBaseChatServiceServer
-	
-	repo   repository.HBaseRepository
+
 	logger log.Logger
+	repo   repository.HBaseRepository
 }
 
 // NewHBaseChatHandler creates a new HBase chat handler
-func NewHBaseChatHandler(repo repository.HBaseRepository, logger log.Logger) *HBaseChatHandler {
+func NewHBaseChatHandler(poolMgr *pool.PoolManager, logger log.Logger) *HBaseChatHandler {
+	var repo repository.HBaseRepository
+	if poolMgr.HBase() != nil {
+		repo = repository.NewGHBaseRepository(poolMgr.HBase(), "chatee_", logger)
+	} else {
+		// 如果 HBase 不可用, panic
+		panic("HBase pool is not available")
+	}
+
 	return &HBaseChatHandler{
-		repo:   repo,
 		logger: logger,
+		repo:   repo,
 	}
 }
 
@@ -40,7 +49,7 @@ func (h *HBaseChatHandler) SaveChatMetadata(ctx context.Context, req *dbc.SaveCh
 		h.logger.Error("Failed to save chat metadata", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to save chat metadata: %v", err)
 	}
-	
+
 	return &dbc.SaveChatMetadataResponse{Success: true}, nil
 }
 
@@ -51,7 +60,7 @@ func (h *HBaseChatHandler) GetChatMetadata(ctx context.Context, req *dbc.GetChat
 		h.logger.Error("Failed to get chat metadata", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to get chat metadata: %v", err)
 	}
-	
+
 	return h.chatMetadataToProto(chat), nil
 }
 
@@ -62,7 +71,7 @@ func (h *HBaseChatHandler) SaveChatInbox(ctx context.Context, req *dbc.SaveChatI
 		h.logger.Error("Failed to save chat inbox", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to save chat inbox: %v", err)
 	}
-	
+
 	return &dbc.SaveChatInboxResponse{Success: true}, nil
 }
 
@@ -73,12 +82,12 @@ func (h *HBaseChatHandler) GetUserChatInbox(ctx context.Context, req *dbc.GetUse
 		h.logger.Error("Failed to get user chat inbox", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to get user chat inbox: %v", err)
 	}
-	
+
 	protoInboxes := make([]*dbc.ChatInboxRow, 0, len(inboxes))
 	for _, inbox := range inboxes {
 		protoInboxes = append(protoInboxes, h.chatInboxToProto(inbox))
 	}
-	
+
 	return &dbc.GetUserChatInboxResponse{
 		Inboxes: protoInboxes,
 		Total:   int64(len(protoInboxes)), // TODO: Get actual total count
@@ -166,4 +175,3 @@ func (h *HBaseChatHandler) chatInboxToProto(inbox *repository.ChatInboxRow) *dbc
 		Timestamp:   inbox.Timestamp,
 	}
 }
-

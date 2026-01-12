@@ -10,24 +10,25 @@ import (
 	"google.golang.org/grpc/status"
 
 	"chatee-go/commonlib/log"
+	"chatee-go/commonlib/pool"
 	"chatee-go/commonlib/snowflake"
 	dbc "chatee-go/gen/dbc"
-	"chatee-go/services/dbc_rpc/repository"
+	repository "chatee-go/services/dbc_rpc/repository/mysql"
 )
 
 // LLMConfigHandler implements LLMConfigService gRPC interface
 type LLMConfigHandler struct {
 	dbc.UnimplementedLLMConfigServiceServer
-	
-	repo   repository.LLMConfigRepository
+
 	logger log.Logger
+	repo   repository.LLMConfigRepository
 }
 
 // NewLLMConfigHandler creates a new LLM config handler
-func NewLLMConfigHandler(repo repository.LLMConfigRepository, logger log.Logger) *LLMConfigHandler {
+func NewLLMConfigHandler(poolMgr *pool.PoolManager, logger log.Logger) *LLMConfigHandler {
 	return &LLMConfigHandler{
-		repo:   repo,
 		logger: logger,
+		repo:   repository.NewMySQLLLMConfigRepository(poolMgr.GetGORM(), poolMgr.GetRedis()),
 	}
 }
 
@@ -40,31 +41,31 @@ func (h *LLMConfigHandler) Register(server *grpc.Server) {
 func (h *LLMConfigHandler) CreateLLMConfig(ctx context.Context, req *dbc.CreateLLMConfigRequest) (*dbc.LLMConfig, error) {
 	configID := snowflake.GenerateTypedID("llm_config")
 	now := time.Now()
-	
+
 	baseURL := sql.NullString{}
 	if req.GetBaseUrl() != "" {
 		baseURL = sql.NullString{String: req.GetBaseUrl(), Valid: true}
 	}
-	
+
 	config := &repository.LLMConfig{
-		ID:         configID,
-		Name:       req.GetName(),
-		Provider:   req.GetProvider(),
-		APIKey:     req.GetApiKey(),
-		BaseURL:    baseURL,
-		Models:     req.GetModels(),
-		IsDefault:  req.GetIsDefault(),
-		IsEnabled:  req.GetIsEnabled(),
-		Settings:   req.GetSettings(),
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		ID:        configID,
+		Name:      req.GetName(),
+		Provider:  req.GetProvider(),
+		APIKey:    req.GetApiKey(),
+		BaseURL:   baseURL,
+		Models:    req.GetModels(),
+		IsDefault: req.GetIsDefault(),
+		IsEnabled: req.GetIsEnabled(),
+		Settings:  req.GetSettings(),
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
-	
+
 	if err := h.repo.Create(ctx, config); err != nil {
 		h.logger.Error("Failed to create LLM config", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to create LLM config: %v", err)
 	}
-	
+
 	return h.toProtoLLMConfig(config), nil
 }
 
@@ -78,7 +79,7 @@ func (h *LLMConfigHandler) GetLLMConfig(ctx context.Context, req *dbc.GetLLMConf
 		h.logger.Error("Failed to get LLM config", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to get LLM config: %v", err)
 	}
-	
+
 	return h.toProtoLLMConfig(config), nil
 }
 
@@ -92,7 +93,7 @@ func (h *LLMConfigHandler) GetDefaultLLMConfig(ctx context.Context, req *dbc.Get
 		h.logger.Error("Failed to get default LLM config", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to get default LLM config: %v", err)
 	}
-	
+
 	return h.toProtoLLMConfig(config), nil
 }
 
@@ -103,12 +104,12 @@ func (h *LLMConfigHandler) GetLLMConfigsByProvider(ctx context.Context, req *dbc
 		h.logger.Error("Failed to get LLM configs by provider", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to get LLM configs: %v", err)
 	}
-	
+
 	protoConfigs := make([]*dbc.LLMConfig, 0, len(configs))
 	for _, config := range configs {
 		protoConfigs = append(protoConfigs, h.toProtoLLMConfig(config))
 	}
-	
+
 	return &dbc.GetLLMConfigsByProviderResponse{
 		Configs: protoConfigs,
 	}, nil
@@ -121,12 +122,12 @@ func (h *LLMConfigHandler) ListLLMConfigs(ctx context.Context, req *dbc.ListLLMC
 		h.logger.Error("Failed to list LLM configs", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to list LLM configs: %v", err)
 	}
-	
+
 	protoConfigs := make([]*dbc.LLMConfig, 0, len(configs))
 	for _, config := range configs {
 		protoConfigs = append(protoConfigs, h.toProtoLLMConfig(config))
 	}
-	
+
 	return &dbc.ListLLMConfigsResponse{
 		Configs: protoConfigs,
 	}, nil
@@ -142,7 +143,7 @@ func (h *LLMConfigHandler) UpdateLLMConfig(ctx context.Context, req *dbc.UpdateL
 		h.logger.Error("Failed to get LLM config for update", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to get LLM config: %v", err)
 	}
-	
+
 	// Update fields
 	if req.GetName() != "" {
 		config.Name = req.GetName()
@@ -162,12 +163,12 @@ func (h *LLMConfigHandler) UpdateLLMConfig(ctx context.Context, req *dbc.UpdateL
 		config.Settings = req.GetSettings()
 	}
 	config.UpdatedAt = time.Now()
-	
+
 	if err := h.repo.Update(ctx, config); err != nil {
 		h.logger.Error("Failed to update LLM config", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to update LLM config: %v", err)
 	}
-	
+
 	return h.toProtoLLMConfig(config), nil
 }
 
@@ -177,7 +178,7 @@ func (h *LLMConfigHandler) DeleteLLMConfig(ctx context.Context, req *dbc.DeleteL
 		h.logger.Error("Failed to delete LLM config", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to delete LLM config: %v", err)
 	}
-	
+
 	return &dbc.DeleteLLMConfigResponse{Success: true}, nil
 }
 
@@ -187,7 +188,7 @@ func (h *LLMConfigHandler) toProtoLLMConfig(config *repository.LLMConfig) *dbc.L
 	if config.BaseURL.Valid {
 		baseURL = config.BaseURL.String
 	}
-	
+
 	return &dbc.LLMConfig{
 		Id:        config.ID,
 		Name:      config.Name,
@@ -202,4 +203,3 @@ func (h *LLMConfigHandler) toProtoLLMConfig(config *repository.LLMConfig) *dbc.L
 		UpdatedAt: config.UpdatedAt.Unix(),
 	}
 }
-

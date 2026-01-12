@@ -1,0 +1,35 @@
+grpc:
+  host: localhost
+  port: 9080
+  
+mysql:
+  host: "localhost"
+  port: 3306
+  user: "root"
+  password: "root"
+  database: "chateego"
+  max_open_conns: 10
+  max_idle_conns: 5
+  conn_max_lifetime: 3600s
+
+redis:
+  host: "localhost"
+  port: 6379
+  password: "123456"
+  db: 0
+  pool_size: 50
+  min_idle_conns: 5
+
+hbase:
+  host: localhost:9095
+  namespace: chatee
+  client_type: 1  # Use Thrift2 HBase TCP Client
+  hbase_pool_config:
+    max_active: 20
+    max_idle: 10
+    idle_timeout: 30s
+  hbase_client_config:
+    connect_timeout: 15
+    socket_timeout: 60
+    max_frame_size: 268435456 # 256MB
+    need_credential: false  

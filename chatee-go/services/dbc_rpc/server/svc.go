@@ -1,16 +1,9 @@
-package main
+package server
 
 import (
-	"fmt"
-
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
-
 	"chatee-go/commonlib/config"
 	"chatee-go/commonlib/log"
 	"chatee-go/commonlib/pool"
-	service "chatee-go/services/dbc_rpc/biz"
-	"chatee-go/services/dbc_rpc/repository"
 )
 
 // ServiceContext holds all dependencies for the DBC service
@@ -18,8 +11,6 @@ type ServiceContext struct {
 	Config      *config.Config
 	Logger      log.Logger
 	PoolManager *pool.PoolManager
-	Repos       *repository.Repositories
-	Service     *service.DBCService
 }
 
 // NewServiceContext creates a new service context with all dependencies initialized
@@ -58,41 +49,39 @@ func NewServiceContext(cfg *config.Config) (*ServiceContext, error) {
 			DB:       cfg.Redis.DB,
 			PoolSize: cfg.Redis.PoolSize,
 		},
-		HBase: &pool.HBaseConfig{
-			ZookeeperQuorum: cfg.HBase.ZookeeperQuorum,
-			ZookeeperPort:   cfg.HBase.ZookeeperPort,
-			PoolSize:        10, // Default pool size
-			Timeout:         30, // Default timeout in seconds
+		ThriftHBase: &pool.ThriftHbaseConfig{
+			Host:       cfg.HBase.Host,
+			Namespace:  cfg.HBase.Namespace,
+			ClientType: 1,
+			HbasePoolConfig: pool.HbasePoolConfig{
+				InitSize:    cfg.HBase.HbasePoolConfig.InitSize,
+				MaxSize:     cfg.HBase.HbasePoolConfig.MaxSize,
+				IdleSize:    cfg.HBase.HbasePoolConfig.IdleSize,
+				IdleTimeout: cfg.HBase.HbasePoolConfig.IdleTimeout,
+			},
+			HbaseClientConfig: pool.HbaseClientConfig{
+				ConnectTimeout: cfg.HBase.HbaseClientConfig.ConnectTimeout,
+				SocketTimeout:  cfg.HBase.HbaseClientConfig.SocketTimeout,
+				MaxFrameSize:   cfg.HBase.HbaseClientConfig.MaxFrameSize,
+				Credential: pool.HabseCredential{
+					User: cfg.HBase.HbaseClientConfig.Credential.User,
+					Pass: cfg.HBase.HbaseClientConfig.Credential.Pass,
+				},
+			},
 		},
 	})
+
 	if err != nil {
 		return nil, err
 	}
 
-	// Initialize repositories
-	// Use GORM instance from pool manager if available, otherwise convert from sql.DB
-	gormDB := poolMgr.GORM()
-	if gormDB == nil {
-		// Fallback: convert sql.DB to GORM
-		gormDB, err = gorm.Open(mysql.New(mysql.Config{
-			Conn: poolMgr.MySQL(),
-		}), &gorm.Config{})
-		if err != nil {
-			return nil, fmt.Errorf("failed to create GORM instance: %w", err)
-		}
-	}
-	repos := repository.NewRepositories(gormDB, poolMgr.Redis())
-
-	// Initialize service
-	svc := service.NewDBCService(repos, poolMgr, cfg, logger)
-
-	return &ServiceContext{
+	svcCtx := &ServiceContext{
 		Config:      cfg,
 		Logger:      logger,
 		PoolManager: poolMgr,
-		Repos:       repos,
-		Service:     svc,
-	}, nil
+	}
+
+	return svcCtx, nil
 }
 
 // Close closes all resources in the service context

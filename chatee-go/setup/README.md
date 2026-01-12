@@ -2,29 +2,94 @@
 
 本目录包含用于本地开发的 Docker Compose 配置，用于启动所有必需的基础设施服务。
 
-## 服务列表
+## 目录结构
 
-- **MySQL 8.0**: 关系型数据库，端口 3306
-- **Redis 7**: 缓存和消息队列，端口 6379
-- **HBase**: NoSQL数据库，端口 16010 (Web UI), 16020 (RegionServer), 16000 (Master RPC), 16030 (RegionServer RPC)
-- **ChromaDB**: 向量数据库，端口 8000
+```
+setup/
+├── redis/                    # Redis 独立启动
+│   ├── docker-compose.yaml
+│   ├── start.sh
+│   └── stop.sh
+├── mysql/                    # MySQL 独立启动
+│   ├── docker-compose.yaml
+│   ├── init/
+│   │   └── 001_schema.sql
+│   ├── start.sh
+│   └── stop.sh
+├── hbase/                    # HBase 独立启动 (带 Thrift)
+│   ├── docker-compose.yaml
+│   ├── start-thrift.sh
+│   ├── start.sh
+│   ├── stop.sh
+│   └── init-tables.sh
+├── docker-compose.yaml       # 一键启动所有服务
+└── README.md
+```
 
-## 快速开始
+## 独立启动（推荐开发时使用）
 
-### 1. 启动所有服务
+### Redis
+```bash
+cd setup/redis
+./start.sh
+
+# 连接信息
+# Host: localhost:6379
+# Password: chatee_redis
+```
+
+### MySQL
+```bash
+cd setup/mysql
+./start.sh
+
+# 连接信息
+# Host: localhost:3306
+# Root Password: chatee_root
+# Database: chatee
+# User: chatee / chatee_pass
+```
+
+### HBase (带 Thrift)
+```bash
+cd setup/hbase
+./start.sh
+
+# 等待启动完成后初始化表
+./init-tables.sh
+
+# 连接信息
+# ZooKeeper: localhost:2181
+# Thrift:    localhost:9090
+# Thrift2:   localhost:9095 (推荐)
+# Web UI:    http://localhost:16010
+```
+
+### 停止服务
+```bash
+cd setup/redis && ./stop.sh
+cd setup/mysql && ./stop.sh
+cd setup/hbase && ./stop.sh
+```
+
+---
+
+## 一键启动所有服务
+
+### 启动
 
 ```bash
 cd setup
 docker-compose up -d
 ```
 
-### 2. 检查服务状态
+### 检查服务状态
 
 ```bash
 docker-compose ps
 ```
 
-### 3. 查看服务日志
+### 查看服务日志
 
 ```bash
 # 查看所有服务日志
@@ -37,13 +102,13 @@ docker-compose logs -f hbase
 docker-compose logs -f chromadb
 ```
 
-### 4. 停止所有服务
+### 停止所有服务
 
 ```bash
 docker-compose down
 ```
 
-### 5. 停止并删除数据卷（清理数据）
+### 停止并删除数据卷（清理数据）
 
 ```bash
 docker-compose down -v

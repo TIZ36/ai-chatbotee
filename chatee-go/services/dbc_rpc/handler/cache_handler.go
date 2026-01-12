@@ -9,23 +9,25 @@ import (
 	"google.golang.org/grpc/status"
 
 	"chatee-go/commonlib/log"
+	"chatee-go/commonlib/pool"
 	dbc "chatee-go/gen/dbc"
+
 	"github.com/redis/go-redis/v9"
 )
 
 // CacheHandler implements CacheService gRPC interface
 type CacheHandler struct {
 	dbc.UnimplementedCacheServiceServer
-	
-	redis  *redis.Client
+
 	logger log.Logger
+	redis  *redis.Client
 }
 
 // NewCacheHandler creates a new cache handler
-func NewCacheHandler(redis *redis.Client, logger log.Logger) *CacheHandler {
+func NewCacheHandler(poolMgr *pool.PoolManager, logger log.Logger) *CacheHandler {
 	return &CacheHandler{
-		redis:  redis,
 		logger: logger,
+		redis:  poolMgr.GetRedis(),
 	}
 }
 
@@ -53,7 +55,7 @@ func (h *CacheHandler) Set(ctx context.Context, req *dbc.SetRequest) (*dbc.SetRe
 	if req.GetTtlSeconds() == 0 {
 		ttl = 0 // No expiration
 	}
-	
+
 	err := h.redis.Set(ctx, req.GetKey(), req.GetValue(), ttl).Err()
 	if err != nil {
 		h.logger.Error("Failed to set cache", log.Err(err))
@@ -309,7 +311,7 @@ func (h *CacheHandler) MGet(ctx context.Context, req *dbc.MGetRequest) (*dbc.MGe
 		h.logger.Error("Failed to get multiple keys", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to get multiple keys: %v", err)
 	}
-	
+
 	// Convert to map[string]string format
 	values := make(map[string]string)
 	for i, val := range vals {
@@ -332,4 +334,3 @@ func (h *CacheHandler) MSet(ctx context.Context, req *dbc.MSetRequest) (*dbc.MSe
 	}
 	return &dbc.MSetResponse{Success: true}, nil
 }
-

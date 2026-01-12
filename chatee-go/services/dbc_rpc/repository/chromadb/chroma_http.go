@@ -1,4 +1,4 @@
-package repository
+package chromadb
 
 import (
 	"bytes"
@@ -20,9 +20,10 @@ type HTTPChromaRepository struct {
 }
 
 // NewHTTPChromaRepository creates a new HTTP-based ChromaDB repository
-func NewHTTPChromaRepository(host string, port int, logger log.Logger) ChromaRepository {
+func NewHTTPChromaRepository(host string, port int, logger log.Logger) HTTPChromaRepository {
 	baseURL := fmt.Sprintf("http://%s:%d/api/v1", host, port)
-	return &HTTPChromaRepository{
+
+	return HTTPChromaRepository{
 		baseURL: baseURL,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
@@ -213,8 +214,8 @@ func (r *HTTPChromaRepository) AddDocuments(ctx context.Context, collectionName 
 // GetDocuments retrieves documents by IDs
 func (r *HTTPChromaRepository) GetDocuments(ctx context.Context, collectionName string, ids []string, includeEmbeddings bool) ([]*Document, error) {
 	reqBody := map[string]interface{}{
-		"ids":              ids,
-		"include":          []string{"documents", "metadatas"},
+		"ids":     ids,
+		"include": []string{"documents", "metadatas"},
 	}
 
 	if includeEmbeddings {
@@ -310,7 +311,7 @@ func (r *HTTPChromaRepository) UpdateDocuments(ctx context.Context, collectionNa
 func (r *HTTPChromaRepository) Query(ctx context.Context, collectionName string, queryEmbeddings [][]float32, nResults int, where map[string]string, include []string) ([]*QueryResult, error) {
 	reqBody := map[string]interface{}{
 		"query_embeddings": queryEmbeddings,
-		"n_results":         nResults,
+		"n_results":        nResults,
 	}
 
 	if where != nil {

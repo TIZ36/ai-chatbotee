@@ -33,7 +33,6 @@ type GORMWorkerConfig struct {
 type GORMWorker struct {
 	name   string
 	db     *gorm.DB
-	sqlDB  *sql.DB
 	config *GORMWorkerConfig
 }
 
@@ -88,8 +87,6 @@ func (w *GORMWorker) Init(ctx context.Context, config interface{}) error {
 		return fmt.Errorf("failed to ping MySQL: %w", err)
 	}
 
-	w.sqlDB = sqlDB
-
 	// Create GORM instance
 	gormDB, err := gorm.Open(mysql.New(mysql.Config{
 		Conn: sqlDB,
@@ -105,14 +102,16 @@ func (w *GORMWorker) Init(ctx context.Context, config interface{}) error {
 
 // Health checks if the GORM worker is healthy
 func (w *GORMWorker) Health(ctx context.Context) error {
-	if w.sqlDB == nil {
-		return fmt.Errorf("GORM worker not initialized")
-	}
 
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	return w.sqlDB.PingContext(pingCtx)
+	sqlDB, err := w.db.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get sql.DB from GORM: %w", err)
+	}
+
+	return sqlDB.PingContext(pingCtx)
 }
 
 // Use executes a function with the GORM database instance
@@ -133,10 +132,11 @@ func (w *GORMWorker) UseWithData(ctx context.Context, data interface{}, fn func(
 
 // Close closes the GORM worker
 func (w *GORMWorker) Close() error {
-	if w.sqlDB != nil {
-		return w.sqlDB.Close()
+	sqlDB, err := w.db.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get sql.DB from GORM: %w", err)
 	}
-	return nil
+	return sqlDB.Close()
 }
 
 // GetDB returns the underlying GORM DB instance (for direct access if needed)
@@ -145,8 +145,8 @@ func (w *GORMWorker) GetDB() *gorm.DB {
 }
 
 // GetSQLDB returns the underlying sql.DB instance
-func (w *GORMWorker) GetSQLDB() *sql.DB {
-	return w.sqlDB
+func (w *GORMWorker) GetSQLDB() (*sql.DB, error) {
+	return w.db.DB()
 }
 
 // =============================================================================

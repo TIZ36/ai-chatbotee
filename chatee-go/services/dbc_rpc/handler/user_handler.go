@@ -10,24 +10,25 @@ import (
 	"google.golang.org/grpc/status"
 
 	"chatee-go/commonlib/log"
+	"chatee-go/commonlib/pool"
 	"chatee-go/commonlib/snowflake"
 	dbc "chatee-go/gen/dbc"
-	"chatee-go/services/dbc_rpc/repository"
+	repository "chatee-go/services/dbc_rpc/repository/mysql"
 )
 
 // UserHandler implements UserService gRPC interface
 type UserHandler struct {
 	dbc.UnimplementedUserServiceServer
 
-	repo   repository.UserRepository
 	logger log.Logger
+	repo   repository.UserRepository
 }
 
 // NewUserHandler creates a new user handler
-func NewUserHandler(repo repository.UserRepository, logger log.Logger) *UserHandler {
+func NewUserHandler(poolMgr *pool.PoolManager, logger log.Logger) *UserHandler {
 	return &UserHandler{
-		repo:   repo,
 		logger: logger,
+		repo:   repository.NewMySQLUserRepository(poolMgr.GetGORM(), poolMgr.GetRedis()),
 	}
 }
 
