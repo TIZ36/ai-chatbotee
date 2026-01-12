@@ -6,7 +6,6 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
 
 	"chatee-go/commonlib/log"
 )

@@ -7,7 +7,7 @@
 package conn
 
 import (
-	common "chatee-go/proto/common"
+	common "chatee-go/gen/common"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -2163,7 +2163,7 @@ const file_conn_conn_proto_rawDesc = "" +
 	"\x15FEED_TYPE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10FEED_TYPE_FOLLOW\x10\x01\x12\x13\n" +
 	"\x0fFEED_TYPE_REPLY\x10\x02\x12\x18\n" +
-	"\x14FEED_TYPE_CHAT_INBOX\x10\x03B\x16Z\x14chatee-go/proto/connb\x06proto3"
+	"\x14FEED_TYPE_CHAT_INBOX\x10\x03B\x14Z\x12chatee-go/gen/connb\x06proto3"
 
 var (
 	file_conn_conn_proto_rawDescOnce sync.Once

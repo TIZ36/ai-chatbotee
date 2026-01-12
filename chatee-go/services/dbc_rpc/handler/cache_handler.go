@@ -217,14 +217,10 @@ func (h *CacheHandler) HGet(ctx context.Context, req *dbc.HGetRequest) (*dbc.HGe
 }
 
 func (h *CacheHandler) HSet(ctx context.Context, req *dbc.HSetRequest) (*dbc.HSetResponse, error) {
-	fields := make(map[string]interface{})
-	for k, v := range req.GetFields() {
-		fields[k] = v
-	}
-	count, err := h.redis.HSet(ctx, req.GetKey(), fields).Result()
+	count, err := h.redis.HSet(ctx, req.GetKey(), req.GetField(), req.GetValue()).Result()
 	if err != nil {
-		h.logger.Error("Failed to set hash fields", log.Err(err))
-		return nil, status.Errorf(codes.Internal, "failed to set hash fields: %v", err)
+		h.logger.Error("Failed to set hash field", log.Err(err))
+		return nil, status.Errorf(codes.Internal, "failed to set hash field: %v", err)
 	}
 	return &dbc.HSetResponse{Success: count > 0}, nil
 }
@@ -314,22 +310,20 @@ func (h *CacheHandler) MGet(ctx context.Context, req *dbc.MGetRequest) (*dbc.MGe
 		return nil, status.Errorf(codes.Internal, "failed to get multiple keys: %v", err)
 	}
 	
-	results := make([]*dbc.MGetResponse_KeyValue, 0, len(vals))
+	// Convert to map[string]string format
+	values := make(map[string]string)
 	for i, val := range vals {
 		if val != nil {
-			results = append(results, &dbc.MGetResponse_KeyValue{
-				Key:   req.GetKeys()[i],
-				Value: val.(string),
-			})
+			values[req.GetKeys()[i]] = val.(string)
 		}
 	}
-	return &dbc.MGetResponse{Values: results}, nil
+	return &dbc.MGetResponse{Values: values}, nil
 }
 
 func (h *CacheHandler) MSet(ctx context.Context, req *dbc.MSetRequest) (*dbc.MSetResponse, error) {
 	pairs := make([]interface{}, 0, len(req.GetKeyValues())*2)
-	for _, kv := range req.GetKeyValues() {
-		pairs = append(pairs, kv.GetKey(), kv.GetValue())
+	for key, value := range req.GetKeyValues() {
+		pairs = append(pairs, key, value)
 	}
 	err := h.redis.MSet(ctx, pairs...).Err()
 	if err != nil {

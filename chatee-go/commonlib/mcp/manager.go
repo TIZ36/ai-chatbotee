@@ -11,6 +11,11 @@ import (
 // =============================================================================
 
 // Manager manages multiple MCP server connections.
+// It handles:
+// - Server configuration and lifecycle
+// - Transport creation (stdio, HTTP, SSE)
+// - Authentication (none, bearer token, OAuth)
+// - Connection pooling and status tracking
 type Manager struct {
 	servers map[string]*ServerConnection
 	mu      sync.RWMutex
@@ -37,44 +42,6 @@ type ServerConfig struct {
 	Auth        *AuthConfig       `json:"auth,omitempty"`
 	AutoConnect bool              `json:"auto_connect"`
 }
-
-// TransportType defines the transport type.
-type TransportType string
-
-const (
-	TransportHTTP  TransportType = "http"
-	TransportSSE   TransportType = "sse"
-	TransportStdio TransportType = "stdio"
-)
-
-// AuthConfig configures authentication.
-type AuthConfig struct {
-	Type         AuthType `json:"type"` // none, bearer, oauth
-	Token        string   `json:"token,omitempty"`
-	ClientID     string   `json:"client_id,omitempty"`
-	ClientSecret string   `json:"client_secret,omitempty"`
-	TokenURL     string   `json:"token_url,omitempty"`
-	Scopes       []string `json:"scopes,omitempty"`
-}
-
-// AuthType defines the authentication type.
-type AuthType string
-
-const (
-	AuthNone   AuthType = "none"
-	AuthBearer AuthType = "bearer"
-	AuthOAuth  AuthType = "oauth"
-)
-
-// ConnectionStatus represents the connection status.
-type ConnectionStatus string
-
-const (
-	StatusDisconnected ConnectionStatus = "disconnected"
-	StatusConnecting   ConnectionStatus = "connecting"
-	StatusConnected    ConnectionStatus = "connected"
-	StatusError        ConnectionStatus = "error"
-)
 
 // NewManager creates a new MCP manager.
 func NewManager() *Manager {
@@ -118,6 +85,12 @@ func (m *Manager) RemoveServer(id string) error {
 }
 
 // Connect connects to a server.
+// Connection process:
+// 1. Create transport based on config type (stdio or HTTP)
+// 2. Handle authentication (add token to headers if bearer auth)
+// 3. Create client with transport
+// 4. Connect and initialize client
+// 5. Update connection status
 func (m *Manager) Connect(ctx context.Context, id string) error {
 	m.mu.Lock()
 	conn, exists := m.servers[id]
@@ -185,27 +158,43 @@ func (m *Manager) Disconnect(id string) error {
 }
 
 // createTransport creates a transport based on config.
+// Transport types:
+// - stdio: Creates StdioTransport for local process communication
+// - http/sse: Creates HTTPTransport for HTTP/SSE communication
+//
+// Authentication handling:
+// - No auth: Direct connection
+// - Bearer token: Adds "Authorization: Bearer <token>" header
+// - OAuth: Requires token exchange (not implemented in transport, handled by manager)
 func (m *Manager) createTransport(config ServerConfig) (Transport, error) {
 	switch config.Type {
 	case TransportHTTP, TransportSSE:
 		headers := make(map[string]string)
+		// Copy existing headers
 		for k, v := range config.Headers {
 			headers[k] = v
 		}
 
 		// Add auth header if configured
+		// Bearer token: Add Authorization header
+		// No token: No additional headers
 		if config.Auth != nil && config.Auth.Type == AuthBearer {
 			headers["Authorization"] = "Bearer " + config.Auth.Token
 		}
 
 		return NewHTTPTransport(HTTPTransportConfig{
-			BaseURL: config.URL,
-			Headers: headers,
+			BaseURL:   config.URL,
+			Headers:   headers,
+			EnableSSE: config.Type == TransportSSE,
 		}), nil
 
 	case TransportStdio:
-		// TODO: Implement stdio transport for local processes
-		return nil, fmt.Errorf("stdio transport not yet implemented")
+		// Create stdio transport for local process
+		return NewStdioTransport(StdioTransportConfig{
+			Command: config.Command,
+			Args:    config.Args,
+			Env:     config.Env,
+		}), nil
 
 	default:
 		return nil, fmt.Errorf("unknown transport type: %s", config.Type)

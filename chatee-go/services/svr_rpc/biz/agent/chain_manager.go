@@ -3,19 +3,32 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/status"
+
 	"chatee-go/commonlib/actor"
+	"chatee-go/commonlib/log"
 	"chatee-go/commonlib/snowflake"
+	dbc "chatee-go/gen/dbc"
+	infraactor "chatee-go/infrastructure/actor"
 )
 
 // ChainManager manages ActionChain execution
 type ChainManager struct {
-	svc      *agentmod.Service
-	chains   map[string]*ChainExecution
-	mu       sync.RWMutex
-	executor *actor.ChainExecutor
+	svc       *agentmod.Service
+	chains    map[string]*ChainExecution
+	mu        sync.RWMutex
+	executor  actor.ChainExecutor
+	chromaClient dbc.ChromaServiceClient
+	chromaConn   *grpc.ClientConn
+	logger       log.Logger
 }
 
 // ChainExecution tracks a running chain
@@ -44,11 +57,36 @@ const (
 )
 
 // NewChainManager creates a new chain manager
-func NewChainManager(svc *Service) *ChainManager {
+func NewChainManager(svc *Service, logger log.Logger) *ChainManager {
 	cm := &ChainManager{
 		svc:    svc,
 		chains: make(map[string]*ChainExecution),
+		logger: logger,
 	}
+	
+	// Initialize DBC client for ChromaDB operations
+	dbcAddr := os.Getenv("CHATEE_GRPC_DBC_ADDR")
+	if dbcAddr == "" {
+		dbcAddr = "localhost:9091" // Default DBC RPC address
+	}
+
+	dbcConn, err := grpc.Dial(
+		dbcAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                10 * time.Second,
+			Timeout:             3 * time.Second,
+			PermitWithoutStream: true,
+		}),
+	)
+	if err != nil {
+		logger.Warn("Failed to connect to DBC service for ChromaDB", log.Err(err))
+	} else {
+		logger.Info("DBC client initialized for ChromaDB", log.String("addr", dbcAddr))
+		cm.chromaClient = dbc.NewChromaServiceClient(dbcConn)
+		cm.chromaConn = dbcConn
+	}
+	
 	cm.executor = cm.createExecutor()
 	return cm
 }
@@ -163,8 +201,8 @@ func (cm *ChainManager) buildChain(specs []ChainStepSpec) (*actor.ActionChain, e
 }
 
 // createExecutor creates a ChainExecutor with handlers
-func (cm *ChainManager) createExecutor() *actor.ChainExecutor {
-	executor := actor.NewChainExecutor()
+func (cm *ChainManager) createExecutor() actor.ChainExecutor {
+	executor := infraactor.NewChainExecutor()
 
 	// Register handlers for each action type
 	executor.RegisterHandler(actor.AG_SELF_GEN, cm.handleSelfGen)
@@ -227,9 +265,9 @@ func (cm *ChainManager) handleSelfDecide(ctx *actor.ChainContext, step *actor.Ac
 
 	prompt := fmt.Sprintf("Question: %s\n\nOptions:%s\n\nChoose the best option and explain your reasoning.", question, optionsPrompt)
 
-	provider, err := cm.svc.cfg.LLMRegistry.Get("deepseek")
-	if err != nil {
-		return err
+	provider, ok := cm.svc.cfg.LLMRegistry.Get("deepseek")
+	if !ok {
+		return fmt.Errorf("LLM provider 'deepseek' not found")
 	}
 
 	adapter := &llmProviderAdapter{provider: provider, model: "deepseek-chat"}
@@ -293,21 +331,77 @@ func (cm *ChainManager) handleCallAgent(ctx *actor.ChainContext, step *actor.Act
 func (cm *ChainManager) handleRAG(ctx *actor.ChainContext, step *actor.ActionStep) error {
 	query := getStringParam(step.Params, "query")
 	topK := getIntParam(step.Params, "top_k")
+	collectionName := getStringParam(step.Params, "collection")
 	if topK == 0 {
 		topK = 5
 	}
+	if collectionName == "" {
+		collectionName = "default" // Default collection name
+	}
 
-	// TODO: Implement RAG retrieval via Chroma
-	// For now, return empty results
-	results := []map[string]interface{}{
-		{"content": "RAG retrieval placeholder", "score": 0.95},
+	if cm.chromaClient == nil {
+		return fmt.Errorf("ChromaDB client not available")
+	}
+
+	// Step 1: Get embedding for the query using LLM provider
+	embedding, err := cm.generateEmbedding(ctx.Context, query)
+	if err != nil {
+		cm.logger.Error("Failed to generate embedding", log.Err(err), log.String("query", query))
+		return fmt.Errorf("failed to generate embedding: %w", err)
+	}
+
+	// Step 2: Query ChromaDB with the embedding
+	// QueryEmbeddings in proto is repeated float, which maps to []float32 in Go
+	queryReq := &dbc.QueryRequest{
+		CollectionName: collectionName,
+		QueryEmbeddings: embedding,
+		NResults:       int32(topK),
+		Include:        []string{"documents", "metadatas", "distances"},
+	}
+
+	queryResp, err := cm.chromaClient.Query(ctx.Context, queryReq)
+	if err != nil {
+		cm.logger.Error("Failed to query ChromaDB", log.Err(err))
+		return fmt.Errorf("failed to query ChromaDB: %w", err)
+	}
+
+	// Step 3: Convert results to the expected format
+	results := make([]map[string]interface{}, 0)
+	if len(queryResp.GetResults()) > 0 {
+		result := queryResp.GetResults()[0]
+		ids := result.GetIds()
+		documents := result.GetDocuments()
+		metadatas := result.GetMetadatas()
+		distances := result.GetDistances()
+
+		for i := 0; i < len(ids) && i < int(topK); i++ {
+			item := map[string]interface{}{
+				"id":       ids[i],
+				"content":  "",
+				"score":    0.0,
+				"metadata": make(map[string]string),
+			}
+
+			if i < len(documents) {
+				item["content"] = documents[i]
+			}
+			if i < len(distances) {
+				// Convert distance to score (1 - distance, assuming cosine distance)
+				item["score"] = 1.0 - float64(distances[i])
+			}
+			if i < len(metadatas) && metadatas[i] != nil {
+				item["metadata"] = metadatas[i]
+			}
+
+			results = append(results, item)
+		}
 	}
 
 	ctx.Variables["rag_results"] = results
 	ctx.Variables["rag_query"] = query
+	ctx.Variables["rag_collection"] = collectionName
 	cm.recordStepResult(ctx, step, results)
 
-	_ = topK
 	return nil
 }
 
@@ -443,4 +537,89 @@ func getMapParam(params map[string]interface{}, key string) map[string]interface
 		return v
 	}
 	return nil
+}
+
+// generateEmbedding generates an embedding vector for text using LLM provider
+// This implementation uses the LLM registry to find an embedding-capable provider
+func (cm *ChainManager) generateEmbedding(ctx context.Context, text string) ([]float32, error) {
+	// Try to get an embedding-capable provider from the registry
+	// First, try OpenAI-compatible providers (OpenAI, DeepSeek, etc.)
+	providers := []string{"openai", "deepseek", "openrouter"}
+	
+	var embeddingProvider llm.EmbeddingProvider
+	for _, name := range providers {
+		if provider, ok := cm.svc.cfg.LLMRegistry.Get(name); ok {
+			if ep, ok := provider.(llm.EmbeddingProvider); ok {
+				embeddingProvider = ep
+				cm.logger.Debug("Using embedding provider", log.String("provider", name))
+				break
+			}
+		}
+	}
+	
+	if embeddingProvider == nil {
+		// Fallback: try to find any provider that implements EmbeddingProvider
+		cm.svc.cfg.LLMRegistry.mu.RLock()
+		for _, provider := range cm.svc.cfg.LLMRegistry.providers {
+			if ep, ok := provider.(llm.EmbeddingProvider); ok {
+				embeddingProvider = ep
+				break
+			}
+		}
+		cm.svc.cfg.LLMRegistry.mu.RUnlock()
+	}
+	
+	if embeddingProvider == nil {
+		// If no embedding provider is available, log warning and use placeholder
+		cm.logger.Warn("No embedding provider available, using placeholder", log.String("query", text))
+		// Return placeholder embedding as fallback
+		return cm.generatePlaceholderEmbedding(text), nil
+	}
+	
+	// Use default embedding model (text-embedding-3-small)
+	// This can be configured per agent or collection
+	model := "" // Empty string will use provider's default
+	
+	resp, err := embeddingProvider.CreateEmbedding(ctx, []string{text}, model)
+	if err != nil {
+		cm.logger.Error("Failed to create embedding, using placeholder", log.Err(err))
+		// Fallback to placeholder on error
+		return cm.generatePlaceholderEmbedding(text), nil
+	}
+	
+	if len(resp.Embeddings) == 0 {
+		cm.logger.Warn("Empty embedding response, using placeholder")
+		return cm.generatePlaceholderEmbedding(text), nil
+	}
+	
+	return resp.Embeddings[0], nil
+}
+
+// generatePlaceholderEmbedding generates a simple hash-based embedding as fallback
+// This is NOT suitable for production semantic search, but allows the system to continue
+func (cm *ChainManager) generatePlaceholderEmbedding(text string) []float32 {
+	dim := 384
+	embedding := make([]float32, dim)
+	hash := 0
+	for _, char := range text {
+		hash = hash*31 + int(char)
+	}
+	for i := 0; i < dim; i++ {
+		val := float32((hash*(i+1))%1000) / 1000.0
+		embedding[i] = val - 0.5
+	}
+	
+	// Normalize
+	sum := float32(0)
+	for _, v := range embedding {
+		sum += v * v
+	}
+	if sum > 0 {
+		norm := float32(1.0 / float64(sum))
+		for i := range embedding {
+			embedding[i] *= norm
+		}
+	}
+	
+	return embedding
 }

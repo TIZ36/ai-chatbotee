@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package chatee.im.thread;
 
-option go_package = "chatee-go/proto/im/thread";
+option go_package = "chatee-go/gen/im/thread";
 
 import "common/common.proto";
 

@@ -112,6 +112,14 @@ func RegisterRoutes(router *gin.Engine, h *handler.Handler) {
 		auth.POST("/refresh", h.RefreshToken)
 	}
 
+	// Sync routes (for reconnection)
+	{
+		sync := v1.Group("/sync")
+		sync.GET("/incremental", h.GetIncrementalMessages)
+		sync.GET("/unread-counts", h.GetUnreadCounts)
+		sync.GET("/unread-messages", h.GetUnreadMessages)
+	}
+
 	// User routes
 	{
 		users := v1.Group("/users")
@@ -119,6 +127,10 @@ func RegisterRoutes(router *gin.Engine, h *handler.Handler) {
 		users.PUT("/:id", h.UpdateUser)
 		users.GET("/:id/sessions", h.GetUserSessions)
 		users.GET("/:id/agents", h.GetUserAgents)
+		users.GET("/:id/follow-feed", h.GetFollowFeed)
+		users.GET("/:id/reply-inbox", h.GetReplyInbox)
+		users.GET("/:id/connections", h.GetUserConnections)
+		users.GET("/:id/connection-status", h.GetConnectionStatus)
 	}
 
 	// Session routes
@@ -159,6 +171,22 @@ func RegisterRoutes(router *gin.Engine, h *handler.Handler) {
 		llm.GET("/models", h.ListModels)
 	}
 
+	// Config management routes (require admin authentication)
+	{
+		config := v1.Group("/config", middleware.AdminAuth())
+		{
+			// Agent CRUD
+			config.POST("/agents", h.CreateAgent)
+			config.GET("/agents", h.ListAgents)
+			config.GET("/agents/:id", h.GetAgent)
+			config.PUT("/agents/:id", h.UpdateAgent)
+			config.DELETE("/agents/:id", h.DeleteAgent)
+
+			// LLM Config CRUD (already implemented above, but can add admin-only endpoints)
+			// MCP Server CRUD (already implemented above, but can add admin-only endpoints)
+		}
+	}
+
 	// MCP routes
 	{
 		mcp := v1.Group("/mcp")
@@ -183,6 +211,29 @@ func RegisterRoutes(router *gin.Engine, h *handler.Handler) {
 		threads.GET("", h.ListThreads)
 		threads.POST("/:id/replies", h.CreateReply)
 		threads.GET("/:id/replies", h.ListReplies)
+		threads.GET("/:id/messages", h.GetThreadMessages)
+		threads.POST("/sync", h.SyncThreadHistory)
+		threads.POST("/follow-feed/sync", h.SyncFollowFeed)
+		threads.POST("/reply-inbox/sync", h.SyncReplyInbox)
+	}
+
+	// Admin routes (require admin authentication)
+	{
+		admin := v1.Group("/admin", middleware.AdminAuth())
+		{
+			// Admin Thread routes
+			adminThreads := admin.Group("/threads")
+			adminThreads.POST("", h.AdminCreateThread)
+			adminThreads.POST("/:id/replies", h.AdminCreateReply)
+			adminThreads.DELETE("/:id/messages/:msgId", h.AdminDeleteMessage)
+			adminThreads.PUT("/:id", h.AdminUpdateThread)
+
+			// Admin Chat routes
+			adminChats := admin.Group("/chats")
+			adminChats.POST("", h.AdminCreateChat)
+			adminChats.DELETE("/:id", h.AdminDeleteChat)
+			adminChats.POST("/:id/participants", h.AdminManageParticipants)
+		}
 	}
 
 	// Group chat routes
@@ -193,9 +244,11 @@ func RegisterRoutes(router *gin.Engine, h *handler.Handler) {
 		chats.PUT("/:id", h.UpdateChat)
 		chats.DELETE("/:id", h.DeleteChat)
 		chats.GET("", h.ListChats)
+		chats.GET("/:id/messages", h.GetChatMessages)
 		chats.POST("/:id/participants", h.AddParticipant)
 		chats.DELETE("/:id/participants/:userId", h.RemoveParticipant)
 		chats.GET("/:id/channels", h.ListChannels)
 		chats.POST("/:id/channels", h.CreateChannel)
+		chats.POST("/sync", h.SyncChatHistory)
 	}
 }

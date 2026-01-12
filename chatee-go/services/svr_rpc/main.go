@@ -20,6 +20,7 @@ import (
 	"chatee-go/commonlib/mcp"
 	"chatee-go/commonlib/pool"
 	"chatee-go/commonlib/snowflake"
+	infraactor "chatee-go/infrastructure/actor"
 	agentmod "chatee-go/services/svr_rpc/biz/agent"
 	llmmod "chatee-go/services/svr_rpc/biz/llm"
 	mcpmod "chatee-go/services/svr_rpc/biz/mcp"
@@ -110,7 +111,7 @@ func main() {
 	}
 
 	// Initialize Actor system
-	actorSystem := actor.NewActorSystem(actor.SystemConfig{
+	actorSystem := infraactor.NewActorSystem(actor.SystemConfig{
 		Name:              "svr_rpc",
 		DefaultBufferSize: 1000,
 		OnError: func(actorID string, err error) {

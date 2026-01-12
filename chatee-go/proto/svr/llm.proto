@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package chatee.svr.llm;
 
-option go_package = "chatee-go/proto/svr/llm";
+option go_package = "chatee-go/gen/svr/llm";
 
 // =============================================================================
 // LLM Service - Large Language Model Management

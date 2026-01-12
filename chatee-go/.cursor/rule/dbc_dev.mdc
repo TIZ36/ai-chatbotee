@@ -1,0 +1,8 @@
+---
+alwaysApply: false
+---
+关于dbc_rpc / repository 下的规则
+
+dbtype/
+- inteface.go                 数据接口
+- specificdbtype.go    具体db的接口实现

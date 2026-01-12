@@ -2440,7 +2440,7 @@ const file_svr_llm_proto_rawDesc = "" +
 	"\x04Chat\x12\x1b.chatee.svr.llm.ChatRequest\x1a\x1c.chatee.svr.llm.ChatResponse\x12L\n" +
 	"\n" +
 	"ChatStream\x12\x1b.chatee.svr.llm.ChatRequest\x1a\x1f.chatee.svr.llm.ChatStreamEvent0\x01\x12V\n" +
-	"\vCountTokens\x12\".chatee.svr.llm.CountTokensRequest\x1a#.chatee.svr.llm.CountTokensResponseB\x19Z\x17chatee-go/proto/svr/llmb\x06proto3"
+	"\vCountTokens\x12\".chatee.svr.llm.CountTokensRequest\x1a#.chatee.svr.llm.CountTokensResponseB\x17Z\x15chatee-go/gen/svr/llmb\x06proto3"
 
 var (
 	file_svr_llm_proto_rawDescOnce sync.Once

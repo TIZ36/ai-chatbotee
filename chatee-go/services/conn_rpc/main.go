@@ -14,8 +14,8 @@ import (
 	"chatee-go/commonlib/config"
 	"chatee-go/commonlib/log"
 	"chatee-go/commonlib/snowflake"
-	"chatee-go/services/conn_rpc/handler"
 	"chatee-go/services/conn_rpc/biz"
+	"chatee-go/services/conn_rpc/handler"
 )
 
 func main() {
@@ -68,12 +68,24 @@ func main() {
 		}
 	}()
 
+	// Initialize IM client for thread/chat operations
+	imClient, err := service.NewIMClient(logger)
+	if err != nil {
+		logger.Warn("Failed to initialize IM client, thread/chat features will be disabled", log.Err(err))
+		imClient = nil
+	}
+	defer func() {
+		if imClient != nil {
+			imClient.Close()
+		}
+	}()
+
 	// WebSocket endpoints (WS and WSS)
 	router.GET("/ws", func(c *gin.Context) {
-		handler.HandleWebSocket(c, svcCtx.Hub, cfg.WebSocket, logger, svrClient)
+		handler.HandleWebSocket(c, svcCtx.Hub, cfg.WebSocket, logger, svrClient, imClient)
 	})
 	router.GET("/wss", func(c *gin.Context) {
-		handler.HandleWebSocket(c, svcCtx.Hub, cfg.WebSocket, logger, svrClient)
+		handler.HandleWebSocket(c, svcCtx.Hub, cfg.WebSocket, logger, svrClient, imClient)
 	})
 
 	// Health endpoints

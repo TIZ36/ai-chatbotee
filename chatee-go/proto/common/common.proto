@@ -4,7 +4,7 @@ syntax = "proto3";
 
 package chatee.common;
 
-option go_package = "chatee-go/proto/common";
+option go_package = "chatee-go/gen/common";
 
 // =============================================================================
 // Basic Types

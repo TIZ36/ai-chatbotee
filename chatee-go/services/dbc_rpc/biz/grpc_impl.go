@@ -3,6 +3,7 @@ package service
 import (
 	"google.golang.org/grpc"
 
+	"chatee-go/commonlib/config"
 	"chatee-go/commonlib/log"
 	"chatee-go/commonlib/pool"
 	"chatee-go/services/dbc_rpc/handler"
@@ -13,14 +14,16 @@ import (
 type DBCService struct {
 	repos   *repository.Repositories
 	poolMgr *pool.PoolManager
+	config  *config.Config
 	logger  log.Logger
 }
 
 // NewDBCService creates a new DBC service
-func NewDBCService(repos *repository.Repositories, poolMgr *pool.PoolManager, logger log.Logger) *DBCService {
+func NewDBCService(repos *repository.Repositories, poolMgr *pool.PoolManager, cfg *config.Config, logger log.Logger) *DBCService {
 	return &DBCService{
 		repos:   repos,
 		poolMgr: poolMgr,
+		config:  cfg,
 		logger:  logger,
 	}
 }
@@ -35,8 +38,25 @@ func (s *DBCService) RegisterGRPC(server *grpc.Server) {
 	llmConfigHandler := handler.NewLLMConfigHandler(s.repos.LLMConfig, s.logger)
 	mcpServerHandler := handler.NewMCPServerHandler(s.repos.MCPServer, s.logger)
 
-	// HBase handlers (using memory implementation for now)
-	hbaseRepo := repository.NewMemoryHBaseRepository()
+	// HBase handlers (using real HBase implementation)
+	var hbaseRepo repository.HBaseRepository
+	if s.poolMgr.HBase() != nil {
+		// Use real HBase repository
+		tablePrefix := ""
+		if s.config != nil {
+			tablePrefix = s.config.HBase.TablePrefix
+		}
+		hbaseRepo = repository.NewGHBaseRepository(
+			s.poolMgr.HBase(),
+			tablePrefix,
+			s.logger,
+		)
+		s.logger.Info("Using real HBase repository", log.String("table_prefix", tablePrefix))
+	} else {
+		// Fallback to memory implementation if HBase is not configured
+		hbaseRepo = repository.NewMemoryHBaseRepository()
+		s.logger.Warn("HBase not configured, using memory implementation")
+	}
 	hbaseThreadHandler := handler.NewHBaseThreadHandler(hbaseRepo, s.logger)
 	hbaseChatHandler := handler.NewHBaseChatHandler(hbaseRepo, s.logger)
 
@@ -47,8 +67,24 @@ func (s *DBCService) RegisterGRPC(server *grpc.Server) {
 	}
 	cacheHandler := handler.NewCacheHandler(redisClient, s.logger)
 
-	// Chroma handler (placeholder)
-	chromaHandler := handler.NewChromaHandler(s.logger)
+	// Chroma handler
+	var chromaRepo repository.ChromaRepository
+	if s.config != nil && s.config.Chroma.Host != "" {
+		// Use real ChromaDB repository
+		chromaRepo = repository.NewHTTPChromaRepository(
+			s.config.Chroma.Host,
+			s.config.Chroma.Port,
+			s.logger,
+		)
+		s.logger.Info("Using real ChromaDB repository", 
+			log.String("host", s.config.Chroma.Host),
+			log.Int("port", s.config.Chroma.Port))
+	} else {
+		// Fallback to memory implementation if ChromaDB is not configured
+		chromaRepo = repository.NewMemoryChromaRepository()
+		s.logger.Warn("ChromaDB not configured, using memory implementation")
+	}
+	chromaHandler := handler.NewChromaHandler(chromaRepo, s.logger)
 
 	// Register all services
 	userHandler.Register(server)

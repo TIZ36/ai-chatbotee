@@ -3427,7 +3427,7 @@ const file_svr_mcp_proto_rawDesc = "" +
 	"\rExchangeToken\x12$.chatee.svr.mcp.ExchangeTokenRequest\x1a%.chatee.svr.mcp.ExchangeTokenResponse\x12Y\n" +
 	"\fRefreshToken\x12#.chatee.svr.mcp.RefreshTokenRequest\x1a$.chatee.svr.mcp.RefreshTokenResponse\x12Z\n" +
 	"\x11ListMarketServers\x12!.chatee.svr.mcp.ListMarketRequest\x1a\".chatee.svr.mcp.ListMarketResponse\x12V\n" +
-	"\x13InstallMarketServer\x12$.chatee.svr.mcp.InstallMarketRequest\x1a\x19.chatee.svr.mcp.MCPServerB\x19Z\x17chatee-go/proto/svr/mcpb\x06proto3"
+	"\x13InstallMarketServer\x12$.chatee.svr.mcp.InstallMarketRequest\x1a\x19.chatee.svr.mcp.MCPServerB\x17Z\x15chatee-go/gen/svr/mcpb\x06proto3"
 
 var (
 	file_svr_mcp_proto_rawDescOnce sync.Once

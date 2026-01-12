@@ -7,7 +7,7 @@
 package thread
 
 import (
-	common "chatee-go/proto/common"
+	common "chatee-go/gen/common"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -2515,7 +2515,7 @@ const file_im_thread_proto_rawDesc = "" +
 	"\vGetUserFeed\x12$.chatee.im.thread.GetUserFeedRequest\x1a%.chatee.im.thread.GetUserFeedResponse\x12`\n" +
 	"\rGetReplyInbox\x12&.chatee.im.thread.GetReplyInboxRequest\x1a'.chatee.im.thread.GetReplyInboxResponse\x12W\n" +
 	"\n" +
-	"MarkAsRead\x12#.chatee.im.thread.MarkAsReadRequest\x1a$.chatee.im.thread.MarkAsReadResponseB\x1bZ\x19chatee-go/proto/im/threadb\x06proto3"
+	"MarkAsRead\x12#.chatee.im.thread.MarkAsReadRequest\x1a$.chatee.im.thread.MarkAsReadResponseB\x19Z\x17chatee-go/gen/im/threadb\x06proto3"
 
 var (
 	file_im_thread_proto_rawDescOnce sync.Once

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package chatee.dbc;
 
-option go_package = "chatee-go/proto/dbc";
+option go_package = "chatee-go/gen/dbc";
 
 import "common/common.proto";
 

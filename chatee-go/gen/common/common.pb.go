@@ -785,7 +785,7 @@ const file_common_common_proto_rawDesc = "" +
 	"\x05IMAGE\x10\x02\x12\t\n" +
 	"\x05VIDEO\x10\x03\x12\b\n" +
 	"\x04FILE\x10\x04\x12\t\n" +
-	"\x05AUDIO\x10\x05B\x18Z\x16chatee-go/proto/commonb\x06proto3"
+	"\x05AUDIO\x10\x05B\x16Z\x14chatee-go/gen/commonb\x06proto3"
 
 var (
 	file_common_common_proto_rawDescOnce sync.Once

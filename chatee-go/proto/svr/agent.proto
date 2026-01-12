@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package chatee.svr.agent;
 
-option go_package = "chatee-go/proto/svr/agent";
+option go_package = "chatee-go/gen/svr/agent";
 
 import "common/common.proto";
 

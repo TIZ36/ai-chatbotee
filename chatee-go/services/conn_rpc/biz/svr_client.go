@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 
 	"chatee-go/commonlib/log"
-	svruser "chatee-go/gen/svr/user"
+	svruser "chatee-go/gen/svr/user/svr"
 )
 
 // SVRClient wraps the gRPC client to svr_rpc UserService
@@ -28,7 +28,7 @@ func NewSVRClient(logger log.Logger) (*SVRClient, error) {
 		svrAddr = "localhost:9092" // Default SVR RPC address
 	}
 
-	conn, err := grpc.NewClient(
+	conn, err := grpc.Dial(
 		svrAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
@@ -54,12 +54,6 @@ func NewSVRClient(logger log.Logger) (*SVRClient, error) {
 
 // RegisterConnection registers a WebSocket connection with the user actor
 func (c *SVRClient) RegisterConnection(ctx context.Context, userID, connID string) error {
-	// Create a connection adapter that implements actor.Connection
-	connAdapter := &ConnectionAdapter{
-		ID:     connID,
-		UserID: userID,
-	}
-
 	req := &svruser.RegisterConnectionRequest{
 		UserId:       userID,
 		ConnectionId: connID,

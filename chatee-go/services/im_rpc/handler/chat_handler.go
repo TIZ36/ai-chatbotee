@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -15,6 +16,7 @@ import (
 	chatpb "chatee-go/gen/im/chat"
 	"chatee-go/services/im_rpc/biz"
 	"chatee-go/services/im_rpc/biz/chat"
+	"chatee-go/services/im_rpc/biz/cursor"
 	"chatee-go/services/im_rpc/biz/push"
 )
 
@@ -40,16 +42,59 @@ func NewChatHandler(coreService *chat.CoreService, clients *service.Clients, pus
 
 // CreateChat creates a new chat
 func (h *ChatHandler) CreateChat(ctx context.Context, req *chatpb.CreateChatRequest) (*chatpb.CreateChatResponse, error) {
-	// TODO: Implement create chat
 	// Generate chat_key based on chat type
 	chatKey := generateChatKey(req.GetChatType(), req.GetCreatedBy(), req.GetParticipantIds())
 
-	// Create chat metadata via DBC
-	// TODO: Implement full create chat logic
+	// Build participants list (include creator)
+	participants := make([]string, 0, len(req.GetParticipantIds())+1)
+	participants = append(participants, req.GetCreatedBy())
+	participants = append(participants, req.GetParticipantIds()...)
+
+	// Convert settings to JSON
+	settingsJSON := "{}"
+	if req.GetSettings() != nil {
+		settingsData, _ := json.Marshal(req.GetSettings())
+		settingsJSON = string(settingsData)
+	}
+
+	// Determine chat type string
+	chatTypeStr := "private"
+	if req.GetChatType() == chatpb.ChatType_GROUP {
+		chatTypeStr = "group"
+	}
+
+	now := time.Now().Unix()
+
+	// Create chat metadata
+	chatMeta := &dbc.ChatMetadataRow{
+		ChatKey:      chatKey,
+		ChatType:     chatTypeStr,
+		Participants: participants,
+		AiAgents:     req.GetAiAgentIds(),
+		CreatedBy:    req.GetCreatedBy(),
+		CreatedAt:    now,
+		Settings:     settingsJSON,
+		Status:       "active",
+		MsgCount:     0,
+		LastActiveAt: now,
+	}
+
+	// Save to DBC
+	dbcReq := &dbc.SaveChatMetadataRequest{
+		Chat: chatMeta,
+	}
+	_, err := h.clients.HBaseChat.SaveChatMetadata(ctx, dbcReq)
+	if err != nil {
+		h.logger.Error("Failed to create chat", log.Err(err), log.String("chat_key", chatKey))
+		return nil, status.Errorf(codes.Internal, "failed to create chat: %v", err)
+	}
+
+	// Convert to proto Chat
+	chatObj := hdbcMetadataToChat(chatMeta)
 
 	return &chatpb.CreateChatResponse{
 		ChatKey: chatKey,
-		Chat:    &chatpb.Chat{}, // TODO: Build full chat object
+		Chat:    chatObj,
 	}, nil
 }
 
@@ -75,35 +120,323 @@ func (h *ChatHandler) GetChat(ctx context.Context, req *chatpb.GetChatRequest) (
 
 // UpdateChat updates a chat
 func (h *ChatHandler) UpdateChat(ctx context.Context, req *chatpb.UpdateChatRequest) (*chatpb.Chat, error) {
-	// TODO: Implement update chat
-	return nil, status.Errorf(codes.Unimplemented, "UpdateChat not yet implemented")
+	chatKey := req.GetChatKey()
+	if chatKey == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "chat_key is required")
+	}
+
+	// Get existing chat
+	getReq := &chatpb.GetChatRequest{ChatKey: chatKey}
+	existingChat, err := h.GetChat(ctx, getReq)
+	if err != nil {
+		return nil, err
+	}
+
+	// Update fields
+	if req.GetTitle() != "" {
+		// Title is not stored in metadata, but we can add it to settings
+		// For now, we'll skip title update as it's not in the metadata structure
+	}
+	if req.GetSettings() != nil {
+		// Settings will be updated in metadata
+	}
+	if req.GetStatus() != chatpb.ChatStatus_CHAT_STATUS_UNSPECIFIED {
+		// Status will be updated
+	}
+
+	// Convert proto Chat to DBC ChatMetadataRow
+	statusStr := "active"
+	switch req.GetStatus() {
+	case chatpb.ChatStatus_CHAT_MUTED:
+		statusStr = "muted"
+	case chatpb.ChatStatus_CHAT_ARCHIVED:
+		statusStr = "archived"
+	default:
+		// Use existing status if not specified
+		if existingChat.GetStatus() == chatpb.ChatStatus_CHAT_MUTED {
+			statusStr = "muted"
+		} else if existingChat.GetStatus() == chatpb.ChatStatus_CHAT_ARCHIVED {
+			statusStr = "archived"
+		}
+	}
+
+	settingsJSON := existingChat.GetSettings()
+	if req.GetSettings() != nil {
+		settingsData, _ := json.Marshal(req.GetSettings())
+		settingsJSON = string(settingsData)
+	}
+
+	// Get participants from existing chat
+	participants := make([]string, 0, len(existingChat.GetParticipants()))
+	for _, p := range existingChat.GetParticipants() {
+		participants = append(participants, p.GetUserId())
+	}
+
+	// Update chat metadata
+	chatMeta := &dbc.ChatMetadataRow{
+		ChatKey:      chatKey,
+		ChatType:     existingChat.GetChatType().String(),
+		Participants: participants,
+		AiAgents:     existingChat.GetAiAgents(),
+		CreatedBy:    existingChat.GetCreatedBy(),
+		CreatedAt:    existingChat.GetCreatedAt(),
+		Settings:     settingsJSON,
+		Status:       statusStr,
+		MsgCount:     existingChat.GetStats().GetMessageCount(),
+		LastMsgId:    existingChat.GetStats().GetLastMsgId(),
+		LastActiveAt: existingChat.GetStats().GetLastActiveAt(),
+	}
+
+	// Save to DBC
+	dbcReq := &dbc.SaveChatMetadataRequest{
+		Chat: chatMeta,
+	}
+	_, err = h.clients.HBaseChat.SaveChatMetadata(ctx, dbcReq)
+	if err != nil {
+		h.logger.Error("Failed to update chat", log.Err(err), log.String("chat_key", chatKey))
+		return nil, status.Errorf(codes.Internal, "failed to update chat: %v", err)
+	}
+
+	// Return updated chat
+	return hdbcMetadataToChat(chatMeta), nil
 }
 
 // DeleteChat deletes a chat (soft delete)
 func (h *ChatHandler) DeleteChat(ctx context.Context, req *chatpb.DeleteChatRequest) (*chatpb.DeleteChatResponse, error) {
-	// TODO: Implement delete chat
+	chatKey := req.GetChatKey()
+	if chatKey == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "chat_key is required")
+	}
+
+	// Update chat status to archived (soft delete)
+	updateReq := &chatpb.UpdateChatRequest{
+		ChatKey: chatKey,
+		Status:  chatpb.ChatStatus_CHAT_ARCHIVED,
+	}
+	_, err := h.UpdateChat(ctx, updateReq)
+	if err != nil {
+		return nil, err
+	}
+
 	return &chatpb.DeleteChatResponse{Success: true}, nil
 }
 
 // ListChats lists user's chats
 func (h *ChatHandler) ListChats(ctx context.Context, req *chatpb.ListChatsRequest) (*chatpb.ListChatsResponse, error) {
-	// TODO: Implement list chats
+	userID := req.GetUserId()
+	if userID == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "user_id is required")
+	}
+
+	// Parse cursor to get offset
+	offset, _, err := cursor.Decode(req.GetCursor())
+	if err != nil {
+		offset = 0
+	}
+	limit := int64(req.GetLimit())
+	if limit <= 0 {
+		limit = 20 // Default limit
+	}
+
+	// Get user's chat inbox to find all chats
+	// We'll iterate through inbox entries to find unique chat keys
+	// Note: This is not the most efficient approach, but HBase doesn't support direct queries by participant
+	// In production, you might want to maintain a separate index table
+	
+	// For now, we'll use a simplified approach: get chats from inbox
+	// This will only return chats that have messages
+	dbcReq := &dbc.GetUserChatInboxRequest{
+		UserId: userID,
+		ChatKey: "", // Empty to get all chats
+		Limit:   limit + 1, // Fetch one extra to check has_more
+		Offset:  offset,
+	}
+	dbcResp, err := h.clients.HBaseChat.GetUserChatInbox(ctx, dbcReq)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get chats: %v", err)
+	}
+
+	// Extract unique chat keys
+	chatKeys := make(map[string]bool)
+	for _, inbox := range dbcResp.GetInboxes() {
+		chatKeys[inbox.GetChatKey()] = true
+	}
+
+	// Fetch chat metadata for each chat
+	chats := make([]*chatpb.ChatSummary, 0, len(chatKeys))
+	for chatKey := range chatKeys {
+		getReq := &chatpb.GetChatRequest{ChatKey: chatKey}
+		chat, err := h.GetChat(ctx, getReq)
+		if err != nil {
+			// Skip chats that can't be fetched
+			continue
+		}
+
+		// Filter by chat type if specified
+		if req.GetChatType() != chatpb.ChatType_CHAT_TYPE_UNSPECIFIED {
+			if chat.GetChatType() != req.GetChatType() {
+				continue
+			}
+		}
+
+		// Filter by status if specified
+		if req.GetStatus() != chatpb.ChatStatus_CHAT_STATUS_UNSPECIFIED {
+			if chat.GetStatus() != req.GetStatus() {
+				continue
+			}
+		}
+
+		// Convert to ChatSummary
+		summary := &chatpb.ChatSummary{
+			ChatKey:     chat.GetChatKey(),
+			ChatType:    chat.GetChatType(),
+			Title:       chat.GetTitle(),
+			LastMsgId:   chat.GetStats().GetLastMsgId(),
+			LastActiveAt: chat.GetStats().GetLastActiveAt(),
+			UnreadCount: 0, // TODO: Calculate unread count
+		}
+		chats = append(chats, summary)
+	}
+
+	// Sort by last active time (most recent first)
+	sort.Slice(chats, func(i, j int) bool {
+		return chats[i].GetLastActiveAt() > chats[j].GetLastActiveAt()
+	})
+
+	hasMore := int64(len(dbcResp.GetInboxes())) > limit
+	nextCursor := cursor.NextCursor(offset, limit, hasMore)
+
 	return &chatpb.ListChatsResponse{
-		Chats:      []*chatpb.ChatSummary{},
-		HasMore:    false,
-		NextCursor: "",
+		Chats:      chats,
+		HasMore:    hasMore,
+		NextCursor: nextCursor,
 	}, nil
 }
 
 // AddParticipant adds a participant to a chat
 func (h *ChatHandler) AddParticipant(ctx context.Context, req *chatpb.AddParticipantRequest) (*chatpb.AddParticipantResponse, error) {
-	// TODO: Implement add participant
-	return nil, status.Errorf(codes.Unimplemented, "AddParticipant not yet implemented")
+	chatKey := req.GetChatKey()
+	userID := req.GetUserId()
+	if chatKey == "" || userID == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "chat_key and user_id are required")
+	}
+
+	// Get existing chat
+	getReq := &chatpb.GetChatRequest{ChatKey: chatKey}
+	chat, err := h.GetChat(ctx, getReq)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if user is already a participant
+	for _, p := range chat.GetParticipants() {
+		if p.GetUserId() == userID {
+			return &chatpb.AddParticipantResponse{Success: true}, nil
+		}
+	}
+
+	// Add user to participants
+	participants := make([]string, 0, len(chat.GetParticipants())+1)
+	for _, p := range chat.GetParticipants() {
+		participants = append(participants, p.GetUserId())
+	}
+	participants = append(participants, userID)
+
+	// Update chat metadata
+	chatMeta := &dbc.ChatMetadataRow{
+		ChatKey:      chatKey,
+		ChatType:     chat.GetChatType().String(),
+		Participants: participants,
+		AiAgents:     chat.GetAiAgents(),
+		CreatedBy:    chat.GetCreatedBy(),
+		CreatedAt:    chat.GetCreatedAt(),
+		Settings:     "", // Will be preserved from existing chat
+		Status:       chat.GetStatus().String(),
+		MsgCount:     chat.GetStats().GetMessageCount(),
+		LastMsgId:    chat.GetStats().GetLastMsgId(),
+		LastActiveAt: chat.GetStats().GetLastActiveAt(),
+	}
+
+	// Get existing settings
+	if chat.GetSettings() != nil {
+		settingsData, _ := json.Marshal(chat.GetSettings())
+		chatMeta.Settings = string(settingsData)
+	}
+
+	// Save to DBC
+	dbcReq := &dbc.SaveChatMetadataRequest{
+		Chat: chatMeta,
+	}
+	_, err = h.clients.HBaseChat.SaveChatMetadata(ctx, dbcReq)
+	if err != nil {
+		h.logger.Error("Failed to add participant", log.Err(err), log.String("chat_key", chatKey), log.String("user_id", userID))
+		return nil, status.Errorf(codes.Internal, "failed to add participant: %v", err)
+	}
+
+	return &chatpb.AddParticipantResponse{Success: true}, nil
 }
 
 // RemoveParticipant removes a participant from a chat
 func (h *ChatHandler) RemoveParticipant(ctx context.Context, req *chatpb.RemoveParticipantRequest) (*chatpb.RemoveParticipantResponse, error) {
-	// TODO: Implement remove participant
+	chatKey := req.GetChatKey()
+	userID := req.GetUserId()
+	if chatKey == "" || userID == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "chat_key and user_id are required")
+	}
+
+	// Get existing chat
+	getReq := &chatpb.GetChatRequest{ChatKey: chatKey}
+	chat, err := h.GetChat(ctx, getReq)
+	if err != nil {
+		return nil, err
+	}
+
+	// Remove user from participants
+	participants := make([]string, 0, len(chat.GetParticipants()))
+	found := false
+	for _, p := range chat.GetParticipants() {
+		if p.GetUserId() != userID {
+			participants = append(participants, p.GetUserId())
+		} else {
+			found = true
+		}
+	}
+
+	if !found {
+		return &chatpb.RemoveParticipantResponse{Success: true}, nil // Already removed
+	}
+
+	// Update chat metadata
+	chatMeta := &dbc.ChatMetadataRow{
+		ChatKey:      chatKey,
+		ChatType:     chat.GetChatType().String(),
+		Participants: participants,
+		AiAgents:     chat.GetAiAgents(),
+		CreatedBy:    chat.GetCreatedBy(),
+		CreatedAt:    chat.GetCreatedAt(),
+		Settings:     "", // Will be preserved from existing chat
+		Status:       chat.GetStatus().String(),
+		MsgCount:     chat.GetStats().GetMessageCount(),
+		LastMsgId:    chat.GetStats().GetLastMsgId(),
+		LastActiveAt: chat.GetStats().GetLastActiveAt(),
+	}
+
+	// Get existing settings
+	if chat.GetSettings() != nil {
+		settingsData, _ := json.Marshal(chat.GetSettings())
+		chatMeta.Settings = string(settingsData)
+	}
+
+	// Save to DBC
+	dbcReq := &dbc.SaveChatMetadataRequest{
+		Chat: chatMeta,
+	}
+	_, err = h.clients.HBaseChat.SaveChatMetadata(ctx, dbcReq)
+	if err != nil {
+		h.logger.Error("Failed to remove participant", log.Err(err), log.String("chat_key", chatKey), log.String("user_id", userID))
+		return nil, status.Errorf(codes.Internal, "failed to remove participant: %v", err)
+	}
+
 	return &chatpb.RemoveParticipantResponse{Success: true}, nil
 }
 
@@ -147,7 +480,7 @@ func (h *ChatHandler) SendMessage(ctx context.Context, req *chatpb.SendMessageRe
 	// Call core service
 	resp, err := h.coreService.SendChatMessage(ctx, internalReq)
 	if err != nil {
-		h.logger.Error("Failed to send message", "error", err)
+		h.logger.Error("Failed to send message", log.Err(err))
 		return nil, status.Errorf(codes.Internal, "failed to send message: %v", err)
 	}
 
@@ -215,7 +548,31 @@ func (h *ChatHandler) GetMessages(ctx context.Context, req *chatpb.GetMessagesRe
 
 // DeleteMessage deletes a message (soft delete)
 func (h *ChatHandler) DeleteMessage(ctx context.Context, req *chatpb.DeleteMessageRequest) (*chatpb.DeleteMessageResponse, error) {
-	// TODO: Implement delete message
+	msgID := req.GetMsgId()
+	chatKey := req.GetChatKey()
+	if msgID == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "msg_id is required")
+	}
+	if chatKey == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "chat_key is required")
+	}
+
+	// Get the message from inbox (we need user_id to query inbox)
+	// Since we don't have user_id in the request, we'll need to mark it as deleted in a different way
+	// For now, we'll use a flag in Redis to mark messages as deleted
+	// In a full implementation, we might want to update the inbox row's flags field
+	
+	deleteKey := fmt.Sprintf("chat_msg_deleted:%s:%s", chatKey, msgID)
+	dbcCacheReq := &dbc.SetRequest{
+		Key:   deleteKey,
+		Value: "1",
+	}
+	_, err := h.clients.Cache.Set(ctx, dbcCacheReq)
+	if err != nil {
+		h.logger.Error("Failed to delete message", log.Err(err), log.String("msg_id", msgID))
+		return nil, status.Errorf(codes.Internal, "failed to delete message: %v", err)
+	}
+
 	return &chatpb.DeleteMessageResponse{Success: true}, nil
 }
 
@@ -430,9 +787,20 @@ func hdbcInboxToChatMessage(inbox *dbc.ChatInboxRow) *chatpb.ChatMessage {
 		Timestamp:   inbox.GetTimestamp(),
 	}
 
+	// Extract channel_id from flags if present
+	channelID := ""
+	if inbox.GetFlags() != "" {
+		var flags map[string]interface{}
+		if err := json.Unmarshal([]byte(inbox.GetFlags()), &flags); err == nil {
+			if chID, ok := flags["channel_id"].(string); ok {
+				channelID = chID
+			}
+		}
+	}
+
 	return &chatpb.ChatMessage{
 		Base:      baseMsg,
 		ChatKey:   inbox.GetChatKey(),
-		ChannelId: "", // TODO: Get from flags or metadata
+		ChannelId: channelID,
 	}
 }

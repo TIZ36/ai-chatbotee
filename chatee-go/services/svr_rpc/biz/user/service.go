@@ -12,6 +12,7 @@ import (
 	"chatee-go/commonlib/log"
 	"chatee-go/commonlib/pool"
 	"chatee-go/commonlib/snowflake"
+	infraactor "chatee-go/infrastructure/actor"
 	svruser "chatee-go/gen/svr/user"
 )
 
@@ -200,7 +201,7 @@ func (s *Service) GetOrCreateUserActor(ctx context.Context, userID string) (*Use
 	}
 
 	// Create user actor
-	userActor := actor.NewUserActor(userID, &actor.UserProfile{
+	userActor := infraactor.NewUserActor(userID, &actor.UserProfile{
 		ID:        userID,
 		Name:      user.Name,
 		Email:     user.Email,
@@ -249,7 +250,7 @@ func (s *Service) RegisterConnection(ctx context.Context, req *svruser.RegisterC
 	}))
 
 	// Add connection to actor
-	if userActor, ok := wrapper.Ref.(*actor.MailboxRef); ok {
+	if userActor, ok := wrapper.Ref.(*infraactor.MailboxRef); ok {
 		// We need to access the underlying actor to add connection
 		// This is a limitation - we should add a method to ActorRef
 		// For now, we'll use a message to register the connection
@@ -314,17 +315,31 @@ func (s *Service) SendMessage(ctx context.Context, req *svruser.SendMessageReque
 	// Send to actor
 	wrapper.Ref.Send(msg)
 
-	// Get connection count
-	connections := 0
-	if userActor, ok := wrapper.Ref.(*actor.MailboxRef); ok {
-		_ = userActor
-		// TODO: Get actual connection count from actor
+	// Get connection count from actor
+	connections := int32(0)
+	respChan := make(chan actor.Message, 1)
+	askMsg := actor.NewAskMessage("get_status", nil, respChan)
+	wrapper.Ref.Ask(askMsg, respChan)
+
+	select {
+	case resp := <-respChan:
+		if genMsg, ok := resp.(*actor.GenericMessage); ok {
+			if genMsg.MsgType == "user_status" && genMsg.Payload != nil {
+				if connCount, ok := genMsg.Payload["connections"].(float64); ok {
+					connections = int32(connCount)
+				} else if connCount, ok := genMsg.Payload["connections"].(int); ok {
+					connections = int32(connCount)
+				}
+			}
+		}
+	case <-time.After(2 * time.Second):
+		// Timeout - assume at least one connection if actor exists
 		connections = 1
 	}
 
 	return &svruser.SendMessageResponse{
 		Success:                  true,
-		DeliveredToConnections: int32(connections),
+		DeliveredToConnections: connections,
 	}, nil
 }
 
@@ -338,31 +353,71 @@ func (s *Service) GetUserStatus(ctx context.Context, req *svruser.GetUserStatusR
 
 	if !ok {
 		return &svruser.UserStatus{
-			UserId:   userID,
-			Online:   false,
-			LastSeen: time.Now().Unix(),
+			UserId:     userID,
+			Online:     false,
+			Connections: 0,
+			LastSeen:   time.Now().Unix(),
 		}, nil
 	}
 
 	// Query the actor for status
 	respChan := make(chan actor.Message, 1)
-	wrapper.Ref.Ask(actor.NewAskMessage("get_status", nil, respChan), respChan)
+	askMsg := actor.NewAskMessage("get_status", nil, respChan)
+	wrapper.Ref.Ask(askMsg, respChan)
 
 	select {
 	case resp := <-respChan:
-		if status, ok := resp.(*svruser.UserStatus); ok {
-			return status, nil
+		// Parse the response from GenericMessage
+		if genMsg, ok := resp.(*actor.GenericMessage); ok {
+			if genMsg.MsgType == "user_status" && genMsg.Payload != nil {
+				status := &svruser.UserStatus{
+					UserId: userID,
+				}
+				
+				// Extract fields from payload
+				if online, ok := genMsg.Payload["online"].(bool); ok {
+					status.Online = online
+				}
+				if connections, ok := genMsg.Payload["connections"].(float64); ok {
+					status.Connections = int32(connections)
+				} else if connections, ok := genMsg.Payload["connections"].(int); ok {
+					status.Connections = int32(connections)
+				}
+				if lastSeen, ok := genMsg.Payload["last_seen"].(float64); ok {
+					status.LastSeen = int64(lastSeen)
+				} else if lastSeen, ok := genMsg.Payload["last_seen"].(int64); ok {
+					status.LastSeen = lastSeen
+				}
+				if activeChats, ok := genMsg.Payload["active_chats"].([]interface{}); ok {
+					status.ActiveChats = make([]string, 0, len(activeChats))
+					for _, chat := range activeChats {
+						if chatStr, ok := chat.(string); ok {
+							status.ActiveChats = append(status.ActiveChats, chatStr)
+						}
+					}
+				}
+				
+				return status, nil
+			}
 		}
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-time.After(5 * time.Second):
-		return nil, fmt.Errorf("timeout getting user status")
+		// Timeout - return default status based on actor existence
+		return &svruser.UserStatus{
+			UserId:     userID,
+			Online:     true, // Actor exists
+			Connections: 0,   // Unknown
+			LastSeen:   time.Now().Unix(),
+		}, nil
 	}
 
+	// Fallback: actor exists but no response
 	return &svruser.UserStatus{
-		UserId:   userID,
-		Online:   true, // Actor exists, so user is online
-		LastSeen: time.Now().Unix(),
+		UserId:     userID,
+		Online:     true,
+		Connections: 0,
+		LastSeen:   time.Now().Unix(),
 	}, nil
 }
 

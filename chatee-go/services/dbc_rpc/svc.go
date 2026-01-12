@@ -58,6 +58,12 @@ func NewServiceContext(cfg *config.Config) (*ServiceContext, error) {
 			DB:       cfg.Redis.DB,
 			PoolSize: cfg.Redis.PoolSize,
 		},
+		HBase: &pool.HBaseConfig{
+			ZookeeperQuorum: cfg.HBase.ZookeeperQuorum,
+			ZookeeperPort:   cfg.HBase.ZookeeperPort,
+			PoolSize:        10, // Default pool size
+			Timeout:         30, // Default timeout in seconds
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -78,7 +84,7 @@ func NewServiceContext(cfg *config.Config) (*ServiceContext, error) {
 	repos := repository.NewRepositories(gormDB, poolMgr.Redis())
 
 	// Initialize service
-	svc := service.NewDBCService(repos, poolMgr, logger)
+	svc := service.NewDBCService(repos, poolMgr, cfg, logger)
 
 	return &ServiceContext{
 		Config:      cfg,

@@ -1,558 +1,267 @@
 package mcp
-package mcp
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-}	return c.transport.IsConnected()func (c *Client) IsConnected() bool {// IsConnected returns true if connected.}	return c.tools	defer c.mu.RUnlock()	c.mu.RLock()func (c *Client) GetCachedTools() []Tool {// GetCachedTools returns cached tools.}	return c.serverInfo	defer c.mu.RUnlock()	c.mu.RLock()func (c *Client) GetServerInfo() *ServerInfo {// GetServerInfo returns the server info.// =============================================================================// Utility Methods// =============================================================================}	return result.Messages, nil	}		return nil, err	if err := json.Unmarshal(resp.Result, &result); err != nil {	}		Messages []map[string]any `json:"messages"`	var result struct {	}		return nil, err	if err != nil {	})		"arguments": arguments,		"name":      name,	resp, err := c.sendRequest(ctx, "prompts/get", map[string]any{func (c *Client) GetPrompt(ctx context.Context, name string, arguments map[string]string) ([]map[string]any, error) {// GetPrompt gets a prompt by name.}	return result.Prompts, nil	}		return nil, err	if err := json.Unmarshal(resp.Result, &result); err != nil {	}		Prompts []Prompt `json:"prompts"`	var result struct {	}		return nil, err	if err != nil {	resp, err := c.sendRequest(ctx, "prompts/list", nil)func (c *Client) ListPrompts(ctx context.Context) ([]Prompt, error) {// ListPrompts lists available prompts.// =============================================================================// Prompt Operations// =============================================================================}	return result.Contents, nil	}		return nil, err	if err := json.Unmarshal(resp.Result, &result); err != nil {	}		Contents []ToolContent `json:"contents"`	var result struct {	}		return nil, err	if err != nil {	})		"uri": uri,	resp, err := c.sendRequest(ctx, "resources/read", map[string]any{func (c *Client) ReadResource(ctx context.Context, uri string) ([]ToolContent, error) {// ReadResource reads a resource by URI.}	return result.Resources, nil	}		return nil, err	if err := json.Unmarshal(resp.Result, &result); err != nil {	}		Resources []Resource `json:"resources"`	var result struct {	}		return nil, err	if err != nil {	resp, err := c.sendRequest(ctx, "resources/list", nil)func (c *Client) ListResources(ctx context.Context) ([]Resource, error) {// ListResources lists available resources.// =============================================================================// Resource Operations// =============================================================================}	return &result, nil	}		return nil, err	if err := json.Unmarshal(resp.Result, &result); err != nil {	var result ToolResult	}		return nil, err	if err != nil {	})		"arguments": arguments,		"name":      name,	resp, err := c.sendRequest(ctx, "tools/call", map[string]any{func (c *Client) CallTool(ctx context.Context, name string, arguments map[string]any) (*ToolResult, error) {// CallTool calls a tool with arguments.}	return result.Tools, nil	}		return nil, err	if err := json.Unmarshal(resp.Result, &result); err != nil {	}		Tools []Tool `json:"tools"`	var result struct {	}		return nil, err	if err != nil {	resp, err := c.sendRequest(ctx, "tools/list", nil)func (c *Client) ListTools(ctx context.Context) ([]Tool, error) {// ListTools lists available tools.// =============================================================================// Tool Operations// =============================================================================}	return resp, nil	}		return nil, resp.Error	if resp.Error != nil {	}		return nil, err	if err != nil {	resp, err := c.transport.Send(ctx, request)	}		Params:  params,		Method:  method,		ID:      id,		JSONRPC: "2.0",	request := &JSONRPCRequest{	id := c.requestID.Add(1)func (c *Client) sendRequest(ctx context.Context, method string, params any) (*JSONRPCResponse, error) {// sendRequest sends a JSON-RPC request.}	return c.transport.Close()func (c *Client) Close() error {// Close closes the client.}	return &serverInfo, nil	}		}			c.mu.Unlock()			c.tools = tools			c.mu.Lock()		if tools, err := c.ListTools(ctx); err == nil {	if serverInfo.Capabilities.Tools != nil {	// Load available tools	}		// Notification failures are not critical	if err != nil {	_, err = c.sendRequest(ctx, "notifications/initialized", nil)	// Send initialized notification	c.mu.Unlock()	c.serverInfo = &serverInfo	c.mu.Lock()	}		return nil, err	if err := json.Unmarshal(resp.Result, &serverInfo); err != nil {	var serverInfo ServerInfo	}		return nil, err	if err != nil {	})		"clientInfo":      clientInfo,		"capabilities":    map[string]any{},		"protocolVersion": "2024-11-05",	resp, err := c.sendRequest(ctx, "initialize", map[string]any{	// Send initialize request	}		return nil, err	if err := c.transport.Connect(ctx); err != nil {func (c *Client) Connect(ctx context.Context, clientInfo map[string]string) (*ServerInfo, error) {// Connect connects and initializes the client.}	}		transport: transport,	return &Client{func NewClient(transport Transport) *Client {// NewClient creates a new MCP client.}	Transport Transporttype ClientConfig struct {// ClientConfig configures the MCP client.}	requestID  atomic.Int64	mu         sync.RWMutex	prompts    []Prompt	resources  []Resource	tools      []Tool	serverInfo *ServerInfo	transport  Transporttype Client struct {// Client is an MCP client.// =============================================================================// MCP Client// =============================================================================}	return ch, nil	}()		}			}				}					ch <- &response				if err := json.Unmarshal([]byte(data), &response); err == nil {				var response JSONRPCResponse				data := line[6:]			if len(line) > 6 && line[:6] == "data: " {			// Parse SSE format			}				return				}					}						Error: &JSONRPCError{Code: -1, Message: err.Error()},					ch <- &JSONRPCResponse{					// Send error response				if err != io.EOF {			if err != nil {			line, err := reader.ReadString('\n')			}			default:				return			case <-ctx.Done():			select {		for {		reader := bufio.NewReader(resp.Body)		defer resp.Body.Close()		defer close(ch)	go func() {	ch := make(chan *JSONRPCResponse, 100)	}		return nil, fmt.Errorf("HTTP error %d: %s", resp.StatusCode, string(body))		resp.Body.Close()		body, _ := io.ReadAll(resp.Body)	if resp.StatusCode != http.StatusOK {	}		return nil, err	if err != nil {	resp, err := t.httpClient.Do(req)	}		req.Header.Set(k, v)	for k, v := range t.headers {	req.Header.Set("Accept", "text/event-stream")	req.Header.Set("Content-Type", "application/json")	}		return nil, err	if err != nil {	req, err := http.NewRequestWithContext(ctx, "POST", t.baseURL, bytes.NewReader(body))	}		return nil, err	if err != nil {	body, err := json.Marshal(request)func (t *HTTPTransport) SendWithSSE(ctx context.Context, request *JSONRPCRequest) (<-chan *JSONRPCResponse, error) {// SendWithSSE sends a request and receives SSE stream.}	return t.connected.Load()func (t *HTTPTransport) IsConnected() bool {// IsConnected returns the connection status.}	return &response, nil	}		return nil, err	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {	var response JSONRPCResponse	}		return nil, fmt.Errorf("HTTP error %d: %s", resp.StatusCode, string(body))		body, _ := io.ReadAll(resp.Body)	if resp.StatusCode != http.StatusOK {	defer resp.Body.Close()	}		return nil, err	if err != nil {	resp, err := t.httpClient.Do(req)	}		req.Header.Set(k, v)	for k, v := range t.headers {	req.Header.Set("Content-Type", "application/json")	}		return nil, err	if err != nil {	req, err := http.NewRequestWithContext(ctx, "POST", t.baseURL, bytes.NewReader(body))	}		return nil, err	if err != nil {	body, err := json.Marshal(request)func (t *HTTPTransport) Send(ctx context.Context, request *JSONRPCRequest) (*JSONRPCResponse, error) {// Send sends a JSON-RPC request over HTTP.}	return nil	t.connected.Store(false)func (t *HTTPTransport) Close() error {// Close closes the transport.}	return nil	t.connected.Store(true)	defer resp.Body.Close()	}		return err	if err != nil {	resp, err := t.httpClient.Do(req)	}		req.Header.Set(k, v)	for k, v := range t.headers {	}		return err	if err != nil {	req, err := http.NewRequestWithContext(ctx, "GET", t.baseURL, nil)	// For HTTP, we just validate the endpoint is reachablefunc (t *HTTPTransport) Connect(ctx context.Context) error {// Connect establishes the HTTP connection (validates endpoint).}	}		headers: config.Headers,		},			Timeout: timeout,		httpClient: &http.Client{		baseURL: config.BaseURL,	return &HTTPTransport{	}		timeout = 30 * time.Second	if timeout == 0 {	timeout := config.Timeoutfunc NewHTTPTransport(config HTTPTransportConfig) *HTTPTransport {// NewHTTPTransport creates a new HTTP transport.}	EnableSSE   bool	Timeout     time.Duration	Headers     map[string]string	BaseURL     stringtype HTTPTransportConfig struct {// HTTPTransportConfig configures the HTTP transport.}	mu         sync.Mutex	connected  atomic.Bool	headers    map[string]string	httpClient *http.Client	baseURL    stringtype HTTPTransport struct {// HTTPTransport implements Transport over HTTP with SSE for streaming.// =============================================================================// HTTP/SSE Transport// =============================================================================}	IsConnected() bool	// IsConnected returns true if connected.		Send(ctx context.Context, request *JSONRPCRequest) (*JSONRPCResponse, error)	// Send sends a request and returns the response.		Close() error	// Close closes the connection.		Connect(ctx context.Context) error	// Connect establishes the connection.type Transport interface {// Transport defines the interface for MCP transports.// =============================================================================// Transport Interfaces// =============================================================================}	Required    bool   `json:"required,omitempty"`	Description string `json:"description,omitempty"`	Name        string `json:"name"`type PromptArgument struct {// PromptArgument describes a prompt argument.}	Arguments   []PromptArgument `json:"arguments,omitempty"`	Description string           `json:"description,omitempty"`	Name        string           `json:"name"`type Prompt struct {// Prompt represents an MCP prompt.}	MimeType    string `json:"mimeType,omitempty"`	Description string `json:"description,omitempty"`	Name        string `json:"name"`	URI         string `json:"uri"`type Resource struct {// Resource represents an MCP resource.}	URI      string `json:"uri,omitempty"`      // For resource type	MimeType string `json:"mimeType,omitempty"`	Data     string `json:"data,omitempty"`     // Base64 for images	Text     string `json:"text,omitempty"`	Type     string `json:"type"` // text, image, resourcetype ToolContent struct {// ToolContent represents content in a tool result.}	IsError bool          `json:"isError,omitempty"`	Content []ToolContent `json:"content"`type ToolResult struct {// ToolResult represents the result of a tool call.}	InputSchema json.RawMessage `json:"inputSchema"`	Description string          `json:"description,omitempty"`	Name        string          `json:"name"`type Tool struct {// Tool represents an MCP tool.}	ListChanged bool `json:"listChanged,omitempty"`type PromptsCapability struct {// PromptsCapability defines prompts support.}	ListChanged bool `json:"listChanged,omitempty"`	Subscribe   bool `json:"subscribe,omitempty"`type ResourcesCapability struct {// ResourcesCapability defines resources support.}	ListChanged bool `json:"listChanged,omitempty"`type ToolsCapability struct {// ToolsCapability defines tools support.}	Prompts   *PromptsCapability   `json:"prompts,omitempty"`	Resources *ResourcesCapability `json:"resources,omitempty"`	Tools     *ToolsCapability     `json:"tools,omitempty"`type ServerCapabilities struct {// ServerCapabilities defines what the server supports.}	Capabilities ServerCapabilities `json:"capabilities"`	Version      string            `json:"version"`	Name         string            `json:"name"`type ServerInfo struct {// ServerInfo contains MCP server information.// =============================================================================// MCP Protocol Types// =============================================================================}	return fmt.Sprintf("JSON-RPC error %d: %s", e.Code, e.Message)func (e *JSONRPCError) Error() string {}	Data    any    `json:"data,omitempty"`	Message string `json:"message"`	Code    int    `json:"code"`type JSONRPCError struct {// JSONRPCError represents a JSON-RPC 2.0 error.}	Error   *JSONRPCError   `json:"error,omitempty"`	Result  json.RawMessage `json:"result,omitempty"`	ID      any             `json:"id,omitempty"`	JSONRPC string          `json:"jsonrpc"`type JSONRPCResponse struct {// JSONRPCResponse represents a JSON-RPC 2.0 response.}	Params  any    `json:"params,omitempty"`	Method  string `json:"method"`	ID      any    `json:"id,omitempty"`	JSONRPC string `json:"jsonrpc"`type JSONRPCRequest struct {// JSONRPCRequest represents a JSON-RPC 2.0 request.// =============================================================================// JSON-RPC 2.0 Types// =============================================================================)	"time"	"sync/atomic"	"sync"	"net/http"	"io"	"fmt"
+	"sync"
+	"sync/atomic"
+)
+
+// =============================================================================
+// MCP Client
+// =============================================================================
+
+// Client is an MCP client that communicates with MCP servers.
+// Connection process:
+// 1. Connect: Establish transport connection (stdio or HTTP)
+// 2. Initialize: Send initialize request with client info and capabilities
+// 3. Receive server info and capabilities
+// 4. Send initialized notification
+// 5. Load available tools/resources/prompts
+type Client struct {
+	transport  Transport
+	serverInfo *ServerInfo
+	tools      []Tool
+	resources  []Resource
+	prompts    []Prompt
+	mu         sync.RWMutex
+	requestID  atomic.Int64
+}
+
+// ClientConfig configures the MCP client.
+type ClientConfig struct {
+	Transport Transport
+}
+
+// NewClient creates a new MCP client.
+func NewClient(transport Transport) *Client {
+	return &Client{
+		transport: transport,
+	}
+}
+
+// Connect connects and initializes the client.
+// Connection flow:
+// 1. Establish transport connection (stdio starts process, HTTP validates endpoint)
+// 2. Send initialize request with:
+//   - protocolVersion: "2024-11-05"
+//   - capabilities: client capabilities
+//   - clientInfo: client name and version
+//
+// 3. Receive initialize response with server info
+// 4. Send initialized notification
+// 5. Load available tools if server supports them
+func (c *Client) Connect(ctx context.Context, clientInfo map[string]string) (*ServerInfo, error) {
+	// Step 1: Establish transport connection
+	if err := c.transport.Connect(ctx); err != nil {
+		return nil, err
+	}
+
+	// Step 2: Send initialize request
+	resp, err := c.sendRequest(ctx, "initialize", map[string]any{
+		"protocolVersion": "2024-11-05",
+		"capabilities":    map[string]any{},
+		"clientInfo":      clientInfo,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 3: Parse server info
+	var serverInfo ServerInfo
+	if err := json.Unmarshal(resp.Result, &serverInfo); err != nil {
+		return nil, err
+	}
+
+	c.mu.Lock()
+	c.serverInfo = &serverInfo
+	c.mu.Unlock()
+
+	// Step 4: Send initialized notification
+	// Notification failures are not critical
+	_, err = c.sendRequest(ctx, "notifications/initialized", nil)
+	if err != nil {
+		// Log but don't fail
+	}
+
+	// Step 5: Load available tools if server supports them
+	if serverInfo.Capabilities.Tools != nil {
+		if tools, err := c.ListTools(ctx); err == nil {
+			c.mu.Lock()
+			c.tools = tools
+			c.mu.Unlock()
+		}
+	}
+
+	return &serverInfo, nil
+}
+
+// Close closes the client.
+func (c *Client) Close() error {
+	return c.transport.Close()
+}
+
+// sendRequest sends a JSON-RPC request.
+func (c *Client) sendRequest(ctx context.Context, method string, params any) (*JSONRPCResponse, error) {
+	id := c.requestID.Add(1)
+	request := &JSONRPCRequest{
+		JSONRPC: "2.0",
+		ID:      id,
+		Method:  method,
+		Params:  params,
+	}
+
+	resp, err := c.transport.Send(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.Error != nil {
+		return nil, resp.Error
+	}
+
+	return resp, nil
+}
+
+// =============================================================================
+// Tool Operations
+// =============================================================================
+
+// ListTools lists available tools.
+func (c *Client) ListTools(ctx context.Context) ([]Tool, error) {
+	resp, err := c.sendRequest(ctx, "tools/list", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Tools []Tool `json:"tools"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return nil, err
+	}
+
+	return result.Tools, nil
+}
+
+// CallTool calls a tool with arguments.
+func (c *Client) CallTool(ctx context.Context, name string, arguments map[string]any) (*ToolResult, error) {
+	resp, err := c.sendRequest(ctx, "tools/call", map[string]any{
+		"name":      name,
+		"arguments": arguments,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var result ToolResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+// =============================================================================
+// Resource Operations
+// =============================================================================
+
+// ListResources lists available resources.
+func (c *Client) ListResources(ctx context.Context) ([]Resource, error) {
+	resp, err := c.sendRequest(ctx, "resources/list", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Resources []Resource `json:"resources"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return nil, err
+	}
+
+	return result.Resources, nil
+}
+
+// ReadResource reads a resource by URI.
+func (c *Client) ReadResource(ctx context.Context, uri string) ([]ToolContent, error) {
+	resp, err := c.sendRequest(ctx, "resources/read", map[string]any{
+		"uri": uri,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Contents []ToolContent `json:"contents"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return nil, err
+	}
+
+	return result.Contents, nil
+}
+
+// =============================================================================
+// Prompt Operations
+// =============================================================================
+
+// ListPrompts lists available prompts.
+func (c *Client) ListPrompts(ctx context.Context) ([]Prompt, error) {
+	resp, err := c.sendRequest(ctx, "prompts/list", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Prompts []Prompt `json:"prompts"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return nil, err
+	}
+
+	return result.Prompts, nil
+}
+
+// GetPrompt gets a prompt by name.
+func (c *Client) GetPrompt(ctx context.Context, name string, arguments map[string]string) ([]map[string]any, error) {
+	resp, err := c.sendRequest(ctx, "prompts/get", map[string]any{
+		"name":      name,
+		"arguments": arguments,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Messages []map[string]any `json:"messages"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return nil, err
+	}
+
+	return result.Messages, nil
+}
+
+// =============================================================================
+// Utility Methods
+// =============================================================================
+
+// GetServerInfo returns the server info.
+func (c *Client) GetServerInfo() *ServerInfo {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.serverInfo
+}
+
+// GetCachedTools returns cached tools.
+func (c *Client) GetCachedTools() []Tool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.tools
+}
+
+// IsConnected returns true if connected.
+func (c *Client) IsConnected() bool {
+	return c.transport.IsConnected()
+}

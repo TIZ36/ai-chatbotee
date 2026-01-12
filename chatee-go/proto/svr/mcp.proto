@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package chatee.svr.mcp;
 
-option go_package = "chatee-go/proto/svr/mcp";
+option go_package = "chatee-go/gen/svr/mcp";
 
 // =============================================================================
 // MCP Service - Model Context Protocol Implementation

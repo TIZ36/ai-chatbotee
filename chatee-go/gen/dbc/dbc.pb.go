@@ -7,7 +7,7 @@
 package dbc
 
 import (
-	_ "chatee-go/proto/common"
+	_ "chatee-go/gen/common"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -10571,7 +10571,7 @@ const file_dbc_dbc_proto_rawDesc = "" +
 	"\x05Query\x12\x18.chatee.dbc.QueryRequest\x1a\x19.chatee.dbc.QueryResponse\x12K\n" +
 	"\n" +
 	"QueryByIDs\x12\x1d.chatee.dbc.QueryByIDsRequest\x1a\x1e.chatee.dbc.QueryByIDsResponse\x12T\n" +
-	"\rGetEmbeddings\x12 .chatee.dbc.GetEmbeddingsRequest\x1a!.chatee.dbc.GetEmbeddingsResponseB\x15Z\x13chatee-go/proto/dbcb\x06proto3"
+	"\rGetEmbeddings\x12 .chatee.dbc.GetEmbeddingsRequest\x1a!.chatee.dbc.GetEmbeddingsResponseB\x13Z\x11chatee-go/gen/dbcb\x06proto3"
 
 var (
 	file_dbc_dbc_proto_rawDescOnce sync.Once

@@ -7,7 +7,7 @@
 package agent
 
 import (
-	common "chatee-go/proto/common"
+	common "chatee-go/gen/common"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -2792,7 +2792,7 @@ const file_svr_agent_proto_rawDesc = "" +
 	"\x0eInterruptChain\x12'.chatee.svr.agent.InterruptChainRequest\x1a(.chatee.svr.agent.InterruptChainResponse\x12X\n" +
 	"\x0eGetChainStatus\x12'.chatee.svr.agent.GetChainStatusRequest\x1a\x1d.chatee.svr.agent.ActionChain\x12W\n" +
 	"\n" +
-	"ListChains\x12#.chatee.svr.agent.ListChainsRequest\x1a$.chatee.svr.agent.ListChainsResponseB\x1bZ\x19chatee-go/proto/svr/agentb\x06proto3"
+	"ListChains\x12#.chatee.svr.agent.ListChainsRequest\x1a$.chatee.svr.agent.ListChainsResponseB\x19Z\x17chatee-go/gen/svr/agentb\x06proto3"
 
 var (
 	file_svr_agent_proto_rawDescOnce sync.Once

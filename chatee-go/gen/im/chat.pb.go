@@ -7,7 +7,7 @@
 package chat
 
 import (
-	common "chatee-go/proto/common"
+	common "chatee-go/gen/common"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -2920,7 +2920,7 @@ const file_im_chat_proto_rawDesc = "" +
 	"\tSubscribe\x12 .chatee.im.chat.SubscribeRequest\x1a\x19.chatee.im.chat.ChatEvent0\x01\x12S\n" +
 	"\n" +
 	"MarkAsRead\x12!.chatee.im.chat.MarkAsReadRequest\x1a\".chatee.im.chat.MarkAsReadResponse\x12_\n" +
-	"\x0eGetUnreadCount\x12%.chatee.im.chat.GetUnreadCountRequest\x1a&.chatee.im.chat.GetUnreadCountResponseB\x19Z\x17chatee-go/proto/im/chatb\x06proto3"
+	"\x0eGetUnreadCount\x12%.chatee.im.chat.GetUnreadCountRequest\x1a&.chatee.im.chat.GetUnreadCountResponseB\x17Z\x15chatee-go/gen/im/chatb\x06proto3"
 
 var (
 	file_im_chat_proto_rawDescOnce sync.Once

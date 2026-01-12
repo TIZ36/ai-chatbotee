@@ -1,1 +1,0 @@
-看下我们的proto是否完整，并执行：make proto

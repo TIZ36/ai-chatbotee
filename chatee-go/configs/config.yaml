@@ -100,3 +100,20 @@ log:
   max_size: 100
   max_backups: 3
   max_age: 30
+
+# Connection Management Configuration
+connection:
+  # Enable Redis-based distributed connection management
+  enable_distributed: false
+  # Node ID (unique per instance, defaults to service.node_id if not set)
+  node_id: ""
+  # Connection heartbeat interval (how often to update heartbeat)
+  heartbeat_interval: 30s
+  # Connection heartbeat timeout (when to consider connection dead)
+  heartbeat_timeout: 60s
+  # Node heartbeat interval (how often to update node heartbeat)
+  node_heartbeat_interval: 10s
+  # Node heartbeat timeout (when to consider node dead)
+  node_heartbeat_timeout: 30s
+  # Load balancing strategy: round_robin, least_connections, user_affinity
+  load_balancing_strategy: "least_connections"

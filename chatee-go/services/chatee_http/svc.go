@@ -3,8 +3,8 @@ package main
 import (
 	"chatee-go/commonlib/config"
 	"chatee-go/commonlib/log"
-	"chatee-go/services/chatee_http/handler"
 	"chatee-go/services/chatee_http/biz"
+	"chatee-go/services/chatee_http/handler"
 )
 
 // ServiceContext holds all dependencies for the HTTP service
@@ -57,4 +57,3 @@ func (ctx *ServiceContext) Close() error {
 	}
 	return nil
 }
-
