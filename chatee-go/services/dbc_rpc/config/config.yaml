@@ -1,7 +1,7 @@
 grpc:
   host: localhost
   port: 9080
-  
+
 mysql:
   host: "localhost"
   port: 3306
@@ -21,7 +21,7 @@ redis:
   min_idle_conns: 5
 
 hbase:
-  host: localhost:9095
+  host: localhost:9090
   namespace: chatee
   client_type: 1  # Use Thrift2 HBase TCP Client
   hbase_pool_config:

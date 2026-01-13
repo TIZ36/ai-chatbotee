@@ -21,10 +21,15 @@ import (
 )
 
 func main() {
-	// Load configuration (empty path uses default search paths: ./configs/config.yaml)
-	cfg, err := config.Load("./config/config.yaml")
+	// Load configuration from command-line flag or default path
+	configPath := "./configs/config.yaml"
+	if len(os.Args) > 1 && os.Args[1] == "-config" && len(os.Args) > 2 {
+		configPath = os.Args[2]
+	}
+
+	cfg, err := config.Load(configPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Failed to load config from %s: %v\n", configPath, err)
 		os.Exit(1)
 	}
 
@@ -41,6 +46,11 @@ func main() {
 		log.String("name", cfg.Service.Name),
 		log.String("version", cfg.Service.Version),
 	)
+
+	// Run database migrations
+	if err := runMigrations(svcCtx.PoolManager, logger); err != nil {
+		logger.Fatal("Failed to run migrations", log.Err(err))
+	}
 
 	// Initialize snowflake ID generator
 	if err := snowflake.Init(1); err != nil {

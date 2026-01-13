@@ -20,14 +20,15 @@ mkdir -p bin logs .pids
 
 echo -e "${GREEN}Starting ${SERVICE_NAME}...${NC}"
 
-# Check if binary exists
-if [ ! -f "$BINARY_PATH" ]; then
-    echo -e "${RED}Error: Binary not found at ${BINARY_PATH}${NC}"
-    echo -e "${YELLOW}Please run 'make build' first${NC}"
+# Step 1: Build
+echo -e "${YELLOW}Step 1: Building ${SERVICE_NAME}...${NC}"
+go build -o "$BINARY_PATH" ./services/chatee_http || {
+    echo -e "${RED}Build failed!${NC}"
     exit 1
-fi
+}
+echo -e "${GREEN}✓ Build completed${NC}"
 
-# Kill existing process if running
+# Step 2: Stop old process
 if [ -f "$PID_FILE" ]; then
     OLD_PID=$(cat "$PID_FILE")
     if ps -p "$OLD_PID" > /dev/null 2>&1; then
@@ -45,9 +46,10 @@ fi
 # Also kill any process with the same name
 pkill -f "$BINARY_PATH" 2>/dev/null || true
 sleep 1
+echo -e "${GREEN}✓ Old process stopped${NC}"
 
-# Start the service
-echo -e "${GREEN}Starting ${SERVICE_NAME}...${NC}"
+# Step 3: Start new service
+echo -e "${YELLOW}Step 3: Starting new ${SERVICE_NAME}...${NC}"
 cd "$(dirname "$0")/.." || exit 1
 nohup "$BINARY_PATH" > "$LOG_FILE" 2>&1 &
 NEW_PID=$!

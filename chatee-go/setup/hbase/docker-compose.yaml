@@ -2,28 +2,29 @@ version: '3.8'
 
 services:
   hbase:
-    image: dajobe/hbase:latest
     container_name: chatee-hbase
-    hostname: hbase
+    image: harisekhon/hbase:latest
+    platform: linux/amd64  # 确保兼容性
+    restart: unless-stopped
     ports:
-      - "16010:16010"  # HBase Master Web UI
-      - "16020:16020"  # HBase RegionServer
-      - "16000:16000"  # HBase Master RPC
-      - "16030:16030"  # HBase RegionServer RPC
-      - "2181:2181"    # ZooKeeper
-      - "9090:9090"    # Thrift Server (重要!)
-      - "9095:9095"    # Thrift2 Server (推荐使用)
+      - "16000:16000"   # HBase Master
+      - "16010:16010"   # HBase Web UI
+      - "16020:16020"   # HBase RegionServer
+      - "16030:16030"   # HBase REST API
+      - "2181:2181"     # ZooKeeper
+      - "9090:9090"     # HBase Thrift API
     volumes:
-      - hbase_data:/data
-      - ./start-thrift.sh:/start-thrift.sh:ro
-    command: /start-thrift.sh
+      - ~/Downloads/hbase_data:/hbase-data
+      - ~/Downloads/zookeeper_data:/zookeeper-data
+    environment:
+      - HBASE_CONF_hbase_rootdir=/hbase-data
+      - HBASE_CONF_hbase_zookeeper_data_dir=/zookeeper-data
+      - HBASE_CONF_hbase_zookeeper_property_dataDir=/zookeeper-data
+      - HBASE_MANAGES_ZK=true
+      - JAVA_HOME=/usr/lib/jvm/java-1.8-openjdk
     healthcheck:
-      test: ["CMD-SHELL", "echo 'status' | hbase shell -n 2>/dev/null | grep -q '1 active' || exit 0"]
+      test: ["CMD", "curl", "-f", "http://localhost:16010/"]
       interval: 30s
       timeout: 10s
-      retries: 10
+      retries: 5
       start_period: 120s
-    restart: unless-stopped
-
-volumes:
-  hbase_data:

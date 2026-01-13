@@ -7,31 +7,37 @@ service:
   environment: dev
   node_id: "1"
 
-# MySQL Configuration
 mysql:
-  host: localhost
+  host: "localhost"
   port: 3306
-  user: root
-  password: root
-  database: chatee
-  max_open_conns: 100
-  max_idle_conns: 10
-  conn_max_lifetime: 1h
+  user: "root"
+  password: "root"
+  database: "chateego"
+  max_open_conns: 10
+  max_idle_conns: 5
+  conn_max_lifetime: 3600s
 
-# Redis Configuration
 redis:
-  host: localhost
+  host: "localhost"
   port: 6379
-  password: ""  # Override with CHATEE_REDIS_PASSWORD env var
+  password: "123456"
   db: 0
-  pool_size: 100
-  min_idle_conns: 10
+  pool_size: 50
+  min_idle_conns: 5
 
-# HBase Configuration
 hbase:
-  zookeeper_quorum: localhost
-  zookeeper_port: 2181
-  table_prefix: chatee_
+  host: localhost:9095
+  namespace: chatee
+  client_type: 1  # Use Thrift2 HBase TCP Client
+  hbase_pool_config:
+    max_active: 20
+    max_idle: 10
+    idle_timeout: 30s
+  hbase_client_config:
+    connect_timeout: 15
+    socket_timeout: 60
+    max_frame_size: 268435456 # 256MB
+    need_credential: false  
 
 # ChromaDB Configuration
 chroma:
@@ -42,7 +48,7 @@ chroma:
 # gRPC Configuration
 grpc:
   host: 0.0.0.0
-  port: 9090
+  port: 9080
   max_recv_msg_size: 16777216  # 16MB
   max_send_msg_size: 16777216
   keepalive_time: 30s

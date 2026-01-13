@@ -18,14 +18,22 @@ NC='\033[0m' # No Color
 # Create directories if they don't exist
 mkdir -p bin logs .pids
 
-echo -e "${GREEN}Starting ${SERVICE_NAME}...${NC}"
+echo -e "${GREEN}================================================${NC}"
+echo -e "${GREEN}Step 1: Building ${SERVICE_NAME}...${NC}"
+echo -e "${GREEN}================================================${NC}"
 
-# Check if binary exists
-if [ ! -f "$BINARY_PATH" ]; then
-    echo -e "${RED}Error: Binary not found at ${BINARY_PATH}${NC}"
-    echo -e "${YELLOW}Please run 'make build' first${NC}"
+# Build the service
+cd "$(dirname "$0")/.." || exit 1
+if ! go build -o "$BINARY_PATH" ./services/conn_rpc; then
+    echo -e "${RED}Build failed${NC}"
     exit 1
 fi
+echo -e "${GREEN}Build successful${NC}"
+echo ""
+
+echo -e "${GREEN}================================================${NC}"
+echo -e "${GREEN}Step 2: Stopping old ${SERVICE_NAME}...${NC}"
+echo -e "${GREEN}================================================${NC}"
 
 # Kill existing process if running
 if [ -f "$PID_FILE" ]; then
@@ -45,10 +53,14 @@ fi
 # Also kill any process with the same name
 pkill -f "$BINARY_PATH" 2>/dev/null || true
 sleep 1
+echo -e "${GREEN}Old process stopped${NC}"
+echo ""
+
+echo -e "${GREEN}================================================${NC}"
+echo -e "${GREEN}Step 3: Starting new ${SERVICE_NAME}...${NC}"
+echo -e "${GREEN}================================================${NC}"
 
 # Start the service
-echo -e "${GREEN}Starting ${SERVICE_NAME}...${NC}"
-cd "$(dirname "$0")/.." || exit 1
 nohup "$BINARY_PATH" > "$LOG_FILE" 2>&1 &
 NEW_PID=$!
 
