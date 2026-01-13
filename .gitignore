@@ -20,8 +20,6 @@ __pycache__/
 # Python 分发/打包
 *.egg
 *.egg-info/
-dist/
-build/
 eggs/
 wheels/
 *.whl
@@ -57,8 +55,9 @@ downloads/
 # Node.js / Electron 前端
 # ====================
 
-# Node 依赖
+# Node 依赖 (所有位置)
 node_modules/
+**/node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -72,6 +71,10 @@ build/
 out/
 *.tsbuildinfo
 
+# Next.js 构建产物
+.next/
+**/.next/
+
 # Electron 构建产物
 electron/dist/
 electron/out/
@@ -81,6 +84,26 @@ electron/out/
 *.deb
 *.rpm
 *.pkg
+
+# ====================
+# Go 后端 (chatee-go)
+# ====================
+
+# Go 编译产物
+chatee-go/bin/
+chatee-go/*.exe
+chatee-go/*.test
+chatee-go/*.out
+
+# Go 生成的 protobuf 文件
+chatee-go/gen/
+
+# Go 日志和 PID 文件
+chatee-go/logs/
+chatee-go/.pids/
+
+# Go vendor (如果不提交)
+# chatee-go/vendor/
 
 # ====================
 # TypeScript
@@ -93,6 +116,10 @@ electron/out/
 # ====================
 # IDE / 编辑器
 # ====================
+
+# Cursor
+.cursor/
+**/.cursor/
 
 # VSCode
 .vscode/
