@@ -17,6 +17,22 @@ __pycache__/
 *.so
 .Python
 
+# Python 类型检查缓存
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+
+# Python 代码质量工具缓存
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+.ruff_cache/
+
 # Python 分发/打包
 *.egg
 *.egg-info/
@@ -71,6 +87,13 @@ dist-electron/
 build/
 out/
 *.tsbuildinfo
+
+# 前端构建产物（明确指定）
+front/dist/
+front/build/
+front/out/
+
+# Electron 构建产物（已在下面单独列出，这里保持）
 
 # Electron 构建产物
 electron/dist/
