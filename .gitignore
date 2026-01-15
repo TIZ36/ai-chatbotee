@@ -231,3 +231,30 @@ coverage/
 # yarn.lock
 # pnpm-lock.yaml
 
+# ====================
+# Cursor / AI 工具
+# ====================
+.cursor/
+.cursorrules
+
+# ====================
+# 测试文件（可选，根据项目需要决定）
+# ====================
+# 如果不想提交测试文件，取消下面的注释
+# backend/test_*.py
+# front/src/**/*.test.ts
+# front/src/**/*.test.tsx
+# front/src/**/*.spec.ts
+# front/src/**/*.spec.tsx
+
+# ====================
+# 本地开发文件
+# ====================
+# 本地启动脚本（如果包含个人配置）
+start-*.sh
+*.local.sh
+
+# 本地数据库文件
+*.db-journal
+*.db-wal
+*.db-shm
