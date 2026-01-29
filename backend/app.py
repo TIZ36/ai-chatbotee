@@ -1191,6 +1191,65 @@ def mcp_health_proxy():
         }), 500
 
 
+@app.route('/api/cache/stats', methods=['GET', 'OPTIONS'])
+def get_cache_stats():
+    """
+    获取缓存统计信息（用于性能监控）
+    
+    返回:
+    - llm_config: LLM 配置缓存统计
+    - mcp_server: MCP 服务器配置缓存统计
+    - tools_list: 工具列表缓存统计
+    - mcp_common: MCP 通用模块缓存统计
+    """
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from services.cache import get_cache_stats as get_service_cache_stats
+        from mcp_server.mcp_common_logic import get_mcp_health_status
+        
+        stats = get_service_cache_stats()
+        stats['mcp_health'] = get_mcp_health_status()
+        
+        return jsonify(stats)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/cache/clear', methods=['POST', 'OPTIONS'])
+def clear_cache():
+    """
+    清理缓存（用于调试）
+    
+    Body (可选):
+    - type: 要清理的缓存类型 (llm_config, mcp_server, all)
+    """
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    
+    try:
+        from services.cache import llm_config_cache, mcp_server_cache
+        
+        data = request.get_json() or {}
+        cache_type = data.get('type', 'all')
+        
+        cleared = []
+        if cache_type in ('llm_config', 'all'):
+            llm_config_cache.clear()
+            cleared.append('llm_config')
+        if cache_type in ('mcp_server', 'all'):
+            mcp_server_cache.clear()
+            cleared.append('mcp_server')
+        
+        return jsonify({
+            'success': True,
+            'cleared': cleared,
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/mcp/proxy', methods=['POST', 'OPTIONS'])
 def mcp_proxy():
     """
@@ -3764,7 +3823,8 @@ def list_llm_configs():
             
             cursor.execute("""
                 SELECT config_id, name, shortname, provider, api_url, model, tags, enabled, 
-                       description, metadata, created_at, updated_at
+                       description, metadata, created_at, updated_at,
+                       (CASE WHEN api_key IS NOT NULL AND LENGTH(TRIM(IFNULL(api_key, ''))) > 0 THEN 1 ELSE 0 END) AS has_api_key
                 FROM llm_configs
                 ORDER BY created_at DESC
             """)
@@ -3788,12 +3848,13 @@ def list_llm_configs():
                         config['metadata'] = {}
                 # 转换 TINYINT 为 boolean
                 config['enabled'] = bool(config.get('enabled'))
+                config['has_api_key'] = bool(config.get('has_api_key'))
                 # 转换日期时间为字符串
                 if config.get('created_at'):
                     config['created_at'] = config['created_at'].isoformat() if hasattr(config['created_at'], 'isoformat') else str(config['created_at'])
                 if config.get('updated_at'):
                     config['updated_at'] = config['updated_at'].isoformat() if hasattr(config['updated_at'], 'isoformat') else str(config['updated_at'])
-                # 不返回API密钥
+                # 不返回API密钥（列表中已用 has_api_key 表示）
                 config.pop('api_key', None)
                 # 添加模型的最大 token 限制
                 model_name = config.get('model', 'gpt-4')
@@ -4731,75 +4792,90 @@ def stream_topic_events(session_id):
         pass
     return resp
 
+def _list_topics_or_sessions():
+    """内部：获取 Topic/会话列表（话题，不含智能体）。返回 (sessions_list, total)，MySQL 不可用时返回 (None, 0)。"""
+    from database import get_mysql_connection
+    conn = get_mysql_connection()
+    if not conn:
+        return None, 0
+    cursor = None
+    try:
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("""
+            SELECT 
+                s.session_id, s.title, s.name, s.llm_config_id, s.avatar, 
+                s.system_prompt, s.session_type, s.owner_id, s.ext,
+                s.created_at, s.updated_at, s.last_message_at,
+                (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.session_id) as message_count,
+                (SELECT content FROM messages 
+                 WHERE session_id = s.session_id AND role = 'user' 
+                 ORDER BY created_at ASC LIMIT 1) as first_user_message
+            FROM sessions s
+            WHERE s.session_type != 'temporary' AND s.session_type NOT LIKE 'agent%'
+            ORDER BY COALESCE(s.last_message_at, s.updated_at, s.created_at) DESC
+            LIMIT 300
+        """)
+        rows = cursor.fetchall()
+        sessions = []
+        for row in rows:
+            first_message = row.get('first_user_message', '') or ''
+            preview_text = (first_message[:30] + '...') if len(first_message) > 30 else first_message
+            ext = row.get('ext')
+            if isinstance(ext, str):
+                try:
+                    ext = json.loads(ext)
+                except Exception:
+                    ext = {}
+            sessions.append({
+                'session_id': row['session_id'],
+                'title': row['title'],
+                'name': row.get('name'),
+                'llm_config_id': row['llm_config_id'],
+                'avatar': row['avatar'],
+                'session_type': row.get('session_type', 'topic_general'),
+                'owner_id': row.get('owner_id'),
+                'ext': ext,
+                'created_at': row['created_at'].isoformat() if row['created_at'] else None,
+                'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
+                'last_message_at': row['last_message_at'].isoformat() if row['last_message_at'] else None,
+                'message_count': row['message_count'] or 0,
+                'preview_text': preview_text.replace('\n', ' ').strip(),
+            })
+        return sessions, len(sessions)
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+@app.route('/api/topics', methods=['GET', 'OPTIONS'])
+def list_topics():
+    """获取 Topic 列表（与 /api/sessions 一致，供前端 topics 统计与圆桌列表使用）"""
+    if request.method == 'OPTIONS':
+        return handle_cors_preflight()
+    try:
+        sessions, total = _list_topics_or_sessions()
+        if sessions is None:
+            return jsonify({'sessions': [], 'topics': [], 'total': 0, 'error': 'MySQL not available'}), 503
+        return jsonify({'sessions': sessions, 'topics': sessions, 'total': total})
+    except Exception as e:
+        print(f"[Topic API] Error listing topics: {e}")
+        return jsonify({'error': str(e), 'sessions': [], 'topics': [], 'total': 0}), 500
+
+
 @app.route('/api/sessions', methods=['GET', 'OPTIONS'])
 def list_sessions():
     """获取 Topic 列表 (兼容旧 sessions 接口)"""
     if request.method == 'OPTIONS':
         return handle_cors_preflight()
-    
     try:
-        from database import get_mysql_connection
-        conn = get_mysql_connection()
-        if not conn:
+        sessions, total = _list_topics_or_sessions()
+        if sessions is None:
             return jsonify({'sessions': [], 'total': 0, 'error': 'MySQL not available'}), 503
-        
-        cursor = None
-        try:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            
-            # 获取 Topic 列表
-            # 这里的 session_type 已经包含了新的类型
-            cursor.execute("""
-                SELECT 
-                    s.session_id, s.title, s.name, s.llm_config_id, s.avatar, 
-                    s.system_prompt, s.session_type, s.owner_id, s.ext,
-                    s.created_at, s.updated_at, s.last_message_at,
-                    (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.session_id) as message_count,
-                    (SELECT content FROM messages 
-                     WHERE session_id = s.session_id AND role = 'user' 
-                     ORDER BY created_at ASC LIMIT 1) as first_user_message
-                FROM sessions s
-                WHERE s.session_type != 'temporary' AND s.session_type NOT LIKE 'agent%'
-                ORDER BY COALESCE(s.last_message_at, s.updated_at, s.created_at) DESC
-                LIMIT 300
-            """)
-            
-            rows = cursor.fetchall()
-            sessions = []
-            for row in rows:
-                first_message = row.get('first_user_message', '') or ''
-                preview_text = (first_message[:30] + '...') if len(first_message) > 30 else first_message
-                
-                # 解析 ext
-                ext = row.get('ext')
-                if isinstance(ext, str):
-                    try: ext = json.loads(ext)
-                    except: ext = {}
-
-                sessions.append({
-                    'session_id': row['session_id'],
-                    'title': row['title'],
-                    'name': row.get('name'),
-                    'llm_config_id': row['llm_config_id'],
-                    'avatar': row['avatar'],
-                    'session_type': row.get('session_type', 'topic_general'),
-                    'owner_id': row.get('owner_id'),
-                    'ext': ext,
-                    'created_at': row['created_at'].isoformat() if row['created_at'] else None,
-                    'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
-                    'last_message_at': row['last_message_at'].isoformat() if row['last_message_at'] else None,
-                    'message_count': row['message_count'] or 0,
-                    'preview_text': preview_text.replace('\n', ' ').strip(),
-                })
-            
-            return jsonify({'sessions': sessions, 'total': len(sessions)})
-            
-        finally:
-            if cursor: cursor.close()
-            if conn: conn.close()
-                
+        return jsonify({'sessions': sessions, 'total': total})
     except Exception as e:
-        print(f"[Topic API] Error listing topics: {e}")
+        print(f"[Topic API] Error listing sessions: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/sessions', methods=['POST', 'OPTIONS'])
@@ -8709,8 +8785,26 @@ def create_skill_pack():
                                                 process_info['media_count'] += 1
                                                 process_info['media_types'].add('audio')
                             
-                            # 处理执行轨迹 processSteps（Topic会话的Agent Actor执行轨迹）
-                            if 'processSteps' in ext_data:
+                            # 处理执行轨迹（优先新协议 processMessages）
+                            if 'processMessages' in ext_data and isinstance(ext_data['processMessages'], list):
+                                messages = ext_data['processMessages']
+                                for pm in messages:
+                                    if not isinstance(pm, dict):
+                                        continue
+                                    all_process_steps.append(pm)
+                                    process_info['process_steps_count'] += 1
+                                    pm_type = pm.get('type', 'unknown')
+                                    title = pm.get('title', '')
+                                    content_type = pm.get('contentType', 'text')
+                                    content_text = pm.get('content', '') or ''
+                                    if pm_type == 'thinking':
+                                        content += f"\n[执行轨迹-思考]: {content_text[:500]}"
+                                    elif pm_type == 'mcp_call':
+                                        content += f"\n[执行轨迹-MCP调用]: {title} ({content_type})"
+                                    elif pm_type == 'workflow':
+                                        content += f"\n[执行轨迹-工作流]: {title}"
+                            # 兼容旧结构 processSteps
+                            elif 'processSteps' in ext_data:
                                 steps = ext_data['processSteps']
                                 if isinstance(steps, list):
                                     for step in steps:

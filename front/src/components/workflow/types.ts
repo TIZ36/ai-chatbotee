@@ -4,39 +4,6 @@
 
 import type { WorkflowNode, WorkflowConnection } from '../../services/workflowApi';
 
-/** 单个过程步骤（用于记录多轮思考和MCP调用） */
-export interface ProcessStep {
-  /** 步骤类型 */
-  type: 'thinking' | 'mcp_call' | 'workflow';
-  /** 时间戳 */
-  timestamp?: number;
-  /** 思考内容（当 type === 'thinking' 时） */
-  thinking?: string;
-  /** MCP 服务器名称（当 type === 'mcp_call' 时） */
-  mcpServer?: string;
-  /** 工具名称（当 type === 'mcp_call' 时） */
-  toolName?: string;
-  /** 调用参数 */
-  arguments?: any;
-  /** 调用结果 */
-  result?: any;
-  /** 执行状态 */
-  status?: 'pending' | 'running' | 'completed' | 'error';
-  /** 执行时长（毫秒） */
-  duration?: number;
-  /** 工作流信息（当 type === 'workflow' 时） */
-  workflowInfo?: {
-    id?: string;
-    name?: string;
-    status?: 'pending' | 'running' | 'completed' | 'error';
-    result?: string;
-    config?: {
-      nodes: WorkflowNode[];
-      connections: WorkflowConnection[];
-    };
-  };
-}
-
 /** 多模态附件 */
 export interface MultimodalAttachment {
   id: string;
@@ -88,8 +55,6 @@ export interface Message {
   multimodal?: MultimodalAttachment[];
   /** MCP 工具调用详情 */
   mcpDetails?: MCPDetail[];
-  /** 多轮过程步骤（保存完整的思考和MCP调用历史） */
-  processSteps?: ProcessStep[];
 }
 
 /** Workflow 组件的 Props */

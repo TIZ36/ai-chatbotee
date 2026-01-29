@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { Message, ProcessStep } from './MessageContent';
+import { Message } from './MessageContent';
 import { LLMClient, LLMMessage } from '../../services/llmClient';
 import { saveMessage, createSession, updateSessionAvatar, updateSessionName, updateSessionSystemPrompt, updateSessionMediaOutputPath, updateSessionLLMConfig, Session } from '../../services/sessionApi';
 import { mcpManager } from '../../services/mcpClient';

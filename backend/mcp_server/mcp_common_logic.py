@@ -15,7 +15,7 @@ _mcp_sessions: Dict[str, requests.Session] = {}
 # 响应缓存：短期缓存 tools/list 和 initialize 响应
 _response_cache: Dict[str, Dict[str, Any]] = {}
 _cache_timestamps: Dict[str, float] = {}
-CACHE_TTL = 30  # 缓存30秒
+CACHE_TTL = 60  # 缓存60秒（性能优化：工具列表不常变化）
 
 # 记录每个 MCP URL 最近一次协商得到的 mcp-session-id
 _mcp_session_ids: Dict[str, str] = {}

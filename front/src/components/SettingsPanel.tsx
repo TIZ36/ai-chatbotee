@@ -23,7 +23,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onUpdateSettings,
 }) => {
   const [clearDataOpen, setClearDataOpen] = useState(false);
-  const [backendUrl, setBackendUrl] = useState<string>('http://localhost:3002');
+  const [backendUrl, setBackendUrl] = useState<string>('http://localhost:3001');
   const [isElectron, setIsElectron] = useState(false);
   const [isSavingBackendUrl, setIsSavingBackendUrl] = useState(false);
 
@@ -37,7 +37,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     // 如果是 Electron 环境，加载后端地址配置
     if (checkElectron() && (window as any).electronAPI?.getBackendUrl) {
       (window as any).electronAPI.getBackendUrl().then((url: string) => {
-        setBackendUrl(url || 'http://localhost:3002');
+        setBackendUrl(url || 'http://localhost:3001');
       }).catch((error: Error) => {
         console.error('[SettingsPanel] Failed to load backend URL:', error);
       });
@@ -101,6 +101,43 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </select>
               <p className="text-xs text-gray-500 dark:text-[#a0a0a0] mt-1">
                 选择界面的显示模式
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-[#e0e0e0] mb-1.5">
+                皮肤
+              </label>
+              <select
+                value={(settings as any).skin || 'default'}
+                onChange={(e) => onUpdateSettings({ skin: e.target.value as 'default' | 'gmgn' })}
+                className="w-full px-3 py-2 text-sm rounded-lg bg-white dark:bg-[#2d2d2d] border border-gray-300 dark:border-[#505050] text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/50 focus:border-[#7c3aed] transition-all duration-150"
+              >
+                <option value="default">Chatee 默认</option>
+                <option value="gmgn">GMGN 风格</option>
+              </select>
+              <p className="text-xs text-gray-500 dark:text-[#a0a0a0] mt-1">
+                参考 gmgn.ai 的深色霓虹绿风格
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-[#e0e0e0] mb-1.5">
+                字体
+              </label>
+              <select
+                value={(settings as any).font || 'default'}
+                onChange={(e) => onUpdateSettings({ font: e.target.value as 'default' | 'pixel' | 'terminal' | 'rounded' | 'dotgothic' | 'silkscreen' })}
+                className="w-full px-3 py-2 text-sm rounded-lg bg-white dark:bg-[#2d2d2d] border border-gray-300 dark:border-[#505050] text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/50 focus:border-[#7c3aed] transition-all duration-150"
+                style={{ fontFamily: (settings as any).font === 'pixel' ? '"Press Start 2P", cursive' : (settings as any).font === 'terminal' ? '"VT323", monospace' : (settings as any).font === 'rounded' ? '"Comfortaa", cursive' : (settings as any).font === 'dotgothic' ? '"DotGothic16", sans-serif' : (settings as any).font === 'silkscreen' ? '"Silkscreen", sans-serif' : 'inherit' }}
+              >
+                <option value="default">默认 (Inter)</option>
+                <option value="pixel">像素 (Press Start 2P)</option>
+                <option value="terminal">终端 (VT323)</option>
+                <option value="rounded">圆体 (Comfortaa)</option>
+                <option value="dotgothic">点阵 (DotGothic16)</option>
+                <option value="silkscreen">像素屏 (Silkscreen)</option>
+              </select>
+              <p className="text-xs text-gray-500 dark:text-[#a0a0a0] mt-1">
+                选择界面字体，像素字体会启用点阵网格背景和块状边框
               </p>
             </div>
           </div>
@@ -194,7 +231,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   type="text"
                   value={backendUrl}
                   onChange={(e) => setBackendUrl(e.target.value)}
-                  placeholder="http://localhost:3002"
+                  placeholder="http://localhost:3001"
                   className="w-full px-3 py-2 text-sm rounded-lg bg-white dark:bg-[#2d2d2d] border border-gray-300 dark:border-[#505050] text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/50 focus:border-[#7c3aed] transition-all duration-150 font-mono"
                 />
                 <p className="text-xs text-gray-500 dark:text-[#a0a0a0] mt-1">

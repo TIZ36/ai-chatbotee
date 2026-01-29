@@ -1,3 +1,5 @@
+import type { ProcessMessage } from '../types/processMessage';
+
 export type UnifiedRole = 'user' | 'assistant' | 'system' | 'tool';
 
 export type UnifiedMediaType = 'image' | 'video' | 'audio' | 'file';
@@ -25,18 +27,8 @@ export interface UnifiedMessage {
   thinking?: string;
   toolCalls?: any;
   tokenCount?: number;
-  /** 过程步骤（思考 + MCP 调用历史），从 ext.processSteps 提取 */
-  processSteps?: Array<{
-    type: 'thinking' | 'mcp_call' | 'workflow';
-    timestamp?: number;
-    thinking?: string;
-    mcpServer?: string;
-    toolName?: string;
-    arguments?: any;
-    result?: any;
-    status?: 'pending' | 'running' | 'completed' | 'error';
-    duration?: number;
-  }>;
+  /** 过程消息（新协议） */
+  processMessages?: ProcessMessage[];
   /** 思维签名（Gemini 模型使用） */
   thoughtSignature?: string;
   /** MCP 执行详情 */

@@ -32,6 +32,11 @@
   --ring: 234 89% 60%;
   --radius: 6px;
 
+  /* 字体栈 - 可由 data-font 覆盖 */
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --font-display: var(--font-sans);
+
   /* 主强调色 - 冷峻蓝紫 (Indigo) */
   --color-accent: #4f46e5; /* indigo-600 */
   --color-accent-hover: #4338ca; /* indigo-700 */
@@ -85,95 +90,499 @@
   --text-muted: #9ca3af;
   --border-default: #e5e7eb;
   --border-subtle: #f3f4f6;
+
+  /* iPhone 安全区（刘海 / 底部横条） */
+  --safe-area-inset-top: env(safe-area-inset-top, 0px);
+  --safe-area-inset-right: env(safe-area-inset-right, 0px);
+  --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-inset-left: env(safe-area-inset-left, 0px);
+}
+
+/* 移动端基础：触摸高亮、防止误触缩放 */
+@layer base {
+  @media (max-width: 767px) {
+    html {
+      -webkit-tap-highlight-color: transparent;
+      -webkit-touch-callout: none;
+    }
+    /* 可点击区域至少 44px（iOS HIG） */
+    .touch-target {
+      min-height: 44px;
+      min-width: 44px;
+    }
+  }
+}
+
+/* 全平台：iPhone 安全区（刘海 / 底部横条） */
+.app-root-bg {
+  padding-top: var(--safe-area-inset-top);
+  padding-left: var(--safe-area-inset-left);
+  padding-right: var(--safe-area-inset-right);
+  padding-bottom: calc(28px + var(--safe-area-inset-bottom));
+}
+
+/* 移动端无底部状态栏时，只留安全区 */
+.app-root-bg.mobile-no-status-bar {
+  padding-bottom: var(--safe-area-inset-bottom);
+}
+
+/* 底部状态栏：为 iPhone 底部横条留出空间 */
+.status-bar-safe {
+  padding-bottom: var(--safe-area-inset-bottom);
+}
+
+/* 移动端：浮岛输入框避开 iPhone 安全区 */
+@media (max-width: 767px) {
+  .floating-composer-container {
+    left: calc(0.5rem + var(--safe-area-inset-left)) !important;
+    right: calc(0.5rem + var(--safe-area-inset-right)) !important;
+    bottom: calc(0.75rem + var(--safe-area-inset-bottom)) !important;
+  }
+  /* 聊天消息区左右安全区（横屏刘海） */
+  .workflow-chat-messages {
+    padding-left: calc(0.75rem + var(--safe-area-inset-left));
+    padding-right: calc(0.75rem + var(--safe-area-inset-right));
+  }
+  .workflow-chat-header {
+    padding-left: calc(0.75rem + var(--safe-area-inset-left));
+    padding-right: calc(0.75rem + var(--safe-area-inset-right));
+  }
+  /* 思维链 tag：移动端只显示图标，不显示文字 */
+  .process-step-tag-label {
+    display: none;
+  }
+}
+
+/* 移动端：弹框全屏 + 安全区，GMGN 纯黑萤绿 */
+html[data-mobile="true"] .chatee-dialog-content {
+  position: fixed !important;
+  left: var(--safe-area-inset-left) !important;
+  right: var(--safe-area-inset-right) !important;
+  top: var(--safe-area-inset-top) !important;
+  bottom: var(--safe-area-inset-bottom) !important;
+  max-width: none !important;
+  max-height: none !important;
+  width: auto !important;
+  height: auto !important;
+  transform: none !important;
+  border-radius: 0 !important;
+  display: flex;
+  flex-direction: column;
+  padding: calc(1rem + var(--safe-area-inset-top)) calc(1rem + var(--safe-area-inset-right)) calc(1rem + var(--safe-area-inset-bottom)) calc(1rem + var(--safe-area-inset-left)) !important;
+}
+
+html[data-mobile="true"][data-skin="gmgn"] .chatee-dialog-content {
+  background: #000 !important;
+  border: 1px solid rgba(0, 212, 170, 0.25) !important;
+  box-shadow: 0 0 32px rgba(0, 212, 170, 0.08), inset 0 1px 0 rgba(0, 212, 170, 0.06) !important;
 }
 
 .dark {
-  /* shadcn/ui design tokens (dark industrial zinc) */
-  --background: 240 10% 3.9%;   /* #18181b */
-  --foreground: 210 20% 96%;
-  --card: 240 10% 3.9%;         /* same as background */
-  --card-foreground: 210 20% 96%;
-  --popover: 240 10% 3.9%;
-  --popover-foreground: 210 20% 96%;
-  --primary: 234 89% 60%;       /* indigo-600 */
-  --primary-foreground: 0 0% 100%;
-  --secondary: 240 5% 10%;      /* subtle surface */
-  --secondary-foreground: 210 20% 96%;
-  --muted: 240 5% 10%;
-  --muted-foreground: 215 10% 70%;
-  --accent: 262 40% 16%;
-  --accent-foreground: 210 20% 96%;
+  /* shadcn/ui design tokens (dark industrial with neon green accent) */
+  --background: 0 0% 5%;        /* #0d0d0d - 深黑 */
+  --foreground: 150 50% 95%;
+  --card: 0 0% 7%;              /* #121212 */
+  --card-foreground: 150 50% 95%;
+  --popover: 0 0% 7%;
+  --popover-foreground: 150 50% 95%;
+  --primary: 150 100% 50%;      /* 萤绿色 #00ff88 */
+  --primary-foreground: 0 0% 0%;
+  --secondary: 0 0% 10%;        /* subtle surface */
+  --secondary-foreground: 150 50% 95%;
+  --muted: 0 0% 12%;
+  --muted-foreground: 0 0% 50%;
+  --accent: 150 100% 50%;
+  --accent-foreground: 0 0% 0%;
   --destructive: 0 72% 52%;
   --destructive-foreground: 0 0% 100%;
-  --border: 240 3.7% 15.9%;     /* #27272a */
-  --input: 240 3.7% 15.9%;
-  --ring: 234 89% 60%;
+  --border: 150 30% 15%;        /* 带绿色调的边框 */
+  --input: 0 0% 12%;
+  --ring: 150 100% 50%;
   --radius: 6px;
 
-  /* 暗色主题强调色 - 同色系 */
-  --color-accent: #4f46e5;
-  --color-accent-hover: #4338ca;
-  --color-accent-light: #6366f1;
-  --color-accent-bg: rgba(79, 70, 229, 0.10);
-  --color-accent-bg-hover: rgba(79, 70, 229, 0.16);
+  /* 暗色主题强调色 - 萤绿色 GMGN 风格 */
+  --color-accent: #00ff88;
+  --color-accent-hover: #00e67a;
+  --color-accent-light: #4ade80;
+  --color-accent-bg: rgba(0, 255, 136, 0.08);
+  --color-accent-bg-hover: rgba(0, 255, 136, 0.15);
   
-  /* 选中/激活状态 */
-  --color-selected: #4f46e5;
-  --color-selected-hover: #4338ca;
-  --color-selected-bg: rgba(79, 70, 229, 0.08);
-  --color-selected-border: rgba(79, 70, 229, 0.22);
+  /* 选中/激活状态 - 萤绿色 */
+  --color-selected: #00ff88;
+  --color-selected-hover: #00e67a;
+  --color-selected-bg: rgba(0, 255, 136, 0.08);
+  --color-selected-border: rgba(0, 255, 136, 0.30);
   
-  /* 活跃状态 */
-  --color-active: #34d399;
-  --color-active-hover: #6ee7b7;
-  --color-active-bg: rgba(52, 211, 153, 0.15);
-  --color-active-border: rgba(52, 211, 153, 0.4);
+  /* 活跃状态 - 萤绿色 */
+  --color-active: #00ff88;
+  --color-active-hover: #4ade80;
+  --color-active-bg: rgba(0, 255, 136, 0.12);
+  --color-active-border: rgba(0, 255, 136, 0.40);
   
   /* 状态指示器 - 暗色调整 */
-  --color-success: #22c55e;
-  --color-success-bg: rgba(34, 197, 94, 0.12);
-  --color-warning: #f59e0b;
-  --color-warning-bg: rgba(245, 158, 11, 0.12);
+  --color-success: #00ff88;
+  --color-success-bg: rgba(0, 255, 136, 0.12);
+  --color-warning: #fbbf24;
+  --color-warning-bg: rgba(251, 191, 36, 0.12);
   --color-error: #ef4444;
   --color-error-bg: rgba(239, 68, 68, 0.12);
-  --color-info: #4f46e5;
-  --color-info-bg: rgba(79, 70, 229, 0.10);
+  --color-info: #00ff88;
+  --color-info-bg: rgba(0, 255, 136, 0.10);
   
-  /* 会话状态颜色 */
-  --color-session-active: #34d399;
-  --color-session-idle: #9ca3af;
+  /* 会话状态颜色 - 萤绿色 */
+  --color-session-active: #00ff88;
+  --color-session-idle: #666666;
   --color-session-loading: #fbbf24;
   --color-session-error: #f87171;
   
-  /* 模型/组件状态 */
-  --color-model-selected: #4f46e5;
-  --color-model-enabled: #4ade80;
-  --color-model-disabled: #6b7280;
+  /* 模型/组件状态 - 萤绿色 */
+  --color-model-selected: #00ff88;
+  --color-model-enabled: #00ff88;
+  --color-model-disabled: #4a4a4a;
   
   /* 交互悬停 */
-  --color-hover-bg: rgba(255, 255, 255, 0.05);
-  --color-hover-border: rgba(255, 255, 255, 0.1);
+  --color-hover-bg: rgba(0, 255, 136, 0.04);
+  --color-hover-border: rgba(0, 255, 136, 0.12);
   
-  /* 暗色主题特定 */
-  --surface-primary: #18181b;   /* zinc-950 */
-  --surface-secondary: #202022; /* slight lift */
-  --surface-tertiary: #242427;
-  --text-primary: #f9fafb;
-  --text-secondary: #d1d5db;
-  --text-muted: #9ca3af;
-  --border-default: #27272a;    /* zinc-800 */
-  --border-subtle: #202022;
+  /* 暗色主题特定 - 更深的黑色 */
+  --surface-primary: #0d0d0d;   /* 深黑 */
+  --surface-secondary: #141414; /* slight lift */
+  --surface-tertiary: #1a1a1a;
+  --text-primary: #f0f0f0;
+  --text-secondary: #a0a0a0;
+  --text-muted: #666666;
+  --border-default: #222222;
+  --border-subtle: #1a1a1a;
+}
+
+/* ========== GMGN 风格皮肤 (参考 gmgn.ai：深色 + 霓虹绿强调) ========== */
+[data-skin="gmgn"] {
+  color-scheme: dark;
+}
+
+[data-skin="gmgn"],
+[data-skin="gmgn"].dark {
+  /* 深色背景 - 偏蓝黑 */
+  --background: 240 20% 4%;
+  --foreground: 150 20% 96%;
+  --card: 240 18% 6%;
+  --card-foreground: 150 20% 96%;
+  --popover: 240 18% 6%;
+  --popover-foreground: 150 20% 96%;
+  --primary: 158 100% 50%;
+  --primary-foreground: 240 20% 4%;
+  --secondary: 240 10% 12%;
+  --secondary-foreground: 150 20% 96%;
+  --muted: 240 10% 12%;
+  --muted-foreground: 150 10% 65%;
+  --accent: 240 10% 14%;
+  --accent-foreground: 150 20% 96%;
+  --border: 240 8% 18%;
+  --input: 240 8% 18%;
+  --ring: 158 100% 50%;
+
+  /* 主强调色 - 霓虹绿 (GMGN 风格) */
+  --color-accent: #00d4aa;
+  --color-accent-hover: #00ff88;
+  --color-accent-light: #34e0b8;
+  --color-accent-bg: rgba(0, 212, 170, 0.12);
+  --color-accent-bg-hover: rgba(0, 212, 170, 0.18);
+
+  --color-selected: #00d4aa;
+  --color-selected-hover: #00ff88;
+  --color-selected-bg: rgba(0, 212, 170, 0.1);
+  --color-selected-border: rgba(0, 212, 170, 0.35);
+
+  --color-active: #00d4aa;
+  --color-active-hover: #00ff88;
+  --color-active-bg: rgba(0, 212, 170, 0.15);
+  --color-active-border: rgba(0, 212, 170, 0.4);
+
+  --color-success: #00d4aa;
+  --color-success-bg: rgba(0, 212, 170, 0.12);
+  --color-info: #00d4aa;
+  --color-info-bg: rgba(0, 212, 170, 0.1);
+
+  --color-hover-bg: rgba(0, 212, 170, 0.06);
+  --color-hover-border: rgba(0, 212, 170, 0.15);
+
+  --surface-primary: #0d0d12;
+  --surface-secondary: #12121a;
+  --surface-tertiary: #18181f;
+  --text-primary: #e8f5f0;
+  --text-secondary: #a0c4b8;
+  --text-muted: #6b8a82;
+  --border-default: #1e2a26;
+  --border-subtle: #161c1a;
+}
+
+/* GMGN 皮肤下全局背景与根容器 - 聊天界面纯黑 */
+[data-skin="gmgn"] body {
+  background: #000;
+  color: #e8f5f0;
+}
+
+[data-skin="gmgn"] .app-root-bg {
+  background: #000 !important;
+}
+
+/* GMGN 下聊天界面区域纯黑 */
+[data-skin="gmgn"] .workflow-chat-outer,
+[data-skin="gmgn"] .workflow-chat-panel,
+[data-skin="gmgn"] .workflow-chat-messages {
+  background: #000 !important;
+}
+
+/* GMGN 下对话头部 - 浅印绿色 */
+[data-skin="gmgn"] .workflow-chat-header {
+  background: linear-gradient(90deg, rgba(0, 212, 170, 0.12) 0%, rgba(0, 212, 170, 0.06) 50%, transparent 100%) !important;
+  border-bottom-color: rgba(0, 212, 170, 0.2) !important;
+}
+
+/* GMGN 下各界面主区域纯黑 + 萤绿描边 */
+[data-skin="gmgn"] main,
+[data-skin="gmgn"] .glass-panel {
+  background: #000 !important;
+}
+
+/* 毛玻璃 + 霓虹绿描边与内光 */
+[data-skin="gmgn"] .glass-header,
+[data-skin="gmgn"] .glass-sidebar,
+[data-skin="gmgn"] .glass-panel,
+[data-skin="gmgn"] .glass-card {
+  background-color: #000 !important;
+  border: 1px solid rgba(0, 212, 170, 0.18);
+  box-shadow:
+    0 0 20px rgba(0, 212, 170, 0.04),
+    inset 0 1px 0 rgba(0, 212, 170, 0.06);
+}
+
+[data-skin="gmgn"] .glass-header {
+  position: relative;
+  box-shadow:
+    0 1px 0 rgba(0, 212, 170, 0.12),
+    0 4px 24px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(0, 212, 170, 0.05);
+}
+
+[data-skin="gmgn"] .glass-sidebar {
+  border-right-color: rgba(0, 212, 170, 0.2);
+  box-shadow: 2px 0 16px rgba(0, 212, 170, 0.05);
+}
+
+[data-skin="gmgn"] .glass-toolbar {
+  background-color: rgba(18, 18, 26, 0.92);
+  border: 1px solid rgba(0, 212, 170, 0.22);
+  box-shadow: 0 0 12px rgba(0, 212, 170, 0.06);
+}
+
+[data-skin="gmgn"] .glass-toolbar:hover {
+  border-color: rgba(0, 212, 170, 0.35);
+  box-shadow: 0 0 16px rgba(0, 212, 170, 0.1);
+}
+
+/* 导航激活项 - 霓虹绿光晕 */
+[data-skin="gmgn"] nav a[class*="color-accent"] {
+  box-shadow: 0 0 14px rgba(0, 212, 170, 0.4), 0 0 28px rgba(0, 212, 170, 0.15);
+}
+
+/* 主按钮 / 强调按钮 - 发光 */
+[data-skin="gmgn"] .gnome-btn-primary,
+[data-skin="gmgn"] button.bg-primaryToken,
+[data-skin="gmgn"] button[class*="color-accent"] {
+  box-shadow:
+    0 0 20px rgba(0, 212, 170, 0.25),
+    0 0 40px rgba(0, 212, 170, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+[data-skin="gmgn"] .gnome-btn-primary:hover,
+[data-skin="gmgn"] button.bg-primaryToken:hover {
+  box-shadow:
+    0 0 24px rgba(0, 212, 170, 0.4),
+    0 0 48px rgba(0, 212, 170, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+/* 链接与可点击文字 - 霓虹绿 + 微光 */
+[data-skin="gmgn"] a:not([class*="Button"]) {
+  color: #34e0b8;
+  text-shadow: 0 0 20px rgba(0, 212, 170, 0.3);
+}
+
+[data-skin="gmgn"] a:not([class*="Button"]):hover {
+  color: #00ff88;
+  text-shadow: 0 0 24px rgba(0, 255, 136, 0.5);
+}
+
+/* 输入框聚焦 - 绿环光晕 */
+[data-skin="gmgn"] input:focus,
+[data-skin="gmgn"] textarea:focus,
+[data-skin="gmgn"] [data-slot="input"]:focus-within {
+  outline: none;
+  box-shadow: 0 0 0 2px #0d0d12, 0 0 0 4px rgba(0, 212, 170, 0.5), 0 0 20px rgba(0, 212, 170, 0.2);
+}
+
+/* 卡片悬停 - 绿边光 */
+[data-skin="gmgn"] .gnome-card:hover,
+[data-skin="gmgn"] .glass-card:hover {
+  border-color: rgba(0, 212, 170, 0.35);
+  box-shadow:
+    0 0 24px rgba(0, 212, 170, 0.08),
+    0 0 48px rgba(0, 212, 170, 0.04),
+    inset 0 1px 0 rgba(0, 212, 170, 0.08);
+}
+
+/* 滚动条 - 绿味儿 */
+[data-skin="gmgn"] ::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(0, 212, 170, 0.35) 0%, rgba(0, 212, 170, 0.2) 100%);
+  border-radius: 999px;
+}
+
+[data-skin="gmgn"] ::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(0, 212, 170, 0.5) 0%, rgba(0, 212, 170, 0.35) 100%);
+}
+
+/* 小趣味：顶部一条极细的霓虹线（可选） */
+[data-skin="gmgn"] .glass-header::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(0, 212, 170, 0.6) 20%, rgba(0, 255, 136, 0.8) 50%, rgba(0, 212, 170, 0.6) 80%, transparent 100%);
+  opacity: 0.9;
+}
+
+/* 执行轨迹 - GMGN 风格 */
+[data-skin="gmgn"] .process-steps-viewer-wrap {
+  border-radius: 8px;
+}
+
+[data-skin="gmgn"] .process-step-card {
+  background-color: rgba(18, 18, 26, 0.5);
+  border: 1px solid rgba(0, 212, 170, 0.08);
+  box-shadow: 0 0 10px rgba(0, 212, 170, 0.02);
+}
+
+[data-skin="gmgn"] .process-step-card:hover {
+  border-color: rgba(0, 212, 170, 0.16);
+  box-shadow: 0 0 12px rgba(0, 212, 170, 0.04);
+}
+
+[data-skin="gmgn"] .process-steps-viewer-wrap .border {
+  border-color: rgba(0, 212, 170, 0.12);
+}
+
+[data-skin="gmgn"] .process-steps-popover {
+  background-color: rgba(13, 13, 18, 0.92);
+  border-color: rgba(0, 212, 170, 0.18);
+  box-shadow:
+    0 0 18px rgba(0, 212, 170, 0.08),
+    0 6px 24px rgba(0, 0, 0, 0.35);
+}
+
+[data-skin="gmgn"] .process-steps-popover .border-b {
+  border-color: rgba(0, 212, 170, 0.12);
+}
+
+/* ========== 趣味字体 (data-font) ========== */
+[data-font="pixel"] {
+  --font-sans: "Press Start 2P", "Silkscreen", cursive;
+  --font-mono: "Silkscreen", "Press Start 2P", monospace;
+  --font-display: "Press Start 2P", cursive;
+}
+
+[data-font="terminal"] {
+  --font-sans: "VT323", monospace;
+  --font-mono: "VT323", monospace;
+  --font-display: "VT323", monospace;
+}
+
+[data-font="rounded"] {
+  --font-sans: "Comfortaa", cursive;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-display: "Comfortaa", cursive;
+}
+
+[data-font="dotgothic"] {
+  --font-sans: "DotGothic16", sans-serif;
+  --font-mono: "DotGothic16", monospace;
+  --font-display: "DotGothic16", sans-serif;
+}
+
+[data-font="silkscreen"] {
+  --font-sans: "Silkscreen", sans-serif;
+  --font-mono: "Silkscreen", monospace;
+  --font-display: "Silkscreen", sans-serif;
+}
+
+/* 像素风装饰：点阵网格背景（伪元素，不覆盖原有渐变） */
+[data-font="pixel"] .app-root-bg,
+[data-font="dotgothic"] .app-root-bg {
+  position: relative;
+}
+
+[data-font="pixel"] .app-root-bg::before,
+[data-font="dotgothic"] .app-root-bg::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(0,0,0,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,0,0,0.04) 1px, transparent 1px);
+  background-size: 8px 8px;
+  z-index: 0;
+}
+
+[data-font="pixel"] .app-root-bg > *,
+[data-font="dotgothic"] .app-root-bg > * {
+  position: relative;
+  z-index: 1;
+}
+
+[data-font="pixel"] .glass-header,
+[data-font="pixel"] .glass-sidebar,
+[data-font="pixel"] .glass-panel,
+[data-font="pixel"] .glass-card,
+[data-font="dotgothic"] .glass-header,
+[data-font="dotgothic"] .glass-sidebar {
+  border-radius: 4px;
+  border-width: 2px;
+  border-style: solid;
+}
+
+[data-font="pixel"] .gnome-card,
+[data-font="pixel"] .glass-card {
+  box-shadow: 4px 4px 0 0 rgba(0, 0, 0, 0.25);
+}
+
+[data-font="dotgothic"] .gnome-card,
+[data-font="dotgothic"] .glass-card {
+  box-shadow: 3px 3px 0 0 rgba(0, 0, 0, 0.2);
+}
+
+[data-font="pixel"] button,
+[data-font="pixel"] [role="button"],
+[data-font="dotgothic"] button {
+  border-radius: 4px;
 }
 
 @layer base {
   body {
-    font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    font-family: var(--font-sans);
     @apply bg-gray-50 text-gray-900 font-sans antialiased;
     @apply dark:bg-[#18181b] dark:text-[#f4f4f5];
   }
 
   code, pre, kbd, samp, .font-mono {
-    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-family: var(--font-mono);
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
   }
   
   * {

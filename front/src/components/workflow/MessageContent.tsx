@@ -32,51 +32,7 @@ import { parseMCPContentBlocks, renderMCPBlocks, renderMCPMedia } from './mcpRen
 import type { SessionMediaItem } from '../ui/SessionMediaPanel';
 import type { WorkflowNode, WorkflowConnection } from '../../services/workflowApi';
 import { ProcessStepsViewer as UnifiedProcessStepsViewer } from '../ui/ProcessStepsViewer';
-
-/** Single process step (for recording multi-round thinking, MCP calls, and agent decisions) */
-export interface ProcessStep {
-  /** Step type */
-  type: 'thinking' | 'mcp_call' | 'workflow' | 'agent_activated' | 'agent_deciding' | 'agent_decision' | 'agent_will_reply' | 'llm_generating';
-  /** Timestamp */
-  timestamp?: number;
-  /** Thinking content (when type === 'thinking' or agent decision types) */
-  thinking?: string;
-  /** MCP server name (when type === 'mcp_call') */
-  mcpServer?: string;
-  /** Tool name (when type === 'mcp_call') */
-  toolName?: string;
-  /** Call arguments */
-  arguments?: any;
-  /** Call result */
-  result?: any;
-  /** Execution status */
-  status?: 'pending' | 'running' | 'completed' | 'error';
-  /** Execution duration (milliseconds) */
-  duration?: number;
-  /** Error message */
-  error?: string;
-  /** Agent ID (when type is agent-related) */
-  agent_id?: string;
-  /** Agent name (when type is agent-related) */
-  agent_name?: string;
-  /** Decision action (when type === 'agent_decision') */
-  action?: string;
-  /** LLM provider (when type === 'llm_generating') */
-  llm_provider?: string;
-  /** LLM model (when type === 'llm_generating') */
-  llm_model?: string;
-  /** Workflow info (when type === 'workflow') */
-  workflowInfo?: {
-    id?: string;
-    name?: string;
-    status?: 'pending' | 'running' | 'completed' | 'error';
-    result?: string;
-    config?: {
-      nodes: WorkflowNode[];
-      connections: WorkflowConnection[];
-    };
-  };
-}
+import type { ProcessMessage } from '../../types/processMessage';
 
 export interface Message {
   id: string;
@@ -115,7 +71,7 @@ export interface Message {
   thoughtSignature?: string;
   toolCallSignatures?: Record<string, string>;
   mcpdetail?: any;
-  processSteps?: ProcessStep[];
+  processMessages?: ProcessMessage[];
   avatarUrl?: string; // Add avatarUrl for assistant messages
   agentName?: string; // Add agentName for assistant messages
   ext?: any; // 扩展字段（用于 reaction/引用等装饰）
@@ -922,7 +878,7 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
                 }
                 // 3. Backend relative path (starting with / but not //)
                 else if (src.startsWith('/') && !src.startsWith('//')) {
-                  const backendUrl = (window as any).__cachedBackendUrl || 'http://localhost:3002';
+                  const backendUrl = (window as any).__cachedBackendUrl || 'http://localhost:3001';
                   imageSrc = `${backendUrl}${src}`;
                 }
                 
@@ -967,7 +923,12 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
       )}
       
       {/* Process Steps / Execution Trace (执行轨迹展示) */}
-      <UnifiedProcessStepsViewer processSteps={message.processSteps} ext={message.ext} role={message.role} />
+      <UnifiedProcessStepsViewer
+        processMessages={message.processMessages}
+        ext={message.ext}
+        isThinking={message.isThinking}
+        isStreaming={message.isStreaming}
+      />
     </div>
   );
 };

@@ -235,6 +235,25 @@ class ActorManager:
         """获取所有活跃的 Actor"""
         return dict(self.actors)
     
+    def get_pool_status(self) -> List[Dict]:
+        """
+        获取 Actor 池状态（用于前端监控）
+        仅返回已激活（is_running 且 topic_id 非空）的 Actor 状态。
+        
+        Returns:
+            list of dict: 每个元素为 get_status() 的返回值
+        """
+        result = []
+        with self._lock:
+            for actor in self.actors.values():
+                if not getattr(actor, "is_running", False) or not getattr(actor, "topic_id", None):
+                    continue
+                try:
+                    result.append(actor.get_status())
+                except Exception as e:
+                    logger.warning(f"[ActorManager] get_status for {actor.agent_id} failed: {e}")
+        return result
+    
     def shutdown(self):
         """关闭管理器"""
         with self._lock:

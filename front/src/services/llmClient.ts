@@ -2384,7 +2384,20 @@ ${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
               
               console.log(`[LLM] Executing tool: ${toolCall.function.name}`);
               const result = await this.executeToolCall(toolCall);
-              console.log(`[LLM] Tool result:`, result);
+              console.log(`[LLM] Tool result type:`, typeof result, 'isArray:', Array.isArray(result), 'hasContent:', !!(result as any)?.content, 'hasResult:', !!(result as any)?.result);
+              
+              // 详细记录结果结构，特别是 content 数组
+              if (result && typeof result === 'object') {
+                const content = (result as any)?.content || (result as any)?.result?.content;
+                if (Array.isArray(content)) {
+                  console.log(`[LLM] Tool result content 数组长度:`, content.length);
+                  content.forEach((item: any, idx: number) => {
+                    if (item?.type === 'image') {
+                      console.log(`[LLM]   content[${idx}]: type=image, mimeType=${item.mimeType || item.mime_type}, dataLength=${item.data?.length || 0}, dataPreview=${item.data ? item.data.substring(0, 50) + '...' : 'no data'}`);
+                    }
+                  });
+                }
+              }
               
               const duration = Date.now() - startTime;
               
@@ -2400,9 +2413,16 @@ ${allTools.map(t => `- ${t.name}: ${t.description}`).join('\n')}
                 
                 if (extraction.hasMedia) {
                   console.log(`[LLM] 成功提取 ${extractedMedia.length} 个媒体文件，已从发送给 LLM 的内容中移除 base64 数据`);
+                  extractedMedia.forEach((m, idx) => {
+                    console.log(`[LLM]   媒体[${idx}]: type=${m.type}, mimeType=${m.mimeType}, dataLength=${m.data.length}, dataPreview=${m.data.substring(0, 50)}...`);
+                  });
                   // 累积提取的媒体
                   accumulatedMedia.push(...extractedMedia);
+                } else {
+                  console.warn(`[LLM] 提取失败：hasMedia=false, media.length=${extraction.media.length}`);
                 }
+              } else {
+                console.log(`[LLM] 未检测到媒体内容`);
               }
               
               // 工具调用完成，清除步骤提示

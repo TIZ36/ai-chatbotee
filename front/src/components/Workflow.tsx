@@ -5,7 +5,7 @@
 
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Send, Loader, Loader2, Bot, Wrench, AlertCircle, CheckCircle, Brain, Plug, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Sparkles, Workflow as WorkflowIcon, Play, ArrowRight, Trash2, X, Edit2, RotateCw, Database, Paperclip, Music, HelpCircle, Package, CheckSquare, Square, Quote, Lightbulb, Eye, Volume2, Paintbrush, Image, Plus } from 'lucide-react';
+import { Send, Loader, Loader2, Bot, Wrench, AlertCircle, CheckCircle, Brain, Plug, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Sparkles, Workflow as WorkflowIcon, Play, ArrowRight, Trash2, X, Edit2, RotateCw, Database, Paperclip, Music, HelpCircle, Package, CheckSquare, Square, Quote, Lightbulb, Eye, Volume2, Paintbrush, Image, Plus, List } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Virtuoso } from 'react-virtuoso';
@@ -66,7 +66,9 @@ import {
 } from './workflow/profession';
 import { useFloatingComposerPadding } from './workflow/useFloatingComposerPadding';
 import { parseMCPContentBlocks, renderMCPBlocks, renderMCPMedia } from './workflow/mcpRender';
-import { MessageContent, Message, ProcessStep } from './workflow/MessageContent';
+import { MessageContent, Message } from './workflow/MessageContent';
+import type { ProcessMessage } from '../types/processMessage';
+import type { ProcessStep } from '../types/processSteps';
 import { ProcessStepsViewer } from './ui/ProcessStepsViewer';
 import { useChatInput } from './workflow/useChatInput';
 import { calculateCursorPosition } from './workflow/utils';
@@ -165,6 +167,8 @@ interface WorkflowProps {
   onSelectSession?: (sessionId: string) => void;
   onSelectMeeting?: (roundTableId: string) => void;
   onSelectResearch?: (researchSessionId: string) => void;
+  /** 移动端：从聊天头部打开会话列表（切换对话） */
+  onOpenConversationSwitcher?: () => void;
 }
 
 const Workflow: React.FC<WorkflowProps> = ({
@@ -172,6 +176,7 @@ const Workflow: React.FC<WorkflowProps> = ({
   onSelectSession,
   onSelectMeeting,
   onSelectResearch,
+  onOpenConversationSwitcher,
 }) => {
   // Gemini inlineData.data 只接受“标准 base64”；这里统一归一化，并对明显不合法的内容返回 null（避免整包请求 400）
   const toInlineBase64 = useCallback((maybeDataUrlOrBase64: string): string | null => {
@@ -324,7 +329,8 @@ const Workflow: React.FC<WorkflowProps> = ({
     action?: string;
     inReplyTo?: string;
     timestamp: number;
-    processSteps?: any[];  // 决策过程步骤
+    processSteps?: any[];  // 决策过程步骤（旧协议）
+    processMessages?: ProcessMessage[];  // 决策过程消息（新协议）
   }
   const [agentDecidingStates, setAgentDecidingStates] = useState<Map<string, AgentDecidingState>>(new Map());
   
@@ -421,7 +427,7 @@ const Workflow: React.FC<WorkflowProps> = ({
   // 兼容历史数据：把 processSteps 里“使用用户选择的模型: <id>”替换为可读名称
   const normalizeIncomingProcessSteps = useCallback((steps?: any[]): any[] | undefined => {
     if (!Array.isArray(steps) || steps.length === 0) return steps;
-    return steps.map((s) => {
+    const normalized = steps.map((s) => {
       const thinking = s?.thinking;
       if (typeof thinking !== 'string') return s;
       const m = thinking.match(/^使用用户选择的模型:\s*(\S+)\s*$/);
@@ -431,7 +437,71 @@ const Workflow: React.FC<WorkflowProps> = ({
       if (!label || label === id) return s;
       return { ...s, thinking: `使用用户选择的模型: ${label}` };
     });
+    // 合并更新：优先使用 step_id（若存在），否则用 type+timestamp 兜底
+    const map = new Map<string, any>();
+    for (const s of normalized) {
+      const key = s?.step_id ? `id:${s.step_id}` : `t:${s?.type ?? 'unknown'}:${s?.timestamp ?? ''}`;
+      map.set(key, s);
+    }
+    return Array.from(map.values()).sort((a, b) => (a?.timestamp ?? 0) - (b?.timestamp ?? 0));
   }, [formatLLMConfigLabel]);
+
+  const buildProcessMessages = useCallback((steps: ProcessStep[]): ProcessMessage[] => {
+    return steps.map((step) => {
+      const blocks = step.result ? parseMCPContentBlocks(step.result) : [];
+      const mediaBlocks = blocks.filter(b => b.kind === 'image' || b.kind === 'video' || b.kind === 'audio');
+      let contentType: ProcessMessage['contentType'] = 'text';
+      let images: ProcessMessage['images'];
+      let image: ProcessMessage['image'];
+      if (mediaBlocks.length > 1) {
+        contentType = 'images';
+        images = mediaBlocks.map(b => ({ mimeType: b.mimeType, data: b.data }));
+      } else if (mediaBlocks.length === 1) {
+        contentType = 'image';
+        image = { mimeType: mediaBlocks[0].mimeType, data: mediaBlocks[0].data };
+      }
+      const content = step.thinking || step.error || (typeof step.result === 'string' ? step.result : undefined);
+      return {
+        type: step.type,
+        contentType,
+        timestamp: step.timestamp ?? Date.now(),
+        title: step.toolName || step.workflowInfo?.name || step.action || step.type,
+        content,
+        image,
+        images,
+        meta: {
+          ...step,
+          blocks,
+        },
+      };
+    });
+  }, []);
+
+  // 兜底：如果历史消息只有 processSteps，补齐 processMessages（保持一致协议）
+  useEffect(() => {
+    setMessages(prev => {
+      let changed = false;
+      const next = prev.map(msg => {
+        const anyMsg = msg as any;
+        if (!anyMsg.processMessages && Array.isArray(anyMsg.processSteps) && anyMsg.processSteps.length > 0) {
+          changed = true;
+          return { ...msg, processMessages: buildProcessMessages(anyMsg.processSteps) };
+        }
+        if (!anyMsg.processMessages && anyMsg.ext?.processMessages) {
+          changed = true;
+          return { ...msg, processMessages: anyMsg.ext.processMessages };
+        }
+        return msg;
+      });
+      return changed ? next : prev;
+    });
+  }, [buildProcessMessages, setMessages]);
+
+  const normalizeIncomingProcessMessages = useCallback((messages?: any[], steps?: any[]) => {
+    if (Array.isArray(messages) && messages.length > 0) return messages;
+    const normalizedSteps = normalizeIncomingProcessSteps(steps) || [];
+    return normalizedSteps.length > 0 ? buildProcessMessages(normalizedSteps) : undefined;
+  }, [normalizeIncomingProcessSteps, buildProcessMessages]);
 
   // 兜底：当 llmConfigs 迟到加载时，也要把当前 Agent 的偏好模型同步到选择框
   useEffect(() => {
@@ -883,11 +953,12 @@ const Workflow: React.FC<WorkflowProps> = ({
             console.log('[Workflow] new_message received:', msg.message_id, 'sender_avatar:', msg.sender_avatar, 'ext.sender_avatar:', msg.ext?.sender_avatar);
             
             // 检查 ID 是否已存在（可能是流式消息的最终版本）
+            const incomingProcessMessages = normalizeIncomingProcessMessages(msg.processMessages || msg.ext?.processMessages, msg.processSteps || msg.ext?.processSteps);
             setMessages((prev) => {
               const existingIndex = prev.findIndex((m) => m.id === msg.message_id || m.id === msg.id);
               if (existingIndex >= 0) {
                 // 更新现有消息（流式消息完成后的最终内容）
-                // 但保留 processSteps 等扩展信息
+                // 但保留 processMessages 等扩展信息
                 const updated = [...prev];
                 const existing = updated[existingIndex];
                 const mergedSteps =
@@ -895,17 +966,20 @@ const Workflow: React.FC<WorkflowProps> = ({
                   existing.ext?.processSteps ||
                   msg.ext?.processSteps;
                 const normalizedMergedSteps = normalizeIncomingProcessSteps(mergedSteps);
+                const mergedProcessMessages = incomingProcessMessages || existing.processMessages || (existing.ext as any)?.processMessages;
                 updated[existingIndex] = {
                   ...existing,
                   content: msg.content,
                   isStreaming: false,
-                  // 合并 ext，保留现有的 processSteps
+                  // 合并 ext，保留现有的 processMessages
                   ext: {
                     ...(msg.ext || {}),
-                    processSteps: normalizedMergedSteps || mergedSteps
+                    processSteps: normalizedMergedSteps || mergedSteps,
+                    processMessages: mergedProcessMessages
                   },
-                  // 保留已有的 processSteps
-                  processSteps: normalizedMergedSteps || existing.processSteps || msg.ext?.processSteps
+                  // 保留已有的 processSteps 和 processMessages
+                  processSteps: normalizedMergedSteps || existing.processSteps || msg.ext?.processSteps,
+                  processMessages: mergedProcessMessages
                 };
                 return updated;
               }
@@ -926,10 +1000,12 @@ const Workflow: React.FC<WorkflowProps> = ({
                 sender_avatar: senderAvatar,
                 sender_name: senderName,
                 processSteps: normalizeIncomingProcessSteps(msg.ext?.processSteps),
+                processMessages: incomingProcessMessages,
                 ext: {
                   ...msg.ext,
                   sender_avatar: senderAvatar,
-                  sender_name: senderName
+                  sender_name: senderName,
+                  processMessages: incomingProcessMessages
                 }
               };
               
@@ -982,7 +1058,8 @@ const Workflow: React.FC<WorkflowProps> = ({
           } else if (payload.type === 'agent_deciding') {
             // Agent 开始决策是否回答
             const data = payload.data;
-            console.log('[Workflow] Agent deciding:', data.agent_name, 'processSteps:', data.processSteps?.length || 0);
+            const incomingProcessMessages = normalizeIncomingProcessMessages(data.processMessages, data.processSteps);
+            console.log('[Workflow] Agent deciding:', data.agent_name, 'processMessages:', incomingProcessMessages?.length || 0);
             
             setAgentDecidingStates((prev) => {
               const next = new Map(prev);
@@ -996,13 +1073,22 @@ const Workflow: React.FC<WorkflowProps> = ({
                   mergedSteps.push(step);
                 }
               }
+              // 合并 processMessages
+              const existingMessages = current?.processMessages || [];
+              const mergedMessages = [...existingMessages];
+              for (const msg of (incomingProcessMessages || [])) {
+                if (!mergedMessages.some(m => m.timestamp === msg.timestamp && m.type === msg.type)) {
+                  mergedMessages.push(msg);
+                }
+              }
               next.set(data.agent_id, {
                 agentName: data.agent_name,
                 agentAvatar: data.agent_avatar,
                 status: 'deciding',
                 inReplyTo: data.in_reply_to,
                 timestamp: data.timestamp || Date.now() / 1000,
-                processSteps: mergedSteps
+                processSteps: mergedSteps,
+                processMessages: mergedMessages.length > 0 ? mergedMessages : undefined
               });
               return next;
             });
@@ -1010,7 +1096,8 @@ const Workflow: React.FC<WorkflowProps> = ({
           } else if (payload.type === 'agent_decision') {
             // Agent 决策完成
             const data = payload.data;
-            console.log('[Workflow] Agent decision:', data.agent_name, data.action, 'processSteps:', data.processSteps?.length || 0);
+            const incomingProcessMessages = normalizeIncomingProcessMessages(data.processMessages, data.processSteps);
+            console.log('[Workflow] Agent decision:', data.agent_name, data.action, 'processMessages:', incomingProcessMessages?.length || 0);
             
             setAgentDecidingStates((prev) => {
               const next = new Map(prev);
@@ -1028,12 +1115,24 @@ const Workflow: React.FC<WorkflowProps> = ({
                     mergedSteps.push(step);
                   }
                 }
+                // 合并 processMessages
+                const existingMessages = current.processMessages || [];
+                const mergedMessages = [...existingMessages];
+                for (const msg of (incomingProcessMessages || [])) {
+                  const existingIdx = mergedMessages.findIndex(m => m.timestamp === msg.timestamp && m.type === msg.type);
+                  if (existingIdx >= 0) {
+                    mergedMessages[existingIdx] = { ...mergedMessages[existingIdx], ...msg };
+                  } else {
+                    mergedMessages.push(msg);
+                  }
+                }
                 next.set(data.agent_id, {
                   ...current,
                   status: 'decided',
                   action: data.action,
                   timestamp: data.timestamp || Date.now() / 1000,
-                  processSteps: mergedSteps
+                  processSteps: mergedSteps,
+                  processMessages: mergedMessages.length > 0 ? mergedMessages : undefined
                 });
               }
               // 决策完成后，延迟2秒移除状态（淡出效果）
@@ -1050,7 +1149,8 @@ const Workflow: React.FC<WorkflowProps> = ({
           } else if (payload.type === 'agent_thinking') {
             // Agent 开始生成回复，创建占位消息（包含决策步骤）
             const data = payload.data;
-            console.log('[Workflow] Agent thinking:', data.agent_name, 'processSteps:', data.processSteps?.length || 0);
+            const incomingProcessMessages = normalizeIncomingProcessMessages(data.processMessages, data.processSteps);
+            console.log('[Workflow] Agent thinking:', data.agent_name, 'processMessages:', incomingProcessMessages?.length || 0);
             
             // 移除决策状态（已开始回复）
             setAgentDecidingStates((prev) => {
@@ -1063,14 +1163,16 @@ const Workflow: React.FC<WorkflowProps> = ({
               // 检查是否已有该消息
               const existingIndex = prev.findIndex(m => m.id === data.message_id);
               if (existingIndex >= 0) {
-                // 消息已存在，更新 processSteps（实时步骤更新）
+                // 消息已存在，更新 processMessages（实时步骤更新）
                 const updated = [...prev];
                 updated[existingIndex] = {
                   ...updated[existingIndex],
                   processSteps: normalizeIncomingProcessSteps(data.processSteps) || updated[existingIndex].processSteps,
+                  processMessages: incomingProcessMessages || updated[existingIndex].processMessages,
                   ext: {
                     ...updated[existingIndex].ext,
                     processSteps: normalizeIncomingProcessSteps(data.processSteps) || (updated[existingIndex].ext as any)?.processSteps,
+                    processMessages: incomingProcessMessages || (updated[existingIndex].ext as any)?.processMessages,
                   }
                 };
                 return updated;
@@ -1086,10 +1188,12 @@ const Workflow: React.FC<WorkflowProps> = ({
                 isStreaming: true,
                 // 包含决策过程步骤
                 processSteps: normalizeIncomingProcessSteps(data.processSteps) || [],
+                processMessages: incomingProcessMessages || [],
                 ext: {
                   sender_name: data.agent_name,
                   sender_avatar: data.agent_avatar,
                   processSteps: normalizeIncomingProcessSteps(data.processSteps) || [],
+                  processMessages: incomingProcessMessages || [],
                   in_reply_to: data.in_reply_to
                 }
               };
@@ -1098,14 +1202,15 @@ const Workflow: React.FC<WorkflowProps> = ({
             });
             
           } else if (payload.type === 'agent_stream_chunk') {
-            // 收到流式 chunk，更新消息内容（包含实时的 processSteps）
+            // 收到流式 chunk，更新消息内容（包含实时的 processMessages）
             const data = payload.data;
+            const incomingProcessMessages = normalizeIncomingProcessMessages(data.processMessages, data.processSteps);
             
             // 调试：检查是否包含图片内容
             const contentPreview = (data.accumulated || data.chunk || '').substring(0, 200);
             const contentLength = (data.accumulated || data.chunk || '').length;
             const hasImage = contentPreview.includes('![') || contentPreview.includes('data:image');
-            console.log(`[Workflow] agent_stream_chunk: msgId=${data.message_id}, contentLen=${contentLength}, hasImage=${hasImage}, preview=${contentPreview}`);
+            console.log(`[Workflow] agent_stream_chunk: msgId=${data.message_id}, contentLen=${contentLength}, hasImage=${hasImage}, processMessages=${incomingProcessMessages?.length || 0}`);
             
             setMessages((prev) => {
               const index = prev.findIndex(m => m.id === data.message_id);
@@ -1119,27 +1224,31 @@ const Workflow: React.FC<WorkflowProps> = ({
                   sender_type: 'agent',
                   isStreaming: true,
                   processSteps: normalizeIncomingProcessSteps(data.processSteps) || [],
+                  processMessages: incomingProcessMessages || [],
                   ext: {
                     sender_name: data.agent_name,
                     sender_avatar: data.agent_avatar,
-                    processSteps: normalizeIncomingProcessSteps(data.processSteps) || []
+                    processSteps: normalizeIncomingProcessSteps(data.processSteps) || [],
+                    processMessages: incomingProcessMessages || []
                   }
                 };
                 wasAtBottomRef.current = true;
                 return [...prev, newMsg];
               }
               
-              // 更新现有消息，合并 processSteps
+              // 更新现有消息，合并 processMessages
               const updated = [...prev];
               updated[index] = {
                 ...updated[index],
                 content: data.accumulated || (updated[index].content + data.chunk),
                 isStreaming: true,
-                // 更新 processSteps
+                // 更新 processSteps 和 processMessages
                 processSteps: normalizeIncomingProcessSteps(data.processSteps) || updated[index].processSteps || [],
+                processMessages: incomingProcessMessages || updated[index].processMessages || [],
                 ext: {
                   ...updated[index].ext,
-                  processSteps: normalizeIncomingProcessSteps(data.processSteps) || updated[index].ext?.processSteps || []
+                  processSteps: normalizeIncomingProcessSteps(data.processSteps) || updated[index].ext?.processSteps || [],
+                  processMessages: incomingProcessMessages || (updated[index].ext as any)?.processMessages || []
                 }
               };
               wasAtBottomRef.current = true;
@@ -1149,9 +1258,10 @@ const Workflow: React.FC<WorkflowProps> = ({
           } else if (payload.type === 'agent_stream_done') {
             // 流式完成（可能包含错误）
             const data = payload.data;
+            const incomingProcessMessages = normalizeIncomingProcessMessages(data.processMessages, data.processSteps);
             const contentLength = (data.content || '').length;
             const hasImage = (data.content || '').includes('![') || (data.content || '').includes('data:image');
-            console.log('[Workflow] Agent stream done:', data.message_id, 'contentLen:', contentLength, 'hasImage:', hasImage, 'processSteps:', data.processSteps?.length || 0, 'error:', data.error);
+            console.log('[Workflow] Agent stream done:', data.message_id, 'contentLen:', contentLength, 'hasImage:', hasImage, 'processMessages:', incomingProcessMessages?.length || 0, 'error:', data.error);
             
             setMessages((prev) => {
               const index = prev.findIndex(m => m.id === data.message_id);
@@ -1162,7 +1272,7 @@ const Workflow: React.FC<WorkflowProps> = ({
               const incomingMedia = Array.isArray(data.media) ? data.media : undefined;
               const normalizedSteps = normalizeIncomingProcessSteps(data.processSteps);
               
-              // 如果有错误，更新内容为错误信息，但保留 processSteps
+              // 如果有错误，更新内容为错误信息，但保留 processMessages
               const content = data.error 
                 ? `[错误] ${data.agent_name || 'Agent'} 无法产生回复: ${data.error}`
                 : (data.content || existing.content);
@@ -1175,11 +1285,13 @@ const Workflow: React.FC<WorkflowProps> = ({
                 media: incomingMedia ?? existing.media,
                 // 保存执行轨迹（包含错误步骤）
                 processSteps: normalizedSteps || existing.processSteps,
+                processMessages: incomingProcessMessages || existing.processMessages,
                 ext: {
                   ...existing.ext,
                   // 同步写入 ext.media，保证刷新/重进会话后也能回显
                   media: incomingMedia ?? existing.ext?.media,
                   processSteps: normalizedSteps || existing.ext?.processSteps,
+                  processMessages: incomingProcessMessages || (existing.ext as any)?.processMessages,
                   error: data.error
                 }
               };
@@ -1187,11 +1299,12 @@ const Workflow: React.FC<WorkflowProps> = ({
               return updated;
             });
           } else if (payload.type === 'agent_silent') {
-            // Agent决定不回答，将信息添加到对应消息的 processSteps 中
+            // Agent决定不回答，将信息添加到对应消息的 processMessages 中
             const data = payload.data;
-            console.log('[Workflow] Agent silent:', data.agent_name, 'processSteps:', data.processSteps?.length || 0);
+            const incomingProcessMessages = normalizeIncomingProcessMessages(data.processMessages, data.processSteps);
+            console.log('[Workflow] Agent silent:', data.agent_name, 'processMessages:', incomingProcessMessages?.length || 0);
             
-            // 找到对应的用户消息，将决策信息添加到其 processSteps 中
+            // 找到对应的用户消息，将决策信息添加到其 processMessages 中
             if (data.in_reply_to) {
               setMessages((prev) => {
                 const index = prev.findIndex(m => m.id === data.in_reply_to);
@@ -1215,10 +1328,12 @@ const Workflow: React.FC<WorkflowProps> = ({
                     sender_name: data.agent_name,
                     sender_avatar: data.agent_avatar,
                     processSteps: normalizeIncomingProcessSteps(data.processSteps),
+                    processMessages: incomingProcessMessages,
                     ext: {
                       sender_name: data.agent_name,
                       sender_avatar: data.agent_avatar,
                       processSteps: normalizeIncomingProcessSteps(data.processSteps),
+                      processMessages: incomingProcessMessages,
                       decision_type: 'silent'
                     }
                   };
@@ -2870,6 +2985,8 @@ const Workflow: React.FC<WorkflowProps> = ({
       } | null = null;
       let rafId: number | null = null;
       
+      const buildProcessMessagesSafe = () => buildProcessMessages(currentProcessSteps);
+
       const flushPendingUpdate = () => {
         if (!pendingUpdate) return;
         const { content, thinking, isThinking, isStreaming, currentStep } = pendingUpdate;
@@ -2883,6 +3000,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                 isStreaming: isStreaming !== undefined ? isStreaming : msg.isStreaming,
                 currentStep: currentStep !== undefined ? currentStep : msg.currentStep,
                 processSteps: [...currentProcessSteps],
+                processMessages: buildProcessMessagesSafe(),
               }
             : msg
         ));
@@ -2902,6 +3020,7 @@ const Workflow: React.FC<WorkflowProps> = ({
             // 更新现有思考步骤的内容
             console.log(`[Workflow] 更新现有思考步骤`);
             existingThinkingStep.thinking = thinkingContent;
+            if (!existingThinkingStep.status) existingThinkingStep.status = 'running';
           } else {
             // 创建新的思考步骤
             console.log(`[Workflow] 创建新的思考步骤`);
@@ -2909,6 +3028,7 @@ const Workflow: React.FC<WorkflowProps> = ({
               type: 'thinking',
               timestamp: Date.now(),
               thinking: thinkingContent,
+              status: 'running',
             });
           }
           lastThinkingLength = thinkingContent.length;
@@ -2916,6 +3036,15 @@ const Workflow: React.FC<WorkflowProps> = ({
         
         // 如果 isStreaming=false，立即刷新（最终状态）
         if (isStreaming === false) {
+          // 结束生成：将思考步骤标记为完成
+          currentProcessSteps.forEach((s) => {
+            if (s.type === 'thinking' && s.status === 'running') {
+              s.status = 'completed';
+              if (s.timestamp) {
+                s.duration = Date.now() - s.timestamp;
+              }
+            }
+          });
           if (rafId) {
             cancelAnimationFrame(rafId);
             rafId = null;
@@ -3221,7 +3350,7 @@ const Workflow: React.FC<WorkflowProps> = ({
               }
               // 保存过程步骤（思考和MCP调用历史）
               if (currentProcessSteps.length > 0) {
-                extData.processSteps = currentProcessSteps;
+                extData.processMessages = buildProcessMessages(currentProcessSteps);
                 console.log(`[Workflow] 保存 ${currentProcessSteps.length} 个过程步骤到数据库:`, currentProcessSteps.map(s => ({
                   type: s.type,
                   toolName: s.toolName,
@@ -3373,7 +3502,7 @@ const Workflow: React.FC<WorkflowProps> = ({
               }
               // 保存过程步骤（思考和MCP调用历史）
               if (currentProcessSteps.length > 0) {
-                extData.processSteps = currentProcessSteps;
+                extData.processMessages = buildProcessMessages(currentProcessSteps);
                 console.log(`[Workflow] 保存 ${currentProcessSteps.length} 个过程步骤到数据库:`, currentProcessSteps.map(s => ({
                   type: s.type,
                   toolName: s.toolName,
@@ -5028,13 +5157,13 @@ const Workflow: React.FC<WorkflowProps> = ({
         })();
       const hasToolCallsArray =
         message.toolCalls && Array.isArray(message.toolCalls) && message.toolCalls.length > 0;
-      const hasProcessSteps = message.processSteps && message.processSteps.length > 0;
+      const hasProcessMessages = message.processMessages && message.processMessages.length > 0;
       const shouldUseSplitView =
         message.role === 'assistant' &&
         (hasThinkingContent ||
           hasMCPDetail ||
           hasToolCallsArray ||
-          hasProcessSteps ||
+          hasProcessMessages ||
           message.isThinking ||
           message.currentStep ||
           message.thoughtSignature);
@@ -5084,7 +5213,7 @@ const Workflow: React.FC<WorkflowProps> = ({
               setShowMCPDetailOverlay(true);
             }}
             onRetry={() => handleRetryMessage(message.id)}
-            processSteps={message.processSteps}
+            processMessages={message.processMessages}
           />
         );
       }
@@ -5093,12 +5222,12 @@ const Workflow: React.FC<WorkflowProps> = ({
         <div
           data-message-id={message.id}
           onClick={() => toggleMessageSelection(message.id)}
-          className={`flex items-start fade-in-up stagger-item ${
+          className={`flex items-start gap-2 fade-in-up stagger-item w-full ${
             message.role === 'user'
-              ? 'flex-row-reverse space-x-reverse space-x-2'
+              ? 'flex-row'
               : message.role === 'assistant' || message.role === 'tool'
-                ? 'flex-col w-full'
-                : 'space-x-2'
+                ? 'flex-row'
+                : 'flex-row'
           } ${
             skillPackSelectionMode
               ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-[#404040] rounded-lg p-2 -m-2 transition-all duration-200'
@@ -5111,7 +5240,7 @@ const Workflow: React.FC<WorkflowProps> = ({
         >
           {/* 选择复选框（仅在选择模式下显示） */}
           {skillPackSelectionMode && (
-            <div className={`flex-shrink-0 mt-0.5 ${message.role === 'user' ? 'ml-1.5' : 'mr-1.5'}`}>
+            <div className={`flex-shrink-0 mt-0.5 ${message.role === 'user' ? 'order-last ml-1.5' : 'mr-1.5'}`}>
               {isSelected ? (
                 <CheckSquare className="w-4 h-4 text-primary-500" />
               ) : (
@@ -5121,51 +5250,46 @@ const Workflow: React.FC<WorkflowProps> = ({
           )}
 
           {(message.role === 'assistant' || message.role === 'tool') ? (
-            <div className="w-full">
-              <div className="flex items-center space-x-2 mb-2">
+            <div className="w-full min-w-0">
+              {/* 第一行：头像 + 名称 + 状态（不占气泡空间） */}
+              <div className="flex flex-row items-center gap-1.5 w-full min-w-0">
                 {(() => {
                   const senderType = (message as any).sender_type as string | undefined;
                   const senderId = (message as any).sender_id as string | undefined;
-                  // topic_general、agent 私聊和 memory 都可能需要显示 Agent 头像
                   const needAgentInfo = currentSessionType === 'topic_general' || currentSessionType === 'agent' || currentSessionType === 'memory';
-                  // 优先使用消息中的 sender_avatar/sender_name，降级查找 topicParticipants
                   const msgExt = (message.ext || {}) as Record<string, any>;
                   const msgSenderAvatar = msgExt.sender_avatar || (message as any).sender_avatar;
                   const msgSenderName = msgExt.sender_name || (message as any).sender_name;
                   const agentP = needAgentInfo && senderType === 'agent' && senderId && !msgSenderAvatar
                     ? topicParticipants.find(p => p.participant_type === 'agent' && p.participant_id === senderId)
                     : undefined;
-                  // 对于 agent 私聊，使用 currentSessionAvatar 作为默认头像
                   const assistantAvatarUrl = message.role === 'assistant'
                     ? (msgSenderAvatar || agentP?.avatar || currentSessionAvatar || undefined)
                     : undefined;
                   const assistantName = msgSenderName || agentP?.name || '';
                   return (
                     <>
-                <MessageAvatar
-                  role={message.role}
-                  avatarUrl={assistantAvatarUrl}
-                  toolType={message.toolType}
-                />
-                {needAgentInfo && message.role === 'assistant' && senderType === 'agent' && assistantName && (
-                  <span className="text-xs text-gray-700 dark:text-[#d0d0d0] font-medium truncate max-w-[120px]" title={assistantName}>
-                    {assistantName}
-                  </span>
-                )}
-                {message.role === 'assistant' && (
-                  <MessageStatusIndicator
-                    isThinking={message.isThinking}
-                    isStreaming={message.isStreaming}
-                    hasContent={!!message.content && message.content.length > 0}
-                    currentStep={message.currentStep}
-                    llmProvider={selectedLLMConfig?.provider}
-                  />
-                )}
+                      <MessageAvatar role={message.role} avatarUrl={assistantAvatarUrl} toolType={message.toolType} size="sm" />
+                      {needAgentInfo && message.role === 'assistant' && senderType === 'agent' && assistantName && (
+                        <span className="text-xs text-gray-700 dark:text-[#d0d0d0] font-medium truncate max-w-[80px]" title={assistantName}>
+                          {assistantName}
+                        </span>
+                      )}
+                      {message.role === 'assistant' && (
+                        <MessageStatusIndicator
+                          isThinking={message.isThinking}
+                          isStreaming={message.isStreaming}
+                          hasContent={!!message.content && message.content.length > 0}
+                          currentStep={message.currentStep}
+                          llmProvider={selectedLLMConfig?.provider}
+                        />
+                      )}
                     </>
                   );
                 })()}
               </div>
-              <div className="w-full group relative">
+              {/* 第二行：气泡换行顶格贴左（抵消列表 px-3），不空头像位 */}
+              <div className="w-full min-w-0 group relative mt-1 -ml-3">
                 <MessageBubbleContainer role={message.role} toolType={message.toolType} className="w-full">
                   <MessageContent
                     message={message}
@@ -5188,57 +5312,60 @@ const Workflow: React.FC<WorkflowProps> = ({
             </div>
           ) : (
             <>
-              <div className="flex-shrink-0 flex items-center space-x-1.5">
-                <MessageAvatar role={message.role} toolType={message.toolType} />
-              </div>
-              <div className={`flex-1 group relative ${message.role === 'user' ? 'flex justify-end' : ''}`}>
-                {/* 用户消息操作：引用 / 编辑 / 回滚 */}
-                {message.role === 'user' && !skillPackSelectionMode && (
-                  <div className="absolute -top-7 right-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-[#2d2d2d] rounded-lg shadow-md border border-gray-200 dark:border-[#404040] px-1 py-0.5">
-                    <IconButton
-                      icon={Quote}
-                      label="引用此消息"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void handleQuoteMessage(message.id);
-                      }}
-                      className="h-7 w-7"
+              {/* 用户消息：第一行头像（右对齐），第二行气泡换行顶格右对齐 */}
+              <div className="w-full min-w-0 flex flex-col items-end">
+                <div className="flex-shrink-0">
+                  <MessageAvatar role={message.role} toolType={message.toolType} size="sm" />
+                </div>
+                <div className="w-full min-w-0 group relative mt-1">
+                  {/* 用户消息操作：引用 / 编辑 / 回滚 */}
+                  {message.role === 'user' && !skillPackSelectionMode && (
+                    <div className="absolute -top-7 right-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-[#2d2d2d] rounded-lg shadow-md border border-gray-200 dark:border-[#404040] px-1 py-0.5">
+                      <IconButton
+                        icon={Quote}
+                        label="引用此消息"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleQuoteMessage(message.id);
+                        }}
+                        className="h-7 w-7"
+                      />
+                      <IconButton
+                        icon={Edit2}
+                        label="编辑此消息"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleStartEdit(message.id);
+                        }}
+                        className="h-7 w-7"
+                      />
+                      <IconButton
+                        icon={RotateCw}
+                        label="回滚到此消息"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleRollbackToMessage(message.id);
+                        }}
+                        className="h-7 w-7"
+                      />
+                    </div>
+                  )}
+                  <MessageBubbleContainer role={message.role} toolType={message.toolType} className="max-w-[85%] w-max ml-auto">
+                    <MessageContent
+                      message={message}
+                      prevMessageContent={getPrevMessageContent(message.id)}
+                      abortController={abortController}
+                      setAbortController={setAbortController}
+                      setMessages={setMessages}
+                      setIsLoading={setIsLoading}
+                      collapsedThinking={collapsedThinking}
+                      toggleThinkingCollapse={toggleThinkingCollapse}
+                      handleExecuteWorkflow={handleExecuteWorkflow}
+                      handleDeleteWorkflowMessage={handleDeleteWorkflowMessage}
+                      openSingleMediaViewer={openSingleMediaViewer}
                     />
-                    <IconButton
-                      icon={Edit2}
-                      label="编辑此消息"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleStartEdit(message.id);
-                      }}
-                      className="h-7 w-7"
-                    />
-                    <IconButton
-                      icon={RotateCw}
-                      label="回滚到此消息"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void handleRollbackToMessage(message.id);
-                      }}
-                      className="h-7 w-7"
-                    />
-                  </div>
-                )}
-                <MessageBubbleContainer role={message.role} toolType={message.toolType} className="max-w-[85%]">
-                  <MessageContent
-                    message={message}
-                    prevMessageContent={getPrevMessageContent(message.id)}
-                    abortController={abortController}
-                    setAbortController={setAbortController}
-                    setMessages={setMessages}
-                    setIsLoading={setIsLoading}
-                    collapsedThinking={collapsedThinking}
-                    toggleThinkingCollapse={toggleThinkingCollapse}
-                    handleExecuteWorkflow={handleExecuteWorkflow}
-                    handleDeleteWorkflowMessage={handleDeleteWorkflowMessage}
-                    openSingleMediaViewer={openSingleMediaViewer}
-                  />
-                </MessageBubbleContainer>
+                  </MessageBubbleContainer>
+                </div>
               </div>
             </>
           )}
@@ -5437,15 +5564,15 @@ const Workflow: React.FC<WorkflowProps> = ({
 
   return (
     <>
-    <div className="h-full flex flex-col bg-gray-50 dark:bg-[#1a1a1a]">
+    <div className="workflow-chat-outer h-full flex flex-col bg-gray-50 dark:bg-[#1a1a1a]">
 
       {/* 主要内容区域：聊天界面 - GNOME 风格布局 */}
       <div className="flex-1 flex min-h-0 p-2 gap-2">
         {/* 左侧配置面板 - 已隐藏，功能移至底部工具栏 */}
         {/* 聊天界面 - 全屏布局（主界面无外边框/无外边距） */}
-        <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-[#2d2d2d] overflow-hidden">
+        <div className="workflow-chat-panel flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-[#2d2d2d] overflow-hidden">
         {/* 状态栏 - 优化样式 */}
-          <div className="border-b border-gray-200 dark:border-[#404040] px-3 py-1 bg-gradient-to-r from-gray-50 to-white dark:from-gray-800 dark:to-gray-900 flex-shrink-0">
+          <div className="workflow-chat-header border-b border-gray-200 dark:border-[#404040] px-3 py-1 bg-gradient-to-r from-gray-50 to-white dark:from-gray-800 dark:to-gray-900 flex-shrink-0">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center space-x-2">
               {/* 头像 - 可点击配置 */}
@@ -5509,7 +5636,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                   <Bot className="w-4 h-4 text-primary-600 dark:text-primary-400" />
                 )}
               </div>
-              <div className="flex items-center gap-2 min-w-0">
+              <div className="flex items-center gap-2 min-w-0 flex-1">
                 <span 
                   className="text-xs font-semibold text-gray-900 dark:text-[#ffffff] leading-tight truncate min-w-0"
                 >
@@ -5523,6 +5650,17 @@ const Workflow: React.FC<WorkflowProps> = ({
                     return 'AI 工作流助手';
                   })()}
                 </span>
+                {/* 移动端：会话列表入口（切换对话） */}
+                {onOpenConversationSwitcher && (
+                  <button
+                    type="button"
+                    onClick={onOpenConversationSwitcher}
+                    className="md:hidden flex-shrink-0 p-2 -m-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 touch-target min-h-[44px] min-w-[44px] flex items-center justify-center"
+                    title="会话列表"
+                  >
+                    <List className="w-5 h-5" />
+                  </button>
+                )}
 
                 {/* 话题参与者头像列表 */}
                 {(currentSessionType === 'topic_general' || currentSessionType === 'memory') && topicParticipants.length > 0 && (
@@ -5617,7 +5755,7 @@ const Workflow: React.FC<WorkflowProps> = ({
               chatContainerRef.current = el;
               setChatScrollEl(el);
             }}
-            className="flex-1 overflow-y-auto hide-scrollbar px-3 py-2 space-y-2 relative bg-gray-50/50 dark:bg-gray-950/50"
+            className="workflow-chat-messages flex-1 overflow-y-auto hide-scrollbar px-3 py-2 space-y-2 relative bg-gray-50/50 dark:bg-gray-950/50"
             style={{ scrollBehavior: 'auto', paddingBottom: floatingComposerPadding }}
             onWheel={(e) => {
               // hybrid 自动触发：接近顶部时继续上拉（滚轮向上）只触发一次
@@ -5729,9 +5867,12 @@ const Workflow: React.FC<WorkflowProps> = ({
             <div className="px-4 py-2 space-y-2">
               {Array.from(agentDecidingStates.entries()).map(([agentId, state]) => {
                 // 判断是否有 MCP 调用步骤（重要步骤）
-                const hasMcpStep = state.processSteps?.some(s => s.type === 'mcp_call');
+                const hasMcpStep = state.processMessages?.some(m => m.type === 'mcp_call' || m.type === 'ag_use_mcp') || state.processSteps?.some(s => s.type === 'mcp_call');
                 // 判断是否立即回答（无决策过程或决策步骤很少）
-                const isImmediateReply = state.action === 'reply' && (!state.processSteps || state.processSteps.length <= 1);
+                const isImmediateReply = state.action === 'reply' && (
+                  (!state.processMessages || state.processMessages.length <= 1) &&
+                  (!state.processSteps || state.processSteps.length <= 1)
+                );
                 
                 return (
                   <div 
@@ -5780,10 +5921,11 @@ const Workflow: React.FC<WorkflowProps> = ({
                     </div>
                     
                     {/* 执行轨迹（使用统一的 ProcessStepsViewer 组件） */}
-                    {state.processSteps && state.processSteps.length > 0 && !isImmediateReply && (
+                    {(state.status === 'deciding' || (state.processMessages && state.processMessages.length > 0)) && !isImmediateReply && (
                       <div className="ml-3">
                         <ProcessStepsViewer 
-                          processSteps={state.processSteps} 
+                          processMessages={state.processMessages || []} 
+                          isThinking={state.status === 'deciding'}
                           hideTitle
                           defaultExpanded
                         />
@@ -5877,8 +6019,8 @@ const Workflow: React.FC<WorkflowProps> = ({
           return null;
         })()}
 
-        {/* 输入框（浮岛悬浮） */}
-          <div className={floatingComposerContainerClass.replace('z-10', 'z-20')}>
+        {/* 输入框（浮岛悬浮，移动端预留安全区） */}
+          <div className={`floating-composer-container ${floatingComposerContainerClass.replace('z-10', 'z-20')}`}>
           <div 
             ref={floatingComposerRef}
             className={`${floatingComposerInnerClass} relative transition-colors ${
@@ -6056,9 +6198,10 @@ const Workflow: React.FC<WorkflowProps> = ({
             );
           })()}
 
-          {/* 工具 Tag（气泡/图标样式）- 在玻璃底板内部，仅在focus时显示 */}
-          {isInputFocused && (
-            <div className="flex items-center gap-1.5 flex-wrap px-3 pt-2 pb-1 animate-in fade-in slide-in-from-bottom-1 duration-200">
+          {/* 工具 Tag 栏 - 常驻显示，左侧工具tag，右侧模型选择 */}
+          <div className="flex items-center justify-between px-2.5 pt-2.5 pb-3">
+            {/* 左侧：工具 tags */}
+            <div className="flex items-center gap-1 flex-wrap flex-1 min-w-0">
               <ComponentThumbnails
                 mcpServers={mcpServers}
                 workflows={workflows}
@@ -6085,10 +6228,10 @@ const Workflow: React.FC<WorkflowProps> = ({
                     setSystemPromptDraft(currentSystemPrompt || '');
                     setIsEditingSystemPrompt(true);
                   }}
-                  className={`flex items-center space-x-1 px-1.5 py-0.5 rounded-md text-[11px] transition-all shadow-sm ${
+                  className={`flex items-center space-x-1 px-1.5 py-0.5 rounded text-[11px] transition-all ${
                     currentSystemPrompt
-                      ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 font-medium border border-indigo-200 dark:border-indigo-800'
-                      : 'bg-gray-100/80 dark:bg-[#363636]/80 text-gray-400 dark:text-[#808080] hover:text-gray-500 dark:hover:text-gray-400 border border-gray-200 dark:border-[#404040]'
+                      ? 'bg-emerald-50 dark:bg-[rgba(0,212,170,0.08)] text-emerald-600 dark:text-[#00d4aa] font-medium ring-1 ring-emerald-200 dark:ring-[rgba(0,212,170,0.25)]'
+                      : 'text-gray-400 dark:text-[#555] hover:text-gray-600 dark:hover:text-[#888]'
                   }`}
                   title={currentSystemPrompt ? `人设: ${currentSystemPrompt.length > 50 ? currentSystemPrompt.slice(0, 50) + '...' : currentSystemPrompt}` : '点击设置人设'}
                 >
@@ -6097,16 +6240,108 @@ const Workflow: React.FC<WorkflowProps> = ({
                 </button>
               )}
             </div>
-          )}
 
-          <div className="flex space-x-2 px-2 pb-2">
+            {/* 右侧：模型选择（非话题模式时显示） */}
+            {currentSessionType !== 'topic_general' && currentSessionType !== 'memory' && !isLoading && (
+              <div className="flex items-center gap-1.5 ml-2 flex-shrink-0">
+                {/* 流式响应开关 */}
+                <label className="flex items-center space-x-1 cursor-pointer group px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-[#1a1a1a] transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={streamEnabled}
+                    onChange={(e) => setStreamEnabled(e.target.checked)}
+                    className="w-2.5 h-2.5 text-neon-500 border-gray-300 dark:border-[#444] rounded focus:ring-neon-500 accent-neon-500"
+                  />
+                  <span className="text-[9px] font-medium text-gray-500 dark:text-[#666] group-hover:text-neon-600 dark:group-hover:text-neon-400">流式</span>
+                </label>
+
+                {/* Token计数 */}
+                {selectedLLMConfig && (
+                  <TokenCounter selectedLLMConfig={selectedLLMConfig} messages={messages} />
+                )}
+
+                {/* 模型选择按钮 */}
+                <button
+                  onClick={() => setShowModelSelectDialog(true)}
+                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition-all ${
+                    selectedLLMConfig
+                      ? 'bg-emerald-50 dark:bg-[rgba(0,212,170,0.08)] text-emerald-600 dark:text-[#00d4aa] font-medium ring-1 ring-emerald-200 dark:ring-[rgba(0,212,170,0.25)]'
+                      : 'text-gray-400 dark:text-[#555] hover:text-gray-600 dark:hover:text-[#888]'
+                  }`}
+                  title={selectedLLMConfig ? `${selectedLLMConfig.name}${selectedLLMConfig.model ? ` (${selectedLLMConfig.model})` : ''}` : '选择模型'}
+                >
+                  {selectedLLMConfig ? (
+                    <>
+                      {(() => {
+                        const providerInfo = getProviderIcon(selectedLLMConfig, providers);
+                        if (providerInfo.logoLight || providerInfo.logoDark) {
+                          return (
+                            <>
+                              {providerInfo.logoLight && (
+                                <img src={providerInfo.logoLight} alt="" className="w-3.5 h-3.5 object-cover rounded dark:hidden" />
+                              )}
+                              {providerInfo.logoDark && (
+                                <img src={providerInfo.logoDark} alt="" className="w-3.5 h-3.5 object-cover rounded hidden dark:block" />
+                              )}
+                              {providerInfo.logoLight && !providerInfo.logoDark && (
+                                <img src={providerInfo.logoLight} alt="" className="w-3.5 h-3.5 object-cover rounded hidden dark:block" />
+                              )}
+                              {!providerInfo.logoLight && providerInfo.logoDark && (
+                                <img src={providerInfo.logoDark} alt="" className="w-3.5 h-3.5 object-cover rounded dark:hidden" />
+                              )}
+                            </>
+                          );
+                        }
+                        if (providerInfo.customLogo) {
+                          return (
+                            <img 
+                              src={providerInfo.customLogo} 
+                              alt="" 
+                              className="w-3.5 h-3.5 object-cover rounded"
+                              style={{ 
+                                objectPosition: providerInfo.logoPosition ? `${providerInfo.logoPosition.x}% ${providerInfo.logoPosition.y}%` : '50% 50%',
+                                transform: `scale(${(providerInfo.logoScale ?? 100) / 100})`,
+                              }}
+                            />
+                          );
+                        }
+                        return <span className="text-xs">{providerInfo.icon}</span>;
+                      })()}
+                      <span className="font-medium truncate max-w-[80px]">
+                        {selectedLLMConfig.shortname || selectedLLMConfig.name}
+                      </span>
+                      {/* 模型能力图标 */}
+                      {(() => {
+                        const enableThinking = selectedLLMConfig.metadata?.enableThinking ?? false;
+                        const supportedInputs: string[] = selectedLLMConfig.metadata?.supportedInputs ?? [];
+                        const supportedOutputs: string[] = selectedLLMConfig.metadata?.supportedOutputs ?? [];
+                        const caps = [];
+                        if (enableThinking) caps.push(<Brain key="t" className="w-2.5 h-2.5 text-purple-400" title="深度思考" />);
+                        if (supportedInputs.includes('image')) caps.push(<Eye key="v" className="w-2.5 h-2.5 text-yellow-400" title="视觉" />);
+                        if (supportedInputs.includes('audio')) caps.push(<Volume2 key="a" className="w-2.5 h-2.5 text-neon-400" title="音频" />);
+                        if (supportedOutputs.includes('image')) caps.push(<Paintbrush key="i" className="w-2.5 h-2.5 text-red-400" title="生图" />);
+                        return caps.length > 0 ? <div className="flex items-center gap-0.5">{caps}</div> : null;
+                      })()}
+                    </>
+                  ) : (
+                    <>
+                      <Brain className="w-3 h-3" />
+                      <span>选择模型</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="flex space-x-1.5 px-2 pb-1.5">
             {/* 附件预览区域 - 缩略图画廊样式 */}
             {attachedMedia.length > 0 && (
-              <div className="mb-2 flex flex-wrap gap-2">
+              <div className="mb-1 flex flex-wrap gap-1.5">
                 {attachedMedia.map((media, index) => (
                   <div key={index} className="relative group">
                     {media.type === 'image' ? (
-                      <div className="w-16 h-16 rounded-lg overflow-hidden border border-gray-200 dark:border-[#404040] hover:border-primary-500 dark:hover:border-primary-500 transition-all hover:scale-105">
+                      <div className="w-12 h-12 rounded-lg overflow-hidden border border-gray-200/60 dark:border-[#404040]/60 hover:border-primary-500 dark:hover:border-primary-500 transition-all hover:scale-105">
                         <img
                           src={media.preview || ensureDataUrlFromMaybeBase64(media.data, media.mimeType)}
                           alt={`附件 ${index + 1}`}
@@ -6114,7 +6349,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                         />
                       </div>
                     ) : media.type === 'video' ? (
-                      <div className="w-16 h-16 rounded-lg overflow-hidden border border-gray-200 dark:border-[#404040] hover:border-primary-500 dark:hover:border-primary-500 transition-all hover:scale-105 relative bg-gray-900">
+                      <div className="w-12 h-12 rounded-lg overflow-hidden border border-gray-200/60 dark:border-[#404040]/60 hover:border-primary-500 dark:hover:border-primary-500 transition-all hover:scale-105 relative bg-gray-900">
                         <video
                           src={media.preview || ensureDataUrlFromMaybeBase64(media.data, media.mimeType)}
                           className="w-full h-full object-cover"
@@ -6127,8 +6362,8 @@ const Workflow: React.FC<WorkflowProps> = ({
                         </div>
                       </div>
                     ) : media.type === 'audio' ? (
-                      <div className="w-16 h-16 flex items-center justify-center rounded-lg border border-gray-200 dark:border-[#404040] hover:border-primary-500 dark:hover:border-primary-500 transition-all hover:scale-105 bg-gradient-to-br from-primary-500 to-primary-700">
-                        <Music className="w-6 h-6 text-white/80" />
+                      <div className="w-12 h-12 flex items-center justify-center rounded-lg border border-gray-200/60 dark:border-[#404040]/60 hover:border-primary-500 dark:hover:border-primary-500 transition-all hover:scale-105 bg-gradient-to-br from-primary-500 to-primary-700">
+                        <Music className="w-5 h-5 text-white/80" />
                       </div>
                     ) : null}
                     <button
@@ -6147,11 +6382,11 @@ const Workflow: React.FC<WorkflowProps> = ({
             
             <div className="flex-1 relative at-selector-container">
               {/* 输入框和右侧按钮容器 */}
-              <div className="flex items-end gap-2">
+              <div className="flex items-end gap-1.5">
                 {/* 加载时显示状态文本 + 左侧高亮工具，否则显示输入框 */}
                 {isLoading ? (
                   <div 
-                    className="flex-1 px-2 py-2 min-h-[36px] max-h-[36px] bg-transparent text-gray-500 dark:text-[#808080] text-[13px] flex items-center overflow-hidden"
+                    className="flex-1 px-2.5 py-2 min-h-[40px] max-h-[40px] bg-transparent text-gray-500 dark:text-[#666] text-[12px] flex items-center overflow-hidden"
                   >
                     <div className="flex items-center gap-2 w-full overflow-hidden">
                       {/* 左侧：正在使用的工具高亮显示 */}
@@ -6365,268 +6600,90 @@ const Workflow: React.FC<WorkflowProps> = ({
                     ? `输入你的任务，我可以使用 ${totalTools} 个工具帮助你完成...`
                     : '输入你的问题，我会尽力帮助你...'
               }
-                  className={`flex-1 resize-none transition-all duration-300 bg-transparent border-none focus:outline-none focus:ring-0 text-gray-900 dark:text-[#ffffff] placeholder-gray-400 dark:placeholder-[#808080] ${
-                    isInputFocused ? 'px-3 py-2.5' : 'px-3 py-2 overflow-hidden'
+                  className={`flex-1 resize-none transition-all duration-200 bg-transparent border-none focus:outline-none focus:ring-0 text-gray-900 dark:text-[#ffffff] placeholder-gray-400 dark:placeholder-[#606060] ${
+                    isInputFocused ? 'px-2.5 py-2' : 'px-2.5 py-1.5 overflow-hidden'
                   } ${
                     isInputExpanded 
-                      ? 'min-h-[200px] max-h-[400px]' 
-                      : isInputFocused ? 'min-h-[52px] max-h-[140px]' : 'min-h-[36px] max-h-[36px]'
+                      ? 'min-h-[180px] max-h-[360px]' 
+                      : isInputFocused ? 'min-h-[52px] max-h-[140px]' : 'min-h-[40px] max-h-[40px]'
                   }`}
-                  style={{ fontSize: isInputFocused ? '14px' : '13px', lineHeight: '1.5' }}
+                  style={{ fontSize: isInputFocused ? '13px' : '12px', lineHeight: '1.5' }}
                   rows={1}
                   disabled={isLoading || !selectedLLMConfig}
                 />
                 )}
                 
-                {/* 右侧：加载时显示中断按钮，正常时显示模型选择+发送按钮 */}
-                {isLoading ? (
-                  // 加载时：只显示中断按钮
-                  <div className="flex items-center gap-1.5 flex-shrink-0 pb-1">
+                {/* 右侧：发送/中断按钮 */}
+                <div className="flex items-center gap-1 flex-shrink-0 pb-0.5">
+                  {isLoading ? (
+                    // 加载时：显示中断按钮
                     <Button
                       onClick={() => {
                         if (abortController) {
                           abortController.abort();
                           setAbortController(null);
-                          // 删除正在流式的消息
                           setMessages(prev => prev.filter(msg => !msg.isStreaming && !msg.isThinking));
                           setIsLoading(false);
                         }
                       }}
                       variant="destructive"
                       size="sm"
-                      className="gap-1 px-2 py-1 h-7 text-xs flex-shrink-0"
+                      className="gap-1 px-2 py-1 h-7 text-xs"
                     >
                       <XCircle className="w-3.5 h-3.5" />
                       <span className="hidden sm:inline">中断</span>
                     </Button>
-                  </div>
-                ) : isInputFocused && (
-                  // 非加载时且聚焦：显示模型选择和发送按钮
-                  <div className="flex items-end gap-1.5 flex-shrink-0 pb-1 animate-in fade-in slide-in-from-right-2 duration-200">
-                    {/* 模型选择显示与Token计数（垂直布局） */}
-                    <div className="flex items-center gap-1.5">
-                      <div className="flex flex-col items-end">
-                        {/* 上方：模型名称 + 能力图标 (仅非话题模式) */}
-                        {(() => {
-                          const session = sessions.find(s => s.session_id === currentSessionId) || currentSessionMeta;
-                          const isTopic = session?.session_type === 'topic_general' || session?.session_type === 'memory';
-                          if (isTopic || !selectedLLMConfig) return null;
-
-                          return (
-                            <div 
-                              className="flex items-center space-x-1 cursor-pointer hover:opacity-80 transition-opacity mb-0.5"
-                              onClick={() => setShowModelSelectDialog(true)}
-                            >
-                              <span className="text-[10px] text-primary-600 dark:text-primary-400 font-medium">
-                                {selectedLLMConfig.shortname || selectedLLMConfig.name}
-                              </span>
-                              {/* 模型能力图标 */}
-                              {(() => {
-                                const enableThinking = selectedLLMConfig.metadata?.enableThinking ?? false;
-                                const supportedInputs: string[] = selectedLLMConfig.metadata?.supportedInputs ?? [];
-                                const supportedOutputs: string[] = selectedLLMConfig.metadata?.supportedOutputs ?? [];
-                                
-                                const capabilities = [];
-                                
-                                // 输入能力
-                                if (enableThinking) {
-                                  capabilities.push(
-                                    <Brain 
-                                      key="thinking" 
-                                      className="w-2.5 h-2.5 text-purple-500 dark:text-purple-400" 
-                                      title="深度思考模式" 
-                                    />
-                                  );
-                                }
-                                if (supportedInputs.includes('image')) {
-                                  capabilities.push(
-                                    <Eye 
-                                      key="vision" 
-                                      className="w-2.5 h-2.5 text-yellow-500 dark:text-yellow-400" 
-                                      title="视觉输入" 
-                                    />
-                                  );
-                                }
-                                if (supportedInputs.includes('audio')) {
-                                  capabilities.push(
-                                    <Volume2 
-                                      key="audio" 
-                                      className="w-2.5 h-2.5 text-green-500 dark:text-green-400" 
-                                      title="音频输入" 
-                                    />
-                                  );
-                                }
-                                
-                                // 输出能力
-                                if (supportedOutputs.includes('image')) {
-                                  capabilities.push(
-                                    <Paintbrush 
-                                      key="image-output" 
-                                      className="w-2.5 h-2.5 text-red-500 dark:text-red-400" 
-                                      title="图片生成" 
-                                    />
-                                  );
-                                }
-                                
-                                if (capabilities.length === 0) return null;
-                                
-                                return (
-                                  <div className="flex items-center gap-0.5">
-                                    {capabilities}
-                                  </div>
-                                );
-                              })()}
-                            </div>
-                          );
-                        })()}
-
-                        {/* 下方：流式按钮和Token计数 */}
-                        <div className="flex items-center gap-2">
-                          {/* 流式响应开关 */}
-                          <label className="flex items-center space-x-1 cursor-pointer group px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-[#363636] transition-colors">
-                            <input
-                              type="checkbox"
-                              checked={streamEnabled}
-                              onChange={(e) => setStreamEnabled(e.target.checked)}
-                              className="w-2.5 h-2.5 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
-                            />
-                            <span className="text-[9px] font-medium text-gray-500 dark:text-[#808080] group-hover:text-gray-700 dark:group-hover:text-[#b0b0b0]">流式</span>
-                          </label>
-                          {selectedLLMConfig && (
-                            <TokenCounter selectedLLMConfig={selectedLLMConfig} messages={messages} />
-                          )}
-                        </div>
-                      </div>
-
-                      {/* 模型选择图标按钮 - 在话题会话中隐藏，因为由 Agent 决定模型 */}
-                      {currentSessionType !== 'topic_general' && currentSessionType !== 'memory' && (
-                        <button
-                          onClick={() => setShowModelSelectDialog(true)}
-                          className={`flex items-center justify-center w-6 h-6 rounded transition-colors overflow-hidden ${
-                            selectedLLMConfig
-                              ? 'hover:bg-gray-100 dark:hover:bg-[#363636]'
-                              : 'bg-gray-100 dark:bg-[#363636] text-gray-500 dark:text-[#808080] hover:bg-gray-200 dark:hover:bg-[#404040]'
-                          }`}
-                          title={selectedLLMConfig ? `${selectedLLMConfig.name}${selectedLLMConfig.model ? ` (${selectedLLMConfig.model})` : ''}` : '选择模型'}
-                        >
-                          {selectedLLMConfig ? (
-                            (() => {
-                              const providerInfo = getProviderIcon(selectedLLMConfig, providers);
-                              // 优先使用供应商的 logo（主题自适应）
-                              if (providerInfo.logoLight || providerInfo.logoDark) {
-                                return (
-                                  <>
-                                    {/* 浅色模式显示 */}
-                                    {providerInfo.logoLight && (
-                                      <img 
-                                        src={providerInfo.logoLight} 
-                                        alt={selectedLLMConfig.provider} 
-                                        className="w-5 h-5 object-cover rounded dark:hidden"
-                                      />
-                                    )}
-                                    {/* 深色模式显示 */}
-                                    {providerInfo.logoDark && (
-                                      <img 
-                                        src={providerInfo.logoDark} 
-                                        alt={selectedLLMConfig.provider} 
-                                        className="w-5 h-5 object-cover rounded hidden dark:block"
-                                      />
-                                    )}
-                                    {/* 如果只有一种logo，则都显示 */}
-                                    {providerInfo.logoLight && !providerInfo.logoDark && (
-                                      <img 
-                                        src={providerInfo.logoLight} 
-                                        alt={selectedLLMConfig.provider} 
-                                        className="w-5 h-5 object-cover rounded hidden dark:block"
-                                      />
-                                    )}
-                                    {!providerInfo.logoLight && providerInfo.logoDark && (
-                                      <img 
-                                        src={providerInfo.logoDark} 
-                                        alt={selectedLLMConfig.provider} 
-                                        className="w-5 h-5 object-cover rounded dark:hidden"
-                                      />
-                                    )}
-                                  </>
-                                );
-                              }
-                              // 其次使用用户上传的自定义 logo（应用位置和缩放设置）
-                              if (providerInfo.customLogo) {
-                                return (
-                                  <img 
-                                    src={providerInfo.customLogo} 
-                                    alt={selectedLLMConfig.provider} 
-                                    className="w-5 h-5 object-cover rounded"
-                                    style={{ 
-                                      objectPosition: providerInfo.logoPosition 
-                                        ? `${providerInfo.logoPosition.x}% ${providerInfo.logoPosition.y}%` 
-                                        : '50% 50%',
-                                      transform: `scale(${(providerInfo.logoScale ?? 100) / 100})`,
-                                    }}
-                                  />
-                                );
-                              }
-                              // 最后显示默认的 emoji 图标
-                              return (
-                                <span className="text-sm" style={{ filter: 'saturate(1.2)' }}>
-                                  {providerInfo.icon}
-                                </span>
-                              );
-                            })()
-                          ) : (
-                            <Brain className="w-3.5 h-3.5" />
-                          )}
-                        </button>
-                      )}
-                    </div>
-
-                    {/* 发送按钮 */}
-                    <Button
-                      onClick={() => {
-                        scrollToBottom('smooth');
-                        setShowScrollToBottom(false);
-                        setShowNewMessagePrompt(false);
-                        setUnreadMessageCount(0);
-                      }}
-                      disabled={!showScrollToBottom}
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-xs text-primary-600 dark:text-primary-400 hover:bg-transparent hover:underline disabled:opacity-40 disabled:no-underline"
-                      title="回到最新消息"
-                    >
-                      到最新
-                    </Button>
-                    <Button
-                      onClick={handleSend}
-                      disabled={(!input.trim() && attachedMedia.length === 0) || !selectedLLMConfig}
-                      variant="primary"
-                      size="sm"
-                      className="gap-1 px-2 py-1 h-7 text-xs flex-shrink-0"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">{editingMessageId ? '重发' : '发送'}</span>
-                    </Button>
-
-                    {/* 生图开关：仅在 image / image-preview 模型下显示 */}
-                    {(() => {
-                      const isImageGenModel = (selectedLLMConfig?.model || '').toLowerCase().includes('image');
-                      if (!isImageGenModel) return null;
-                      return (
+                  ) : (
+                    <>
+                      {/* 到最新按钮 */}
+                      {showScrollToBottom && (
                         <Button
-                          onClick={() => setUseThoughtSignature(v => !v)}
-                          variant={useThoughtSignature ? 'secondary' : 'outline'}
+                          onClick={() => {
+                            scrollToBottom('smooth');
+                            setShowScrollToBottom(false);
+                            setShowNewMessagePrompt(false);
+                            setUnreadMessageCount(0);
+                          }}
+                          variant="ghost"
                           size="sm"
-                          className="h-7 px-2 text-xs flex-shrink-0"
-                          title={useThoughtSignature
-                            ? '已开启：会回灌历史生成图片的 thoughtSignature（用于基于上次修改继续）'
-                            : '已关闭：不回灌历史生成图片（更适合全新生图）'}
+                          className="h-7 px-2 text-xs text-neon-600 dark:text-neon-400 hover:bg-transparent hover:underline"
+                          title="回到最新消息"
                         >
-                          {useThoughtSignature ? '签名:开' : '签名:关'}
+                          到最新
                         </Button>
-                      );
-                    })()}
-                  </div>
-                )}
+                      )}
+                      
+                      {/* 生图开关 */}
+                      {(() => {
+                        const isImageGenModel = (selectedLLMConfig?.model || '').toLowerCase().includes('image');
+                        if (!isImageGenModel) return null;
+                        return (
+                          <Button
+                            onClick={() => setUseThoughtSignature(v => !v)}
+                            variant={useThoughtSignature ? 'secondary' : 'outline'}
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            title={useThoughtSignature ? '已开启签名回灌' : '已关闭签名回灌'}
+                          >
+                            {useThoughtSignature ? '签名:开' : '签名:关'}
+                          </Button>
+                        );
+                      })()}
+                      
+                      {/* 发送按钮 - 萤绿色 */}
+                      <Button
+                        onClick={handleSend}
+                        disabled={(!input.trim() && attachedMedia.length === 0) || !selectedLLMConfig}
+                        variant="primary"
+                        size="sm"
+                        className="gap-1 px-3 py-1 h-7 text-xs font-medium dark:bg-neon-500 dark:hover:bg-neon-400 dark:text-black dark:shadow-glow-neon/50"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">{editingMessageId ? '重发' : '发送'}</span>
+                      </Button>
+                    </>
+                  )}
+                </div>
               </div>
             {/* 编辑模式提示和取消按钮 */}
             {editingMessageId && (

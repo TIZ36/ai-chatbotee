@@ -134,6 +134,20 @@ export default {
           900: '#0c4a6e',
           950: '#082f49',
         },
+        // 萤绿色 - GMGN 主色调
+        neon: {
+          50: '#f0fff4',
+          100: '#dcfce7',
+          200: '#bbf7d0',
+          300: '#86efac',
+          400: '#4ade80',
+          500: '#00ff88',  // 主萤绿色
+          600: '#00e67a',
+          700: '#00cc6d',
+          800: '#00994f',
+          900: '#006633',
+          950: '#003d1f',
+        },
       },
       backgroundImage: {
         'gradient-primary': 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
@@ -218,6 +232,8 @@ export default {
         'glow-success': '0 0 20px rgba(34, 197, 94, 0.3)',
         'glow-warning': '0 0 20px rgba(245, 158, 11, 0.3)',
         'glow-error': '0 0 20px rgba(239, 68, 68, 0.3)',
+        'glow-neon': '0 0 20px rgba(0, 255, 136, 0.3)',
+        'glow-neon-lg': '0 0 30px rgba(0, 255, 136, 0.4)',
       },
     },
   },

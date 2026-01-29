@@ -89,6 +89,10 @@ class ActorBase(ABC):
         # 多模态后处理缓存
         self._pending_reply_media: Optional[List[Dict[str, Any]]] = None
         
+        # 统计：消息处理数、错误数（用于 Actor 池监控）
+        self._stats: Dict[str, int] = {"messages_processed": 0, "errors": 0}
+        self._stats_lock = threading.Lock()
+        
         logger.info(f"[ActorBase:{agent_id}] Initialized")
     
     # ========== 生命周期 ==========
@@ -300,6 +304,41 @@ class ActorBase(ABC):
         """停止 Actor"""
         self.is_running = False
         logger.info(f"[ActorBase:{self.agent_id}] Stopped")
+    
+    def get_status(self) -> Dict[str, Any]:
+        """
+        获取当前 Actor 状态（用于 Actor 池监控）
+        
+        Returns:
+            agent_id, topic_id, context_size (token 数), persona, error_rate, default_model 等
+        """
+        with self._stats_lock:
+            processed = self._stats.get("messages_processed", 0)
+            errors = self._stats.get("errors", 0)
+        error_rate = (errors / processed) if processed else 0.0
+        model = self._config.get("model") or "gpt-4"
+        try:
+            context_tokens = self.state.estimate_tokens(model) if hasattr(self.state, "estimate_tokens") else 0
+        except Exception:
+            context_tokens = len(self.state.history) * 100  # 粗略回退
+        persona = {
+            "name": self.info.get("name") or self.agent_id,
+            "avatar": self.info.get("avatar"),
+            "system_prompt": (self.info.get("system_prompt") or "")[:200] + ("..." if len(self.info.get("system_prompt") or "") > 200 else ""),
+        }
+        return {
+            "agent_id": self.agent_id,
+            "topic_id": self.topic_id or "",
+            "context_size": context_tokens,
+            "context_messages": len(self.state.history),
+            "persona": persona,
+            "messages_processed": processed,
+            "errors": errors,
+            "error_rate": round(error_rate, 4),
+            "default_model": self._config.get("model") or "-",
+            "default_provider": self._config.get("provider") or "-",
+            "is_running": self.is_running,
+        }
     
     def _run(self):
         """Actor 主循环 - 顺序处理 mailbox 中的消息"""
@@ -581,9 +620,12 @@ class ActorBase(ABC):
         self._sync_message('agent_thinking', '', ext={
             'message_id': reply_message_id,
             'processSteps': ctx.to_process_steps_dict(),
+            'processMessages': ctx.to_process_messages(),
             'in_reply_to': message_id,
         })
         
+        with self._stats_lock:
+            self._stats["messages_processed"] = self._stats.get("messages_processed", 0) + 1
         try:
             # 迭代处理
             while not ctx.is_complete and ctx.iteration < ctx.max_iterations:
@@ -601,6 +643,8 @@ class ActorBase(ABC):
             self._generate_final_response(ctx)
             
         except Exception as e:
+            with self._stats_lock:
+                self._stats["errors"] = self._stats.get("errors", 0) + 1
             logger.error(f"[ActorBase:{self.agent_id}] Process error: {e}")
             traceback.print_exc()
             ctx.mark_error(str(e))
@@ -696,6 +740,9 @@ class ActorBase(ABC):
         
         # 初始化迭代轮次
         ctx.iteration = 1
+        
+        with self._stats_lock:
+            self._stats["messages_processed"] = self._stats.get("messages_processed", 0) + 1
         
         # 添加激活步骤（包含轮次信息）
         ctx.add_step(
@@ -794,6 +841,8 @@ class ActorBase(ABC):
             logger.info(f"[ActorBase:{self.agent_id}] Message processed successfully (V2)")
             
         except Exception as e:
+            with self._stats_lock:
+                self._stats["errors"] = self._stats.get("errors", 0) + 1
             logger.error(f"[ActorBase:{self.agent_id}] Process error (V2): {e}")
             traceback.print_exc()
             ctx.mark_error(str(e))
@@ -1910,6 +1959,15 @@ class ActorBase(ABC):
             
             # 非流式调用，获取决策
             print(f"{CYAN}[Actor Mode] 调用 Provider SDK 进行消息处理决策...{RESET}")
+            
+            # 添加决策步骤通知前端
+            ctx.add_step(
+                'llm_decision',
+                thinking=f'正在分析并决策... (模型: {config_obj.model})',
+                llm_provider=config_obj.provider,
+                llm_model=config_obj.model,
+            )
+            
             response = provider.chat(llm_messages)
             content = (response.content or '').strip()
             
@@ -1919,6 +1977,13 @@ class ActorBase(ABC):
             # 3. 解析 LLM 决策
             decision, decision_data = self._parse_llm_decision(content, ctx)
             ctx.set_llm_decision(decision, decision_data)
+            
+            # 更新决策步骤为完成
+            ctx.update_last_step(
+                status='completed',
+                thinking=f'决策完成: {decision}',
+                decision=decision,
+            )
             
             ctx.update_phase(status='completed', decision=decision)
             self._publish_process_event(ctx, ProcessPhase.MSG_DEAL, 'completed', {
@@ -2902,6 +2967,13 @@ class ActorBase(ABC):
             print(f"{CYAN}[MCP DEBUG] Agent 人设长度: {len(agent_persona) if agent_persona else 0} 字符{RESET}")
             
             print(f"{YELLOW}[MCP DEBUG] 调用 execute_mcp_with_llm...{RESET}")
+            
+            # 更新步骤状态，显示正在执行
+            ctx.update_last_step(
+                thinking=f'正在执行 {mcp_server_name} 工具调用...',
+                status='running',
+            )
+            
             result = execute_mcp_with_llm(
                 mcp_server_id=server_id,
                 input_text=input_text,
@@ -3009,9 +3081,22 @@ class ActorBase(ABC):
                 tool_text += f"\n\n⚠️ 部分工具执行失败:\n" + "\n".join(partial_errors)
                 print(f"{YELLOW}[MCP DEBUG] 有 {len(partial_errors)} 个工具失败{RESET}")
             
+            # 构建完成消息
+            tools_used = [r.get('tool', 'unknown') for r in results_list if not r.get('error')]
+            success_count = len(tools_used)
+            failed_count = len(partial_errors)
+            completion_msg = f'{mcp_server_name} 调用完成'
+            if success_count > 0:
+                completion_msg += f'（成功 {success_count} 个工具'
+                if failed_count > 0:
+                    completion_msg += f'，失败 {failed_count} 个'
+                completion_msg += '）'
+            
             ctx.update_last_step(
                 status='completed',
+                thinking=completion_msg,
                 result={'summary': summary, 'tool_text': tool_text[:500] if tool_text else ''},
+                duration_ms=duration_ms,
             )
             
             # 提取 MCP 返回的媒体数据（图片等）
@@ -3336,12 +3421,75 @@ class ActorBase(ABC):
             self._sync_message('agent_thinking', '', ext={
                 'message_id': ctx.reply_message_id,
                 'processSteps': ctx.to_process_steps_dict(),
+                'processMessages': ctx.to_process_messages(),
                 'in_reply_to': ctx.original_message.get('message_id'),
                 'process_version': 'v2',
                 'step_update': step,  # 当前变更的步骤
             })
         except Exception as e:
             logger.warning(f"[ActorBase:{self.agent_id}] Failed to notify step change: {e}")
+
+    def _extract_images_from_result(self, result: Any) -> List[Dict[str, Any]]:
+        """从 MCP result 中提取图片媒体（仅 image）"""
+        images: List[Dict[str, Any]] = []
+        if not result:
+            return images
+        content = None
+        if isinstance(result, dict):
+            if isinstance(result.get('result'), dict):
+                content = result['result'].get('content')
+            if content is None:
+                content = result.get('content')
+        if not isinstance(content, list):
+            return images
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            if item.get('type') != 'image':
+                continue
+            mime_type = item.get('mimeType') or item.get('mime_type') or 'image/png'
+            data = item.get('data')
+            if isinstance(data, str) and data:
+                images.append({'mimeType': mime_type, 'data': data})
+        return images
+
+    def _build_process_messages_from_steps(self, steps: Any) -> List[Dict[str, Any]]:
+        """把 processSteps 转成 processMessages（新协议）"""
+        if not isinstance(steps, list):
+            return []
+        messages: List[Dict[str, Any]] = []
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            step_type = step.get('type', 'unknown')
+            title = (
+                step.get('toolName')
+                or (step.get('workflowInfo') or {}).get('name')
+                or step.get('action')
+                or step_type
+            )
+            images = self._extract_images_from_result(step.get('result'))
+            if len(images) > 1:
+                content_type = 'images'
+                image = None
+            elif len(images) == 1:
+                content_type = 'image'
+                image = images[0]
+            else:
+                content_type = 'text'
+                image = None
+            content = step.get('thinking') or step.get('error')
+            messages.append({
+                'type': step_type,
+                'contentType': content_type,
+                'timestamp': step.get('timestamp', int(time.time() * 1000)),
+                'title': title,
+                'content': content,
+                'image': image,
+                'images': images if len(images) > 1 else None,
+                'meta': step,
+            })
+        return messages
     
 
     # ========== 消息同步 ==========
@@ -3362,6 +3510,14 @@ class ActorBase(ABC):
         """
         from services.topic_service import get_topic_service
         
+        if ext and 'processSteps' in ext and 'processMessages' not in ext:
+            try:
+                ext['processMessages'] = self._build_process_messages_from_steps(ext.get('processSteps'))
+            except Exception as e:
+                logger.warning(f"[ActorBase:{self.agent_id}] build processMessages failed: {e}")
+        if ext and 'processSteps' in ext:
+            ext.pop('processSteps', None)
+
         message = {
             'agent_id': self.agent_id,
             'agent_name': self.info.get('name', 'Agent'),
@@ -3559,7 +3715,7 @@ class ActorBase(ABC):
             if not sop_id:
                 return None
             
-            # 从数据库获取SOP内容
+            # 从数据库获取SOP内容（包含执行步骤）
             conn = get_mysql_connection()
             if not conn:
                 return None
@@ -3568,14 +3724,44 @@ class ActorBase(ABC):
                 import pymysql
                 cursor = conn.cursor(pymysql.cursors.DictCursor)
                 cursor.execute("""
-                    SELECT name, summary FROM skill_packs WHERE skill_pack_id = %s
+                    SELECT name, summary, process_steps FROM skill_packs WHERE skill_pack_id = %s
                 """, (sop_id,))
                 row = cursor.fetchone()
                 cursor.close()
                 conn.close()
                 
                 if row:
-                    return f"【{row.get('name', 'SOP')}】\n{row.get('summary', '')}"
+                    sop_lines = [f"【{row.get('name', 'SOP')}】"]
+                    if row.get('summary'):
+                        sop_lines.append(f"说明: {row.get('summary')}")
+                    
+                    # 解析并添加执行步骤
+                    process_steps = row.get('process_steps')
+                    if process_steps:
+                        steps = []
+                        if isinstance(process_steps, str):
+                            try:
+                                steps = json.loads(process_steps)
+                            except:
+                                pass
+                        elif isinstance(process_steps, list):
+                            steps = process_steps
+                        
+                        if steps:
+                            sop_lines.append("\n执行流程:")
+                            for i, step in enumerate(steps, 1):
+                                step_name = step.get('name', step.get('title', f'步骤{i}'))
+                                step_desc = step.get('description', step.get('content', ''))
+                                step_tool = step.get('tool', step.get('mcp_server', ''))
+                                
+                                step_line = f"  {i}. {step_name}"
+                                if step_desc:
+                                    step_line += f"\n     描述: {step_desc}"
+                                if step_tool:
+                                    step_line += f"\n     工具: {step_tool}"
+                                sop_lines.append(step_line)
+                    
+                    return "\n".join(sop_lines)
                 return None
             except Exception as e:
                 logger.error(f"[ActorBase:{self.agent_id}] Error loading SOP: {e}")

@@ -151,8 +151,8 @@ export async function getBackendUrl(): Promise<string> {
   if (api?.getBackendUrl) {
     return api.getBackendUrl();
   }
-  // 浏览器环境：使用环境变量或默认值
-  return import.meta.env.VITE_BACKEND_URL || 'http://localhost:3002';
+  // 浏览器环境：使用环境变量或默认值（与 backend config.yaml server.port 一致）
+  return import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
 }
 
 /**

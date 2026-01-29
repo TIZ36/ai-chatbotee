@@ -9,6 +9,15 @@ MCP 执行服务（供 AgentActor/接口复用）
 
 注意：这里不依赖 Flask app.py，避免循环导入。
 使用 mcp_common_logic 模块直接调用 MCP（类似 ok-publish 分支）。
+
+性能优化:
+- 使用 LRU 缓存减少数据库查询
+- 启用 tools/list 缓存（60秒 TTL）
+- 减少不必要的重试和迭代
+
+代码组织:
+- 通用工具函数已迁移到 services.mcp.* 模块
+- 本文件保留核心执行逻辑和向后兼容接口
 """
 
 from __future__ import annotations
@@ -16,13 +25,48 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
+import pymysql
 
 from database import get_mysql_connection
-from mcp_server.mcp_common_logic import get_mcp_tools_list, call_mcp_tool, prepare_mcp_headers, initialize_mcp_session
-import pymysql
+from mcp_server.mcp_common_logic import (
+    get_mcp_tools_list, 
+    call_mcp_tool, 
+    prepare_mcp_headers, 
+    initialize_mcp_session,
+)
+from services.cache import (
+    get_llm_config_cached,
+    get_mcp_server_cached,
+    llm_config_cache,
+    mcp_server_cache,
+)
+
+# 从新模块导入工具函数（逐步迁移）
+from services.mcp.utils import (
+    create_logger as _mk_logger_new,
+    truncate_deep as _truncate_deep_new,
+    build_tool_description,
+    build_tool_name_map,
+    convert_to_openai_tools,
+    Colors,
+)
+from services.mcp.text_extractor import (
+    extract_user_request as extract_user_request_from_input,
+    extract_title as extract_title_from_text,
+    extract_images_from_context,
+    clean_tool_usage_marker,
+)
+from services.mcp.argument_generator import (
+    validate_and_convert_param as _validate_and_convert_param,
+    generate_tool_arguments,
+)
+from services.mcp.llm_caller import (
+    call_llm_api,
+    call_llm_with_tools,
+)
 
 
 # ==================== 参数生成辅助函数（两步法）====================
@@ -648,505 +692,33 @@ def generate_tool_arguments(
     return args
 
 
-# ==================== 原有函数 ====================
+# ==================== 工具函数（使用新模块实现） ====================
+# 这些函数已迁移到 services.mcp.* 模块
+# 保留本地定义是为了向后兼容，实际调用新模块实现
 
-def _mk_logger(external_log: Optional[callable] = None) -> tuple[list[str], callable]:
-    logs: list[str] = []
-
-    def add_log(message: str):
-        line = f"[{datetime.now().strftime('%H:%M:%S')}] {message}"
-        logs.append(line)
-        if external_log:
-            try:
-                external_log(line)
-            except Exception:
-                pass
-
-    return logs, add_log
+def _mk_logger(external_log: Optional[Callable] = None) -> Tuple[List[str], Callable]:
+    """创建日志记录器（使用新模块实现）"""
+    return _mk_logger_new(external_log)
 
 
 def _truncate_deep(obj: Any, *, max_str: int = 2000) -> Any:
-    """避免把超大结果（尤其 base64）塞进 processSteps/system prompt"""
-    if obj is None:
-        return None
-    if isinstance(obj, str):
-        s = obj
-        if len(s) > max_str:
-            return s[:max_str] + f"...[truncated:{len(s)}]"
-        return s
-    if isinstance(obj, (int, float, bool)):
-        return obj
-    if isinstance(obj, list):
-        return [_truncate_deep(x, max_str=max_str) for x in obj[:200]]
-    if isinstance(obj, dict):
-        out: Dict[str, Any] = {}
-        for k, v in list(obj.items())[:200]:
-            # 常见字段：data/base64，单独更严格一点
-            if k in ("data", "image", "base64", "payload") and isinstance(v, str) and len(v) > 512:
-                out[k] = v[:256] + f"...[truncated:{len(v)}]"
-            else:
-                out[k] = _truncate_deep(v, max_str=max_str)
-        return out
-    return str(obj)
+    """深度截断对象（使用新模块实现）"""
+    return _truncate_deep_new(obj, max_str=max_str)
 
 
-def call_llm_api(llm_config: dict, system_prompt: str, user_input: str, add_log=None):
-    """
-    调用LLM API - 使用 Provider SDK 统一调用
-    """
-    from services.providers.factory import create_provider
-    from services.providers.base import LLMMessage
-    
-    provider = llm_config.get('provider', '')
-    api_key = llm_config.get('api_key', '')
-    api_url = llm_config.get('api_url', '')
-    model = llm_config.get('model', '')
-    
-    api_key_preview = f"{api_key[:8]}...{api_key[-4:]}" if api_key and len(api_key) > 12 else ("已设置" if api_key else "❌ 未设置")
-    print(f"[call_llm_api] 🔄 调用LLM API (使用 Provider SDK)")
-    print(f"[call_llm_api]    Provider: {provider}")
-    print(f"[call_llm_api]    Model: {model}")
-    print(f"[call_llm_api]    API URL: {api_url or '默认'}")
-    print(f"[call_llm_api]    API Key: {api_key_preview}")
-    
-    if add_log:
-        add_log(f"🔄 调用LLM API: {provider} - {model}")
-        add_log(f"系统提示词长度: {len(system_prompt)}, 用户输入长度: {len(user_input)}")
-        add_log(f"LLM配置详情: provider={provider}, model={model}, api_url={api_url or '默认'}, api_key={api_key_preview}")
-
-    # 检查必要参数
-    if not provider:
-        print(f"[call_llm_api] ❌ LLM配置中缺少provider字段")
-        if add_log:
-            add_log("❌ LLM配置中缺少provider字段")
-        return None
-
-    if not api_key:
-        print(f"[call_llm_api] ❌ API密钥为空 (provider: {provider})")
-        if add_log:
-            add_log(f"❌ API密钥为空 (provider: {provider})")
-        return None
-
-    if not model:
-        print(f"[call_llm_api] ❌ 模型名称为空 (provider: {provider})")
-        if add_log:
-            add_log(f"❌ 模型名称为空 (provider: {provider})")
-        return None
-
-    # 使用 Provider SDK 统一调用
-    try:
-        llm_provider = create_provider(
-            provider_type=provider,
-            api_key=api_key,
-            api_url=api_url or None,
-            model=model
-        )
-        
-        messages = [
-            LLMMessage(role='system', content=system_prompt),
-            LLMMessage(role='user', content=user_input)
-        ]
-        
-        print(f"[call_llm_api] 📤 调用 {provider.upper()} Provider SDK...")
-        response = llm_provider.chat(messages, temperature=0.1, max_tokens=8192)
-        
-        content = response.content
-        print(f"[call_llm_api] ✅ {provider.upper()} API调用成功，返回内容长度: {len(content or '')}")
-        if add_log:
-            add_log(f"✅ {provider.upper()} API调用成功，返回内容长度: {len(content or '')}")
-        return content
-        
-    except ValueError as e:
-        # Provider 不支持
-        error_msg = str(e)
-        print(f"[call_llm_api] ❌ Provider 错误: {error_msg}")
-        if add_log:
-            add_log(f"❌ Provider 错误: {error_msg}")
-        return None
-    except Exception as e:
-        error_msg = f"{type(e).__name__}: {str(e)}"
-        print(f"[call_llm_api] ❌ API调用失败: {error_msg}")
-        if add_log:
-            add_log(f"❌ {provider.upper()} API调用失败: {error_msg}")
-        return None
+# call_llm_api 和 call_llm_with_tools 已从 services.mcp.llm_caller 导入
+# 无需在此重复定义
 
 
-def call_llm_with_tools(
-    llm_config: dict, 
-    messages: List[Dict[str, Any]], 
-    tools: List[Dict[str, Any]], 
-    add_log=None
-) -> Optional[Dict[str, Any]]:
-    """
-    使用原生 Tool Calling 调用 LLM（高性能版本）
-    
-    与临时会话相同的调用方式，一次 API 请求即可完成工具选择
-    
-    Args:
-        llm_config: LLM 配置
-        messages: 消息列表（OpenAI 格式）
-        tools: 工具列表（OpenAI function calling 格式）
-        add_log: 日志函数
-        
-    Returns:
-        {
-            'content': str,  # 文本回复
-            'tool_calls': List[Dict],  # 工具调用列表
-            'finish_reason': str
-        }
-        或 None（失败时）
-    """
-    from services.providers.factory import create_provider
-    from services.providers.base import LLMMessage
-    
-    provider = llm_config.get('provider', '')
-    api_key = llm_config.get('api_key', '')
-    api_url = llm_config.get('api_url', '')
-    model = llm_config.get('model', '')
-    
-    api_key_preview = f"{api_key[:8]}...{api_key[-4:]}" if api_key and len(api_key) > 12 else ("已设置" if api_key else "❌ 未设置")
-    print(f"[call_llm_with_tools] 🔄 原生 Tool Calling")
-    print(f"[call_llm_with_tools]    Provider: {provider}, Model: {model}")
-    print(f"[call_llm_with_tools]    Tools: {len(tools)} 个")
-    print(f"[call_llm_with_tools]    Messages: {len(messages)} 条")
-    
-    if add_log:
-        add_log(f"🔧 原生Tool Calling: {provider}/{model}, {len(tools)}个工具")
-
-    # 检查必要参数
-    if not provider or not api_key or not model:
-        print(f"[call_llm_with_tools] ❌ 缺少必要参数")
-        return None
-
-    try:
-        llm_provider = create_provider(
-            provider_type=provider,
-            api_key=api_key,
-            api_url=api_url or None,
-            model=model
-        )
-        
-        # 转换消息格式
-        llm_messages = []
-        for msg in messages:
-            llm_messages.append(LLMMessage(
-                role=msg.get('role', 'user'),
-                content=msg.get('content', ''),
-                tool_calls=msg.get('tool_calls'),
-                tool_call_id=msg.get('tool_call_id'),
-                name=msg.get('name')
-            ))
-        
-        # 调用 LLM（传递 tools 参数启用原生 function calling）
-        print(f"[call_llm_with_tools] 📤 调用 {provider.upper()} SDK with tools...")
-        response = llm_provider.chat(
-            llm_messages, 
-            tools=tools,
-            tool_choice="auto",
-            temperature=0.1,
-            max_tokens=4096
-        )
-        
-        result = {
-            'content': response.content or '',
-            'tool_calls': response.tool_calls or [],
-            'finish_reason': response.finish_reason
-        }
-        
-        tool_count = len(result['tool_calls']) if result['tool_calls'] else 0
-        print(f"[call_llm_with_tools] ✅ 成功: {tool_count} 个工具调用, 内容长度: {len(result['content'])}")
-        if add_log:
-            add_log(f"✅ 原生Tool Calling成功: {tool_count}个工具调用")
-        
-        return result
-        
-    except Exception as e:
-        error_msg = f"{type(e).__name__}: {str(e)}"
-        print(f"[call_llm_with_tools] ❌ 失败: {error_msg}")
-        if add_log:
-            add_log(f"❌ Tool Calling失败: {error_msg}")
-        return None
-
-
-# ==================== 旧的原生 HTTP 实现（已弃用，保留备用） ====================
-def _call_llm_api_legacy(llm_config: dict, system_prompt: str, user_input: str, add_log=None):
-    """
-    旧版 LLM API 调用（原生 HTTP 实现）
-    已弃用，保留备用
-    """
-    import requests
-    from requests.exceptions import RequestException, Timeout, ConnectionError as RequestsConnectionError
-    
-    provider = llm_config.get('provider', '')
-    api_key = llm_config.get('api_key', '')
-    api_url = llm_config.get('api_url', '')
-    model = llm_config.get('model', '')
-
-    if provider == 'openai':
-        default_url = 'https://api.openai.com/v1/chat/completions'
-        url = api_url or default_url
-
-        payload = {
-            'model': model,
-            'messages': [
-                {'role': 'system', 'content': system_prompt},
-                {'role': 'user', 'content': user_input}
-            ],
-            # 工具选择/结构化输出：尽量稳定
-            'temperature': 0.1,
-            'max_tokens': 8192,  # 增加 max_tokens 确保完整返回 JSON
-        }
-
-        headers = {
-            'Authorization': f'Bearer {api_key}',
-            'Content-Type': 'application/json',
-        }
-
-        try:
-            response = requests.post(url, json=payload, headers=headers, timeout=60)
-            if response.ok:
-                data = response.json()
-                content = data['choices'][0]['message']['content']
-                if add_log:
-                    add_log(f"✅ OpenAI API调用成功，返回内容长度: {len(content or '')}")
-                return content
-            else:
-                if add_log:
-                    error_text = response.text[:500] if response.text else "无响应内容"
-                    add_log(f"❌ OpenAI API调用失败: HTTP {response.status_code} - {error_text}")
-                return None
-        except Timeout:
-            if add_log:
-                add_log(f"❌ OpenAI API调用超时 (60秒)")
-            return None
-        except RequestsConnectionError as e:
-            if add_log:
-                add_log(f"❌ OpenAI API连接失败: {str(e)}")
-            return None
-        except RequestException as e:
-            if add_log:
-                add_log(f"❌ OpenAI API请求异常: {type(e).__name__}: {str(e)}")
-            return None
-        except Exception as e:
-            if add_log:
-                add_log(f"❌ OpenAI API调用未知错误: {type(e).__name__}: {str(e)}")
-            return None
-
-    elif provider == 'deepseek':
-        # DeepSeek 使用 OpenAI 兼容 API
-        default_url = 'https://api.deepseek.com/v1/chat/completions'
-        if not api_url:
-            url = default_url
-        elif '/chat/completions' not in api_url:
-            # 如果只提供了 host，需要补全路径
-            base_url = api_url.rstrip('/')
-            if base_url.endswith('/v1'):
-                url = f"{base_url}/chat/completions"
-            else:
-                url = f"{base_url}/v1/chat/completions"
-        else:
-            url = api_url
-        
-        # 调试日志（始终打印，不依赖 add_log）
-        print(f"[DeepSeek MCP] 🔄 调用 DeepSeek API")
-        print(f"[DeepSeek MCP]    原始 API URL: {api_url or '未设置'}")
-        print(f"[DeepSeek MCP]    最终 URL: {url}")
-        print(f"[DeepSeek MCP]    Model: {model}")
-        print(f"[DeepSeek MCP]    API Key: {api_key[:8]}...{api_key[-4:] if len(api_key) > 12 else '***'}")
-
-        payload = {
-            'model': model,
-            'messages': [
-                {'role': 'system', 'content': system_prompt},
-                {'role': 'user', 'content': user_input}
-            ],
-            # 工具选择/结构化输出：尽量稳定
-            'temperature': 0.1,
-            'max_tokens': 8192,  # 增加 max_tokens 确保完整返回 JSON
-        }
-
-        headers = {
-            'Authorization': f'Bearer {api_key}',
-            'Content-Type': 'application/json',
-        }
-
-        try:
-            response = requests.post(url, json=payload, headers=headers, timeout=60)
-            print(f"[DeepSeek MCP]    Response Status: {response.status_code}")
-            if response.ok:
-                data = response.json()
-                content = data['choices'][0]['message']['content']
-                print(f"[DeepSeek MCP] ✅ 成功，返回内容长度: {len(content or '')}")
-                if add_log:
-                    add_log(f"✅ DeepSeek API调用成功，返回内容长度: {len(content or '')}")
-                return content
-            else:
-                error_text = response.text[:500] if response.text else "无响应内容"
-                print(f"[DeepSeek MCP] ❌ 失败: HTTP {response.status_code} - {error_text}")
-                if add_log:
-                    add_log(f"❌ DeepSeek API调用失败: HTTP {response.status_code} - {error_text}")
-                return None
-        except Timeout:
-            print(f"[DeepSeek MCP] ❌ 超时 (60秒)")
-            if add_log:
-                add_log(f"❌ DeepSeek API调用超时 (60秒)")
-            return None
-        except RequestsConnectionError as e:
-            print(f"[DeepSeek MCP] ❌ 连接失败: {str(e)}")
-            if add_log:
-                add_log(f"❌ DeepSeek API连接失败: {str(e)}")
-            return None
-        except RequestException as e:
-            print(f"[DeepSeek MCP] ❌ 请求异常: {type(e).__name__}: {str(e)}")
-            if add_log:
-                add_log(f"❌ DeepSeek API请求异常: {type(e).__name__}: {str(e)}")
-            return None
-        except Exception as e:
-            print(f"[DeepSeek MCP] ❌ 未知错误: {type(e).__name__}: {str(e)}")
-            if add_log:
-                add_log(f"❌ DeepSeek API调用未知错误: {type(e).__name__}: {str(e)}")
-            return None
-            
-    elif provider == 'anthropic':
-        default_url = 'https://api.anthropic.com/v1/messages'
-        url = api_url or default_url
-        
-        payload = {
-            'model': model,
-            'max_tokens': 4096,
-            'messages': [
-                {'role': 'user', 'content': f"{system_prompt}\n\n用户输入: {user_input}"}
-            ],
-        }
-        
-        headers = {
-            'x-api-key': api_key,
-            'anthropic-version': '2023-06-01',
-            'Content-Type': 'application/json',
-        }
-        
-        try:
-            response = requests.post(url, json=payload, headers=headers, timeout=60)
-            if response.ok:
-                data = response.json()
-                content = data['content'][0]['text']
-                if add_log:
-                    add_log(f"✅ Anthropic API调用成功，返回内容长度: {len(content or '')}")
-                return content
-            else:
-                if add_log:
-                    error_text = response.text[:500] if response.text else "无响应内容"
-                    add_log(f"❌ Anthropic API调用失败: HTTP {response.status_code} - {error_text}")
-                return None
-        except Timeout:
-            if add_log:
-                add_log(f"❌ Anthropic API调用超时 (60秒)")
-            return None
-        except RequestsConnectionError as e:
-            if add_log:
-                add_log(f"❌ Anthropic API连接失败: {str(e)}")
-            return None
-        except RequestException as e:
-            if add_log:
-                add_log(f"❌ Anthropic API请求异常: {type(e).__name__}: {str(e)}")
-            return None
-        except Exception as e:
-            if add_log:
-                add_log(f"❌ Anthropic API调用未知错误: {type(e).__name__}: {str(e)}")
-            return None
-            
-    elif provider == 'gemini':
-        default_url = 'https://generativelanguage.googleapis.com/v1beta'
-        base_url = api_url or default_url
-        model_name = model or 'gemini-2.5-flash'
-        
-        # 构建完整的 API URL
-        if base_url.endswith('/'):
-            url = f"{base_url}models/{model_name}:generateContent"
-        else:
-            url = f"{base_url}/models/{model_name}:generateContent"
-        
-        # 转换消息格式为 Gemini 格式
-        contents = [
-            {
-                'role': 'user',
-                'parts': [{'text': f"{system_prompt}\n\n用户输入: {user_input}"}]
-            }
-        ]
-        
-        payload = {
-            'contents': contents,
-            'generationConfig': {
-                # 工具选择/结构化输出：尽量稳定
-                'temperature': 0.1,
-                'maxOutputTokens': 8192,  # 增加 maxOutputTokens 确保完整返回 JSON
-            },
-        }
-        
-        # 只在metadata中明确指定thinking_level时才添加（某些模型不支持此字段）
-        if llm_config.get('metadata') and llm_config['metadata'].get('thinking_level'):
-            payload['generationConfig']['thinkingLevel'] = llm_config['metadata']['thinking_level']
-        
-        headers = {
-            'x-goog-api-key': api_key,
-            'Content-Type': 'application/json',
-        }
-        
-        try:
-            response = requests.post(url, json=payload, headers=headers, timeout=60)
-            if response.ok:
-                data = response.json()
-                if data.get('candidates') and len(data['candidates']) > 0:
-                    candidate = data['candidates'][0]
-                    if candidate.get('content') and candidate['content'].get('parts'):
-                        # 提取所有文本内容
-                        text_parts = [part.get('text', '') for part in candidate['content']['parts'] if part.get('text')]
-                        content = ''.join(text_parts)
-                        if add_log:
-                            add_log(f"✅ Gemini API调用成功，返回内容长度: {len(content or '')}")
-                        return content
-                if add_log:
-                    add_log("❌ Gemini API返回数据格式错误")
-                return None
-            else:
-                if add_log:
-                    try:
-                        error_data = response.json() if response.content else {}
-                        error_msg = error_data.get('error', {}).get('message', response.text)
-                    except:
-                        error_msg = response.text[:500] if response.text else "无响应内容"
-                    add_log(f"❌ Gemini API调用失败: HTTP {response.status_code} - {error_msg}")
-                return None
-        except Timeout:
-            if add_log:
-                add_log(f"❌ Gemini API调用超时 (60秒)")
-            return None
-        except RequestsConnectionError as e:
-            if add_log:
-                add_log(f"❌ Gemini API连接失败: {str(e)}")
-            return None
-        except RequestException as e:
-            if add_log:
-                add_log(f"❌ Gemini API请求异常: {type(e).__name__}: {str(e)}")
-            return None
-        except Exception as e:
-            if add_log:
-                add_log(f"❌ Gemini API调用未知错误: {type(e).__name__}: {str(e)}")
-            return None
-    else:
-        print(f"[_call_llm_api_legacy] ❌ 不支持的LLM提供商: {provider}")
-        if add_log:
-            add_log(f"❌ 不支持的LLM提供商: {provider}")
-        return None
-
+# ==================== 核心执行函数 ====================
 
 def execute_mcp_with_llm(
     *,
     mcp_server_id: str,
     input_text: str,
     llm_config_id: str,
-    add_log: Optional[callable] = None,
-    max_iterations: int = 3,
+    add_log: Optional[Callable] = None,
+    max_iterations: int = 1,  # 性能优化：默认只执行一轮（两步法不需要多轮）
     topic_id: Optional[str] = None,
     existing_session_id: Optional[str] = None,
     agent_system_prompt: Optional[str] = None,  # Agent 的人设/系统提示词
@@ -1190,35 +762,31 @@ def execute_mcp_with_llm(
         if not effective_input:
             effective_input = input_text or ""
 
-        # 使用 llm_service 获取 LLM 配置（确保格式正确且包含 API key）
+        # 使用缓存获取 LLM 配置（性能优化：减少数据库查询）
         log(f"获取LLM配置: {llm_config_id}")
         try:
             from services.llm_service import get_llm_service
             llm_service = get_llm_service()
-            llm_config = llm_service.get_config(llm_config_id, include_api_key=True)
+            
+            # 使用缓存版本（TTL 5分钟）
+            llm_config = get_llm_config_cached(
+                config_id=llm_config_id,
+                get_config_func=llm_service.get_config,
+                include_api_key=True,
+            )
             
             if not llm_config:
                 log(f"❌ LLM配置不存在或已禁用: {llm_config_id}")
                 return {"error": "LLM config not found or disabled", "logs": logs}
             
-            # llm_service.get_config 返回的配置已经是正确格式，包含所有必要字段
-            log(f"✅ LLM配置获取成功:")
-            log(f"   配置ID: {llm_config.get('config_id', llm_config_id)}")
-            log(f"   Provider: {llm_config.get('provider', '未知')}")
-            log(f"   Model: {llm_config.get('model', '未知')}")
-            log(f"   API URL: {llm_config.get('api_url', '默认')}")
-            log(f"   API Key: {'已设置' if llm_config.get('api_key') else '❌ 未设置'}")
-            log(f"   Metadata: {llm_config.get('metadata', {})}")
+            # 简化日志输出
+            log(f"✅ LLM配置: {llm_config.get('provider')}/{llm_config.get('model')}")
 
             # 验证LLM配置的完整性
-            missing_fields = []
-            if not llm_config.get('provider'):
-                missing_fields.append('provider')
-            if not llm_config.get('model'):
-                missing_fields.append('model')
-            if not llm_config.get('api_key'):
-                missing_fields.append('api_key')
-
+            missing_fields = [
+                field for field in ('provider', 'model', 'api_key')
+                if not llm_config.get(field)
+            ]
             if missing_fields:
                 error_msg = f"LLM配置不完整，缺少字段: {', '.join(missing_fields)}"
                 log(f"❌ {error_msg}")
@@ -1228,33 +796,44 @@ def execute_mcp_with_llm(
             log(f"❌ {error_msg}")
             return {"error": error_msg, "logs": logs}
 
-        # 获取 MCP 服务器配置（仍然需要数据库连接）
+        # 获取 MCP 服务器配置（使用缓存优化）
+        def _fetch_mcp_server(server_id: str) -> Optional[Dict[str, Any]]:
+            """从数据库获取 MCP 服务器配置"""
+            conn = get_mysql_connection()
+            if not conn:
+                return None
+            try:
+                cursor = conn.cursor(pymysql.cursors.DictCursor)
+                cursor.execute(
+                    """
+                    SELECT server_id, name, url, enabled
+                    FROM mcp_servers
+                    WHERE server_id = %s AND enabled = 1
+                    """,
+                    (server_id,),
+                )
+                return cursor.fetchone()
+            finally:
+                cursor.close()
+                conn.close()
+        
+        log(f"获取MCP服务器配置: {mcp_server_id}")
+        mcp_server = get_mcp_server_cached(mcp_server_id, _fetch_mcp_server)
+        
+        if not mcp_server:
+            return {"error": "MCP server not found or disabled", "logs": logs}
+
+        server_name = mcp_server.get("name") or mcp_server_id
+        server_url = mcp_server.get("url")
+        log(f"✅ MCP服务器: {server_name}")
+        
+        # 获取数据库连接（用于后续操作）
         conn = get_mysql_connection()
         if not conn:
             return {"error": "MySQL not available", "logs": logs}
 
         cursor = None
         try:
-            import pymysql
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-
-            # MCP server
-            log(f"获取MCP服务器配置: {mcp_server_id}")
-            cursor.execute(
-                """
-                SELECT server_id, name, url, enabled
-                FROM mcp_servers
-                WHERE server_id = %s AND enabled = 1
-                """,
-                (mcp_server_id,),
-            )
-            mcp_server = cursor.fetchone()
-            if not mcp_server:
-                return {"error": "MCP server not found or disabled", "logs": logs}
-
-            server_name = mcp_server.get("name") or mcp_server_id
-            server_url = mcp_server.get("url")
-            log(f"MCP服务器配置获取成功: {server_name} ({server_url})")
 
             # ==================== 使用 mcp_common_logic 直接调用 MCP（类似 ok-publish） ====================
             # 1. 准备请求头（包括 OAuth token 等）
@@ -1280,49 +859,26 @@ def execute_mcp_with_llm(
             else:
                 log(f"跳过 MCP 会话初始化，使用已有 session_id")
             
-            # 3. 获取工具列表（带自动重连和重试机制）
+            # 3. 获取工具列表（性能优化：启用缓存，减少 MCP 调用）
             log("Step 2/3: tools/list")
-            # Actor 场景优先不走缓存：避免 tools/list 的短期缓存掩盖 session-id/权限变更
+            # 优化：启用 60 秒缓存，工具列表不常变化
             # auto_reconnect=True 会在失败时自动清理旧连接并重试
-            max_retries = 0  # 最多重试2次（加上第一次共3次）
-            tools_response = None
-            last_error = None
-            
-            for retry_attempt in range(max_retries + 1):
-                if retry_attempt > 0:
-                    log(f"⚠️ 获取工具列表失败，第 {retry_attempt + 1} 次尝试...")
-                    # 清理旧连接和 session-id，准备重新初始化
-                    from mcp_server.mcp_common_logic import invalidate_mcp_connection
-                    invalidate_mcp_connection(server_url)
-                    if 'mcp-session-id' in headers:
-                        del headers['mcp-session-id']
-                    # 重新初始化会话
-                    init_response = initialize_mcp_session(server_url, headers)
-                    if init_response:
-                        log(f"✅ 重新初始化 MCP 会话成功，session_id: {headers.get('mcp-session-id', 'N/A')[:16]}...")
-                    else:
-                        log("⚠️ 重新初始化 MCP 会话失败，但继续尝试获取工具列表")
-                    # 等待一段时间再重试
-                    import time
-                    time.sleep(0.5 * retry_attempt)
-                
-                tools_response = get_mcp_tools_list(server_url, headers, use_cache=False, auto_reconnect=True)
-                if tools_response and 'result' in tools_response:
-                    # 成功获取工具列表
-                    break
-                else:
-                    # 记录错误信息
-                    if tools_response:
-                        last_error = f"Invalid response: {str(tools_response)[:200]}"
-                    else:
-                        last_error = "No response from MCP server"
-                    log(f"❌ 获取工具列表失败: {last_error}")
+            tools_response = get_mcp_tools_list(
+                server_url, 
+                headers, 
+                use_cache=True,  # 性能优化：启用缓存
+                auto_reconnect=True,
+            )
             
             if not tools_response or 'result' not in tools_response:
-                # 导入健康状态函数
+                # 获取失败时的调试信息
                 from mcp_server.mcp_common_logic import get_mcp_health_status
                 health_status = get_mcp_health_status(server_url)
-                log(f"❌ 获取工具列表失败（已重试 {max_retries} 次）: {last_error}")
+                last_error = (
+                    f"Invalid response: {str(tools_response)[:200]}" 
+                    if tools_response else "No response from MCP server"
+                )
+                log(f"❌ 获取工具列表失败: {last_error}")
                 return {
                     "error": "Failed to get MCP tools list",
                     "logs": logs,
@@ -1332,8 +888,7 @@ def execute_mcp_with_llm(
                         "tools_response_preview": _truncate_deep(tools_response, max_str=1200),
                         "health_status": health_status,
                         "last_error": last_error,
-                        "retry_attempts": max_retries + 1,
-                        "hint": "MCP 服务可能已重启或不可用，系统已尝试自动重连和重试。请检查 MCP 服务状态。",
+                        "hint": "MCP 服务可能不可用，请检查 MCP 服务状态。",
                     },
                 }
 
@@ -1554,9 +1109,12 @@ def execute_mcp_with_llm(
             executed_tool_names: set[str] = set()  # 记录已执行的工具名
 
             # ==================== 尝试原生 Tool Calling（高性能路径） ====================
-            # 支持原生 function calling 的模型（OpenAI, DeepSeek 等）可以一次 API 调用完成工具选择
+            # 支持原生 function calling 的模型可以一次 API 调用完成工具选择
+            # 优化：增加 Gemini 支持（使用 function_declarations）
             provider_type = llm_config.get('provider', '').lower()
-            use_native_tool_calling = provider_type in ('openai', 'deepseek', 'anthropic', 'claude')
+            use_native_tool_calling = provider_type in (
+                'openai', 'deepseek', 'anthropic', 'claude', 'gemini', 'google'
+            )
             
             if use_native_tool_calling:
                 log("Step 3/3: 工具选择与执行（原生 Tool Calling - 高性能）")
@@ -1606,12 +1164,12 @@ def execute_mcp_with_llm(
                     log(f"✅ 原生 Tool Calling 返回 {len(tool_calls_from_native)} 个工具调用")
                     print(f"{GREEN}[MCP EXEC] ✅ 原生返回 {len(tool_calls_from_native)} 个工具调用{RESET}")
                     
-                    # 执行工具调用
+                    # 解析工具调用
+                    parsed_calls = []
                     for tc in tool_calls_from_native[:5]:  # 最多5个
                         tool_name = tc.get('function', {}).get('name') or tc.get('name', '')
                         tool_args_str = tc.get('function', {}).get('arguments') or tc.get('arguments', '{}')
                         
-                        # 解析参数
                         try:
                             if isinstance(tool_args_str, str):
                                 tool_args = json.loads(tool_args_str) if tool_args_str else {}
@@ -1620,47 +1178,65 @@ def execute_mcp_with_llm(
                         except json.JSONDecodeError:
                             tool_args = {}
                         
-                        log(f"  执行工具: {tool_name}")
-                        print(f"{CYAN}[MCP EXEC] 执行工具: {tool_name}, 参数: {list(tool_args.keys())}{RESET}")
-                        
-                        # 调用 MCP 工具
-                        try:
-                            tool_result = call_mcp_tool(
-                                target_url=server_url,
-                                headers=headers,
-                                tool_name=tool_name,
-                                tool_args=tool_args,
-                                add_log=log,
-                            )
+                        parsed_calls.append((tool_name, tool_args))
+                    
+                    # 并行执行工具调用（性能优化）
+                    from services.parallel import MCPToolCall, execute_mcp_tools_parallel
+                    
+                    mcp_tool_calls = [
+                        MCPToolCall(tool_name=name, arguments=args)
+                        for name, args in parsed_calls
+                    ]
+                    
+                    def _call_mcp_wrapper(tool_name: str, tool_args: Dict[str, Any]) -> Dict[str, Any]:
+                        """MCP 调用包装器"""
+                        return call_mcp_tool(
+                            target_url=server_url,
+                            headers=headers,
+                            tool_name=tool_name,
+                            tool_args=tool_args,
+                            add_log=None,  # 并行执行时不打印日志
+                        )
+                    
+                    log(f"🚀 并行执行 {len(mcp_tool_calls)} 个工具调用...")
+                    print(f"{CYAN}[MCP EXEC] 🚀 并行执行 {len(mcp_tool_calls)} 个工具{RESET}")
+                    
+                    parallel_results = execute_mcp_tools_parallel(
+                        tool_calls=mcp_tool_calls,
+                        call_func=_call_mcp_wrapper,
+                        max_concurrent=3,  # 最多 3 个并发
+                        timeout=60.0,
+                    )
+                    
+                    # 转换结果格式
+                    for pr in parallel_results:
+                        if pr.success:
+                            tool_text = ""
+                            raw_result = pr.raw_result
                             
-                            # 提取结果（call_mcp_tool 返回格式：{success, data, text, raw_result, ...}）
-                            if tool_result and tool_result.get('success'):
-                                tool_text = tool_result.get('text') or str(tool_result.get('data', ''))
-                                
-                                results.append({
-                                    "tool": tool_name,
-                                    "arguments": tool_args,
-                                    "tool_text": tool_text,
-                                    "raw_result": tool_result.get('raw_result'),
-                                    "success": True,
-                                })
-                                executed_tool_names.add(tool_name)
-                                log(f"    ✅ {tool_name} 执行成功")
-                            else:
-                                error_msg = tool_result.get('error', '未知错误') if tool_result else '调用失败'
-                                results.append({
-                                    "tool": tool_name,
-                                    "error": error_msg,
-                                    "success": False,
-                                })
-                                log(f"    ❌ {tool_name} 执行失败: {error_msg}")
-                        except Exception as e:
+                            # 提取文本
+                            if isinstance(pr.result, dict):
+                                tool_text = pr.result.get('text') or str(pr.result.get('data', ''))
+                            elif pr.result:
+                                tool_text = str(pr.result)
+                            
                             results.append({
-                                "tool": tool_name,
-                                "error": str(e),
-                                "success": False,
+                                "tool": pr.tool_name,
+                                "tool_text": tool_text,
+                                "raw_result": raw_result,
+                                "success": True,
+                                "duration_ms": pr.duration_ms,
                             })
-                            log(f"    ❌ {tool_name} 异常: {e}")
+                            executed_tool_names.add(pr.tool_name)
+                            log(f"  ✅ {pr.tool_name} ({pr.duration_ms:.0f}ms)")
+                        else:
+                            results.append({
+                                "tool": pr.tool_name,
+                                "error": pr.error or "未知错误",
+                                "success": False,
+                                "duration_ms": pr.duration_ms,
+                            })
+                            log(f"  ❌ {pr.tool_name}: {pr.error}")
                     
                     # 原生 Tool Calling 成功，跳过两步法
                     all_tool_calls = tool_calls_from_native

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
-import { Brain, Plug, Workflow as WorkflowIcon, Settings, Code, MessageCircle, Globe, Sparkles, Bot, Users, BookOpen, Shield, Activity, Plus, FolderOpen, Image as ImageIcon } from 'lucide-react';
+import { Brain, Plug, Workflow as WorkflowIcon, Settings, Code, MessageCircle, Globe, Sparkles, Bot, Users, BookOpen, Shield, Activity, Plus, FolderOpen, Image as ImageIcon, Palette, Check, Type } from 'lucide-react';
 import appLogoDark from '../assets/app_logo_dark.png';
 import appLogoLight from '../assets/app_logo_light.png';
 import { Button } from './components/ui/Button';
@@ -31,6 +31,12 @@ import { getRoundTables, type RoundTable } from './services/roundTableApi';
 import { toast } from './components/ui/use-toast';
 import { ConfirmDialog } from './components/ui/ConfirmDialog';
 import MediaLibraryPage from './components/MediaLibraryPage';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from './components/ui/DropdownMenu';
 
 // 导航项组件 - 带动画和tooltip
 interface NavItemProps {
@@ -75,8 +81,14 @@ const NavItem: React.FC<NavItemProps> = ({ to, icon, title, isActive }) => {
   );
 };
 
+export type SkinId = 'default' | 'gmgn';
+
+export type FontId = 'default' | 'pixel' | 'terminal' | 'rounded' | 'dotgothic' | 'silkscreen';
+
 interface Settings {
   theme: 'light' | 'dark' | 'system';
+  skin: SkinId;
+  font: FontId;
   autoRefresh: boolean;
   refreshInterval: number;
   videoColumns: number;
@@ -96,12 +108,13 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('settings');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        return { theme: 'system', skin: 'default', font: 'default', autoRefresh: false, refreshInterval: 60, videoColumns: 4, ...parsed };
       } catch {
-        return { theme: 'system', autoRefresh: false, refreshInterval: 60, videoColumns: 4 };
+        return { theme: 'system', skin: 'default', font: 'default', autoRefresh: false, refreshInterval: 60, videoColumns: 4 };
       }
     }
-    return { theme: 'system', autoRefresh: false, refreshInterval: 60, videoColumns: 4 };
+    return { theme: 'system', skin: 'default', font: 'default', autoRefresh: false, refreshInterval: 60, videoColumns: 4 };
   });
   const [isAdmin, setIsAdmin] = useState(false);
 
@@ -159,18 +172,45 @@ const App: React.FC = () => {
     return root.classList.contains('dark');
   });
 
+  // 应用主题（light/dark）与皮肤（default/gmgn）；移动端强制 GMGN
   useEffect(() => {
     const root = window.document.documentElement;
-    const isDark = settings.theme === 'dark' || 
+    const mobile = window.matchMedia('(max-width: 767px)').matches;
+    const skin = mobile ? 'gmgn' : settings.skin;
+    root.setAttribute('data-skin', skin);
+    root.setAttribute('data-mobile', mobile ? 'true' : 'false');
+
+    const isGmgn = skin === 'gmgn';
+    const isDark = isGmgn || settings.theme === 'dark' ||
       (settings.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-    
+
     setIsDarkMode(isDark);
     if (isDark) {
       root.classList.add('dark');
     } else {
       root.classList.remove('dark');
     }
-  }, [settings.theme]);
+  }, [settings.theme, settings.skin]);
+
+  // 同步 data-mobile 与移动端强制 GMGN（resize 时）
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const sync = () => {
+      const root = document.documentElement;
+      const mobile = mq.matches;
+      root.setAttribute('data-mobile', mobile ? 'true' : 'false');
+      if (mobile) root.setAttribute('data-skin', 'gmgn');
+      else root.setAttribute('data-skin', settings.skin);
+    };
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, [settings.skin]);
+
+  // 应用字体
+  useEffect(() => {
+    document.documentElement.setAttribute('data-font', settings.font);
+  }, [settings.font]);
 
   const updateSettings = (newSettings: Partial<Settings>) => {
     setSettings(prev => ({ ...prev, ...newSettings }));
@@ -281,11 +321,26 @@ const App: React.FC = () => {
     }
   };
 
-  // 左侧边栏显示状态
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  // 左侧边栏显示状态（移动端默认收起）
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
+  );
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
+  );
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const onChange = () => {
+      setIsMobile(mq.matches);
+      if (mq.matches) setIsSidebarCollapsed(true);
+    };
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
 
   return (
-    <div className="h-screen bg-gradient-to-br from-gray-100 via-gray-50 to-gray-100 dark:from-[#0f0f0f] dark:via-[#141414] dark:to-[#0f0f0f] flex flex-col transition-colors duration-200 overflow-hidden" style={{ paddingBottom: '28px' }}>
+    <div className={`app-root-bg h-screen bg-gradient-to-br from-gray-100 via-gray-50 to-gray-100 dark:from-[#0f0f0f] dark:via-[#141414] dark:to-[#0f0f0f] flex flex-col transition-colors duration-200 overflow-hidden ${isMobile ? 'mobile-no-status-bar' : ''}`}>
       {/* macOS 专用小标题栏 - 仅用于红黄绿按钮拖拽区域 */}
       {isMac && (
         <div
@@ -296,12 +351,21 @@ const App: React.FC = () => {
         />
       )}
       
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-      {/* 左侧导航栏 - 毛玻璃效果 */}
+      <div className="flex flex-1 min-h-0 overflow-hidden relative">
+      {/* 移动端侧栏遮罩 */}
+      {isMobile && !isSidebarCollapsed && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          aria-hidden
+          onClick={() => setIsSidebarCollapsed(true)}
+        />
+      )}
+      {/* 左侧导航栏 - 毛玻璃效果；移动端为浮层 */}
         <nav 
           className={`glass-sidebar flex flex-col items-center flex-shrink-0 z-50 pt-2 transition-all duration-300 ease-in-out overflow-hidden ${
             isSidebarCollapsed ? 'w-0 border-r-0' : 'w-[48px]'
-          }`}
+          } ${isMobile && !isSidebarCollapsed ? 'fixed left-0 top-0 bottom-0 shadow-xl' : ''}`}
+          style={isMobile && !isSidebarCollapsed ? { paddingTop: 'calc(0.5rem + var(--safe-area-inset-top))' } : undefined}
         >
 
         {/* 上方导航：聊天、MCP、Workflow */}
@@ -417,12 +481,13 @@ const App: React.FC = () => {
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
         {/* Header - Logo + 模式切换（仅聊天页显示切换按钮）- 毛玻璃效果 */}
         <header 
-          className="h-10 flex-shrink-0 glass-header flex items-center justify-between px-3"
+          className="h-10 flex-shrink-0 glass-header flex items-center justify-between px-3 min-h-[44px] md:min-h-0"
+          style={isMobile ? { paddingTop: 'max(0.25rem, var(--safe-area-inset-top))', paddingLeft: 'calc(0.75rem + var(--safe-area-inset-left))', paddingRight: 'calc(0.75rem + var(--safe-area-inset-right))' } : undefined}
         >
-          {/* 左侧 Logo */}
+          {/* 左侧 Logo - 移动端满足 44px 触摸目标 */}
           <div className="flex items-center gap-2">
             <div
-              className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity"
+              className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity touch-target min-h-[44px] min-w-[44px] -m-2 p-2 md:min-h-0 md:min-w-0 md:m-0 md:p-0"
               onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
               title="点击隐藏/显示侧边栏"
             >
@@ -435,8 +500,84 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          {/* 右侧切换对话按钮 */}
+          {/* 右侧：字体 + 皮肤（仅桌面端）+ 切换对话按钮 */}
           <div className="flex items-center gap-2">
+            {!isMobile && (
+              <>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs glass-toolbar gap-1.5"
+                      title="切换字体"
+                    >
+                      <Type className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline max-w-[4rem] truncate">
+                        {settings.font === 'default' ? '默认' : settings.font === 'pixel' ? '像素' : settings.font === 'terminal' ? '终端' : settings.font === 'rounded' ? '圆体' : settings.font === 'dotgothic' ? '点阵' : '像素屏'}
+                      </span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="min-w-[160px] max-h-[70vh] overflow-y-auto">
+                    <DropdownMenuItem onClick={() => updateSettings({ font: 'default' })} className="flex items-center justify-between">
+                      <span>默认 (Inter)</span>
+                      {settings.font === 'default' && <Check className="w-4 h-4" />}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => updateSettings({ font: 'pixel' })} className="flex items-center justify-between">
+                      <span>像素 (Press Start 2P)</span>
+                      {settings.font === 'pixel' && <Check className="w-4 h-4" />}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => updateSettings({ font: 'terminal' })} className="flex items-center justify-between">
+                      <span>终端 (VT323)</span>
+                      {settings.font === 'terminal' && <Check className="w-4 h-4" />}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => updateSettings({ font: 'rounded' })} className="flex items-center justify-between">
+                      <span>圆体 (Comfortaa)</span>
+                      {settings.font === 'rounded' && <Check className="w-4 h-4" />}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => updateSettings({ font: 'dotgothic' })} className="flex items-center justify-between">
+                      <span>点阵 (DotGothic16)</span>
+                      {settings.font === 'dotgothic' && <Check className="w-4 h-4" />}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => updateSettings({ font: 'silkscreen' })} className="flex items-center justify-between">
+                      <span>像素屏 (Silkscreen)</span>
+                      {settings.font === 'silkscreen' && <Check className="w-4 h-4" />}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs glass-toolbar gap-1.5"
+                      title="切换皮肤"
+                    >
+                      <Palette className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">
+                        {settings.skin === 'gmgn' ? 'GMGN' : '默认'}
+                      </span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="min-w-[140px]">
+                    <DropdownMenuItem
+                      onClick={() => updateSettings({ skin: 'default' })}
+                      className="flex items-center justify-between"
+                    >
+                      <span>Chatee 默认</span>
+                      {settings.skin === 'default' && <Check className="w-4 h-4" />}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => updateSettings({ skin: 'gmgn' })}
+                      className="flex items-center justify-between"
+                    >
+                      <span>GMGN 风格</span>
+                      {settings.skin === 'gmgn' && <Check className="w-4 h-4" />}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </>
+            )}
             {isChatPage && (
               <Button
                 variant="ghost"
@@ -655,6 +796,7 @@ const App: React.FC = () => {
                   <Workflow
                     sessionId={selectedSessionId}
                     onSelectSession={handleSelectSession}
+                    onOpenConversationSwitcher={() => setShowConversationSwitcher(true)}
                   />
               </div>
             </div>
@@ -673,6 +815,7 @@ const App: React.FC = () => {
                         <Workflow
                           sessionId={selectedSessionId}
                           onSelectSession={handleSelectSession}
+                          onOpenConversationSwitcher={() => setShowConversationSwitcher(true)}
                         />
                       }
                     />
@@ -731,8 +874,8 @@ const App: React.FC = () => {
         onConfirm={performDeleteSession}
       />
 
-      {/* 底部状态栏 */}
-      <StatusBar />
+      {/* 底部状态栏 - 移动端不显示 */}
+      {!isMobile && <StatusBar />}
     </div>
   );
 };

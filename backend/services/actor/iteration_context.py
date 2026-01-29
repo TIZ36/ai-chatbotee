@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from uuid import uuid4
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -174,6 +175,7 @@ class IterationContext:
             添加的步骤对象
         """
         step = {
+            'step_id': kwargs.pop('step_id', None) or uuid4().hex,
             'type': step_type,
             'timestamp': int(time.time() * 1000),
             'status': status,
@@ -334,6 +336,66 @@ class IterationContext:
         """转换为 processSteps 格式（供前端）"""
         return self.process_steps.copy()
 
+    def _extract_media_images(self, result: Any) -> List[Dict[str, Any]]:
+        """从 MCP result 中提取图片媒体（仅 image）"""
+        images: List[Dict[str, Any]] = []
+        if not result:
+            return images
+        content = None
+        if isinstance(result, dict):
+            if isinstance(result.get('result'), dict):
+                content = result['result'].get('content')
+            if content is None:
+                content = result.get('content')
+        if not isinstance(content, list):
+            return images
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            if item.get('type') != 'image':
+                continue
+            mime_type = item.get('mimeType') or item.get('mime_type') or 'image/png'
+            data = item.get('data')
+            if isinstance(data, str) and data:
+                images.append({'mimeType': mime_type, 'data': data})
+        return images
+
+    def to_process_messages(self) -> List[Dict[str, Any]]:
+        """转换为 processMessages 格式（新协议）"""
+        messages: List[Dict[str, Any]] = []
+        for step in self.process_steps:
+            if not isinstance(step, dict):
+                continue
+            step_type = step.get('type', 'unknown')
+            title = (
+                step.get('toolName')
+                or (step.get('workflowInfo') or {}).get('name')
+                or step.get('action')
+                or step_type
+            )
+            images = self._extract_media_images(step.get('result'))
+            if len(images) > 1:
+                content_type = 'images'
+                image = None
+            elif len(images) == 1:
+                content_type = 'image'
+                image = images[0]
+            else:
+                content_type = 'text'
+                image = None
+            content = step.get('thinking') or step.get('error')
+            messages.append({
+                'type': step_type,
+                'contentType': content_type,
+                'timestamp': step.get('timestamp', int(time.time() * 1000)),
+                'title': title,
+                'content': content,
+                'image': image,
+                'images': images if len(images) > 1 else None,
+                'meta': step,
+            })
+        return messages
+
     def _json_safe(self, obj: Any, max_depth: int = 8):
         """
         将任意对象递归转换为可 JSON 序列化结构，避免 bytes / Exception / 自定义对象导致持久化失败。
@@ -404,7 +466,7 @@ class IterationContext:
     def build_ext_data(self) -> Dict[str, Any]:
         """构建扩展数据（用于消息存储）"""
         ext = {
-            'processSteps': self.process_steps,
+            'processMessages': self.to_process_messages(),
             **self.final_ext,
         }
 

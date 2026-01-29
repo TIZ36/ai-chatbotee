@@ -3,18 +3,17 @@
  * 左边显示消息主要内容，右边显示AI思考过程、MCP调用和工作流执行过程
  */
 
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { 
   CheckSquare,
   Square,
   Quote,
   Edit2,
   RotateCw,
-  ChevronDown,
-  ChevronUp,
-  Plug
+  Sparkles
 } from 'lucide-react';
-import { ProcessStepsViewer, type ProcessStep } from './ui/ProcessStepsViewer';
+import { ProcessStepsViewer } from './ui/ProcessStepsViewer';
+import type { ProcessMessage } from '../types/processMessage';
 import { 
   MessageBubble, 
   MessageAvatar, 
@@ -93,8 +92,8 @@ export interface SplitViewMessageProps {
   onRetry?: () => void;
   /** LLM 提供商 */
   llmProvider?: string;
-  /** 多轮过程步骤 */
-  processSteps?: ProcessStep[];
+  /** 过程消息（新协议） */
+  processMessages?: ProcessMessage[];
 }
 
 export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
@@ -127,7 +126,7 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
   onViewMCPDetail,
   onRetry,
   llmProvider,
-  processSteps,
+  processMessages,
 }) => {
   const leftRef = useRef<HTMLDivElement>(null);
 
@@ -148,7 +147,7 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
   })();
   const hasToolCalls = toolCalls && Array.isArray(toolCalls) && toolCalls.length > 0;
   const hasWorkflow = role === 'tool' && (toolType === 'workflow' || toolType === 'mcp') && workflowStatus;
-  const hasProcessSteps = processSteps && processSteps.length > 0;
+  const hasProcessSteps = processMessages && processMessages.length > 0;
   const hasContent = !!content && content.trim().length > 0;
   
   const shouldShowSidePanel = role === 'assistant' && (
@@ -161,35 +160,6 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
     thoughtSignature
   );
 
-  // 过程面板（堆叠在模型输出之上）
-  // 默认规则：
-  // - 流式输出期间：始终展开过程（实时显示步骤）
-  // - 模型还没有输出时：默认展开过程
-  // - 模型输出完成后：默认折叠过程
-  const userToggledRef = useRef(false);
-  const [processExpanded, setProcessExpanded] = useState<boolean>(() => !hasContent || isStreaming);
-  useEffect(() => {
-    if (!shouldShowSidePanel) return;
-    
-    // 流式输出期间强制展开过程面板（实时显示执行轨迹）
-    if (isStreaming) {
-      if (!userToggledRef.current) {
-        setProcessExpanded(true);
-      }
-      return;
-    }
-    
-    if (!hasContent) {
-      // 没输出时强制展示过程（符合"默认展示过程"）
-      userToggledRef.current = false;
-      setProcessExpanded(true);
-      return;
-    }
-    // 有输出后且不在流式输出，如果用户没有手动操作过，则自动折叠
-    if (!userToggledRef.current) {
-      setProcessExpanded(false);
-    }
-  }, [hasContent, shouldShowSidePanel, isStreaming]);
 
   // 用户消息不显示分栏
   const isUserMessage = role === 'user';
@@ -256,73 +226,34 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
       <div className="flex-1 group relative">
         {/* 堆叠布局：上方过程（默认自动展开/折叠），下方模型输出 */}
         <div className="space-y-2">
-          {/* 过程区域（思考/工具/工作流） */}
+          {/* 过程区域（思考链 + tags 同行显示） */}
           {shouldShowSidePanel && (
-            <div className="pl-2 border-l-2 border-dashed border-gray-300 dark:border-[#505050]">
-              <button
-                onClick={() => {
-                  userToggledRef.current = true;
-                  setProcessExpanded(v => !v);
-                }}
-                className="w-full py-1 flex items-center justify-between hover:bg-gray-50/50 dark:hover:bg-[#363636]/30 transition-colors rounded"
-                title={processExpanded ? '折叠过程' : '展开过程'}
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <Plug className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-                  <span className="text-xs font-semibold text-gray-700 dark:text-gray-200 truncate">
-                    思考 / 工具 / Workflow 过程
-                  </span>
-                  {(isThinking || isStreaming) && (
-                    <div className="flex items-center gap-1 ml-1.5 px-1.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800/30">
-                      <div className="flex space-x-0.5">
-                        <div className="w-1 h-1 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                        <div className="w-1 h-1 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                        <div className="w-1 h-1 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                      </div>
-                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium whitespace-nowrap">
-                        {isThinking ? (llmProvider === 'gemini' ? '深度思考中' : '思考中') : '生成中'}
-                      </span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <Sparkles className="w-3 h-3 text-primary" />
+                <span className="text-[10px] font-semibold text-gray-600 dark:text-gray-300">
+                  思考链
+                </span>
+                {(isThinking || isStreaming) && (
+                  <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800/30">
+                    <div className="flex space-x-0.5">
+                      <div className="w-1 h-1 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <div className="w-1 h-1 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <div className="w-1 h-1 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                     </div>
-                  )}
-                  {!hasContent && !isThinking && !isStreaming && (
-                    <span className="text-[10px] text-gray-500 dark:text-gray-400 flex-shrink-0">
-                      （模型未输出，默认展示）
+                    <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-medium whitespace-nowrap">
+                      {isThinking ? (llmProvider === 'gemini' ? '深度思考中' : '思考中') : '生成中'}
                     </span>
-                  )}
-                  {hasContent && !processExpanded && !isStreaming && (
-                    <span className="text-[10px] text-gray-500 dark:text-gray-400 flex-shrink-0">
-                      （已输出，默认折叠）
-                    </span>
-                  )}
-                </div>
-                {processExpanded ? (
-                  <ChevronUp className="w-4 h-4 text-gray-400" />
-                ) : (
-                  <ChevronDown className="w-4 h-4 text-gray-400" />
+                  </div>
                 )}
-              </button>
-
-              {processExpanded && (
-                <ProcessStepsViewer
-                  processSteps={processSteps}
-                  thinking={thinking}
-                  isThinking={isThinking}
-                  isStreaming={isStreaming}
-                  mcpDetail={mcpDetail}
-                  toolCalls={hasToolCalls ? (toolCalls as Array<{ name: string; arguments: any; result?: any }>) : undefined}
-                  role={role}
-                  hideTitle={true}
-                  workflowInfo={hasWorkflow ? {
-                    id: workflowId,
-                    name: workflowName,
-                    status: workflowStatus,
-                    result: workflowResult,
-                    config: workflowConfig,
-                  } : undefined}
-                  hideTitle
-                  defaultExpanded
-                />
-              )}
+              </div>
+              <ProcessStepsViewer
+                processMessages={processMessages}
+                isThinking={isThinking}
+                isStreaming={isStreaming}
+                hideTitle
+                defaultExpanded
+              />
             </div>
           )}
 
