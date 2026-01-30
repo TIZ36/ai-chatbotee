@@ -1,0 +1,21 @@
+---
+description: Unified dialog positioning and appearance
+alwaysApply: true
+---
+
+# Dialog Display Standard
+
+- Use the shared `Dialog` component for all dialogs.
+- Dialogs are centered, with frosted overlay and bounded size (not fullscreen on mobile).
+- Internal content must scroll inside a container and hide scrollbars (`no-scrollbar`).
+- Borders should be subtle, especially under `niho` skin.
+- Close actions in dialogs should use neon pink styling under `niho` (e.g., `niho-close-pink`).
+
+Example:
+
+```tsx
+<DialogContent className="chatee-dialog-standard">
+  <div className="max-h-[70vh] overflow-auto no-scrollbar">...</div>
+  <Button className="niho-close-pink">关闭</Button>
+</DialogContent>
+```

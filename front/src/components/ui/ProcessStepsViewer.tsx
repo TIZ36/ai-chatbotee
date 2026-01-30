@@ -1,6 +1,6 @@
 /**
- * ProcessStepsViewer - 思考链（GMGN 风格）
- * 参考 gmgn.ai：一行多个 tag，每个 tag 代表一种信息，hover 展示详情
+ * ProcessStepsViewer - 思考链（Niho 风格）
+ * 参考 niho/skr：一行多个 tag，每个 tag 代表一种信息，hover 展示详情
  * 步骤归类：1. 思考  2. MCP 调用  3. 决策
  */
 
@@ -18,6 +18,8 @@ import {
   MessageSquare,
   Check,
   X,
+  Bot,
+  Quote,
 } from 'lucide-react';
 import { truncateBase64Strings } from '../../utils/textUtils';
 import { parseMCPContentBlocks, renderMCPBlocks } from '../workflow/mcpRender';
@@ -32,14 +34,26 @@ import {
   DialogFooter,
 } from './Dialog';
 
+export interface ExecutionLogEntry {
+  id: string;
+  timestamp: number;
+  type: string;
+  message: string;
+  detail?: string;
+  duration?: number;
+}
+
 export interface ProcessStepsViewerProps {
   processMessages?: ProcessMessage[];
+  executionLogs?: ExecutionLogEntry[];
   ext?: any;
   isThinking?: boolean;
   isStreaming?: boolean;
   title?: string;
   defaultExpanded?: boolean;
   hideTitle?: boolean;
+  showTags?: boolean;
+  onQuote?: () => void;
 }
 
 /** 步骤归类：思考 / MCP调用 / 决策 / 输出 */
@@ -105,18 +119,20 @@ function stepTagLabel(step: ProcessMessage): string {
 
 export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
   processMessages,
+  executionLogs,
   ext,
   isThinking,
   isStreaming,
   title = '思考链',
   defaultExpanded = true,
   hideTitle = false,
+  showTags = true,
+  onQuote,
 }) => {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [pinnedIndex, setPinnedIndex] = useState<number | null>(null);
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [detailMessage, setDetailMessage] = useState<ProcessMessage | null>(null);
+  const [timelineOpen, setTimelineOpen] = useState(false);
   const [popoverPos, setPopoverPos] = useState<{ top: number; left: number; transform?: string; marginTop?: number } | null>(null);
   const tagRefs = useRef<(HTMLSpanElement | null)[]>([]);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -235,13 +251,23 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
   if (orderedSteps.length === 0) return null;
 
   const formatDuration = (ms?: number) => (ms == null ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`);
+  const formatTime = (timestamp?: number) => {
+    if (!timestamp) return '—';
+    return new Date(timestamp).toLocaleTimeString('zh-CN', {
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  };
 
   const isRunningStatus = (status?: string) => {
     const s = String(status || '').toLowerCase();
     return s === 'running' || s === 'pending' || s === 'iterating' || s === 'processing';
   };
 
-  const renderPopoverBody = (msg: ProcessMessage) => {
+  const renderDetailBody = (msg: ProcessMessage, options?: { showMetaLine?: boolean }) => {
+    const showMetaLine = options?.showMetaLine ?? true;
     const metaLine = [
       stepTagLabel(msg),
       msg.meta?.status ? `状态: ${msg.meta.status}` : null,
@@ -268,7 +294,7 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
 
     return (
       <div className="space-y-2 p-2">
-        {metaLine && <div className="text-[10px] text-muted-foreground">{metaLine}</div>}
+        {showMetaLine && metaLine && <div className="text-[10px] text-muted-foreground">{metaLine}</div>}
         {imageBlocks.length > 0 && (
           <div className="rounded border border-primary/30 bg-primary/5 p-2">
             <div className="flex items-center gap-1 text-[10px] font-medium text-primary mb-1">
@@ -327,17 +353,17 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
   const categoryStyle = (cat: 'thinking' | 'mcp' | 'decision' | 'output') => {
     switch (cat) {
       case 'thinking':
-        // 紫色系 - 思考/模型
-        return 'bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/30 dark:bg-violet-500/15';
+        // 紫色系 -> 霓虹粉 (Niho)
+        return 'process-tag-thinking bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/30 dark:bg-violet-500/15';
       case 'mcp':
-        // 青色系 - 工具/MCP
-        return 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/30 dark:bg-cyan-500/15';
+        // 青色系 -> 霓虹青 (Niho)
+        return 'process-tag-mcp bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/30 dark:bg-cyan-500/15';
       case 'decision':
-        // 橙色系 - 决策
-        return 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/30 dark:bg-orange-500/15';
+        // 橙色系 -> 淡金色 (Niho)
+        return 'process-tag-decision bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/30 dark:bg-orange-500/15';
       case 'output':
-        // 绿色系 - 输出
-        return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 dark:bg-emerald-500/15';
+        // 绿色系 -> 荧光绿 (Niho)
+        return 'process-tag-output bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 dark:bg-emerald-500/15';
       default:
         return 'bg-muted/50 text-muted-foreground border-border';
     }
@@ -408,21 +434,46 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
   return (
     <div ref={wrapRef} className={`process-steps-viewer-wrap relative ${hideTitle ? '' : 'mt-1.5'}`}>
       {!hideTitle && (
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => setIsExpanded(!isExpanded)}
-          className="flex items-center gap-1.5 w-full text-left py-1 px-0 rounded hover:bg-muted/50 transition-colors"
+          className="w-full justify-start gap-1.5 px-0 py-1 text-left h-auto hover:bg-muted/50"
         >
           {isExpanded ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
           <Sparkles className="w-3.5 h-3.5 text-primary" />
           <span className="font-medium text-xs text-foreground">{title}</span>
           <span className="text-[10px] text-muted-foreground">{orderedSteps.length} 步</span>
           {ext?.llmInfo && <span className="text-[10px] text-muted-foreground">{ext.llmInfo.provider}/{ext.llmInfo.model}</span>}
-        </button>
+        </Button>
       )}
       {(hideTitle || isExpanded) && (
-        <div className={hideTitle ? 'inline' : 'mt-1'}>
-          {tagsContent}
+        <div className={`${hideTitle ? '' : 'mt-1'} flex items-start gap-2`}>
+          {showTags ? <div className="min-w-0 flex-1">{tagsContent}</div> : null}
+          <div className="flex items-center gap-1">
+            {onQuote && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onQuote}
+                aria-label="引用此消息"
+                title="引用此消息"
+                className="h-6 w-6"
+              >
+                <Quote className="w-3 h-3" />
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setTimelineOpen(true)}
+              aria-label="查看过程详情"
+              title="查看过程详情"
+              className="h-6 w-6"
+            >
+              <Bot className={`w-3 h-3 transition-transform ${(isThinking || isStreaming) ? 'animate-pulse text-primary' : ''}`} />
+            </Button>
+          </div>
         </div>
       )}
 
@@ -447,18 +498,8 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
           <div className="border-b border-border px-2 py-1 text-[10px] font-medium text-foreground">
             {stepTagLabel(orderedSteps[(pinnedIndex ?? hoveredIndex)!])}
           </div>
-          {renderPopoverBody(orderedSteps[(pinnedIndex ?? hoveredIndex)!])}
+          {renderDetailBody(orderedSteps[(pinnedIndex ?? hoveredIndex)!])}
           <div className="border-t border-border px-2 py-1 flex items-center justify-end gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setDetailMessage(orderedSteps[(pinnedIndex ?? hoveredIndex)!]);
-                setDetailOpen(true);
-              }}
-            >
-              详情
-            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -476,17 +517,85 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
         </div>
       )}
 
-      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent>
+      <Dialog open={timelineOpen} onOpenChange={setTimelineOpen}>
+        <DialogContent className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{detailMessage ? stepTagLabel(detailMessage) : '详情'}</DialogTitle>
-            <DialogDescription>过程详情（可滚动）</DialogDescription>
+            <DialogTitle>思维链</DialogTitle>
           </DialogHeader>
-          <div className="max-h-[60vh] overflow-auto">
-            {detailMessage ? renderPopoverBody(detailMessage) : null}
+          <div className="max-h-[70vh] overflow-auto space-y-3 pr-1 no-scrollbar mt-2">
+            {/* 执行日志区域 */}
+            {executionLogs && executionLogs.length > 0 && (
+              <div className="rounded-md border border-border/60 bg-muted/20">
+                <div className="px-3 py-2 border-b border-border/60">
+                  <span className="text-[11px] font-medium text-muted-foreground">执行日志 ({executionLogs.length})</span>
+                </div>
+                <div className="px-3 py-2 space-y-0.5 text-[10px] text-muted-foreground/70 italic">
+                  {executionLogs.map((log, idx) => (
+                    <div key={log.id || idx} className="leading-relaxed">
+                      <span className="opacity-40 text-[9px] mr-1.5">
+                        {new Date(log.timestamp).toLocaleTimeString('zh-CN', { hour12: false })}
+                      </span>
+                      {log.message}
+                      {log.duration != null && (
+                        <span className="ml-1 opacity-60">({log.duration < 1000 ? `${log.duration}ms` : `${(log.duration / 1000).toFixed(1)}s`})</span>
+                      )}
+                      {log.detail && (
+                        <span className="ml-1 opacity-50 text-[9px]">{log.detail}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {/* 思维链步骤 */}
+            {orderedSteps.map((step, idx) => {
+              const cat = stepCategory(step);
+              const label = stepTagLabel(step);
+              const isRunning = isRunningStatus(step.meta?.status) || (step.type === 'thinking' && isThinking) || (step.type === 'output' && isStreaming);
+              return (
+                <div
+                  key={`${step.type}-${step.timestamp ?? idx}`}
+                  className="rounded-md border border-border/60 bg-muted/30"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-border/60">
+                    <div className="flex flex-wrap items-center gap-2 min-w-0">
+                      <span className="text-[11px] text-muted-foreground">{formatTime(step.timestamp)}</span>
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${categoryStyle(cat)}`}
+                      >
+                        {label}
+                      </span>
+                      {step.meta?.status && (
+                        <span className="text-[11px] text-muted-foreground">状态: {step.meta.status}</span>
+                      )}
+                      {step.meta?.duration != null && (
+                        <span className="text-[11px] text-muted-foreground">耗时: {formatDuration(step.meta.duration)}</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 text-muted-foreground">
+                      {isRunning ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : step.meta?.status === 'error' ? (
+                        <X className="w-3 h-3 text-red-500" />
+                      ) : step.meta?.status === 'completed' ? (
+                        <Check className="w-3 h-3 text-emerald-500" />
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="px-1 pb-1">
+                    {renderDetailBody(step, { showMetaLine: false })}
+                  </div>
+                </div>
+              );
+            })}
           </div>
           <DialogFooter>
-            <Button variant="secondary" onClick={() => setDetailOpen(false)}>
+            <Button
+              variant="secondary"
+              onClick={() => setTimelineOpen(false)}
+              className="niho-close-pink"
+            >
               关闭
             </Button>
           </DialogFooter>

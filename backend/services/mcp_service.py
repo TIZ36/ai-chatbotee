@@ -127,8 +127,10 @@ class MCPService:
             if k.lower() not in ['host', 'content-length', 'transfer-encoding']
         }
         
-        # 发送请求
-        response = requests.request(
+        # 发送请求（使用连接池，减少握手开销）
+        from mcp_server.mcp_common_logic import get_mcp_session
+        session = get_mcp_session(target_url)
+        response = session.request(
             method=method,
             url=target_url,
             headers=filtered_headers,

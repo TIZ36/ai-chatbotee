@@ -14,11 +14,8 @@ export type { AvatarConfigDialogProps } from './AvatarConfigDialog';
 export { SkillPackDialog, SkillPackUseConfirmDialog } from './SkillPackDialogs';
 export type { SkillPackDialogProps, SkillPackUseConfirmDialogProps } from './SkillPackDialogs';
 
-export { NewMeetingDialog, NewResearchDialog } from './NewSessionDialogs';
-export type { NewMeetingDialogProps, NewResearchDialogProps } from './NewSessionDialogs';
-
-export { NicknameDialog } from './NicknameDialog';
-export type { NicknameDialogProps } from './NicknameDialog';
+export { NewMeetingDialog } from './NewSessionDialogs';
+export type { NewMeetingDialogProps } from './NewSessionDialogs';
 
 export { PersonaPanel } from './PersonaPanel';
 export type { PersonaPanelProps } from './PersonaPanel';

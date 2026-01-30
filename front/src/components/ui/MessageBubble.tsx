@@ -1,6 +1,6 @@
 /**
  * 统一的消息气泡组件
- * 用于会话、Agent、Meeting、Research 等场景的消息展示
+ * 用于会话、Agent、Meeting 等场景的消息展示
  * 确保所有场景的消息样式一致
  */
 
@@ -99,7 +99,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   
   return (
     <div
-      className={cn(bubbleClasses, className)}
+      className={cn(bubbleClasses, className, `message-bubble-${role}`)}
       style={{
         fontSize: role === 'assistant' || role === 'tool' ? '12px' : '12px',
         lineHeight: role === 'assistant' || role === 'tool' ? '1.5' : '1.5',
@@ -211,7 +211,7 @@ export const MessageAvatar: React.FC<MessageAvatarProps> = ({
   };
   
   return (
-    <div className={cn(avatarClasses, className)}>
+    <div className={cn(avatarClasses, className, `avatar-${role}`)}>
       {renderIcon()}
     </div>
   );
@@ -255,6 +255,11 @@ export const MessageStatusIndicator: React.FC<MessageStatusIndicatorProps> = ({
             <div className="w-1 h-1 bg-primary-500 rounded-full animate-bounce" style={{ animationDelay: '200ms', animationDuration: '1s' }} />
             <div className="w-1 h-1 bg-primary-500 rounded-full animate-bounce" style={{ animationDelay: '400ms', animationDuration: '1s' }} />
           </div>
+          {currentStep && currentStep.trim() && (
+            <span className="text-xs text-gray-400 dark:text-[#808080] font-normal truncate max-w-[200px]">
+              {currentStep}
+            </span>
+          )}
         </div>
       </div>
     );
@@ -267,10 +272,17 @@ export const MessageStatusIndicator: React.FC<MessageStatusIndicatorProps> = ({
         <div className="relative">
           <Sparkles className="w-4 h-4 text-amber-500 animate-pulse" />
         </div>
-        <div className="flex space-x-0.5">
-          <div className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" style={{ animationDelay: '0ms' }} />
-          <div className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" style={{ animationDelay: '200ms' }} />
-          <div className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" style={{ animationDelay: '400ms' }} />
+        <div className="flex items-center space-x-1">
+          <div className="flex space-x-0.5">
+            <div className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" style={{ animationDelay: '0ms' }} />
+            <div className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" style={{ animationDelay: '200ms' }} />
+            <div className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" style={{ animationDelay: '400ms' }} />
+          </div>
+          {currentStep && currentStep.trim() && (
+            <span className="text-xs text-gray-400 dark:text-[#808080] font-normal truncate max-w-[200px]">
+              {currentStep}
+            </span>
+          )}
         </div>
       </div>
     );
@@ -285,6 +297,11 @@ export const MessageStatusIndicator: React.FC<MessageStatusIndicatorProps> = ({
           <div className="w-1.5 h-1.5 bg-primary-500 rounded-full animate-pulse" style={{ animationDelay: '150ms' }} />
           <div className="w-1.5 h-1.5 bg-primary-500 rounded-full animate-pulse" style={{ animationDelay: '300ms' }} />
         </div>
+        {currentStep && currentStep.trim() && (
+          <span className="text-xs text-gray-400 dark:text-[#808080] font-normal truncate max-w-[200px]">
+            {currentStep}
+          </span>
+        )}
       </div>
     );
   }
@@ -436,7 +453,7 @@ export const MessageBubbleContainer: React.FC<MessageBubbleContainerProps> = ({
   
   return (
     <div
-      className={cn(bubbleClasses, className)}
+      className={cn(bubbleClasses, className, `message-bubble-${role}`)}
       style={{
         fontSize: role === 'assistant' || role === 'tool' ? '12px' : '12px',
         lineHeight: role === 'assistant' || role === 'tool' ? '1.5' : '1.5',

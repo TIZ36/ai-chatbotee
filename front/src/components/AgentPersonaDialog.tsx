@@ -150,39 +150,36 @@ const AgentPersonaDialog: React.FC<AgentPersonaDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+      <DialogContent className="max-w-xl max-h-[80vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Settings className="w-5 h-5" />
             智能体配置
           </DialogTitle>
-          <DialogDescription>
-            编辑「{agent?.name || agent?.title || 'Agent'}」的基本信息和高级功能
-          </DialogDescription>
         </DialogHeader>
 
         {/* Tab 切换 */}
-        <div className="flex border-b border-gray-200 dark:border-[#404040]">
+        <div className="flex items-center gap-2 border-b border-gray-200/70 dark:border-[#404040]/70">
           <button
             onClick={() => setActiveTab('basic')}
-            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium border-b-2 transition-colors ${
               activeTab === 'basic'
                 ? 'border-primary-500 text-primary-600 dark:text-primary-400'
                 : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
             }`}
           >
-            <User className="w-4 h-4" />
+            <User className="w-3.5 h-3.5" />
             基本信息
           </button>
           <button
             onClick={() => setActiveTab('persona')}
-            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium border-b-2 transition-colors ${
               activeTab === 'persona'
                 ? 'border-primary-500 text-primary-600 dark:text-primary-400'
                 : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
             }`}
           >
-            <Sliders className="w-4 h-4" />
+            <Sliders className="w-3.5 h-3.5" />
             高级设置
             {enabledFeatures.length > 0 && (
               <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 rounded">
@@ -193,21 +190,21 @@ const AgentPersonaDialog: React.FC<AgentPersonaDialogProps> = ({
         </div>
 
         {/* Tab 内容 */}
-        <div className="flex-1 overflow-y-auto py-4">
+        <div className="flex-1 overflow-y-auto py-3 no-scrollbar">
           {activeTab === 'basic' ? (
-            <div className="space-y-4 px-1">
+            <div className="space-y-3 px-1">
               {/* 头像 */}
               <div>
-                <Label className="mb-2 block">头像</Label>
-                <div className="flex items-center gap-4">
-                  <div className="relative w-20 h-20 rounded-full overflow-hidden border-2 border-gray-200 dark:border-[#404040] flex items-center justify-center bg-gray-100 dark:bg-[#363636]">
+                <Label className="mb-1 block">头像</Label>
+                <div className="flex items-center gap-3">
+                  <div className="relative w-16 h-16 rounded-full overflow-hidden border border-gray-200 dark:border-[#404040] flex items-center justify-center bg-gray-100 dark:bg-[#363636]">
                     {editAvatar ? (
                       <img src={editAvatar} alt="Avatar" className="w-full h-full object-cover" />
                     ) : (
-                      <Bot className="w-8 h-8 text-gray-400" />
+                      <Bot className="w-6 h-6 text-gray-400" />
                     )}
                   </div>
-                  <div className="flex flex-col gap-2">
+                  <div className="flex flex-col gap-1.5">
                     <input
                       ref={fileInputRef}
                       type="file"
@@ -220,7 +217,7 @@ const AgentPersonaDialog: React.FC<AgentPersonaDialogProps> = ({
                       size="sm"
                       onClick={() => fileInputRef.current?.click()}
                     >
-                      <Upload className="w-4 h-4 mr-1.5" />
+                      <Upload className="w-3.5 h-3.5 mr-1.5" />
                       上传头像
                     </Button>
                     {editAvatar && (
@@ -239,7 +236,7 @@ const AgentPersonaDialog: React.FC<AgentPersonaDialogProps> = ({
 
               {/* 名称 */}
               <div>
-                <Label htmlFor="agent-name" className="mb-2 block">名称</Label>
+                <Label htmlFor="agent-name" className="mb-1 block">名称</Label>
                 <Input
                   id="agent-name"
                   value={editName}
@@ -250,7 +247,7 @@ const AgentPersonaDialog: React.FC<AgentPersonaDialogProps> = ({
 
               {/* 默认 LLM */}
               <div>
-                <Label className="mb-2 block">默认 LLM</Label>
+                <Label className="mb-1 block">默认 LLM</Label>
                 <Select
                   value={editLlmConfigId || ''}
                   onValueChange={(v) => setEditLlmConfigId(v || null)}
@@ -270,13 +267,13 @@ const AgentPersonaDialog: React.FC<AgentPersonaDialogProps> = ({
 
               {/* 人设 / System Prompt */}
               <div>
-                <Label htmlFor="agent-prompt" className="mb-2 block">人设 / System Prompt</Label>
+                <Label htmlFor="agent-prompt" className="mb-1 block">人设 / System Prompt</Label>
                 <Textarea
                   id="agent-prompt"
                   value={editSystemPrompt}
                   onChange={(e) => setEditSystemPrompt(e.target.value)}
                   placeholder="定义智能体的角色、能力和行为..."
-                  className="min-h-[200px]"
+                  className="min-h-[160px]"
                 />
               </div>
             </div>
@@ -289,8 +286,8 @@ const AgentPersonaDialog: React.FC<AgentPersonaDialogProps> = ({
           )}
         </div>
 
-        <DialogFooter className="flex items-center justify-between border-t pt-4">
-          <div className="text-xs text-gray-500">
+        <DialogFooter className="flex items-center justify-between border-t pt-3">
+          <div className="text-[11px] text-gray-500">
             {activeTab === 'persona' && enabledFeatures.length > 0 
               ? `已启用: ${enabledFeatures.join('、')}`
               : activeTab === 'persona' 

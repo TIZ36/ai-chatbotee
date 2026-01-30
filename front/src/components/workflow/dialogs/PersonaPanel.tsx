@@ -23,17 +23,14 @@ export interface PersonaPanelProps {
   isLoadingPersonaList: boolean;
   personaAgents: Session[];
   personaMeetings: RoundTable[];
-  personaResearchSessions: Session[];
   personaTopics: Session[];
   isTemporarySession: boolean;
   currentSessionId: string | null;
   temporarySessionId: string;
   onSwitchSession: (sessionId: string) => void;
   onOpenMeeting: (roundTableId: string) => void;
-  onOpenResearch: (sessionId: string) => void;
   onDeleteAgent: (id: string, name: string) => void;
   onDeleteMeeting: (id: string, name: string) => void;
-  onDeleteResearch: (id: string, name: string) => void;
   onShowRoleGenerator: () => void;
 }
 
@@ -45,17 +42,14 @@ export const PersonaPanel: React.FC<PersonaPanelProps> = ({
   isLoadingPersonaList,
   personaAgents,
   personaMeetings,
-  personaResearchSessions,
   personaTopics,
   isTemporarySession,
   currentSessionId,
   temporarySessionId,
   onSwitchSession,
   onOpenMeeting,
-  onOpenResearch,
   onDeleteAgent,
   onDeleteMeeting,
-  onDeleteResearch,
   onShowRoleGenerator,
 }) => {
   return (

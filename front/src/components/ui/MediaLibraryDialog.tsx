@@ -277,7 +277,7 @@ export const MediaLibraryDialog: React.FC<MediaLibraryDialogProps> = ({
                               {displayName}
                             </div>
                             <div className="text-[11px] text-gray-500 dark:text-[#808080] truncate">
-                              {s.session_type || 'memory'} · {s.session_id.slice(0, 8)}
+                              {s.session_type || 'temporary'} · {s.session_id.slice(0, 8)}
                             </div>
                           </div>
                           <IconButton

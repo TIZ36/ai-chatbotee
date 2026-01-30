@@ -146,6 +146,23 @@
   .workflow-chat-header {
     padding-left: calc(0.75rem + var(--safe-area-inset-left));
     padding-right: calc(0.75rem + var(--safe-area-inset-right));
+    position: relative;
+  }
+  .workflow-header-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(79, 70, 229, 0.5);
+    box-shadow: 0 0 8px rgba(79, 70, 229, 0.2);
+    flex-shrink: 0;
+  }
+  .dark .workflow-header-dot {
+    background: rgba(148, 163, 184, 0.6);
+    box-shadow: 0 0 8px rgba(148, 163, 184, 0.2);
+  }
+  html[data-skin="niho"] .workflow-header-dot {
+    background: rgba(255, 107, 157, 0.6);
+    box-shadow: 0 0 10px rgba(255, 107, 157, 0.35);
   }
   /* 思维链 tag：移动端只显示图标，不显示文字 */
   .process-step-tag-label {
@@ -153,32 +170,28 @@
   }
 }
 
-/* 移动端：弹框全屏 + 安全区，GMGN 纯黑萤绿 */
+/* 移动端：弹框居中 + 毛玻璃 + 有限高宽 */
 html[data-mobile="true"] .chatee-dialog-content {
   position: fixed !important;
-  left: var(--safe-area-inset-left) !important;
-  right: var(--safe-area-inset-right) !important;
-  top: var(--safe-area-inset-top) !important;
-  bottom: var(--safe-area-inset-bottom) !important;
-  max-width: none !important;
-  max-height: none !important;
-  width: auto !important;
-  height: auto !important;
-  transform: none !important;
-  border-radius: 0 !important;
+  left: 50% !important;
+  top: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  width: min(92vw, 620px) !important;
+  max-height: 72vh !important;
+  border-radius: 12px !important;
   display: flex;
   flex-direction: column;
-  padding: calc(1rem + var(--safe-area-inset-top)) calc(1rem + var(--safe-area-inset-right)) calc(1rem + var(--safe-area-inset-bottom)) calc(1rem + var(--safe-area-inset-left)) !important;
+  padding: 16px !important;
 }
 
-html[data-mobile="true"][data-skin="gmgn"] .chatee-dialog-content {
-  background: #000 !important;
-  border: 1px solid rgba(0, 212, 170, 0.25) !important;
-  box-shadow: 0 0 32px rgba(0, 212, 170, 0.08), inset 0 1px 0 rgba(0, 212, 170, 0.06) !important;
+html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
+  background: rgba(10, 10, 12, 0.92) !important;
+  border: 1px solid var(--niho-text-border) !important;
+  box-shadow: 0 0 24px rgba(255, 107, 157, 0.08), 0 8px 24px rgba(0, 0, 0, 0.35) !important;
 }
 
 .dark {
-  /* shadcn/ui design tokens (dark industrial with neon green accent) */
+  /* shadcn/ui design tokens (dark industrial with neon green accent - Niho) */
   --background: 0 0% 5%;        /* #0d0d0d - 深黑 */
   --foreground: 150 50% 95%;
   --card: 0 0% 7%;              /* #121212 */
@@ -200,7 +213,7 @@ html[data-mobile="true"][data-skin="gmgn"] .chatee-dialog-content {
   --ring: 150 100% 50%;
   --radius: 6px;
 
-  /* 暗色主题强调色 - 萤绿色 GMGN 风格 */
+  /* 暗色主题强调色 - 萤绿色 Niho 风格 */
   --color-accent: #00ff88;
   --color-accent-hover: #00e67a;
   --color-accent-light: #4ade80;
@@ -255,236 +268,649 @@ html[data-mobile="true"][data-skin="gmgn"] .chatee-dialog-content {
   --border-subtle: #1a1a1a;
 }
 
-/* ========== GMGN 风格皮肤 (参考 gmgn.ai：深色 + 霓虹绿强调) ========== */
-[data-skin="gmgn"] {
+/* ========== Niho 霓虹主题 (参考 niho/skr：纯黑 + 荧光绿/粉色强调) ========== */
+[data-skin="niho"] {
   color-scheme: dark;
 }
 
-[data-skin="gmgn"],
-[data-skin="gmgn"].dark {
-  /* 深色背景 - 偏蓝黑 */
-  --background: 240 20% 4%;
+[data-skin="niho"],
+[data-skin="niho"].dark {
+  /* 纯黑背景 */
+  --background: 0 0% 0%;
   --foreground: 150 20% 96%;
-  --card: 240 18% 6%;
+  --card: 0 0% 4%;
   --card-foreground: 150 20% 96%;
-  --popover: 240 18% 6%;
+  --popover: 0 0% 4%;
   --popover-foreground: 150 20% 96%;
-  --primary: 158 100% 50%;
-  --primary-foreground: 240 20% 4%;
-  --secondary: 240 10% 12%;
+  --primary: 150 100% 50%;
+  --primary-foreground: 0 0% 0%;
+  --secondary: 0 0% 10%;
   --secondary-foreground: 150 20% 96%;
-  --muted: 240 10% 12%;
+  --muted: 0 0% 12%;
   --muted-foreground: 150 10% 65%;
-  --accent: 240 10% 14%;
-  --accent-foreground: 150 20% 96%;
-  --border: 240 8% 18%;
-  --input: 240 8% 18%;
-  --ring: 158 100% 50%;
+  --accent: 150 100% 50%;
+  --accent-foreground: 0 0% 0%;
+  --border: 0 0% 15%;
+  --input: 0 0% 12%;
+  --ring: 150 100% 50%;
 
-  /* 主强调色 - 霓虹绿 (GMGN 风格) */
-  --color-accent: #00d4aa;
-  --color-accent-hover: #00ff88;
-  --color-accent-light: #34e0b8;
-  --color-accent-bg: rgba(0, 212, 170, 0.12);
-  --color-accent-bg-hover: rgba(0, 212, 170, 0.18);
+  /* --- 核心色卡 --- */
+  
+  /* 荧光绿 (主强调 / 成功) */
+  --color-accent: #00ff88;
+  --color-accent-hover: #39ff14;
+  --color-accent-light: #00d4aa;
+  --color-accent-bg: rgba(0, 255, 136, 0.1);
+  --color-accent-bg-hover: rgba(0, 255, 136, 0.18);
 
-  --color-selected: #00d4aa;
-  --color-selected-hover: #00ff88;
-  --color-selected-bg: rgba(0, 212, 170, 0.1);
-  --color-selected-border: rgba(0, 212, 170, 0.35);
+  /* 霓虹粉 (次强调 / 错误) */
+  --color-secondary: #ff6b9d;
+  --color-secondary-hover: #ff1493;
+  --color-secondary-bg: rgba(255, 107, 157, 0.1);
+  
+  /* 淡金色 (高亮 / 警告) */
+  --color-highlight: #ffd700;
+  --color-highlight-hover: #ffea00;
+  --color-highlight-bg: rgba(255, 215, 0, 0.1);
+  
+  /* 霓虹青 (信息) */
+  --color-info: #00e5ff;
+  --color-info-hover: #00ffff;
+  --color-info-bg: rgba(0, 229, 255, 0.1);
 
-  --color-active: #00d4aa;
-  --color-active-hover: #00ff88;
-  --color-active-bg: rgba(0, 212, 170, 0.15);
-  --color-active-border: rgba(0, 212, 170, 0.4);
+  /* 语义映射 */
+  --color-success: #00ff88;
+  --color-success-bg: rgba(0, 255, 136, 0.12);
+  --color-warning: #ffd700;
+  --color-warning-bg: rgba(255, 215, 0, 0.12);
+  --color-error: #ff6b9d;
+  --color-error-bg: rgba(255, 107, 157, 0.12);
 
-  --color-success: #00d4aa;
-  --color-success-bg: rgba(0, 212, 170, 0.12);
-  --color-info: #00d4aa;
-  --color-info-bg: rgba(0, 212, 170, 0.1);
+  --color-selected: #00ff88;
+  --color-selected-hover: #39ff14;
+  --color-selected-bg: rgba(0, 255, 136, 0.08);
+  --color-selected-border: rgba(0, 255, 136, 0.35);
 
-  --color-hover-bg: rgba(0, 212, 170, 0.06);
-  --color-hover-border: rgba(0, 212, 170, 0.15);
+  --color-active: #00ff88;
+  --color-active-hover: #39ff14;
+  --color-active-bg: rgba(0, 255, 136, 0.15);
+  --color-active-border: rgba(0, 255, 136, 0.4);
 
-  --surface-primary: #0d0d12;
-  --surface-secondary: #12121a;
-  --surface-tertiary: #18181f;
+  --color-hover-bg: rgba(0, 255, 136, 0.06);
+  --color-hover-border: rgba(0, 255, 136, 0.15);
+
+  --surface-primary: #000000;
+  --surface-secondary: #0a0a0a;
+  --surface-tertiary: #111111;
   --text-primary: #e8f5f0;
   --text-secondary: #a0c4b8;
   --text-muted: #6b8a82;
-  --border-default: #1e2a26;
-  --border-subtle: #161c1a;
+  --border-default: #1a1a1a;
+  --border-subtle: #111111;
+
+  /* 文本边框统一（Niho 深色下更柔和） */
+  --niho-text-border: rgba(255, 255, 255, 0.08);
+  --niho-text-border-strong: rgba(255, 255, 255, 0.14);
+  --niho-text-bg: rgba(255, 255, 255, 0.04);
+
+  /* --- 饱和度扩展系统 --- */
+  
+  /* 荧光绿饱和度梯度 */
+  --neon-green-50: rgba(0, 255, 136, 0.05);
+  --neon-green-100: rgba(0, 255, 136, 0.1);
+  --neon-green-200: rgba(0, 255, 136, 0.2);
+  --neon-green-500: #00ff88;
+  --neon-green-600: #00d4aa;
+  --neon-green-700: #00b894;
+
+  /* 霓虹粉饱和度梯度 */
+  --neon-pink-50: rgba(255, 107, 157, 0.05);
+  --neon-pink-100: rgba(255, 107, 157, 0.1);
+  --neon-pink-500: #ff6b9d;
+  --neon-pink-600: #ff1493;
+
+  /* 淡金色饱和度梯度 */
+  --neon-gold-50: rgba(255, 215, 0, 0.05);
+  --neon-gold-100: rgba(255, 215, 0, 0.1);
+  --neon-gold-500: #ffd700;
+  --neon-gold-600: #f0b90b;
 }
 
-/* GMGN 皮肤下全局背景与根容器 - 聊天界面纯黑 */
-[data-skin="gmgn"] body {
+/* Niho 皮肤下全局背景与根容器 - 聊天界面纯黑 */
+[data-skin="niho"] body {
   background: #000;
   color: #e8f5f0;
 }
 
-[data-skin="gmgn"] .app-root-bg {
+[data-skin="niho"] .app-root-bg {
   background: #000 !important;
 }
 
-/* GMGN 下聊天界面区域纯黑 */
-[data-skin="gmgn"] .workflow-chat-outer,
-[data-skin="gmgn"] .workflow-chat-panel,
-[data-skin="gmgn"] .workflow-chat-messages {
+/* Niho 下聊天界面区域纯黑 */
+[data-skin="niho"] .workflow-chat-outer,
+[data-skin="niho"] .workflow-chat-panel,
+[data-skin="niho"] .workflow-chat-messages {
   background: #000 !important;
 }
 
-/* GMGN 下对话头部 - 浅印绿色 */
-[data-skin="gmgn"] .workflow-chat-header {
-  background: linear-gradient(90deg, rgba(0, 212, 170, 0.12) 0%, rgba(0, 212, 170, 0.06) 50%, transparent 100%) !important;
-  border-bottom-color: rgba(0, 212, 170, 0.2) !important;
+/* Niho 下对话头部 - 纯黑 + 粉雾动态光 */
+[data-skin="niho"] .workflow-chat-header {
+  background: #000 !important;
+  position: relative;
+  overflow: hidden;
+  min-height: 40px;
+  border: 1px solid rgba(255, 107, 157, 0.18) !important;
+  box-shadow:
+    0 0 8px rgba(255, 107, 157, 0.08),
+    inset 0 0 6px rgba(148, 163, 184, 0.06);
 }
 
-/* GMGN 下各界面主区域纯黑 + 萤绿描边 */
-[data-skin="gmgn"] main,
-[data-skin="gmgn"] .glass-panel {
+/* Niho 下各界面主区域纯黑 + 萤绿描边 */
+[data-skin="niho"] main,
+[data-skin="niho"] .glass-panel {
   background: #000 !important;
 }
 
 /* 毛玻璃 + 霓虹绿描边与内光 */
-[data-skin="gmgn"] .glass-header,
-[data-skin="gmgn"] .glass-sidebar,
-[data-skin="gmgn"] .glass-panel,
-[data-skin="gmgn"] .glass-card {
+[data-skin="niho"] .glass-header,
+[data-skin="niho"] .glass-sidebar,
+[data-skin="niho"] .glass-panel,
+[data-skin="niho"] .glass-card {
   background-color: #000 !important;
-  border: 1px solid rgba(0, 212, 170, 0.18);
+  border: 1px solid rgba(0, 255, 136, 0.18);
   box-shadow:
-    0 0 20px rgba(0, 212, 170, 0.04),
-    inset 0 1px 0 rgba(0, 212, 170, 0.06);
+    0 0 20px rgba(0, 255, 136, 0.04),
+    inset 0 1px 0 rgba(0, 255, 136, 0.06);
 }
 
-[data-skin="gmgn"] .glass-header {
+[data-skin="niho"] .glass-header {
   position: relative;
+  border-color: transparent;
   box-shadow:
-    0 1px 0 rgba(0, 212, 170, 0.12),
+    0 1px 0 rgba(255, 255, 255, 0.08),
     0 4px 24px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(0, 212, 170, 0.05);
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
-[data-skin="gmgn"] .glass-sidebar {
-  border-right-color: rgba(0, 212, 170, 0.2);
-  box-shadow: 2px 0 16px rgba(0, 212, 170, 0.05);
+[data-skin="niho"] .glass-sidebar {
+  border-right-color: rgba(0, 255, 136, 0.2);
+  box-shadow: 2px 0 16px rgba(0, 255, 136, 0.05);
 }
 
-[data-skin="gmgn"] .glass-toolbar {
+[data-skin="niho"] .glass-toolbar {
   background-color: rgba(18, 18, 26, 0.92);
-  border: 1px solid rgba(0, 212, 170, 0.22);
-  box-shadow: 0 0 12px rgba(0, 212, 170, 0.06);
+  border: 1px solid rgba(0, 255, 136, 0.22);
+  box-shadow: 0 0 12px rgba(0, 255, 136, 0.06);
 }
 
-[data-skin="gmgn"] .glass-toolbar:hover {
-  border-color: rgba(0, 212, 170, 0.35);
-  box-shadow: 0 0 16px rgba(0, 212, 170, 0.1);
+[data-skin="niho"] .glass-toolbar:hover {
+  border-color: rgba(0, 255, 136, 0.35);
+  box-shadow: 0 0 16px rgba(0, 255, 136, 0.1);
 }
 
 /* 导航激活项 - 霓虹绿光晕 */
-[data-skin="gmgn"] nav a[class*="color-accent"] {
-  box-shadow: 0 0 14px rgba(0, 212, 170, 0.4), 0 0 28px rgba(0, 212, 170, 0.15);
+[data-skin="niho"] nav a[class*="color-accent"] {
+  box-shadow: 0 0 14px rgba(0, 255, 136, 0.4), 0 0 28px rgba(0, 255, 136, 0.15);
 }
 
 /* 主按钮 / 强调按钮 - 发光 */
-[data-skin="gmgn"] .gnome-btn-primary,
-[data-skin="gmgn"] button.bg-primaryToken,
-[data-skin="gmgn"] button[class*="color-accent"] {
+[data-skin="niho"] .gnome-btn-primary,
+[data-skin="niho"] button.bg-primaryToken,
+[data-skin="niho"] button[class*="color-accent"] {
   box-shadow:
-    0 0 20px rgba(0, 212, 170, 0.25),
-    0 0 40px rgba(0, 212, 170, 0.1),
+    0 0 20px rgba(0, 255, 136, 0.25),
+    0 0 40px rgba(0, 255, 136, 0.1),
     inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
-[data-skin="gmgn"] .gnome-btn-primary:hover,
-[data-skin="gmgn"] button.bg-primaryToken:hover {
+[data-skin="niho"] .gnome-btn-primary:hover,
+[data-skin="niho"] button.bg-primaryToken:hover {
   box-shadow:
-    0 0 24px rgba(0, 212, 170, 0.4),
-    0 0 48px rgba(0, 212, 170, 0.15),
+    0 0 24px rgba(0, 255, 136, 0.4),
+    0 0 48px rgba(0, 255, 136, 0.15),
     inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
-/* 链接与可点击文字 - 霓虹绿 + 微光 */
-[data-skin="gmgn"] a:not([class*="Button"]) {
-  color: #34e0b8;
-  text-shadow: 0 0 20px rgba(0, 212, 170, 0.3);
+/* 次要按钮 - 霓虹粉 */
+[data-skin="niho"] .gnome-btn-secondary,
+[data-skin="niho"] button.bg-secondaryToken {
+  border-color: rgba(255, 107, 157, 0.3);
+  color: #ff6b9d;
 }
 
-[data-skin="gmgn"] a:not([class*="Button"]):hover {
+[data-skin="niho"] .gnome-btn-secondary:hover,
+[data-skin="niho"] button.bg-secondaryToken:hover {
+  background-color: rgba(255, 107, 157, 0.1);
+  border-color: #ff6b9d;
+  box-shadow: 0 0 15px rgba(255, 107, 157, 0.2);
+}
+
+/* 危险操作 - 霓虹粉背景 */
+[data-skin="niho"] .gnome-btn-danger {
+  background-color: #ff6b9d;
+  box-shadow: 0 0 20px rgba(255, 107, 157, 0.3);
+}
+
+[data-skin="niho"] .gnome-btn-danger:hover {
+  background-color: #ff1493;
+  box-shadow: 0 0 25px rgba(255, 107, 157, 0.5);
+}
+
+/* 链接与可点击文字 - 霓虹绿 + 微光 */
+[data-skin="niho"] a:not([class*="Button"]) {
   color: #00ff88;
+  text-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
+}
+
+[data-skin="niho"] a:not([class*="Button"]):hover {
+  color: #39ff14;
   text-shadow: 0 0 24px rgba(0, 255, 136, 0.5);
 }
 
+/* 状态指示器 - 淡金色加载 */
+[data-skin="niho"] .animate-spin {
+  color: #ffd700 !important;
+}
+
+[data-skin="niho"] .color-error,
+[data-skin="niho"] .text-error {
+  color: #ff6b9d !important;
+}
+
+/* 状态指示器 - 霓虹粉错误 */
+[data-skin="niho"] .color-error,
+[data-skin="niho"] .text-error,
+[data-skin="niho"] .text-red-500,
+[data-skin="niho"] .text-red-400 {
+  color: #ff6b9d !important;
+}
+
+[data-skin="niho"] .bg-error,
+[data-skin="niho"] .bg-red-500,
+[data-skin="niho"] .bg-red-500\/10 {
+  background-color: rgba(255, 107, 157, 0.1) !important;
+  border-color: rgba(255, 107, 157, 0.2) !important;
+}
+
+/* 状态指示器 - 淡金色警告/正在进行 */
+[data-skin="niho"] .animate-spin,
+[data-skin="niho"] .text-amber-500,
+[data-skin="niho"] .bg-amber-500 {
+  color: #ffd700 !important;
+}
+
+[data-skin="niho"] .color-warning,
+[data-skin="niho"] .text-warning,
+[data-skin="niho"] .text-yellow-600,
+[data-skin="niho"] .text-yellow-400 {
+  color: #ffd700 !important;
+}
+
+[data-skin="niho"] .bg-warning,
+[data-skin="niho"] .bg-yellow-50,
+[data-skin="niho"] .bg-yellow-900\/20 {
+  background-color: rgba(255, 215, 0, 0.1) !important;
+  border-color: rgba(255, 215, 0, 0.2) !important;
+}
+
+/* 状态指示器 - 霓虹青信息 */
+[data-skin="niho"] .color-info,
+[data-skin="niho"] .text-info,
+[data-skin="niho"] .text-blue-500,
+[data-skin="niho"] .text-cyan-600 {
+  color: #00e5ff !important;
+}
+
+[data-skin="niho"] .bg-info,
+[data-skin="niho"] .bg-blue-50,
+[data-skin="niho"] .bg-blue-900\/20 {
+  background-color: rgba(0, 229, 255, 0.1) !important;
+  border-color: rgba(0, 229, 255, 0.2) !important;
+}
+
+/* 思考中/生成中状态 - 荧光绿 */
+[data-skin="niho"] .bg-emerald-50,
+[data-skin="niho"] .dark\:bg-emerald-900\/20,
+[data-skin="niho"] .bg-emerald-500,
+[data-skin="niho"] .bg-primary-50,
+[data-skin="niho"] .dark\:bg-primary-900\/20 {
+  background-color: rgba(0, 255, 136, 0.1) !important;
+  border-color: rgba(0, 255, 136, 0.2) !important;
+}
+
+[data-skin="niho"] .text-gray-600,
+[data-skin="niho"] .dark\:text-gray-300 {
+  /* 针对思考链标签的优化 */
+  color: #a0c4b8 !important;
+}
+
+[data-skin="niho"] .text-emerald-600,
+[data-skin="niho"] .dark\:text-emerald-400,
+[data-skin="niho"] .text-emerald-500,
+[data-skin="niho"] .text-primary,
+[data-skin="niho"] .text-primary-500,
+[data-skin="niho"] .text-primary-600 {
+  color: #00ff88 !important;
+}
+
+[data-skin="niho"] .animate-bounce,
+[data-skin="niho"] .bg-emerald-500,
+[data-skin="niho"] .bg-primary-500 {
+  background-color: #00ff88 !important;
+}
+
+/* Markdown 内容样式自定义 - Niho */
+[data-skin="niho"] .prose blockquote {
+  border-left-color: var(--niho-text-border-strong) !important;
+  background-color: var(--niho-text-bg) !important;
+  color: #e8f5f0 !important;
+}
+
+[data-skin="niho"] .prose a {
+  color: #00e5ff !important;
+  text-decoration-color: rgba(0, 229, 255, 0.3);
+}
+
+[data-skin="niho"] .prose a:hover {
+  color: #00ffff !important;
+  text-shadow: 0 0 10px rgba(0, 229, 255, 0.5);
+}
+
+[data-skin="niho"] .prose code:not(pre code) {
+  background-color: rgba(0, 255, 136, 0.1) !important;
+  color: #00ff88 !important;
+}
+
+/* 消息气泡自定义 - Niho */
+[data-skin="niho"] .message-bubble-user {
+  background-color: rgba(0, 229, 255, 0.05) !important;
+}
+
+[data-skin="niho"] .badge-info {
+  background-color: rgba(0, 229, 255, 0.1) !important;
+  color: #00e5ff !important;
+  border: 1px solid rgba(0, 229, 255, 0.2);
+}
+
+[data-skin="niho"] .badge-success {
+  background-color: rgba(0, 255, 136, 0.1) !important;
+  color: #00ff88 !important;
+  border: 1px solid rgba(0, 255, 136, 0.2);
+}
+
+[data-skin="niho"] .badge-warning {
+  background-color: rgba(255, 215, 0, 0.1) !important;
+  color: #ffd700 !important;
+  border: 1px solid rgba(255, 215, 0, 0.2);
+}
+
+[data-skin="niho"] .badge-error {
+  background-color: rgba(255, 107, 157, 0.1) !important;
+  color: #ff6b9d !important;
+  border: 1px solid rgba(255, 107, 157, 0.2);
+}
+
+/* 人设按钮 - Niho 霓虹粉 */
+[data-skin="niho"] .niho-persona-btn {
+  color: var(--color-secondary) !important;
+  background-color: var(--color-secondary-bg) !important;
+  border: 1px solid rgba(255, 107, 157, 0.25);
+  box-shadow: none;
+}
+[data-skin="niho"] .niho-persona-btn:hover {
+  color: var(--color-secondary-hover) !important;
+  background-color: rgba(255, 107, 157, 0.16) !important;
+  border-color: rgba(255, 107, 157, 0.35);
+}
+[data-skin="niho"] .niho-persona-btn--active {
+  color: #ff1493 !important;
+  background-color: rgba(255, 20, 147, 0.18) !important;
+  border-color: rgba(255, 20, 147, 0.45) !important;
+  box-shadow: 0 0 10px rgba(255, 20, 147, 0.18);
+}
+[data-skin="niho"] .niho-persona-btn--active:hover {
+  color: #ff1493 !important;
+  background-color: rgba(255, 20, 147, 0.26) !important;
+  border-color: rgba(255, 20, 147, 0.6) !important;
+}
+[data-skin="niho"] .niho-persona-btn--inactive {
+  color: #ff9fc4 !important;
+  background-color: rgba(255, 107, 157, 0.08) !important;
+  border-color: rgba(255, 107, 157, 0.2) !important;
+}
+[data-skin="niho"] .niho-persona-btn--inactive:hover {
+  color: #ff7fb4 !important;
+  background-color: rgba(255, 107, 157, 0.14) !important;
+  border-color: rgba(255, 107, 157, 0.3) !important;
+}
+
+[data-skin="niho"] .avatar-user {
+  background-color: #00e5ff !important;
+  color: #000 !important;
+  box-shadow: 0 0 10px rgba(0, 229, 255, 0.3);
+}
+
+[data-skin="niho"] .message-bubble-assistant {
+  background-color: rgba(0, 255, 136, 0.03) !important;
+}
+
+[data-skin="niho"] .avatar-assistant {
+  background-color: #00ff88 !important;
+  color: #000 !important;
+  box-shadow: 0 0 10px rgba(0, 255, 136, 0.3);
+}
+
+/* ProcessTag (思考链标签) 精准应用 - Niho */
+[data-skin="niho"] .process-tag-thinking {
+  background-color: rgba(255, 107, 157, 0.15) !important;
+  color: #ff6b9d !important;
+  border-color: rgba(255, 107, 157, 0.3) !important;
+}
+
+[data-skin="niho"] .process-tag-mcp {
+  background-color: rgba(0, 229, 255, 0.15) !important;
+  color: #00e5ff !important;
+  border-color: rgba(0, 229, 255, 0.3) !important;
+}
+
+[data-skin="niho"] .process-tag-decision {
+  background-color: rgba(255, 215, 0, 0.15) !important;
+  color: #ffd700 !important;
+  border-color: rgba(255, 215, 0, 0.3) !important;
+}
+
+[data-skin="niho"] .process-tag-output {
+  background-color: rgba(0, 255, 136, 0.15) !important;
+  color: #00ff88 !important;
+  border-color: rgba(0, 255, 136, 0.3) !important;
+}
+
 /* 输入框聚焦 - 绿环光晕 */
-[data-skin="gmgn"] input:focus,
-[data-skin="gmgn"] textarea:focus,
-[data-skin="gmgn"] [data-slot="input"]:focus-within {
+[data-skin="niho"] input:focus,
+[data-skin="niho"] textarea:focus,
+[data-skin="niho"] [data-slot="input"]:focus-within {
   outline: none;
-  box-shadow: 0 0 0 2px #0d0d12, 0 0 0 4px rgba(0, 212, 170, 0.5), 0 0 20px rgba(0, 212, 170, 0.2);
+  box-shadow: 0 0 0 2px #000000, 0 0 0 4px rgba(0, 255, 136, 0.5), 0 0 20px rgba(0, 255, 136, 0.2);
 }
 
 /* 卡片悬停 - 绿边光 */
-[data-skin="gmgn"] .gnome-card:hover,
-[data-skin="gmgn"] .glass-card:hover {
-  border-color: rgba(0, 212, 170, 0.35);
+[data-skin="niho"] .gnome-card:hover,
+[data-skin="niho"] .glass-card:hover {
+  border-color: rgba(0, 255, 136, 0.35);
   box-shadow:
-    0 0 24px rgba(0, 212, 170, 0.08),
-    0 0 48px rgba(0, 212, 170, 0.04),
-    inset 0 1px 0 rgba(0, 212, 170, 0.08);
+    0 0 24px rgba(0, 255, 136, 0.08),
+    0 0 48px rgba(0, 255, 136, 0.04),
+    inset 0 1px 0 rgba(0, 255, 136, 0.08);
 }
 
 /* 滚动条 - 绿味儿 */
-[data-skin="gmgn"] ::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, rgba(0, 212, 170, 0.35) 0%, rgba(0, 212, 170, 0.2) 100%);
+[data-skin="niho"] ::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(0, 255, 136, 0.35) 0%, rgba(0, 255, 136, 0.2) 100%);
   border-radius: 999px;
 }
 
-[data-skin="gmgn"] ::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, rgba(0, 212, 170, 0.5) 0%, rgba(0, 212, 170, 0.35) 100%);
+[data-skin="niho"] ::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(0, 255, 136, 0.5) 0%, rgba(0, 255, 136, 0.35) 100%);
 }
 
 /* 小趣味：顶部一条极细的霓虹线（可选） */
-[data-skin="gmgn"] .glass-header::before {
+[data-skin="niho"] .glass-header::before {
   content: "";
   position: absolute;
   left: 0;
   right: 0;
   top: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent 0%, rgba(0, 212, 170, 0.6) 20%, rgba(0, 255, 136, 0.8) 50%, rgba(0, 212, 170, 0.6) 80%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, rgba(0, 255, 136, 0.6) 20%, rgba(0, 255, 136, 0.8) 50%, rgba(0, 255, 136, 0.6) 80%, transparent 100%);
   opacity: 0.9;
 }
 
-/* 执行轨迹 - GMGN 风格 */
-[data-skin="gmgn"] .process-steps-viewer-wrap {
+/* 执行轨迹 - Niho 风格 */
+[data-skin="niho"] .process-steps-viewer-wrap {
   border-radius: 8px;
 }
 
-[data-skin="gmgn"] .process-step-card {
+[data-skin="niho"] .process-step-card {
   background-color: rgba(18, 18, 26, 0.5);
-  border: 1px solid rgba(0, 212, 170, 0.08);
-  box-shadow: 0 0 10px rgba(0, 212, 170, 0.02);
+  border: 1px solid var(--niho-text-border);
+  box-shadow: 0 0 10px rgba(0, 255, 136, 0.02);
 }
 
-[data-skin="gmgn"] .process-step-card:hover {
-  border-color: rgba(0, 212, 170, 0.16);
-  box-shadow: 0 0 12px rgba(0, 212, 170, 0.04);
+[data-skin="niho"] .process-step-card:hover {
+  border-color: var(--niho-text-border-strong);
+  box-shadow: 0 0 12px rgba(0, 255, 136, 0.04);
 }
 
-[data-skin="gmgn"] .process-steps-viewer-wrap .border {
-  border-color: rgba(0, 212, 170, 0.12);
+[data-skin="niho"] .process-steps-viewer-wrap .border {
+  border-color: var(--niho-text-border);
 }
 
-[data-skin="gmgn"] .process-steps-popover {
+[data-skin="niho"] .process-steps-popover {
   background-color: rgba(13, 13, 18, 0.92);
-  border-color: rgba(0, 212, 170, 0.18);
+  border-color: var(--niho-text-border-strong);
   box-shadow:
-    0 0 18px rgba(0, 212, 170, 0.08),
+    0 0 18px rgba(0, 255, 136, 0.08),
     0 6px 24px rgba(0, 0, 0, 0.35);
 }
 
-[data-skin="gmgn"] .process-steps-popover .border-b {
-  border-color: rgba(0, 212, 170, 0.12);
+[data-skin="niho"] .process-steps-popover .border-b,
+[data-skin="niho"] .process-steps-popover .border-t {
+  border-color: var(--niho-text-border);
+}
+
+/* 标准对话框内滚动区域（无滚动条） */
+.chatee-dialog-standard .no-scrollbar {
+  scrollbar-width: none;
+}
+.chatee-dialog-standard .no-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* Niho：弱化所有边框线条 */
+[data-skin="niho"] .border,
+[data-skin="niho"] .border-b,
+[data-skin="niho"] .border-t,
+[data-skin="niho"] .border-l,
+[data-skin="niho"] .border-r,
+[data-skin="niho"] .border-x,
+[data-skin="niho"] .border-y {
+  border-color: var(--niho-text-border) !important;
+}
+
+/* 附件弹窗滚动条隐藏 */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* 附件弹窗 - Niho 配色 */
+[data-skin="niho"] .attachment-panel {
+  background-color: rgba(10, 10, 10, 0.92) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  box-shadow:
+    0 0 20px rgba(0, 255, 136, 0.06),
+    0 8px 24px rgba(0, 0, 0, 0.45);
+}
+[data-skin="niho"] .attachment-panel .border-b,
+[data-skin="niho"] .attachment-panel .border-t {
+  border-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+/* 引用详情对话框样式 */
+.quote-detail-dialog {
+  max-width: min(640px, 92vw);
+  max-height: 70vh;
+  backdrop-filter: blur(12px);
+  padding: 16px;
+}
+.quote-detail-body {
+  max-height: 50vh;
+  overflow: auto;
+}
+.quote-detail-content {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.niho-close-pink {
+  border-color: rgba(255, 107, 157, 0.4) !important;
+  color: #ff6b9d !important;
+}
+.niho-close-pink:hover {
+  background-color: rgba(255, 107, 157, 0.15) !important;
+  border-color: rgba(255, 107, 157, 0.55) !important;
+  color: #ff1493 !important;
+}
+
+@media (max-width: 640px) {
+  .quote-detail-dialog {
+    max-width: 92vw;
+    max-height: 70vh;
+    margin: 0 auto;
+  }
+  .quote-detail-body {
+    max-height: 52vh;
+  }
+}
+
+[data-skin="niho"] .quote-detail-dialog {
+  background-color: rgba(10, 10, 12, 0.92) !important;
+  border-color: var(--niho-text-border) !important;
+  box-shadow:
+    0 0 18px rgba(255, 107, 157, 0.08),
+    0 6px 24px rgba(0, 0, 0, 0.35);
+}
+[data-skin="niho"] .quote-detail-content {
+  border-color: var(--niho-text-border) !important;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* --- 霓虹发光工具类 --- */
+.neon-glow-green {
+  text-shadow: 0 0 5px #00ff88, 0 0 10px #00ff88;
+}
+.neon-glow-pink {
+  text-shadow: 0 0 5px #ff6b9d, 0 0 10px #ff6b9d;
+}
+.neon-glow-gold {
+  text-shadow: 0 0 5px #ffd700, 0 0 10px #ffd700;
+}
+.neon-glow-cyan {
+  text-shadow: 0 0 5px #00e5ff, 0 0 10px #00e5ff;
+}
+
+.neon-border-green {
+  border: 1px solid #00ff88;
+  box-shadow: 0 0 10px rgba(0, 255, 136, 0.3), inset 0 0 5px rgba(0, 255, 136, 0.2);
+}
+.neon-border-pink {
+  border: 1px solid #ff6b9d;
+  box-shadow: 0 0 10px rgba(255, 107, 157, 0.3), inset 0 0 5px rgba(255, 107, 157, 0.2);
 }
 
 /* ========== 趣味字体 (data-font) ========== */
@@ -1017,6 +1443,14 @@ html[data-mobile="true"][data-skin="gmgn"] .chatee-dialog-content {
   /* Electron App Region */
   .app-drag {
     -webkit-app-region: drag;
+    border: 0 !important;
+    box-shadow: none !important;
+    background: transparent !important;
+  }
+  [data-skin="niho"] .app-drag {
+    border-bottom: 0 !important;
+    box-shadow: none !important;
+    background: transparent !important;
   }
 
   .app-no-drag {
@@ -1859,6 +2293,11 @@ html[data-mobile="true"][data-skin="gmgn"] .chatee-dialog-content {
 
   .markdown-content p {
     @apply mb-3 last:mb-0;
+  }
+
+  /* 确保第一个元素顶部对齐（无顶部边距） */
+  .markdown-content > :first-child {
+    @apply !mt-0;
   }
 
   .markdown-content h1,

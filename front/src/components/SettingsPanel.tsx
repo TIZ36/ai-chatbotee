@@ -109,14 +109,14 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </label>
               <select
                 value={(settings as any).skin || 'default'}
-                onChange={(e) => onUpdateSettings({ skin: e.target.value as 'default' | 'gmgn' })}
+                onChange={(e) => onUpdateSettings({ skin: e.target.value as 'default' | 'niho' })}
                 className="w-full px-3 py-2 text-sm rounded-lg bg-white dark:bg-[#2d2d2d] border border-gray-300 dark:border-[#505050] text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/50 focus:border-[#7c3aed] transition-all duration-150"
               >
                 <option value="default">Chatee 默认</option>
-                <option value="gmgn">GMGN 风格</option>
+                <option value="niho">Niho 霓虹</option>
               </select>
               <p className="text-xs text-gray-500 dark:text-[#a0a0a0] mt-1">
-                参考 gmgn.ai 的深色霓虹绿风格
+                参考 niho/skr 的深色霓虹风格
               </p>
             </div>
             <div>

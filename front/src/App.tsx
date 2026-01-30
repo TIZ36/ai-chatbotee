@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
-import { Brain, Plug, Workflow as WorkflowIcon, Settings, Code, MessageCircle, Globe, Sparkles, Bot, Users, BookOpen, Shield, Activity, Plus, FolderOpen, Image as ImageIcon, Palette, Check, Type } from 'lucide-react';
+import { Brain, Plug, Workflow as WorkflowIcon, Settings, Code, MessageCircle, Globe, Sparkles, Bot, Users, BookOpen, Activity, Plus, FolderOpen, Image as ImageIcon, Palette, Check, Type } from 'lucide-react';
 import appLogoDark from '../assets/app_logo_dark.png';
 import appLogoLight from '../assets/app_logo_light.png';
 import { Button } from './components/ui/Button';
@@ -21,12 +21,11 @@ import MCPConfig from './components/MCPConfig';
 import WorkflowEditor from './components/WorkflowEditor';
 import Workflow from './components/Workflow';
 import CrawlerConfigPage from './components/CrawlerConfigPage';
-import UserAccessPage from './components/UserAccessPage';
 import AgentsPage from './components/AgentsPage';
 // 新架构组件
 import SystemStatusPanel from './components/SystemStatusPanel';
 import StatusBar from './components/StatusBar';
-import { getAgents, getMemories, getSessions, createSession, deleteSession, type Session } from './services/sessionApi';
+import { getAgents, getSessions, createSession, deleteSession, type Session } from './services/sessionApi';
 import { getRoundTables, type RoundTable } from './services/roundTableApi';
 import { toast } from './components/ui/use-toast';
 import { ConfirmDialog } from './components/ui/ConfirmDialog';
@@ -81,7 +80,7 @@ const NavItem: React.FC<NavItemProps> = ({ to, icon, title, isActive }) => {
   );
 };
 
-export type SkinId = 'default' | 'gmgn';
+export type SkinId = 'default' | 'niho';
 
 export type FontId = 'default' | 'pixel' | 'terminal' | 'rounded' | 'dotgothic' | 'silkscreen';
 
@@ -92,6 +91,7 @@ interface Settings {
   autoRefresh: boolean;
   refreshInterval: number;
   videoColumns: number;
+  enableToolCalling: boolean;
 }
 
 const App: React.FC = () => {
@@ -109,34 +109,19 @@ const App: React.FC = () => {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        return { theme: 'system', skin: 'default', font: 'default', autoRefresh: false, refreshInterval: 60, videoColumns: 4, ...parsed };
+        return { theme: 'system', skin: 'default', font: 'default', autoRefresh: false, refreshInterval: 60, videoColumns: 4, enableToolCalling: true, ...parsed };
       } catch {
-        return { theme: 'system', skin: 'default', font: 'default', autoRefresh: false, refreshInterval: 60, videoColumns: 4 };
+        return { theme: 'system', skin: 'default', font: 'default', autoRefresh: false, refreshInterval: 60, videoColumns: 4, enableToolCalling: true };
       }
     }
-    return { theme: 'system', skin: 'default', font: 'default', autoRefresh: false, refreshInterval: 60, videoColumns: 4 };
+    return { theme: 'system', skin: 'default', font: 'default', autoRefresh: false, refreshInterval: 60, videoColumns: 4, enableToolCalling: true };
   });
-  const [isAdmin, setIsAdmin] = useState(false);
 
   // 保存设置
   useEffect(() => {
     localStorage.setItem('settings', JSON.stringify(settings));
   }, [settings]);
 
-  // 检查用户权限（是否是管理员）
-  useEffect(() => {
-    const checkAdmin = async () => {
-      try {
-        const { getUserAccess } = await import('./services/userAccessApi');
-        const user = await getUserAccess();
-        setIsAdmin(user.is_owner || user.is_admin || false);
-      } catch (error) {
-        console.error('[App] Failed to check admin status:', error);
-        setIsAdmin(false);
-      }
-    };
-    checkAdmin();
-  }, []);
 
   // Electron 环境：加载后端地址配置
   useEffect(() => {
@@ -172,16 +157,16 @@ const App: React.FC = () => {
     return root.classList.contains('dark');
   });
 
-  // 应用主题（light/dark）与皮肤（default/gmgn）；移动端强制 GMGN
+  // 应用主题（light/dark）与皮肤（default/niho）；移动端强制 niho
   useEffect(() => {
     const root = window.document.documentElement;
     const mobile = window.matchMedia('(max-width: 767px)').matches;
-    const skin = mobile ? 'gmgn' : settings.skin;
+    const skin = mobile ? 'niho' : settings.skin;
     root.setAttribute('data-skin', skin);
     root.setAttribute('data-mobile', mobile ? 'true' : 'false');
 
-    const isGmgn = skin === 'gmgn';
-    const isDark = isGmgn || settings.theme === 'dark' ||
+    const isNiho = skin === 'niho';
+    const isDark = isNiho || settings.theme === 'dark' ||
       (settings.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
 
     setIsDarkMode(isDark);
@@ -192,14 +177,14 @@ const App: React.FC = () => {
     }
   }, [settings.theme, settings.skin]);
 
-  // 同步 data-mobile 与移动端强制 GMGN（resize 时）
+  // 同步 data-mobile 与移动端强制 niho（resize 时）
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 767px)');
     const sync = () => {
       const root = document.documentElement;
       const mobile = mq.matches;
       root.setAttribute('data-mobile', mobile ? 'true' : 'false');
-      if (mobile) root.setAttribute('data-skin', 'gmgn');
+      if (mobile) root.setAttribute('data-skin', 'niho');
       else root.setAttribute('data-skin', settings.skin);
     };
     sync();
@@ -245,9 +230,10 @@ const App: React.FC = () => {
   const loadSwitcherData = async () => {
     try {
       setIsLoadingSwitcher(true);
-      const [agents, topics] = await Promise.all([getAgents(), getMemories()]);
+      const [agents, sessions] = await Promise.all([getAgents(), getSessions()]);
       setSwitcherAgents(agents || []);
-      setSwitcherTopics(topics || []);
+      const topics = (sessions || []).filter(s => s.session_type === 'topic_general');
+      setSwitcherTopics(topics);
     } catch (e) {
       setSwitcherAgents([]);
       setSwitcherTopics([]);
@@ -301,7 +287,7 @@ const App: React.FC = () => {
   const handleCreateTopic = async () => {
     try {
       setIsCreatingTopic(true);
-      const newSession = await createSession(undefined, undefined, 'memory');
+      const newSession = await createSession(undefined, undefined, 'topic_general');
       setShowConversationSwitcher(false);
       handleSelectSession(newSession.session_id);
       toast({
@@ -344,7 +330,7 @@ const App: React.FC = () => {
       {/* macOS 专用小标题栏 - 仅用于红黄绿按钮拖拽区域 */}
       {isMac && (
         <div
-          className="w-full h-7 flex-shrink-0 app-drag glass-header"
+          className="w-full h-[10px] flex-shrink-0 app-drag"
           onDoubleClick={() => {
             window.electronAPI?.toggleMaximize?.();
           }}
@@ -434,16 +420,6 @@ const App: React.FC = () => {
             title="爬虫配置"
             isActive={location.pathname === '/crawler-config'}
           />
-
-          {/* 用户访问管理 - 仅管理员可见 */}
-          {isAdmin && (
-            <NavItem
-              to="/user-access"
-              icon={<Shield className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-              title="用户访问管理"
-              isActive={location.pathname === '/user-access'}
-            />
-          )}
 
           <NavItem
             to="/system-status"
@@ -555,7 +531,7 @@ const App: React.FC = () => {
                     >
                       <Palette className="w-3.5 h-3.5" />
                       <span className="hidden sm:inline">
-                        {settings.skin === 'gmgn' ? 'GMGN' : '默认'}
+                        {settings.skin === 'niho' ? 'Niho' : '默认'}
                       </span>
                     </Button>
                   </DropdownMenuTrigger>
@@ -568,11 +544,11 @@ const App: React.FC = () => {
                       {settings.skin === 'default' && <Check className="w-4 h-4" />}
                     </DropdownMenuItem>
                     <DropdownMenuItem
-                      onClick={() => updateSettings({ skin: 'gmgn' })}
+                      onClick={() => updateSettings({ skin: 'niho' })}
                       className="flex items-center justify-between"
                     >
-                      <span>GMGN 风格</span>
-                      {settings.skin === 'gmgn' && <Check className="w-4 h-4" />}
+                      <span>Niho 霓虹</span>
+                      {settings.skin === 'niho' && <Check className="w-4 h-4" />}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -730,7 +706,7 @@ const App: React.FC = () => {
                   </div>
                 </div>
 
-                {/* 话题（记忆体） */}
+                {/* 话题 */}
                 <div className="w-full">
                   <div className="text-xs font-semibold text-gray-700 dark:text-gray-200 px-1 mb-1 flex items-center gap-1.5">
                     <FolderOpen className="w-3.5 h-3.5" />
@@ -796,7 +772,8 @@ const App: React.FC = () => {
                   <Workflow
                     sessionId={selectedSessionId}
                     onSelectSession={handleSelectSession}
-                    onOpenConversationSwitcher={() => setShowConversationSwitcher(true)}
+                    enableToolCalling={settings.enableToolCalling}
+                    onToggleToolCalling={(enabled) => updateSettings({ enableToolCalling: enabled })}
                   />
               </div>
             </div>
@@ -815,7 +792,8 @@ const App: React.FC = () => {
                         <Workflow
                           sessionId={selectedSessionId}
                           onSelectSession={handleSelectSession}
-                          onOpenConversationSwitcher={() => setShowConversationSwitcher(true)}
+                          enableToolCalling={settings.enableToolCalling}
+                          onToggleToolCalling={(enabled) => updateSettings({ enableToolCalling: enabled })}
                         />
                       }
                     />
@@ -844,8 +822,6 @@ const App: React.FC = () => {
                       />
                     } />
 
-                    {/* 用户访问管理页面 */}
-                    <Route path="/user-access" element={<UserAccessPage />} />
 
                     {/* 智能体管理页面 */}
                     <Route path="/agents" element={<AgentsPage />} />

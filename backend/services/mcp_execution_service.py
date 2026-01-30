@@ -586,22 +586,52 @@ def generate_tool_arguments(
     props = tool_info.get('props', {})
     required = tool_info.get('required', [])
     
-    # 如果提供了 LLM 配置和完整输入文本，使用 LLM 提取参数
-    if llm_config and full_input_text:
-        try:
-            llm_args = _extract_args_with_llm(
-                tool_name=tool_name,
-                tool_info=tool_info,
-                full_input_text=full_input_text,
-                context=context,
-                llm_config=llm_config,
-                add_log=add_log
-            )
-            if llm_args:
-                return llm_args
-        except Exception as e:
-            if add_log:
-                add_log(f"⚠️ LLM 参数提取失败，回退到规则匹配: {e}")
+    # 【性能优化】快速路径：简单参数场景跳过 LLM 调用
+    print(f"[ArgGen] tool={tool_name}, props={list(props.keys())}, required={required}")
+    
+    # 情况1：无参数工具，直接返回空字典
+    if not props and not required:
+        print(f"[ArgGen] ⚡ 无参数工具，直接返回空字典")
+        return {}
+    
+    # 情况2：工具名暗示无需复杂参数（check_*, get_status*, list_* 等）
+    no_arg_patterns = ('check_', 'get_status', 'get_profile', 'get_login', 'list_', 'show_')
+    tool_lower = tool_name.lower()
+    if any(tool_lower.startswith(p) for p in no_arg_patterns) and not required:
+        print(f"[ArgGen] ⚡ 查询类工具无必需参数，跳过 LLM")
+        # 直接走规则匹配
+        pass  # 继续往下走规则匹配逻辑
+    
+    # 情况3：只有简单参数且无必需参数
+    elif not required and len(props) <= 2:
+        simple_params = {'input', 'query', 'text', 'prompt', 'message', 'content', 'q', 'keyword'}
+        if all(p.lower() in simple_params for p in props.keys()):
+            print(f"[ArgGen] ⚡ 简单可选参数，跳过 LLM")
+            # 填充简单参数
+            args = {}
+            for param in props.keys():
+                args[param] = user_input
+            return args
+    
+    # 情况4：有必需参数但都是简单类型
+    else:
+        # 如果提供了 LLM 配置和完整输入文本，使用 LLM 提取参数
+        if llm_config and full_input_text:
+            try:
+                print(f"[ArgGen] 🤖 复杂参数，使用 LLM 提取...")
+                llm_args = _extract_args_with_llm(
+                    tool_name=tool_name,
+                    tool_info=tool_info,
+                    full_input_text=full_input_text,
+                    context=context,
+                    llm_config=llm_config,
+                    add_log=add_log
+                )
+                if llm_args:
+                    return llm_args
+            except Exception as e:
+                if add_log:
+                    add_log(f"⚠️ LLM 参数提取失败，回退到规则匹配: {e}")
     
     # 回退到规则匹配
     args = {}
@@ -723,6 +753,9 @@ def execute_mcp_with_llm(
     existing_session_id: Optional[str] = None,
     agent_system_prompt: Optional[str] = None,  # Agent 的人设/系统提示词
     original_message: Optional[Dict[str, Any]] = None,  # 原始消息（用于提取图片等上下文）
+    forced_tool_name: Optional[str] = None,  # 指定工具名则跳过 LLM 选择
+    forced_tool_args: Optional[Dict[str, Any]] = None,  # 指定工具参数
+    enable_tool_calling: bool = True,  # 是否启用原生 Tool Calling
 ) -> Dict[str, Any]:
     """
     执行 MCP（两步法）：LLM 只选择工具，参数由系统自动生成
@@ -747,12 +780,42 @@ def execute_mcp_with_llm(
     YELLOW = '\033[93m'
     RED = '\033[91m'
     MAGENTA = '\033[95m'
+    BLUE = '\033[94m'
     RESET = '\033[0m'
     BOLD = '\033[1m'
     
-    print(f"{MAGENTA}{BOLD}[MCP EXEC] ========== execute_mcp_with_llm 开始 =========={RESET}")
+    import datetime
+    def _ts():
+        """返回当前时间戳字符串"""
+        return datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    
+    # 发送执行日志到前端
+    def _send_log(message: str, log_type: str = 'info', detail: str = None, duration: int = None):
+        """发送执行日志到前端"""
+        if not topic_id:
+            return
+        try:
+            from services.topic_service import get_topic_service
+            import time
+            log_data = {
+                'id': f"mcp-log-{int(time.time() * 1000)}-{id(message)}",
+                'timestamp': int(time.time() * 1000),
+                'log_type': log_type,
+                'message': message,
+            }
+            if detail:
+                log_data['detail'] = detail
+            if duration is not None:
+                log_data['duration'] = duration
+            get_topic_service()._publish_event(topic_id, 'execution_log', log_data)
+        except Exception as e:
+            print(f"{YELLOW}[MCP EXEC] 发送执行日志失败: {e}{RESET}")
+    
+    print(f"{MAGENTA}{BOLD}[MCP EXEC] ========== execute_mcp_with_llm 开始 [{_ts()}] =========={RESET}")
     print(f"{MAGENTA}[MCP EXEC] Server: {mcp_server_id}, LLM: {llm_config_id}{RESET}")
     print(f"{MAGENTA}[MCP EXEC] Input 长度: {len(input_text) if input_text else 0} 字符{RESET}")
+    
+    _send_log("初始化 MCP 执行环境...", log_type='step')
     
     logs, log = _mk_logger(add_log)
 
@@ -850,17 +913,25 @@ def execute_mcp_with_llm(
                 log(f"复用已有 MCP session: {existing_session_id[:16]}...")
             
             # 2. 初始化 MCP 会话（仅当没有 session_id 时）
+            print(f"{CYAN}[MCP EXEC] [{_ts()}] Step 1: Initialize session...{RESET}")
+            _send_log("初始化 MCP 会话...", log_type='step')
             if 'mcp-session-id' not in headers:
                 init_response = initialize_mcp_session(server_url, headers)
                 if not init_response:
                     log("⚠️ MCP initialize 失败，但继续尝试获取工具列表")
+                    _send_log("会话初始化失败，继续尝试", log_type='info')
                 else:
                     log(f"MCP 会话初始化成功，session_id: {headers.get('mcp-session-id', 'N/A')[:16]}...")
+                    _send_log("会话初始化成功", log_type='step')
             else:
                 log(f"跳过 MCP 会话初始化，使用已有 session_id")
+                _send_log("复用已有会话", log_type='step')
+            print(f"{CYAN}[MCP EXEC] [{_ts()}] Step 1 完成{RESET}")
             
             # 3. 获取工具列表（性能优化：启用缓存，减少 MCP 调用）
+            print(f"{CYAN}[MCP EXEC] [{_ts()}] Step 2: tools/list...{RESET}")
             log("Step 2/3: tools/list")
+            _send_log("获取可用工具列表...", log_type='step')
             # 优化：启用 60 秒缓存，工具列表不常变化
             # auto_reconnect=True 会在失败时自动清理旧连接并重试
             tools_response = get_mcp_tools_list(
@@ -869,6 +940,7 @@ def execute_mcp_with_llm(
                 use_cache=True,  # 性能优化：启用缓存
                 auto_reconnect=True,
             )
+            print(f"{CYAN}[MCP EXEC] [{_ts()}] Step 2 完成{RESET}")
             
             if not tools_response or 'result' not in tools_response:
                 # 获取失败时的调试信息
@@ -905,7 +977,162 @@ def execute_mcp_with_llm(
             all_tool_names = [t.get('name', 'unnamed') for t in tools]
             log(f"  可用工具: {', '.join(all_tool_names)}")
             print(f"{CYAN}[MCP EXEC] 所有工具: {', '.join(all_tool_names)}{RESET}")
+            _send_log(f"获取到 {len(tools)} 个可用工具", log_type='step', detail=', '.join(all_tool_names[:5]) + ('...' if len(all_tool_names) > 5 else ''))
             
+            # ==================== 【性能优化】简单意图直接映射（跳过 LLM 选择） ====================
+            # 对于明确的用户意图，直接匹配工具，跳过 LLM 选择步骤（节省 ~1.6秒）
+            def _try_fast_tool_match(user_text: str, available_tools: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+                """
+                尝试快速匹配工具（基于关键词）
+                
+                Returns:
+                    匹配的工具信息，如果没有匹配返回 None
+                """
+                if not user_text:
+                    return None
+                
+                user_lower = user_text.lower()
+                
+                # 关键词 → 工具名映射（支持中英文）
+                keyword_tool_map = {
+                    # 登录相关
+                    ('登录状态', '登陆状态', 'login status', 'check login'): 'check_login_status',
+                    ('二维码', 'qrcode', 'qr code', '扫码登录'): 'get_login_qrcode',
+                    ('退出登录', '登出', 'logout', '清除cookie', 'delete cookie'): 'delete_cookies',
+                    # 用户相关
+                    ('用户信息', '我的信息', '个人信息', 'user profile', 'my profile'): 'user_profile',
+                    # 内容相关
+                    ('笔记列表', '我的笔记', 'list feeds', 'my feeds'): 'list_feeds',
+                    ('搜索', 'search'): 'search_feeds',
+                }
+                
+                # 尝试匹配
+                for keywords, tool_name in keyword_tool_map.items():
+                    if any(kw in user_lower for kw in keywords):
+                        # 检查工具是否存在
+                        for tool in available_tools:
+                            if tool.get('name', '').lower() == tool_name.lower():
+                                schema = tool.get("inputSchema") or tool.get("input_schema") or tool.get("parameters") or {}
+                                props = schema.get("properties", {}) if isinstance(schema, dict) else {}
+                                required = schema.get("required", []) if isinstance(schema, dict) else []
+                                
+                                # 只对无参数或简单参数的工具使用快速匹配
+                                if not required:
+                                    return {
+                                        'name': tool.get('name'),
+                                        'description': tool.get('description', ''),
+                                        'schema': schema,
+                                        'props': props,
+                                        'required': required,
+                                    }
+                return None
+            
+            # 尝试快速匹配
+            fast_matched_tool = _try_fast_tool_match(effective_input, tools)
+            if fast_matched_tool and not forced_tool_name:
+                print(f"{GREEN}[MCP EXEC] ⚡ 快速匹配成功: {fast_matched_tool['name']}（跳过 LLM 选择）{RESET}")
+                log(f"⚡ 快速匹配工具: {fast_matched_tool['name']}（跳过 LLM）")
+                _send_log(f"⚡ 快速匹配: {fast_matched_tool['name']}", log_type='tool', detail='跳过 LLM 选择')
+                
+                # 直接调用匹配的工具
+                print(f"{CYAN}[MCP EXEC] [{_ts()}] 快速路径 - MCP 工具调用开始: {fast_matched_tool['name']}{RESET}")
+                _send_log(f"正在执行工具: {fast_matched_tool['name']}...", log_type='tool')
+                fast_call_start = datetime.datetime.now()
+                fast_result = call_mcp_tool(
+                    target_url=server_url,
+                    headers=headers,
+                    tool_name=fast_matched_tool['name'],
+                    tool_args={},  # 无参数工具
+                    add_log=None,
+                )
+                fast_call_duration = int((datetime.datetime.now() - fast_call_start).total_seconds() * 1000)
+                print(f"{CYAN}[MCP EXEC] [{_ts()}] 快速路径 - MCP 工具调用完成: {fast_matched_tool['name']}{RESET}")
+                _send_log(f"工具执行完成: {fast_matched_tool['name']}", log_type='tool', duration=fast_call_duration)
+                
+                if fast_result.get("success"):
+                    tool_text = fast_result.get("text") or str(fast_result.get("data", ""))
+                    summary = f"✅ MCP \"{server_name}\" 执行完成（⚡快速匹配：{fast_matched_tool['name']}）"
+                    results = [{
+                        "tool": fast_matched_tool['name'],
+                        "tool_text": tool_text,
+                        "raw_result": fast_result.get("raw_result"),
+                        "success": True,
+                    }]
+                    print(f"{GREEN}[MCP EXEC] [{_ts()}] ========== execute_mcp_with_llm 结束（快速路径） =========={RESET}")
+                    return {
+                        "summary": summary,
+                        "tool_text": tool_text,
+                        "results": results,
+                        "raw_result": fast_result.get("raw_result"),
+                        "raw_result_compact": _truncate_deep(fast_result.get("raw_result"), max_str=1200),
+                        "logs": logs,
+                        "media": [],
+                        "mcp_session_id": headers.get('mcp-session-id'),
+                        "fast_matched": True,
+                    }
+                else:
+                    # 快速匹配失败，回退到正常流程
+                    log(f"⚠️ 快速匹配工具调用失败，回退到 LLM 选择: {fast_result.get('error')}")
+                    print(f"{YELLOW}[MCP EXEC] ⚠️ 快速匹配失败，回退 LLM 流程{RESET}")
+            
+            # ==================== 直接调用指定工具（跳过 LLM 选择） ====================
+            if forced_tool_name:
+                forced_name = str(forced_tool_name).strip()
+                tool_map = build_tool_name_map(tools)
+                tool_info = tool_map.get(forced_name.lower())
+                if not tool_info:
+                    return {
+                        "error": f"指定工具不存在: {forced_name}",
+                        "logs": logs,
+                    }
+                
+                direct_args = forced_tool_args if isinstance(forced_tool_args, dict) else {}
+                log(f"🔧 直接调用工具: {tool_info.get('name')}（跳过 LLM 选择）")
+                
+                direct_result = call_mcp_tool(
+                    target_url=server_url,
+                    headers=headers,
+                    tool_name=tool_info.get('name'),
+                    tool_args=direct_args,
+                    add_log=None,
+                )
+                
+                if direct_result.get("success"):
+                    tool_text = direct_result.get("text") or str(direct_result.get("data", ""))
+                    summary = f"✅ MCP \"{server_name}\" 执行完成（1 个工具调用：{tool_info.get('name')}）"
+                    results = [{
+                        "tool": tool_info.get("name"),
+                        "tool_text": tool_text,
+                        "raw_result": direct_result.get("raw_result"),
+                        "success": True,
+                    }]
+                    return {
+                        "summary": summary,
+                        "tool_text": tool_text,
+                        "results": results,
+                        "raw_result": direct_result.get("raw_result"),
+                        "raw_result_compact": _truncate_deep(direct_result.get("raw_result"), max_str=1200),
+                        "logs": logs,
+                        "media": [],
+                        "mcp_session_id": headers.get('mcp-session-id'),
+                        "native_tool_calling": False,
+                        "forced_tool_calling": True,
+                    }
+                
+                error_msg = direct_result.get("error") or "MCP tool call failed"
+                return {
+                    "error": error_msg,
+                    "logs": logs,
+                    "results": [{
+                        "tool": tool_info.get("name"),
+                        "error": error_msg,
+                        "error_type": direct_result.get("error_type", "unknown"),
+                        "success": False,
+                    }],
+                    "mcp_session_id": headers.get('mcp-session-id'),
+                    "forced_tool_calling": True,
+                }
+
             # 打印当前 session_id 状态（调试用）
             current_session_id = headers.get('mcp-session-id')
             if current_session_id:
@@ -1112,7 +1339,7 @@ def execute_mcp_with_llm(
             # 支持原生 function calling 的模型可以一次 API 调用完成工具选择
             # 优化：增加 Gemini 支持（使用 function_declarations）
             provider_type = llm_config.get('provider', '').lower()
-            use_native_tool_calling = provider_type in (
+            use_native_tool_calling = enable_tool_calling and provider_type in (
                 'openai', 'deepseek', 'anthropic', 'claude', 'gemini', 'google'
             )
             
@@ -1498,10 +1725,16 @@ def execute_mcp_with_llm(
                     intent: Optional[str] = None
                     parse_err: Optional[str] = None
                     try:
+                        print(f"{YELLOW}[MCP EXEC] [{_ts()}] LLM 调用开始: {round_label}{RESET}")
                         log(f"{round_label}：使用LLM选择工具")
                         log(f"   LLM配置ID: {llm_config_id}")
                         log(f"   LLM配置内容: provider={llm_config.get('provider')}, model={llm_config.get('model')}, has_api_key={bool(llm_config.get('api_key'))}")
+                        _send_log(f"LLM 选择工具中...", log_type='llm', detail=f"{llm_config.get('provider')}/{llm_config.get('model')}")
+                        llm_call_start = datetime.datetime.now()
                         api_result = call_llm_api(llm_config, system_text, user_text, log)
+                        llm_call_duration = int((datetime.datetime.now() - llm_call_start).total_seconds() * 1000)
+                        print(f"{YELLOW}[MCP EXEC] [{_ts()}] LLM 调用完成: {round_label}{RESET}")
+                        _send_log(f"LLM 选择完成", log_type='llm', duration=llm_call_duration)
 
                         if api_result is None:
                             # LLM API调用失败
@@ -1633,6 +1866,9 @@ def execute_mcp_with_llm(
                     if not actual_user_request:
                         actual_user_request = effective_input  # 如果提取失败，使用原始输入
                     
+                    print(f"{YELLOW}[MCP EXEC] [{_ts()}] 参数生成开始: {tool_name_str}{RESET}")
+                    _send_log(f"生成工具参数: {tool_name_str}...", log_type='step')
+                    arg_gen_start = datetime.datetime.now()
                     tool_args = generate_tool_arguments(
                         tool_name=tool_name_str,
                         tool_info=tool_info,
@@ -1644,6 +1880,9 @@ def execute_mcp_with_llm(
                         full_input_text=effective_input,  # 传递完整输入（包含对话历史）
                         add_log=None  # 不传递日志函数，减少输出
                     )
+                    arg_gen_duration = int((datetime.datetime.now() - arg_gen_start).total_seconds() * 1000)
+                    print(f"{YELLOW}[MCP EXEC] [{_ts()}] 参数生成完成: {tool_name_str}{RESET}")
+                    _send_log(f"参数生成完成: {tool_name_str}", log_type='step', duration=arg_gen_duration)
                     
                     # 只记录关键信息，不输出详细参数
                     log(f"准备调用工具: {tool_name_str}")
@@ -1699,7 +1938,13 @@ def execute_mcp_with_llm(
                     
                     try:
                         # 使用 mcp_common_logic 直接调用工具（不传递 log 以减少输出）
+                        print(f"{BLUE}[MCP EXEC] [{_ts()}] MCP 工具调用开始: {tool_name_str}{RESET}")
+                        _send_log(f"正在调用工具: {tool_name_str}...", log_type='tool')
+                        mcp_call_start = datetime.datetime.now()
                         tool_result = call_mcp_tool(server_url, headers, tool_name_str, tool_args, None)
+                        mcp_call_duration = int((datetime.datetime.now() - mcp_call_start).total_seconds() * 1000)
+                        print(f"{BLUE}[MCP EXEC] [{_ts()}] MCP 工具调用完成: {tool_name_str}{RESET}")
+                        _send_log(f"工具调用完成: {tool_name_str}", log_type='tool', duration=mcp_call_duration)
                         
                         # 处理新的结构化返回格式
                         if isinstance(tool_result, dict):
@@ -1938,6 +2183,8 @@ def execute_mcp_with_llm(
                 # 即使提取失败，也不影响整体流程
                 pass
 
+            print(f"{GREEN}[MCP EXEC] [{_ts()}] 结果处理完成，准备返回{RESET}")
+            
             tool_names = [r.get("tool") for r in results if r.get("tool")]
             tool_names_text = ", ".join(tool_names[:8]) + ("..." if len(tool_names) > 8 else "")
             summary = f'✅ MCP "{server_name}" 执行完成（{len(results)} 个工具调用：{tool_names_text}）'
@@ -1951,6 +2198,7 @@ def execute_mcp_with_llm(
                 "results": results,  # results[i].result 保留原始 MCP jsonrpc（含 base64 图片）
             }
 
+            print(f"{GREEN}[MCP EXEC] [{_ts()}] ========== execute_mcp_with_llm 结束 =========={RESET}")
             return {
                 "summary": summary,
                 "tool_text": "\n\n".join(tool_text_outputs).strip() if tool_text_outputs else None,

@@ -185,7 +185,7 @@ def get_client_ip():
     return request.remote_addr or 'unknown'
 
 def is_owner_ip(ip: str) -> bool:
-    """检查IP是否为软件拥有者（包括配置的拥有者IP和管理员）"""
+    """检查IP是否为软件拥有者（仅配置IP/本机）"""
     # 1. 检查配置的拥有者IP列表
     owner_config = config.get('owner', {}) or {}
     owner_ips_str = owner_config.get('ip_addresses', '127.0.0.1,::1')
@@ -196,23 +196,6 @@ def is_owner_ip(ip: str) -> bool:
     # 2. 检查本机访问（127.0.0.1, ::1, localhost）
     if ip in ['127.0.0.1', '::1', 'localhost']:
         return True
-    
-    # 3. 检查数据库中是否为管理员
-    try:
-        from database import get_mysql_connection
-        conn = get_mysql_connection()
-        if conn:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            cursor.execute("""
-                SELECT is_admin FROM user_access WHERE ip_address = %s
-            """, (ip,))
-            user = cursor.fetchone()
-            cursor.close()
-            conn.close()
-            if user and user.get('is_admin'):
-                return True
-    except Exception as e:
-        print(f"[Owner Check] Error checking admin status: {e}")
     
     return False
 
@@ -799,28 +782,17 @@ def mcp_proxy_inspector():
                 is_tools_call = method == 'tools/call'
                 needs_json_response = is_tools_list or is_tools_call  # 这些方法前端期望 JSON
                 
-                # 从数据库获取服务器配置，检查响应格式
+                # 从缓存/数据库获取服务器配置，检查响应格式
                 response_format = 'json'  # 默认 JSON
                 try:
-                    from database import get_mysql_connection
-                    conn = get_mysql_connection()
-                    if conn:
-                        cursor = conn.cursor()
-                        cursor.execute(
-                            "SELECT ext FROM mcp_servers WHERE url = %s AND enabled = 1 LIMIT 1",
-                            (target_url,)
-                        )
-                        server_row = cursor.fetchone()
-                        if server_row and server_row[0]:
-                            ext = server_row[0]
-                            if isinstance(ext, str):
-                                ext = json.loads(ext)
-                            response_format = ext.get('response_format', 'json')
-                            print(f"[MCP Proxy] Server response_format: {response_format}")
-                        cursor.close()
-                        conn.close()
-                except Exception as db_error:
-                    print(f"[MCP Proxy] Warning: Failed to get response_format from DB: {db_error}")
+                    from mcp_server.mcp_common_logic import get_mcp_server_config
+                    server_config = get_mcp_server_config(target_url)
+                    if server_config and server_config.get("found"):
+                        ext = server_config.get("ext") or {}
+                        response_format = ext.get('response_format', 'json')
+                        print(f"[MCP Proxy] Server response_format: {response_format}")
+                except Exception as config_error:
+                    print(f"[MCP Proxy] Warning: Failed to get response_format from cache/DB: {config_error}")
                 
                 # 检测是否是 Notion MCP（兼容旧逻辑）
                 is_notion = target_url and 'mcp.notion.com' in target_url
@@ -7224,17 +7196,6 @@ def upgrade_to_agent(session_id):
             """, (name, avatar, system_prompt, llm_config_id, creator_ip, session_id))
             conn.commit()
 
-            # 同步到user_agent_access表（加速查询）
-            try:
-                cursor.execute("""
-                    INSERT INTO user_agent_access (ip_address, agent_session_id, access_type)
-                    VALUES (%s, %s, 'creator')
-                    ON DUPLICATE KEY UPDATE access_type = 'creator'
-                """, (creator_ip, session_id))
-                conn.commit()
-            except Exception as e:
-                print(f"[Agent API] Warning: Failed to sync to user_agent_access: {e}")
-
             # 为该角色创建初始版本（如果不存在）
             try:
                 current_version_id = _ensure_role_current_version(conn, session_id)
@@ -7288,501 +7249,9 @@ def upgrade_to_agent(session_id):
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/user-access', methods=['GET', 'OPTIONS'])
-def get_user_access():
-    """获取当前用户的访问信息（首次访问时返回需要填写昵称）"""
-    if request.method == 'OPTIONS':
-        return handle_cors_preflight()
-    
-    try:
-        from database import get_mysql_connection
-        conn = get_mysql_connection()
-        if not conn:
-            return jsonify({'error': 'MySQL not available'}), 503
-        
-        client_ip = get_client_ip()
-        is_owner = is_owner_ip(client_ip)
-        
-        cursor = None
-        try:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            
-            # 查询用户访问信息
-            cursor.execute("""
-                SELECT ip_address, nickname, is_enabled, is_admin, first_access_at, last_access_at
-                FROM user_access
-                WHERE ip_address = %s
-            """, (client_ip,))
-            
-            user = cursor.fetchone()
-            
-            # 本机访问自动设置为管理员
-            is_local = client_ip in ['127.0.0.1', '::1', 'localhost']
-            
-            if not user:
-                # 首次访问，需要填写昵称
-                # 如果是本机访问，自动创建为管理员
-                if is_local:
-                    try:
-                        cursor.execute("""
-                            INSERT INTO user_access (ip_address, nickname, is_enabled, is_admin, first_access_at, last_access_at)
-                            VALUES (%s, %s, 1, 1, NOW(), NOW())
-                        """, (client_ip, '管理员'))
-                        conn.commit()
-                        return jsonify({
-                            'ip_address': client_ip,
-                            'nickname': '管理员',
-                            'is_enabled': True,
-                            'is_admin': True,
-                            'is_owner': True,
-                            'needs_nickname': False,
-                            'first_access_at': datetime.now().isoformat(),
-                        })
-                    except Exception as e:
-                        print(f"[User Access] Error creating local admin: {e}")
-                
-                return jsonify({
-                    'ip_address': client_ip,
-                    'nickname': None,
-                    'is_enabled': True,
-                    'is_admin': is_local,  # 本机访问自动是管理员
-                    'is_owner': is_owner or is_local,
-                    'needs_nickname': True,
-                    'first_access_at': None,
-                })
-            
-            # 如果是本机访问但还不是管理员，自动设置为管理员
-            if is_local and not user.get('is_admin'):
-                cursor.execute("""
-                    UPDATE user_access
-                    SET is_admin = 1, last_access_at = NOW()
-                    WHERE ip_address = %s
-                """, (client_ip,))
-                conn.commit()
-                user['is_admin'] = True
-            
-            # 更新最后访问时间
-            cursor.execute("""
-                UPDATE user_access
-                SET last_access_at = NOW()
-                WHERE ip_address = %s
-            """, (client_ip,))
-            conn.commit()
-            
-            # 本机访问或管理员都是owner
-            is_owner_final = is_owner or is_local or bool(user.get('is_admin'))
-            
-            return jsonify({
-                'ip_address': user['ip_address'],
-                'nickname': user['nickname'],
-                'is_enabled': user['is_enabled'],
-                'is_admin': bool(user.get('is_admin')) or is_local,
-                'is_owner': is_owner_final,
-                'needs_nickname': not user['nickname'],
-                'first_access_at': user['first_access_at'].isoformat() if user['first_access_at'] else None,
-                'last_access_at': user['last_access_at'].isoformat() if user['last_access_at'] else None,
-            })
-            
-        finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
-                
-    except Exception as e:
-        print(f"[User Access API] Error getting user access: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/user-access', methods=['POST', 'OPTIONS'])
-def create_or_update_user_access():
-    """创建或更新用户访问信息（首次访问时填写昵称）"""
-    if request.method == 'OPTIONS':
-        return handle_cors_preflight()
-    
-    try:
-        from database import get_mysql_connection
-        conn = get_mysql_connection()
-        if not conn:
-            return jsonify({'error': 'MySQL not available'}), 503
-        
-        data = request.get_json() or {}
-        nickname = (data.get('nickname') or '').strip()
-        
-        if not nickname:
-            return jsonify({'error': '昵称不能为空'}), 400
-        
-        client_ip = get_client_ip()
-        
-        cursor = None
-        try:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            
-            # 检查是否已存在
-            cursor.execute("""
-                SELECT ip_address FROM user_access WHERE ip_address = %s
-            """, (client_ip,))
-            exists = cursor.fetchone()
-            
-            if exists:
-                # 更新昵称
-                cursor.execute("""
-                    UPDATE user_access
-                    SET nickname = %s, last_access_at = NOW()
-                    WHERE ip_address = %s
-                """, (nickname, client_ip))
-            else:
-                # 创建新用户
-                cursor.execute("""
-                    INSERT INTO user_access (ip_address, nickname, first_access_at, last_access_at)
-                    VALUES (%s, %s, NOW(), NOW())
-                """, (client_ip, nickname))
-            
-            conn.commit()
-            
-            return jsonify({
-                'ip_address': client_ip,
-                'nickname': nickname,
-                'message': '用户信息保存成功'
-            })
-            
-        finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
-                
-    except Exception as e:
-        print(f"[User Access API] Error creating/updating user access: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/user-access/list', methods=['GET', 'OPTIONS'])
-def list_user_access():
-    """获取所有用户访问列表（仅拥有者可用）"""
-    if request.method == 'OPTIONS':
-        return handle_cors_preflight()
-    
-    try:
-        client_ip = get_client_ip()
-        if not is_owner_ip(client_ip):
-            return jsonify({'error': '权限不足，仅拥有者可以查看用户列表'}), 403
-        
-        from database import get_mysql_connection
-        conn = get_mysql_connection()
-        if not conn:
-            return jsonify({'error': 'MySQL not available'}), 503
-        
-        cursor = None
-        try:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            
-            cursor.execute("""
-                SELECT ip_address, nickname, is_enabled, is_admin, first_access_at, last_access_at, created_at, updated_at
-                FROM user_access
-                ORDER BY is_admin DESC, last_access_at DESC, created_at DESC
-            """)
-            
-            users = []
-            for row in cursor.fetchall():
-                users.append({
-                    'ip_address': row['ip_address'],
-                    'nickname': row['nickname'],
-                    'is_enabled': bool(row['is_enabled']),
-                    'is_admin': bool(row.get('is_admin', 0)),
-                    'first_access_at': row['first_access_at'].isoformat() if row['first_access_at'] else None,
-                    'last_access_at': row['last_access_at'].isoformat() if row['last_access_at'] else None,
-                    'created_at': row['created_at'].isoformat() if row['created_at'] else None,
-                    'updated_at': row['updated_at'].isoformat() if row['updated_at'] else None,
-                })
-            
-            return jsonify({'users': users, 'total': len(users)})
-            
-        finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
-                
-    except Exception as e:
-        print(f"[User Access API] Error listing user access: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/user-access/<ip_address>', methods=['PUT', 'OPTIONS'])
-def update_user_access(ip_address):
-    """更新用户访问信息（仅拥有者可用）"""
-    if request.method == 'OPTIONS':
-        return handle_cors_preflight()
-    
-    try:
-        client_ip = get_client_ip()
-        if not is_owner_ip(client_ip):
-            return jsonify({'error': '权限不足，仅拥有者可以修改用户信息'}), 403
-        
-        data = request.get_json() or {}
-        nickname = data.get('nickname')
-        is_enabled = data.get('is_enabled')
-        is_admin = data.get('is_admin')
-        
-        from database import get_mysql_connection
-        conn = get_mysql_connection()
-        if not conn:
-            return jsonify({'error': 'MySQL not available'}), 503
-        
-        cursor = None
-        try:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            
-            update_fields = []
-            params = []
-            
-            if nickname is not None:
-                update_fields.append("nickname = %s")
-                params.append(nickname.strip())
-            
-            if is_enabled is not None:
-                update_fields.append("is_enabled = %s")
-                params.append(1 if is_enabled else 0)
-            
-            if is_admin is not None:
-                update_fields.append("is_admin = %s")
-                params.append(1 if is_admin else 0)
-            
-            if not update_fields:
-                return jsonify({'error': '没有需要更新的字段'}), 400
-            
-            params.append(ip_address)
-            
-            cursor.execute(f"""
-                UPDATE user_access
-                SET {', '.join(update_fields)}, updated_at = NOW()
-                WHERE ip_address = %s
-            """, params)
-            
-            conn.commit()
-            
-            return jsonify({'message': '用户信息更新成功'})
-            
-        finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
-                
-    except Exception as e:
-        print(f"[User Access API] Error updating user access: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/user-access/<ip_address>', methods=['DELETE', 'OPTIONS'])
-def delete_user_access(ip_address):
-    """删除用户访问（仅拥有者可用）"""
-    if request.method == 'OPTIONS':
-        return handle_cors_preflight()
-    
-    try:
-        client_ip = get_client_ip()
-        if not is_owner_ip(client_ip):
-            return jsonify({'error': '权限不足，仅拥有者可以删除用户'}), 403
-        
-        from database import get_mysql_connection
-        conn = get_mysql_connection()
-        if not conn:
-            return jsonify({'error': 'MySQL not available'}), 503
-        
-        cursor = None
-        try:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            
-            cursor.execute("DELETE FROM user_access WHERE ip_address = %s", (ip_address,))
-            conn.commit()
-            
-            return jsonify({'message': '用户删除成功'})
-            
-        finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
-                
-    except Exception as e:
-        print(f"[User Access API] Error deleting user access: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/agents/<agent_session_id>/access', methods=['GET', 'OPTIONS'])
-def get_agent_access(agent_session_id):
-    """获取agent的访问权限列表（仅拥有者可用）"""
-    if request.method == 'OPTIONS':
-        return handle_cors_preflight()
-    
-    try:
-        client_ip = get_client_ip()
-        if not is_owner_ip(client_ip):
-            return jsonify({'error': '权限不足，仅拥有者可以查看访问权限'}), 403
-        
-        from database import get_mysql_connection
-        conn = get_mysql_connection()
-        if not conn:
-            return jsonify({'error': 'MySQL not available'}), 503
-        
-        cursor = None
-        try:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            
-            # 获取所有有权限访问该agent的用户
-            cursor.execute("""
-                SELECT 
-                    uaa.ip_address,
-                    uaa.access_type,
-                    uaa.granted_at,
-                    ua.nickname,
-                    ua.is_enabled
-                FROM user_agent_access uaa
-                LEFT JOIN user_access ua ON uaa.ip_address = ua.ip_address
-                WHERE uaa.agent_session_id = %s
-                ORDER BY uaa.granted_at DESC
-            """, (agent_session_id,))
-            
-            accesses = []
-            for row in cursor.fetchall():
-                accesses.append({
-                    'ip_address': row['ip_address'],
-                    'nickname': row['nickname'],
-                    'is_enabled': bool(row['is_enabled']) if row['is_enabled'] is not None else True,
-                    'access_type': row['access_type'],
-                    'granted_at': row['granted_at'].isoformat() if row['granted_at'] else None,
-                })
-            
-            return jsonify({'accesses': accesses, 'total': len(accesses)})
-            
-        finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
-                
-    except Exception as e:
-        print(f"[Agent Access API] Error getting agent access: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/agents/<agent_session_id>/access', methods=['POST', 'OPTIONS'])
-def grant_agent_access(agent_session_id):
-    """授权用户访问agent（仅拥有者可用）"""
-    if request.method == 'OPTIONS':
-        return handle_cors_preflight()
-    
-    try:
-        client_ip = get_client_ip()
-        if not is_owner_ip(client_ip):
-            return jsonify({'error': '权限不足，仅拥有者可以授权访问'}), 403
-        
-        data = request.get_json() or {}
-        ip_address = (data.get('ip_address') or '').strip()
-        
-        if not ip_address:
-            return jsonify({'error': 'IP地址不能为空'}), 400
-        
-        from database import get_mysql_connection
-        conn = get_mysql_connection()
-        if not conn:
-            return jsonify({'error': 'MySQL not available'}), 503
-        
-        cursor = None
-        try:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            
-            # 检查agent是否存在
-            cursor.execute("""
-                SELECT session_id FROM sessions WHERE session_id = %s AND session_type = 'agent'
-            """, (agent_session_id,))
-            if not cursor.fetchone():
-                return jsonify({'error': 'Agent不存在'}), 404
-            
-            # 授权访问
-            cursor.execute("""
-                INSERT INTO user_agent_access (ip_address, agent_session_id, access_type, granted_at)
-                VALUES (%s, %s, 'granted', NOW())
-                ON DUPLICATE KEY UPDATE access_type = 'granted', granted_at = NOW()
-            """, (ip_address, agent_session_id))
-            conn.commit()
-            
-            return jsonify({'message': '授权成功'})
-            
-        finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
-                
-    except Exception as e:
-        print(f"[Agent Access API] Error granting agent access: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/agents/<agent_session_id>/access/<ip_address>', methods=['DELETE', 'OPTIONS'])
-def revoke_agent_access(agent_session_id, ip_address):
-    """取消用户访问agent的权限（仅拥有者可用，不能取消创建者的权限）"""
-    if request.method == 'OPTIONS':
-        return handle_cors_preflight()
-    
-    try:
-        client_ip = get_client_ip()
-        if not is_owner_ip(client_ip):
-            return jsonify({'error': '权限不足，仅拥有者可以取消授权'}), 403
-        
-        from database import get_mysql_connection
-        conn = get_mysql_connection()
-        if not conn:
-            return jsonify({'error': 'MySQL not available'}), 503
-        
-        cursor = None
-        try:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            
-            # 检查是否为创建者（不能取消创建者的权限）
-            cursor.execute("""
-                SELECT access_type FROM user_agent_access
-                WHERE ip_address = %s AND agent_session_id = %s
-            """, (ip_address, agent_session_id))
-            access = cursor.fetchone()
-            
-            if access and access['access_type'] == 'creator':
-                return jsonify({'error': '不能取消创建者的访问权限'}), 400
-            
-            # 取消授权
-            cursor.execute("""
-                DELETE FROM user_agent_access
-                WHERE ip_address = %s AND agent_session_id = %s
-            """, (ip_address, agent_session_id))
-            conn.commit()
-            
-            return jsonify({'message': '取消授权成功'})
-            
-        finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
-                
-    except Exception as e:
-        print(f"[Agent Access API] Error revoking agent access: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
 @app.route('/api/agents', methods=['GET', 'OPTIONS'])
 def list_agents():
-    """获取智能体列表（使用user_agent_access表加速查询）"""
+    """获取智能体列表"""
     if request.method == 'OPTIONS':
         return handle_cors_preflight()
     
@@ -7796,113 +7265,51 @@ def list_agents():
         try:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             
-            # 获取客户端IP并判断是否为拥有者
-            client_ip = get_client_ip()
-            is_owner = is_owner_ip(client_ip)
-            
-            # 检查用户是否在访问列表中且已启用
-            if not is_owner:
-                cursor.execute("""
-                    SELECT is_enabled FROM user_access WHERE ip_address = %s
-                """, (client_ip,))
-                user_access = cursor.fetchone()
-                if not user_access or not user_access['is_enabled']:
-                    # 用户不在访问列表中或已被禁用
-                    return jsonify({'agents': [], 'total': 0, 'error': '访问被拒绝'}), 403
-            
-            # 使用user_agent_access表加速查询
+            # 查询所有 agent（移除用户访问控制）
             # 优化：使用子查询计算message_count，避免JOIN messages表导致性能问题
             # 优化：列表查询不返回完整的system_prompt，减少数据传输量
-            if is_owner:
-                # 拥有者：可以看到所有agent
-                try:
-                    cursor.execute("""
-                        SELECT 
-                            s.session_id,
-                            s.title,
-                            s.name,
-                            s.llm_config_id,
-                            s.avatar,
-                            s.system_prompt,
-                            s.ext,
-                            s.session_type,
-                            rv.version_id as current_role_version_id,
-                            s.created_at,
-                            s.updated_at,
-                            s.last_message_at,
-                            (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.session_id) as message_count
-                        FROM sessions s
-                        LEFT JOIN role_versions rv ON rv.role_id = s.session_id AND rv.is_current = 1
-                        WHERE s.session_type = 'agent'
-                        ORDER BY s.updated_at DESC, s.created_at DESC
-                    """)
-                except Exception as join_error:
-                    print(f"[Agent API] Warning: role_versions join failed, fallback without versions: {join_error}")
-                    cursor.execute("""
-                        SELECT 
-                            s.session_id,
-                            s.title,
-                            s.name,
-                            s.llm_config_id,
-                            s.avatar,
-                            s.system_prompt,
-                            s.ext,
-                            s.session_type,
-                            NULL as current_role_version_id,
-                            s.created_at,
-                            s.updated_at,
-                            s.last_message_at,
-                            (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.session_id) as message_count
-                        FROM sessions s
-                        WHERE s.session_type = 'agent'
-                        ORDER BY s.updated_at DESC, s.created_at DESC
-                    """)
-            else:
-                # 普通用户：从user_agent_access表查询可访问的agent
-                try:
-                    cursor.execute("""
-                        SELECT 
-                            s.session_id,
-                            s.title,
-                            s.name,
-                            s.llm_config_id,
-                            s.avatar,
-                            s.system_prompt,
-                            s.ext,
-                            s.session_type,
-                            rv.version_id as current_role_version_id,
-                            s.created_at,
-                            s.updated_at,
-                            s.last_message_at,
-                            (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.session_id) as message_count
-                        FROM user_agent_access uaa
-                        INNER JOIN sessions s ON uaa.agent_session_id = s.session_id
-                        LEFT JOIN role_versions rv ON rv.role_id = s.session_id AND rv.is_current = 1
-                        WHERE uaa.ip_address = %s AND s.session_type = 'agent'
-                        ORDER BY s.updated_at DESC, s.created_at DESC
-                    """, (client_ip,))
-                except Exception as join_error:
-                    print(f"[Agent API] Warning: role_versions join failed, fallback without versions: {join_error}")
-                    cursor.execute("""
-                        SELECT 
-                            s.session_id,
-                            s.title,
-                            s.name,
-                            s.llm_config_id,
-                            s.avatar,
-                            s.system_prompt,
-                            s.ext,
-                            s.session_type,
-                            NULL as current_role_version_id,
-                            s.created_at,
-                            s.updated_at,
-                            s.last_message_at,
-                            (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.session_id) as message_count
-                        FROM user_agent_access uaa
-                        INNER JOIN sessions s ON uaa.agent_session_id = s.session_id
-                        WHERE uaa.ip_address = %s AND s.session_type = 'agent'
-                        ORDER BY s.updated_at DESC, s.created_at DESC
-                    """, (client_ip,))
+            try:
+                cursor.execute("""
+                    SELECT 
+                        s.session_id,
+                        s.title,
+                        s.name,
+                        s.llm_config_id,
+                        s.avatar,
+                        s.system_prompt,
+                        s.ext,
+                        s.session_type,
+                        rv.version_id as current_role_version_id,
+                        s.created_at,
+                        s.updated_at,
+                        s.last_message_at,
+                        (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.session_id) as message_count
+                    FROM sessions s
+                    LEFT JOIN role_versions rv ON rv.role_id = s.session_id AND rv.is_current = 1
+                    WHERE s.session_type = 'agent'
+                    ORDER BY s.updated_at DESC, s.created_at DESC
+                """)
+            except Exception as join_error:
+                print(f"[Agent API] Warning: role_versions join failed, fallback without versions: {join_error}")
+                cursor.execute("""
+                    SELECT 
+                        s.session_id,
+                        s.title,
+                        s.name,
+                        s.llm_config_id,
+                        s.avatar,
+                        s.system_prompt,
+                        s.ext,
+                        s.session_type,
+                        NULL as current_role_version_id,
+                        s.created_at,
+                        s.updated_at,
+                        s.last_message_at,
+                        (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.session_id) as message_count
+                    FROM sessions s
+                    WHERE s.session_type = 'agent'
+                    ORDER BY s.updated_at DESC, s.created_at DESC
+                """)
             
             agents = []
             rows = cursor.fetchall()
@@ -7969,15 +7376,6 @@ def list_memories():
             # 获取客户端IP
             client_ip = get_client_ip()
             is_owner = is_owner_ip(client_ip)
-            
-            # 如果不是拥有者，检查用户是否在访问列表中
-            if not is_owner:
-                cursor.execute("""
-                    SELECT is_enabled FROM user_access WHERE ip_address = %s
-                """, (client_ip,))
-                user_access = cursor.fetchone()
-                if not user_access or not user_access['is_enabled']:
-                    return jsonify({'memories': [], 'total': 0, 'error': '访问被拒绝'}), 403
             
             # 查询 session_type = 'memory' 的会话（话题）
             cursor.execute("""
@@ -8604,16 +8002,6 @@ def import_agent():
                 agent_data.get('system_prompt'),
                 creator_ip,
             ))
-            
-            # 同步到user_agent_access表（加速查询）
-            try:
-                cursor.execute("""
-                    INSERT INTO user_agent_access (ip_address, agent_session_id, access_type)
-                    VALUES (%s, %s, 'creator')
-                    ON DUPLICATE KEY UPDATE access_type = 'creator'
-                """, (creator_ip, session_id))
-            except Exception as e:
-                print(f"[Agent API] Warning: Failed to sync to user_agent_access: {e}")
             
             conn.commit()
             

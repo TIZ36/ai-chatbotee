@@ -72,6 +72,7 @@ export interface Message {
   toolCallSignatures?: Record<string, string>;
   mcpdetail?: any;
   processMessages?: ProcessMessage[];
+  executionLogs?: Array<{ id: string; timestamp: number; type: string; message: string; detail?: string; duration?: number }>;
   avatarUrl?: string; // Add avatarUrl for assistant messages
   agentName?: string; // Add agentName for assistant messages
   ext?: any; // 扩展字段（用于 reaction/引用等装饰）
@@ -663,10 +664,18 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
             return { cleanContent, images };
           };
           
-          const { cleanContent, images: embeddedImages } = extractEmbeddedImages(message.content || '');
+          const { cleanContent: rawContent, images: embeddedImages } = extractEmbeddedImages(message.content || '');
+          const sanitizeThinkTags = (content: string) => {
+            if (!content) return '';
+            // Remove <think>...</think> blocks (case-insensitive, dotall)
+            const withoutBlocks = content.replace(/<think[\s\S]*?>[\s\S]*?<\/think>/gi, '');
+            // Remove any stray think tags
+            return withoutBlocks.replace(/<\/?think[^>]*>/gi, '').trim();
+          };
+          const cleanContent = sanitizeThinkTags(rawContent);
           
           return (
-            <div className="prose prose-sm dark:prose-invert max-w-none text-gray-900 dark:text-[#ffffff] markdown-content text-xs">
+            <div className="prose prose-sm dark:prose-invert max-w-none text-gray-900 dark:text-[#ffffff] markdown-content text-xs [&>:first-child]:mt-0">
               {/* 渲染提取出的嵌入图片 */}
               {embeddedImages.length > 0 && (
                 <div className="mb-3 space-y-3">
@@ -772,8 +781,8 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
                   );
                 }
               },
-              // Paragraph styling
-              p: ({ children }: any) => <p className="mb-2 last:mb-0 leading-snug">{children}</p>,
+              // Paragraph styling - 确保第一个段落顶部对齐
+              p: ({ children }: any) => <p className="mb-2 last:mb-0 first:mt-0 leading-snug">{children}</p>,
               // Heading styling
               h1: ({ children }: any) => <h1 className="text-xl font-bold mt-3 mb-2 first:mt-0">{children}</h1>,
               h2: ({ children }: any) => <h2 className="text-lg font-bold mt-3 mb-2 first:mt-0">{children}</h2>,

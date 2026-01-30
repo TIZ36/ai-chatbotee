@@ -2862,6 +2862,14 @@ class ActorBase(ABC):
             iteration=ctx.iteration,
         )
         
+        # 发送执行日志：开始 MCP 调用
+        self._send_execution_log(
+            ctx,
+            f"开始调用 MCP 服务: {mcp_server_name}",
+            log_type='tool',
+            detail=f"工具: {action.mcp_tool_name or 'auto'}",
+        )
+        
         print(f"{GREEN}[MCP DEBUG] 开始 MCP 调用{RESET}")
         
         try:
@@ -2941,18 +2949,16 @@ class ActorBase(ABC):
 
             print(f"{CYAN}[MCP DEBUG] User Content: {user_content[:100]}...{RESET}")
             
-            # 1. 先获取 MCP 工具列表，构建工具描述
-            print(f"{YELLOW}[MCP DEBUG] 获取工具列表...{RESET}")
-            tools_desc = self._get_mcp_tools_description(server_id)
-            print(f"{GREEN}[MCP DEBUG] 工具描述长度: {len(tools_desc) if tools_desc else 0} 字符{RESET}")
+            # 性能优化：移除 _get_mcp_tools_description 调用
+            # 原因：execute_mcp_with_llm 内部会获取工具列表，这里获取是重复的
+            # 而且 _get_mcp_tools_description 没有先 initialize session，导致失败重试浪费 2 秒
             
-            # 2. 构建带历史上下文和工具描述的输入
+            # 直接构建带历史上下文的输入（不重复获取工具列表）
             history_context = self._build_mcp_context(ctx)
             print(f"{CYAN}[MCP DEBUG] 历史上下文长度: {len(history_context) if history_context else 0} 字符{RESET}")
             
             input_parts = []
-            if tools_desc:
-                input_parts.append(f"【可用工具】\n{tools_desc}")
+            # 工具列表由 execute_mcp_with_llm 内部获取，不需要在这里添加
             if history_context:
                 input_parts.append(f"【对话历史】\n{history_context}")
             input_parts.append(f"【当前请求】\n{user_content}")
@@ -2967,6 +2973,8 @@ class ActorBase(ABC):
             print(f"{CYAN}[MCP DEBUG] Agent 人设长度: {len(agent_persona) if agent_persona else 0} 字符{RESET}")
             
             print(f"{YELLOW}[MCP DEBUG] 调用 execute_mcp_with_llm...{RESET}")
+            msg_ext = (ctx.original_message or {}).get('ext', {}) or {}
+            enable_tool_calling = msg_ext.get('use_tool_calling', True)
             
             # 更新步骤状态，显示正在执行
             ctx.update_last_step(
@@ -2980,6 +2988,10 @@ class ActorBase(ABC):
                 llm_config_id=final_llm_config_id,
                 agent_system_prompt=agent_persona,  # 传递 Agent 人设
                 original_message=ctx.original_message,  # 传递原始消息（用于提取图片等上下文）
+                forced_tool_name=action.mcp_tool_name if action.mcp_tool_name and action.mcp_tool_name != 'auto' else None,
+                forced_tool_args=action.params if isinstance(action.params, dict) else {},
+                enable_tool_calling=enable_tool_calling,
+                topic_id=ctx.topic_id or self.topic_id,  # 传递 topic_id 以发送执行日志到前端
             )
             print(f"{GREEN}[MCP DEBUG] execute_mcp_with_llm 返回{RESET}")
             print(f"{CYAN}[MCP DEBUG] Result keys: {list(result.keys()) if result else 'None'}{RESET}")
@@ -3533,6 +3545,45 @@ class ActorBase(ABC):
         topic_id = ext.get('topic_id') or self.topic_id
         if topic_id:
             get_topic_service()._publish_event(topic_id, msg_type, message)
+    
+    def _send_execution_log(
+        self,
+        ctx: 'IterationContext',
+        message: str,
+        log_type: str = 'info',
+        detail: str = None,
+        duration: int = None,
+    ):
+        """
+        发送执行日志到前端
+        
+        Args:
+            ctx: 迭代上下文
+            message: 日志消息
+            log_type: 日志类型 (info, step, tool, llm, success, error, thinking)
+            detail: 详细信息
+            duration: 耗时（毫秒）
+        """
+        from services.topic_service import get_topic_service
+        
+        topic_id = ctx.topic_id or self.topic_id
+        if not topic_id:
+            return
+        
+        log_data = {
+            'id': f"log-{int(time.time() * 1000)}-{id(self)}",
+            'timestamp': int(time.time() * 1000),
+            'log_type': log_type,
+            'message': message,
+            'agent_id': self.agent_id,
+            'agent_name': self.info.get('name', 'Agent'),
+        }
+        if detail:
+            log_data['detail'] = detail
+        if duration is not None:
+            log_data['duration'] = duration
+        
+        get_topic_service()._publish_event(topic_id, 'execution_log', log_data)
     
     def _generate_final_response(self, ctx: IterationContext):
         """

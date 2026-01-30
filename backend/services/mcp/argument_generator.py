@@ -141,9 +141,50 @@ class ArgumentGenerator:
         Returns:
             参数字典
         """
-        # 尝试 LLM 提取
+        props = tool_info.get('props', {})
+        required = tool_info.get('required', [])
+        
+        # 调试日志（直接打印到控制台，因为 add_log 可能是 None）
+        print(f"[ArgGen] tool={tool_name}, props_keys={list(props.keys())}, required={required}")
+        
+        # 【性能优化】简单参数场景直接使用规则匹配，跳过 LLM 调用
+        # 情况1：无参数
+        if not props:
+            print(f"[ArgGen] ⚡ 无参数，直接返回空字典")
+            return {}
+        
+        # 情况2：只有一个简单参数（如 input, query, text）
+        simple_params = {'input', 'query', 'text', 'prompt', 'message', 'content', 'q', 'keyword', 'keywords'}
+        if len(props) == 1:
+            param_name = list(props.keys())[0]
+            if param_name.lower() in simple_params:
+                self._log(f"  ⚡ 快速参数生成: {param_name}={user_input[:30]}...")
+                return {param_name: user_input}
+        
+        # 情况3：工具名暗示无需复杂参数（如 check_login_status, get_profile 等）
+        no_arg_patterns = ('check_', 'get_status', 'get_profile', 'list_', 'show_')
+        tool_lower = tool_name.lower()
+        if any(tool_lower.startswith(p) for p in no_arg_patterns) and not required:
+            # 无必需参数的查询类工具，直接用规则匹配
+            self._log(f"  ⚡ 快速规则匹配: {tool_name}")
+            return self._extract_with_rules(tool_name, tool_info, user_input, context)
+        
+        # 情况4：参数数量少（<=2）且都是简单类型（string, number, boolean）
+        complex_types = {'object', 'array'}
+        param_types = [p.get('type', 'string') for p in props.values()]
+        if len(props) <= 2 and not any(t in complex_types for t in param_types):
+            # 简单参数，优先使用规则匹配
+            rule_args = self._extract_with_rules(tool_name, tool_info, user_input, context)
+            # 检查必需参数是否都有值
+            missing_required = [r for r in required if r not in rule_args or not rule_args.get(r)]
+            if not missing_required:
+                self._log(f"  ⚡ 规则匹配成功: {list(rule_args.keys())}")
+                return rule_args
+        
+        # 【复杂场景】使用 LLM 提取
         if self._llm_config and full_input_text:
             try:
+                self._log(f"  🤖 使用 LLM 提取复杂参数...")
                 llm_args = self._extract_with_llm(
                     tool_name, tool_info, full_input_text, context
                 )
@@ -152,7 +193,7 @@ class ArgumentGenerator:
             except Exception as e:
                 self._log(f"⚠️ LLM 提取失败，回退规则匹配: {e}")
         
-        # 规则匹配
+        # 回退：规则匹配
         return self._extract_with_rules(tool_name, tool_info, user_input, context)
     
     def _extract_with_llm(

@@ -3,22 +3,20 @@
  * 左边显示消息主要内容，右边显示AI思考过程、MCP调用和工作流执行过程
  */
 
-import React, { useRef, useEffect } from 'react';
+import React, { useRef } from 'react';
 import { 
   CheckSquare,
   Square,
-  Quote,
   Edit2,
   RotateCw,
-  Sparkles
+  Plug
 } from 'lucide-react';
-import { ProcessStepsViewer } from './ui/ProcessStepsViewer';
+import { ProcessStepsViewer, type ExecutionLogEntry } from './ui/ProcessStepsViewer';
+import { Button } from './ui/Button';
 import type { ProcessMessage } from '../types/processMessage';
 import { 
   MessageBubble, 
   MessageAvatar, 
-  MessageStatusIndicator,
-  getMessageBubbleClasses,
   type MessageRole,
   type ToolType
 } from './ui/MessageBubble';
@@ -94,6 +92,8 @@ export interface SplitViewMessageProps {
   llmProvider?: string;
   /** 过程消息（新协议） */
   processMessages?: ProcessMessage[];
+  /** 执行日志（持久化） */
+  executionLogs?: ExecutionLogEntry[];
 }
 
 export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
@@ -125,8 +125,8 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
   onResend,
   onViewMCPDetail,
   onRetry,
-  llmProvider,
   processMessages,
+  executionLogs,
 }) => {
   const leftRef = useRef<HTMLDivElement>(null);
 
@@ -146,9 +146,7 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
     return false;
   })();
   const hasToolCalls = toolCalls && Array.isArray(toolCalls) && toolCalls.length > 0;
-  const hasWorkflow = role === 'tool' && (toolType === 'workflow' || toolType === 'mcp') && workflowStatus;
   const hasProcessSteps = processMessages && processMessages.length > 0;
-  const hasContent = !!content && content.trim().length > 0;
   
   const shouldShowSidePanel = role === 'assistant' && (
     hasThinking || 
@@ -185,12 +183,17 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
     media, // 多模态媒体内容
   };
 
+  // AI 消息（assistant/tool）全宽显示，用户消息保持右对齐带头像
+  const isAssistantMessage = role === 'assistant' || role === 'tool';
+
   return (
     <div 
       data-message-id={id}
       onClick={selectionMode ? onToggleSelection : undefined}
-      className={`flex items-start space-x-2 fade-in-up stagger-item ${
-        isUserMessage ? 'flex-row-reverse space-x-reverse' : ''
+      className={`fade-in-up stagger-item ${
+        isAssistantMessage 
+          ? 'w-full' // AI 消息全宽
+          : `flex items-start space-x-2 ${isUserMessage ? 'flex-row-reverse space-x-reverse' : ''}`
       } ${
         selectionMode 
           ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-[#404040] rounded-lg p-2 -m-2 transition-all duration-200' 
@@ -212,136 +215,132 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
         </div>
       )}
 
-      {/* 头像 - 移除头像旁边的状态指示器，全部移入过程区域显示 */}
-      <div className="flex-shrink-0">
-        <MessageAvatar 
-          role={role as MessageRole} 
-          toolType={toolType as ToolType} 
-          avatarUrl={avatarUrl}
-          size="md"
-        />
-      </div>
+      {/* 头像 - 非用户消息保留原布局 */}
+      {!isAssistantMessage && !isUserMessage && (
+        <div className="flex-shrink-0 flex items-start">
+          <MessageAvatar 
+            role={role as MessageRole} 
+            toolType={toolType as ToolType} 
+            avatarUrl={avatarUrl}
+            size="md"
+          />
+        </div>
+      )}
 
       {/* 消息内容区域 */}
-      <div className="flex-1 group relative">
-        {/* 堆叠布局：上方过程（默认自动展开/折叠），下方模型输出 */}
-        <div className="space-y-2">
-          {/* 过程区域（思考链 + tags 同行显示） */}
-          {shouldShowSidePanel && (
+      <div className={`group relative ${isAssistantMessage ? 'w-full' : 'flex-1'}`}>
+        {isAssistantMessage ? (
+          /* AI 消息：堆叠布局：上方过程（默认自动展开/折叠），下方模型输出 */
+          <div className="space-y-2">
+            {/* AI 消息：头像行 */}
             <div className="flex items-center gap-2 flex-wrap">
-              <div className="flex items-center gap-1.5 flex-shrink-0">
-                <Sparkles className="w-3 h-3 text-primary" />
-                <span className="text-[10px] font-semibold text-gray-600 dark:text-gray-300">
-                  思考链
-                </span>
-                {(isThinking || isStreaming) && (
-                  <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800/30">
-                    <div className="flex space-x-0.5">
-                      <div className="w-1 h-1 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                      <div className="w-1 h-1 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                      <div className="w-1 h-1 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                    </div>
-                    <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-medium whitespace-nowrap">
-                      {isThinking ? (llmProvider === 'gemini' ? '深度思考中' : '思考中') : '生成中'}
-                    </span>
-                  </div>
-                )}
-              </div>
-              <ProcessStepsViewer
-                processMessages={processMessages}
-                isThinking={isThinking}
-                isStreaming={isStreaming}
-                hideTitle
-                defaultExpanded
+              {/* 小头像 */}
+              <MessageAvatar 
+                role={role as MessageRole} 
+                toolType={toolType as ToolType} 
+                avatarUrl={avatarUrl}
+                size="sm"
               />
+              {/* 执行过程标签（显示工具调用、思考等状态） */}
+              {(shouldShowSidePanel || (executionLogs && executionLogs.length > 0)) && (
+                <>
+                  <ProcessStepsViewer
+                    processMessages={processMessages}
+                    executionLogs={executionLogs}
+                    isThinking={isThinking}
+                    isStreaming={isStreaming}
+                    hideTitle
+                    showTags={false}
+                    defaultExpanded
+                    onQuote={onQuote}
+                  />
+                </>
+              )}
             </div>
-          )}
 
-          {/* 模型输出（消息气泡） */}
-          <div ref={leftRef} className="min-w-0">
-            <MessageBubble role={role as MessageRole} toolType={toolType as ToolType}>
-              {renderContent(messageObj)}
-            </MessageBubble>
+            {/* 模型输出（消息气泡） */}
+            <div ref={leftRef} className="min-w-0">
+              <MessageBubble role={role as MessageRole} toolType={toolType as ToolType}>
+                {renderContent(messageObj)}
+              </MessageBubble>
 
-            {/* 操作按钮 - 显示在气泡上方 */}
-            {/* 用户消息的编辑、重新发送和引用按钮 */}
-            {role === 'user' && !isLoading && (
-              <div className="absolute -top-7 right-0 flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-[#2d2d2d] rounded-lg shadow-md border border-gray-200 dark:border-[#404040] px-1 py-0.5">
-                {onQuote && (
-                  <button
-                    onClick={onQuote}
-                    className="p-1.5 text-gray-500 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-all"
-                    title="引用此消息"
-                  >
-                    <Quote className="w-3.5 h-3.5" />
-                  </button>
-                )}
-                {onEdit && (
-                  <button
-                    onClick={onEdit}
-                    className="p-1.5 text-gray-500 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-all"
-                    title="编辑消息"
-                  >
-                    <Edit2 className="w-3.5 h-3.5" />
-                  </button>
-                )}
-                {onResend && (
-                  <button
-                    onClick={onResend}
-                    className="p-1.5 text-gray-500 hover:text-green-600 dark:text-gray-400 dark:hover:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 rounded transition-all"
-                    title="重新发送"
-                  >
-                    <RotateCw className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-            )}
-
-            {/* Assistant消息的操作按钮（引用 + MCP 详情） - 显示在气泡上方 */}
-            {role === 'assistant' && !isLoading && (onQuote || (mcpDetail && onViewMCPDetail)) && (
-              <div className="absolute -top-7 right-0 flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-[#2d2d2d] rounded-lg shadow-md border border-gray-200 dark:border-[#404040] px-1 py-0.5">
-                {onQuote && (
-                  <button
-                    onClick={onQuote}
-                    className="p-1.5 text-gray-500 hover:text-primary-600 dark:text-gray-400 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded transition-all"
-                    title="引用此消息"
-                  >
-                    <Quote className="w-3.5 h-3.5" />
-                  </button>
-                )}
-                {mcpDetail && onViewMCPDetail && (
-                  <button
+              {/* Assistant消息的操作按钮（引用 + MCP 详情） - 显示在气泡上方 */}
+              {!isLoading && mcpDetail && onViewMCPDetail && (
+                <div className="absolute -top-7 right-0 flex items-center space-x-0.5 bg-muted/70 rounded-lg border border-border px-1 py-0.5">
+                  <Button
                     onClick={onViewMCPDetail}
-                    className="p-1.5 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded transition-all flex items-center space-x-1"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-emerald-600 dark:text-emerald-400"
                     title="查看 MCP 详情"
                   >
                     <Plug className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-            )}
+                  </Button>
+                </div>
+              )}
 
-            {/* Assistant错误消息的重试按钮 - 显示在气泡上方 */}
-            {role === 'assistant' && 
-             content?.includes('❌ 错误') && 
-             toolCalls && 
-             typeof toolCalls === 'object' &&
-             (toolCalls as any).canRetry === true && 
-             onRetry && (
-              <div className="absolute -top-8 right-0 flex items-center space-x-1">
-                <button
-                  onClick={onRetry}
-                  disabled={isLoading}
-                  className="px-2.5 py-1 text-xs font-medium text-white bg-primary-500 hover:bg-primary-600 disabled:bg-gray-400 disabled:cursor-not-allowed rounded-lg transition-all flex items-center space-x-1.5 shadow-md"
-                  title="重试发送"
-                >
-                  <RotateCw className="w-3.5 h-3.5" />
-                  <span>重试</span>
-                </button>
-              </div>
-            )}
+              {/* Assistant错误消息的重试按钮 - 显示在气泡上方 */}
+              {content?.includes('❌ 错误') && 
+               toolCalls && 
+               typeof toolCalls === 'object' &&
+               (toolCalls as any).canRetry === true && 
+               onRetry && (
+                <div className="absolute -top-8 right-0 flex items-center space-x-1">
+                  <button
+                    onClick={onRetry}
+                    disabled={isLoading}
+                    className="px-2.5 py-1 text-xs font-medium text-white bg-primary-500 hover:bg-primary-600 disabled:bg-gray-400 disabled:cursor-not-allowed rounded-lg transition-all flex items-center space-x-1.5 shadow-md"
+                    title="重试发送"
+                  >
+                    <RotateCw className="w-3.5 h-3.5" />
+                    <span>重试</span>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        ) : (
+          /* 用户消息：头像一行，气泡下一行 */
+          <div ref={leftRef} className="min-w-0 space-y-2">
+            <div className="flex items-center justify-end gap-1.5">
+              {!isLoading && (onEdit || onResend) && (
+                <div className="flex items-center space-x-0.5 bg-muted/70 rounded-lg border border-border px-1 py-0.5">
+                  {onEdit && (
+                    <Button
+                      onClick={onEdit}
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground hover:text-primary-600 dark:hover:text-primary-400"
+                      title="编辑消息"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </Button>
+                  )}
+                  {onResend && (
+                    <Button
+                      onClick={onResend}
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground hover:text-green-600 dark:hover:text-green-400"
+                      title="重新发送"
+                    >
+                      <RotateCw className="w-3.5 h-3.5" />
+                    </Button>
+                  )}
+                </div>
+              )}
+              <MessageAvatar 
+                role={role as MessageRole} 
+                toolType={toolType as ToolType} 
+                avatarUrl={avatarUrl}
+                size="md"
+              />
+            </div>
+            <MessageBubble role={role as MessageRole} toolType={toolType as ToolType}>
+              {renderContent(messageObj)}
+            </MessageBubble>
+          </div>
+        )}
       </div>
     </div>
   );
