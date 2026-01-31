@@ -23,54 +23,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onUpdateSettings,
 }) => {
   const [clearDataOpen, setClearDataOpen] = useState(false);
-  const [backendUrl, setBackendUrl] = useState<string>('http://localhost:3001');
-  const [isElectron, setIsElectron] = useState(false);
-  const [isSavingBackendUrl, setIsSavingBackendUrl] = useState(false);
-
-  // 检查是否为 Electron 环境
-  useEffect(() => {
-    const checkElectron = () => {
-      return typeof window !== 'undefined' && (window as any).electronAPI !== undefined;
-    };
-    setIsElectron(checkElectron());
-    
-    // 如果是 Electron 环境，加载后端地址配置
-    if (checkElectron() && (window as any).electronAPI?.getBackendUrl) {
-      (window as any).electronAPI.getBackendUrl().then((url: string) => {
-        setBackendUrl(url || 'http://localhost:3001');
-      }).catch((error: Error) => {
-        console.error('[SettingsPanel] Failed to load backend URL:', error);
-      });
-    }
-  }, []);
-
-  const handleSaveBackendUrl = async () => {
-    if (!isElectron || !(window as any).electronAPI?.setBackendUrl) {
-      return;
-    }
-    
-    setIsSavingBackendUrl(true);
-    try {
-      await (window as any).electronAPI.setBackendUrl(backendUrl);
-      // 更新缓存
-      (window as any).__cachedBackendUrl = backendUrl;
-      // 提示用户
-      toast({
-        title: '保存成功',
-        description: '后端地址已保存，请重启应用以使配置生效',
-        variant: 'success',
-      });
-    } catch (error) {
-      console.error('[SettingsPanel] Failed to save backend URL:', error);
-      toast({
-        title: '保存失败',
-        description: error instanceof Error ? error.message : '请稍后重试',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsSavingBackendUrl(false);
-    }
-  };
 
   const handleClearData = () => {
     setClearDataOpen(true);
@@ -219,37 +171,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </div>
         </Card>
 
-        {/* Electron 后端地址配置 */}
-        {isElectron && (
-          <Card title="后端地址配置">
-            <div className="space-y-3">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-[#e0e0e0] mb-1.5">
-                  后端 API 地址
-                </label>
-                <input
-                  type="text"
-                  value={backendUrl}
-                  onChange={(e) => setBackendUrl(e.target.value)}
-                  placeholder="http://localhost:3001"
-                  className="w-full px-3 py-2 text-sm rounded-lg bg-white dark:bg-[#2d2d2d] border border-gray-300 dark:border-[#505050] text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/50 focus:border-[#7c3aed] transition-all duration-150 font-mono"
-                />
-                <p className="text-xs text-gray-500 dark:text-[#a0a0a0] mt-1">
-                  配置后端服务器的地址，修改后需要重启应用生效
-                </p>
-              </div>
-              <Button
-                onClick={handleSaveBackendUrl}
-                variant="primary"
-                size="sm"
-                disabled={isSavingBackendUrl}
-                className="w-full"
-              >
-                {isSavingBackendUrl ? '保存中...' : '保存配置'}
-              </Button>
-            </div>
-          </Card>
-        )}
 
         {/* API设置 */}
         <Card title="API设置">
@@ -338,21 +259,13 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
               <p className="text-xs text-gray-600 dark:text-[#a0a0a0]">打开或关闭浏览器开发者工具窗口</p>
             </div>
             <button
-              onClick={async () => {
-                if (window.electronAPI) {
-                  try {
-                    await window.electronAPI.toggleDevTools();
-                  } catch (error) {
-                    console.error('Failed to toggle dev tools:', error);
-                  }
-                } else {
-                  console.log('Not in Electron environment');
-                }
+              onClick={() => {
+                alert('在浏览器环境中，请使用以下快捷键打开开发者工具：\n\nWindows/Linux: F12 或 Ctrl+Shift+I\nMac: Cmd+Option+I');
               }}
               className="px-3 py-1.5 text-sm font-medium rounded-lg bg-[#7c3aed] text-white hover:bg-[#6d28d9] active:bg-[#5b21b6] transition-all duration-150 flex items-center space-x-1.5"
             >
               <Code className="w-4 h-4" />
-              <span>切换</span>
+              <span>提示</span>
             </button>
           </div>
         </Card>

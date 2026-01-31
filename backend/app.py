@@ -2372,17 +2372,8 @@ Headers: {dict(request.headers)}
                 <p class="info">窗口将自动关闭...</p>
                 <div class="spinner"></div>
                 <script>
-                    // 检测是否在 Electron 环境中
-                    const isElectron = typeof window !== 'undefined' && 
-                                      (window.navigator.userAgent.includes('Electron') || 
-                                       window.location.protocol === 'file:');
-                    
-                    if (isElectron) {
-                        // Electron 环境：立即尝试关闭（Electron 主进程会处理）
-                        console.log('Electron environment detected, window will be closed by main process');
-                        // Electron 主进程会检测到成功页面并关闭窗口
-                    } else if (window.opener) {
-                        // 浏览器环境：如果是弹窗，尝试关闭
+                    // 浏览器环境：如果是弹窗，尝试关闭
+                    if (window.opener) {
                         setTimeout(() => {
                             window.close();
                         }, 1500);

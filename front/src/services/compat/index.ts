@@ -44,43 +44,9 @@ export { HealthMonitor, getHealthMonitor, initHealthMonitor } from '../providers
 export { createProvider, createProviderAuto } from '../providers/llm';
 
 // ============================================================================
-// Electron 兼容层
+// Electron 兼容层（已移除）
 // ============================================================================
-
-// Electron API 相关
-export {
-  isElectron,
-  getElectronAPI,
-  getBackendUrl,
-  setBackendUrl,
-  openFolder,
-  getFileInfo,
-  listDirectory,
-  readFileAsDataUrl,
-  saveMedia,
-  clipboardReadText,
-  clipboardWriteText,
-  showNotification,
-  mcpOAuthAuthorize,
-  mcpOAuthOpenExternal,
-  createTerminalSession,
-  toggleMaximize,
-  toggleDevTools,
-} from './electron';
-
-export type {
-  ElectronAPI,
-  SystemInfo,
-  FileInfo,
-  DirectoryListing,
-  SaveMediaParams,
-  SaveMediaResult,
-  OAuthParams,
-  OAuthResult,
-  TerminalSession,
-  TerminalData,
-  TerminalExit,
-} from './electron';
+// Electron 功能已完全移除，项目现在仅支持浏览器环境
 
 // ============================================================================
 // 推荐迁移指南
@@ -99,6 +65,6 @@ export type {
 // Workflow:
 //   import { WorkflowPool, WorkflowExecutor } from '../services/workflow'
 // 
-// Electron:
-//   import { isElectron, getBackendUrl, saveMedia } from '../services/compat/electron'
+// 后端 URL:
+//   import { getBackendUrl } from '../utils/backendUrl'
 //

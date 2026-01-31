@@ -296,10 +296,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
     }
   };
 
-  // 检测是否在Electron环境中
-  const isElectron = () => {
-    return typeof window !== 'undefined' && (window as any).electronAPI !== undefined;
-  };
+  // Electron 已移除，stdio MCP 暂不支持
 
   // 加载 Notion 注册列表
   const loadNotionRegistrations = async (): Promise<NotionRegistration[]> => {
@@ -795,35 +792,9 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
       console.log(`[MCP Config] Testing connection to ${server.name} (${server.url})`);
       console.log(`[MCP Config] Server metadata:`, JSON.stringify(server.metadata, null, 2));
 
-      // stdio：通过 Electron main 的 MCP runner 测试
+      // stdio MCP 不支持（需要 Electron 或后端实现）
       if (server.type === 'stdio') {
-        if (!isElectron() || !(window as any).electronAPI?.mcpRunnerStart) {
-          throw new Error('stdio MCP 仅支持在 Electron 环境运行');
-        }
-        const stdioCfg = server.ext?.stdio || {};
-        const command = (stdioCfg as any).command || 'npx';
-        const args = (stdioCfg as any).args || [];
-        const env = (stdioCfg as any).env || {};
-        const cwd = (stdioCfg as any).cwd;
-
-        const startRes = await (window as any).electronAPI.mcpRunnerStart({
-          serverId: server.id,
-          command,
-          args,
-          env,
-          cwd,
-        });
-        if (!startRes?.success) {
-          throw new Error(startRes?.error || 'Failed to start stdio runner');
-        }
-
-        setTestResults(prev => new Map(prev).set(server.id, {
-          success: true,
-          message: `stdio runner 启动成功`,
-          connected: true,
-        }));
-
-        return;
+        throw new Error('stdio MCP 暂不支持，请使用 HTTP 方式的 MCP 服务器');
       }
       
       // 检查metadata中的headers
@@ -1670,11 +1641,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                 onClick={() => {
                   if (typeof window === 'undefined') return;
                   const url = oauthAuthorizationUrl;
-                  if ((window as any).electronAPI?.mcpOAuthOpenExternal) {
-                    (window as any).electronAPI.mcpOAuthOpenExternal({ authorizationUrl: url });
-                  } else {
-                    window.open(url, 'MCP Authorization', 'width=600,height=700,scrollbars=yes,resizable=yes');
-                  }
+                  window.open(url, 'MCP Authorization', 'width=600,height=700,scrollbars=yes,resizable=yes');
                 }}
               >
                 <ExternalLink className="w-4 h-4 mr-2" />

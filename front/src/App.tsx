@@ -123,22 +123,6 @@ const App: React.FC = () => {
   }, [settings]);
 
 
-  // Electron 环境：加载后端地址配置
-  useEffect(() => {
-    const loadBackendUrl = async () => {
-      if (window.electronAPI?.getBackendUrl) {
-        try {
-          const backendUrl = await window.electronAPI.getBackendUrl();
-          // 缓存到 window 对象，供 getBackendUrl 使用
-          (window as any).__cachedBackendUrl = backendUrl;
-          console.log('[App] Loaded backend URL from Electron config:', backendUrl);
-        } catch (error) {
-          console.error('[App] Failed to load backend URL from Electron:', error);
-        }
-      }
-    };
-    loadBackendUrl();
-  }, []);
 
   // 保存选中的会话ID（用于重启后恢复）
   useEffect(() => {
@@ -328,14 +312,6 @@ const App: React.FC = () => {
   return (
     <div className={`app-root-bg h-screen bg-gradient-to-br from-gray-100 via-gray-50 to-gray-100 dark:from-[#0f0f0f] dark:via-[#141414] dark:to-[#0f0f0f] flex flex-col transition-colors duration-200 overflow-hidden ${isMobile ? 'mobile-no-status-bar' : ''}`}>
       {/* macOS 专用小标题栏 - 仅用于红黄绿按钮拖拽区域 */}
-      {isMac && (
-        <div
-          className="w-full h-[10px] flex-shrink-0 app-drag"
-          onDoubleClick={() => {
-            window.electronAPI?.toggleMaximize?.();
-          }}
-        />
-      )}
       
       <div className="flex flex-1 min-h-0 overflow-hidden relative">
       {/* 移动端侧栏遮罩 */}
@@ -431,16 +407,8 @@ const App: React.FC = () => {
           {/* DevTools 按钮 */}
           <div className="relative group">
             <button
-              onClick={async () => {
-                if (window.electronAPI) {
-                  try {
-                    await window.electronAPI.toggleDevTools();
-                  } catch (error) {
-                    console.error('Failed to toggle dev tools:', error);
-                  }
-                } else {
-                  alert('在浏览器环境中，请使用以下快捷键打开开发者工具：\n\nWindows/Linux: F12 或 Ctrl+Shift+I\nMac: Cmd+Option+I');
-                }
+              onClick={() => {
+                alert('在浏览器环境中，请使用以下快捷键打开开发者工具：\n\nWindows/Linux: F12 或 Ctrl+Shift+I\nMac: Cmd+Option+I');
               }}
               className="w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-200 ease-out text-gray-500 dark:text-[#a0a0a0] hover:bg-white/50 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white"
               title="开发者工具 (F12)"

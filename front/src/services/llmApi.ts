@@ -324,6 +324,31 @@ export function importLLMConfigsFromFile(): Promise<LLMConfigExportData> {
 // ============================================================================
 
 /**
+ * 系统支持的供应商信息
+ */
+export interface SupportedProvider {
+  provider_type: 'openai' | 'deepseek' | 'anthropic' | 'gemini' | 'ollama';
+  name: string;
+  description: string;
+  default_api_url: string;
+  requires_api_key: boolean;
+  icon: string;
+  color: string;
+}
+
+/**
+ * 获取系统支持的供应商列表
+ */
+export async function getSupportedProviders(): Promise<SupportedProvider[]> {
+  const response = await fetch(`${API_BASE_URL}/providers/supported`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch supported providers: ${response.statusText}`);
+  }
+  const data = await response.json();
+  return data.providers || [];
+}
+
+/**
  * 获取所有供应商
  */
 export async function getProviders(): Promise<LLMProvider[]> {

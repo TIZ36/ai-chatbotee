@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Card, Badge } from './ui/PageLayout';
-import { getBackendUrl, isElectron } from '../services/compat/electron';
+import { getBackendUrl } from '../utils/backendUrl';
 
 // ============================================================================
 // 类型定义
@@ -321,8 +321,8 @@ const SystemStatusPanel: React.FC = () => {
           <div className="flex items-center gap-2">
             <Cpu className="w-4 h-4 text-[var(--color-text-secondary)]" />
             <span className="text-[var(--color-text-secondary)]">运行模式:</span>
-            <Badge variant={isElectron() ? 'info' : 'default'}>
-              {isElectron() ? 'Electron' : '浏览器'}
+            <Badge variant="default">
+              浏览器
             </Badge>
           </div>
           <div className="flex items-center gap-2">

@@ -10,7 +10,8 @@ import {
   LLMConfigFromDB, CreateLLMConfigRequest,
   downloadLLMConfigAsJson, downloadAllLLMConfigsAsJson, importLLMConfigsFromFile, importLLMConfigs,
   getProviders, getProvider, createProvider, updateProvider, deleteProvider, downloadProviderLogo, getProviderLogoOptions,
-  LLMProvider, CreateProviderRequest, UpdateProviderRequest, LogoOption
+  getSupportedProviders,
+  LLMProvider, CreateProviderRequest, UpdateProviderRequest, LogoOption, SupportedProvider
 } from '../services/llmApi';
 import { fetchOllamaModels } from '../services/ollamaService';
 import { fetchModelsForProvider } from '../services/modelListService';
@@ -78,6 +79,7 @@ const downloadLogoFromLobeHub = async (provider: string): Promise<string | null>
 const LLMConfigPanel: React.FC = () => {
   // 供应商相关状态
   const [providers, setProviders] = useState<LLMProvider[]>([]);
+  const [supportedProviders, setSupportedProviders] = useState<SupportedProvider[]>([]);
   const [isLoadingProviders, setIsLoadingProviders] = useState(true);
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
   const [showCreateProviderDialog, setShowCreateProviderDialog] = useState(false);
@@ -225,6 +227,16 @@ const LLMConfigPanel: React.FC = () => {
 
   // 不再需要按provider分组，因为现在使用供应商列表
 
+  // 加载系统支持的供应商列表
+  const loadSupportedProviders = async () => {
+    try {
+      const data = await getSupportedProviders();
+      setSupportedProviders(data);
+    } catch (error) {
+      console.error('Failed to load supported providers:', error);
+    }
+  };
+
   // 加载供应商列表
   const loadProviders = async () => {
     try {
@@ -354,6 +366,7 @@ const LLMConfigPanel: React.FC = () => {
   };
 
   useEffect(() => {
+    loadSupportedProviders();
     loadProviders();
     loadConfigs();
   }, []);
@@ -836,15 +849,102 @@ const LLMConfigPanel: React.FC = () => {
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
               </div>
-            ) : providers.length === 0 ? (
-              <EmptyState
-                icon={Brain}
-                title="暂无供应商"
-                description="点击上方按钮添加供应商"
-              />
             ) : (
-              <div className="p-2 space-y-1">
-                {providers.map(provider => {
+              <>
+                {/* 系统支持的供应商（未添加的） */}
+                {supportedProviders.length > 0 && (() => {
+                  // 找出未添加的系统供应商
+                  const addedProviderTypes = new Set(providers.map(p => p.provider_type));
+                  const unaddedProviders = supportedProviders.filter(
+                    sp => !addedProviderTypes.has(sp.provider_type)
+                  );
+                  
+                  if (unaddedProviders.length === 0) return null;
+                  
+                  return (
+                    <div className="p-2 border-b border-gray-200 dark:border-[#404040]">
+                      <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 px-2">
+                        系统支持的供应商
+                      </div>
+                      <div className="space-y-1">
+                        {unaddedProviders.map(supportedProvider => (
+                          <button
+                            key={supportedProvider.provider_type}
+                            onClick={async () => {
+                              try {
+                                // 自动创建系统供应商
+                                const result = await createProvider({
+                                  name: supportedProvider.name,
+                                  provider_type: supportedProvider.provider_type,
+                                  override_url: false,
+                                  default_api_url: supportedProvider.default_api_url,
+                                  logo_theme: 'auto',
+                                });
+                                
+                                // 尝试自动下载logo
+                                try {
+                                  const logoData = await downloadProviderLogo(supportedProvider.provider_type, 'auto');
+                                  await updateProvider(result.provider_id, {
+                                    logo_light: logoData.logo_light,
+                                    logo_dark: logoData.logo_dark,
+                                    logo_theme: logoData.theme as 'auto' | 'light' | 'dark',
+                                  });
+                                } catch (logoError) {
+                                  console.warn('Failed to download logo:', logoError);
+                                }
+                                
+                                await loadProviders();
+                                setSelectedProviderId(result.provider_id);
+                                
+                                toast({
+                                  title: '供应商添加成功',
+                                  description: `已添加 ${supportedProvider.name}`,
+                                  variant: 'success',
+                                });
+                              } catch (error) {
+                                toast({
+                                  title: '添加供应商失败',
+                                  description: error instanceof Error ? error.message : String(error),
+                                  variant: 'destructive',
+                                });
+                              }
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left"
+                          >
+                            <div className="w-6 h-6 rounded flex items-center justify-center flex-shrink-0">
+                              <span className="text-xs">{supportedProvider.icon}</span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">
+                                {supportedProvider.name}
+                              </div>
+                              <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                {supportedProvider.description}
+                              </div>
+                            </div>
+                            <Plus className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+                
+                {/* 已添加的供应商列表 */}
+                {providers.length === 0 ? (
+                  <EmptyState
+                    icon={Brain}
+                    title="暂无供应商"
+                    description="从上方系统供应商中选择添加"
+                  />
+                ) : (
+                  <div className="p-2 space-y-1">
+                    {providers.length > 0 && (
+                      <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 px-2">
+                        已添加的供应商
+                      </div>
+                    )}
+                    {providers.map(provider => {
                   // 计算该供应商的模型数量
                   const providerModelCount = configs.filter(c => 
                     c.provider === provider.provider_type || 
@@ -951,7 +1051,9 @@ const LLMConfigPanel: React.FC = () => {
                     </div>
                   );
                 })}
-              </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

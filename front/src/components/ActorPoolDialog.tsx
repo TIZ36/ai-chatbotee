@@ -12,7 +12,7 @@ import {
   DialogDescription,
 } from '@/components/ui/Dialog';
 import { Button } from '@/components/ui/Button';
-import { getBackendUrl } from '../services/compat/electron';
+import { getBackendUrl } from '../utils/backendUrl';
 import { RefreshCw, Users } from 'lucide-react';
 
 export interface ActorStatus {
@@ -41,7 +41,7 @@ const ActorPoolDialog: React.FC<ActorPoolDialogProps> = ({ open, onOpenChange })
   const [backendUrl, setBackendUrl] = useState('');
 
   const fetchPool = useCallback(async () => {
-    const base = await getBackendUrl();
+    const base = getBackendUrl();
     setBackendUrl(base);
     if (!base) return;
     setLoading(true);

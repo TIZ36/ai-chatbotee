@@ -5,7 +5,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { Key, MessageSquare, RefreshCw, Users } from 'lucide-react';
-import { getBackendUrl } from '../services/compat/electron';
+import { getBackendUrl } from '../utils/backendUrl';
 import { Button } from '@/components/ui/Button';
 import ActorPoolDialog from './ActorPoolDialog';
 
@@ -39,7 +39,7 @@ const StatusBar: React.FC = () => {
   const [actorPoolOpen, setActorPoolOpen] = useState(false);
 
   useEffect(() => {
-    getBackendUrl().then(setBackendUrl);
+    setBackendUrl(getBackendUrl());
   }, []);
 
   const checkStatus = useCallback(async () => {

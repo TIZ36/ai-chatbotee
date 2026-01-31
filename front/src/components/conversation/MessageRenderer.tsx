@@ -157,7 +157,7 @@ function resolveImageSrc(src: string): string {
   // raw base64 payload (legacy)
   if (looksLikeBase64Payload(src)) return ensureDataUrlFromMaybeBase64(src);
 
-  // local absolute file path (Electron needs file://)
+  // local absolute file path (浏览器环境使用 file://)
   if (isProbablyLocalAbsolutePath(src)) return toFileUrl(src);
 
   // backend-relative (e.g. /uploads/xxx.png)
@@ -181,49 +181,8 @@ const MarkdownImage: React.FC<{ src?: string; alt?: string }> = ({ src, alt }) =
 
   useEffect(() => {
     setStatus('loading');
-    let cancelled = false;
-
-    const electronAPI = (window as any)?.electronAPI as any;
-    const canReadAsDataUrl = electronAPI && typeof electronAPI.readFileAsDataUrl === 'function';
-
-    const tryReadLocalAsDataUrl = async (filePath: string) => {
-      try {
-        const dataUrl = await electronAPI.readFileAsDataUrl(filePath);
-        const normalized = ensureDataUrlFromMaybeBase64(String(dataUrl));
-        if (!cancelled) setImageSrc(normalized);
-      } catch (e) {
-        // 兜底：尝试 file://（在生产 file:// 页面下通常可用）
-        if (!cancelled) setImageSrc(toFileUrl(filePath));
-      }
-    };
-
-    // Electron + 本地路径：优先转 data: URL，避免 webSecurity=true 时 file:// 被拦截
-    if (canReadAsDataUrl && isProbablyLocalAbsolutePath(src)) {
-      (async () => {
-        // src 可能是 file:// URL，需要还原成真实路径
-        if (src.startsWith('file://')) {
-          try {
-            const u = new URL(src);
-            // URL.pathname 在 mac/linux 下是 /Users/...；在 windows 下可能是 /C:/...
-            const pathname = decodeURI(u.pathname);
-            const filePath = pathname.startsWith('/') && /^[A-Za-z]:\//.test(pathname.slice(1)) ? pathname.slice(1) : pathname;
-            await tryReadLocalAsDataUrl(filePath);
-            return;
-          } catch {
-            // ignore
-          }
-        }
-
-        await tryReadLocalAsDataUrl(src);
-      })();
-    } else {
-      // 非 Electron 本地路径、或无 API：保持原逻辑（含 raw base64 → data url）
-      setImageSrc(resolveImageSrc(src));
-    }
-
-    return () => {
-      cancelled = true;
-    };
+    // 浏览器环境：直接使用 resolveImageSrc 处理所有路径
+    setImageSrc(resolveImageSrc(src));
   }, [src]);
 
   return (
