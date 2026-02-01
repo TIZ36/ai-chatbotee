@@ -18,7 +18,7 @@ import {
   MessageSquare,
   Check,
   X,
-  Bot,
+  Brain,
   Quote,
 } from 'lucide-react';
 import { truncateBase64Strings } from '../../utils/textUtils';
@@ -33,15 +33,8 @@ import {
   DialogDescription,
   DialogFooter,
 } from './Dialog';
-
-export interface ExecutionLogEntry {
-  id: string;
-  timestamp: number;
-  type: string;
-  message: string;
-  detail?: string;
-  duration?: number;
-}
+import type { ExecutionLogEntry } from './ExecutionLogViewer';
+import { ExecutionLogScroller } from './ExecutionLogScroller';
 
 export interface ProcessStepsViewerProps {
   processMessages?: ProcessMessage[];
@@ -211,6 +204,45 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
     return sorted;
   }, [processMessages, ext?.processMessages, isStreaming, isThinking]);
 
+  // 思维链右侧垂直滚动：优先展示后端 executionLogs；若后端未推送 execution_log，则从 orderedSteps 生成（包含 thinking 文本）
+  const inlineLogs: ExecutionLogEntry[] = useMemo(() => {
+    if (Array.isArray(executionLogs) && executionLogs.length > 0) return executionLogs;
+    const base = (orderedSteps || []).filter(Boolean) as ProcessMessage[];
+    if (base.length === 0) return [];
+
+    const mapType = (pm: ProcessMessage): ExecutionLogEntry['type'] => {
+      const t = String(pm.type || '').toLowerCase();
+      if (t.includes('thinking') || t.includes('llm_generating')) return 'thinking';
+      if (t.includes('mcp_call') || t.includes('ag_use_mcp') || t.includes('mcp') || t.includes('tool')) return 'tool';
+      if (t.includes('llm')) return 'llm';
+      if (t.includes('output')) return 'llm';
+      return 'step';
+    };
+
+    return base
+      .map((pm) => {
+        const type = mapType(pm);
+        const titleText = typeof pm.title === 'string' ? pm.title.trim() : '';
+        const contentText = typeof pm.content === 'string' ? pm.content.trim() : '';
+
+        // 避免把“思考中/输出中”这种占位塞进右侧滚动区（你明确不想看到无意义文案）
+        if (!contentText && (titleText === '思考中' || titleText === '输出中')) return null;
+
+        const message = contentText || titleText;
+        if (!message) return null;
+
+        return {
+          id: `pm-${pm.timestamp}-${pm.type}-${titleText || 'x'}`,
+          timestamp: typeof pm.timestamp === 'number' ? pm.timestamp : Date.now(),
+          type,
+          // message 用于过滤；detail 用于 thinking 短摘（ExecutionLogScroller 会优先用 detail）
+          message: titleText || message,
+          detail: contentText || undefined,
+        } as ExecutionLogEntry;
+      })
+      .filter(Boolean) as ExecutionLogEntry[];
+  }, [executionLogs, orderedSteps]);
+
   useEffect(() => {
     const activeIndex = pinnedIndex ?? hoveredIndex;
     if (activeIndex === null) {
@@ -331,7 +363,9 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
         )}
         {textItems.length > 0 && (
           <div className="rounded border border-border/50 bg-muted/40 p-2">
-            <div className="text-[10px] text-muted-foreground mb-1">文本</div>
+            <div className="text-[10px] text-muted-foreground mb-1">
+              {(msg.type === 'thinking' || msg.type === 'llm_generating') ? '思考内容' : '文本'}
+            </div>
             <div className="space-y-1 max-h-48 overflow-auto">
               {textItems.map((t, i) => (
                 <pre key={i} className="text-[10px] whitespace-pre-wrap break-words">
@@ -399,7 +433,7 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
       >
         {step.type === 'llm_generating'
           ? <Cpu className="w-2.5 h-2.5 flex-shrink-0" />
-          : cat === 'thinking' && <Lightbulb className="w-2.5 h-2.5 flex-shrink-0" />}
+          : cat === 'thinking' && <Brain className="w-2.5 h-2.5 flex-shrink-0" />}
         {cat === 'mcp' && <Wrench className="w-2.5 h-2.5 flex-shrink-0" />}
         {cat === 'decision' && <Target className="w-2.5 h-2.5 flex-shrink-0" />}
         {cat === 'output' && <MessageSquare className="w-2.5 h-2.5 flex-shrink-0" />}
@@ -463,16 +497,24 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
                 <Quote className="w-3 h-3" />
               </Button>
             )}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setTimelineOpen(true)}
-              aria-label="查看过程详情"
-              title="查看过程详情"
-              className="h-6 w-6"
-            >
-              <Bot className={`w-3 h-3 transition-transform ${(isThinking || isStreaming) ? 'animate-pulse text-primary' : ''}`} />
-            </Button>
+            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setTimelineOpen(true)}
+                aria-label="查看过程详情"
+                title="查看过程详情"
+                className={`h-6 w-6 flex-shrink-0 ${(isThinking || isStreaming) ? 'thinking-brain-icon' : ''}`}
+              >
+                <Brain className={`w-3 h-3 transition-transform ${(isThinking || isStreaming) ? 'animate-bounce text-primary' : ''}`} />
+              </Button>
+              {/* 执行日志垂直滚动显示（类似 Cursor）：仅在有日志时展示 */}
+              <div className="flex-1 min-w-0 max-w-[300px] sm:max-w-[400px] overflow-hidden">
+                {inlineLogs.length > 0 ? (
+                  <ExecutionLogScroller logs={inlineLogs} isActive={isThinking || isStreaming} maxHeight={120} />
+                ) : null}
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -523,30 +565,37 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
             <DialogTitle>思维链</DialogTitle>
           </DialogHeader>
           <div className="max-h-[70vh] overflow-auto space-y-3 pr-1 no-scrollbar mt-2">
-            {/* 执行日志区域 */}
-            {executionLogs && executionLogs.length > 0 && (
-              <div className="rounded-md border border-border/60 bg-muted/20">
-                <div className="px-3 py-2 border-b border-border/60">
-                  <span className="text-[11px] font-medium text-muted-foreground">执行日志 ({executionLogs.length})</span>
-                </div>
-                <div className="px-3 py-2 space-y-0.5 text-[10px] text-muted-foreground/70 italic">
-                  {executionLogs.map((log, idx) => (
-                    <div key={log.id || idx} className="leading-relaxed">
-                      <span className="opacity-40 text-[9px] mr-1.5">
-                        {new Date(log.timestamp).toLocaleTimeString('zh-CN', { hour12: false })}
-                      </span>
-                      {log.message}
-                      {log.duration != null && (
-                        <span className="ml-1 opacity-60">({log.duration < 1000 ? `${log.duration}ms` : `${(log.duration / 1000).toFixed(1)}s`})</span>
-                      )}
-                      {log.detail && (
-                        <span className="ml-1 opacity-50 text-[9px]">{log.detail}</span>
-                      )}
+            {/* 执行日志区域 - 从 ext.log 读取 */}
+            {(() => {
+              // 优先从 ext.log 读取，向后兼容 executionLogs
+              const logs = (ext as any)?.log || executionLogs;
+              if (logs && Array.isArray(logs) && logs.length > 0) {
+                return (
+                  <div className="rounded-md border border-border/60 bg-muted/20">
+                    <div className="px-3 py-2 border-b border-border/60">
+                      <span className="text-[11px] font-medium text-muted-foreground">执行日志 ({logs.length})</span>
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
+                    <div className="px-3 py-2 space-y-0.5 text-[10px] text-muted-foreground/70 italic">
+                      {logs.map((log: any, idx: number) => (
+                        <div key={log.id || idx} className="leading-relaxed">
+                          <span className="opacity-40 text-[9px] mr-1.5">
+                            {new Date(log.timestamp).toLocaleTimeString('zh-CN', { hour12: false })}
+                          </span>
+                          {log.message}
+                          {log.duration != null && (
+                            <span className="ml-1 opacity-60">({log.duration < 1000 ? `${log.duration}ms` : `${(log.duration / 1000).toFixed(1)}s`})</span>
+                          )}
+                          {log.detail && (
+                            <span className="ml-1 opacity-50 text-[9px]">{log.detail}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })()}
             
             {/* 思维链步骤 */}
             {orderedSteps.map((step, idx) => {

@@ -125,7 +125,7 @@ export const useChatInput = ({
       setModuleSelectorIndex(-1);
     }
     
-    // Detect @ token（与 RoundTable 的策略一致：基于 caret 的 token 上下文）
+    // Detect @ token（基于 caret 的 token 上下文）
     const atCtx = getAtTriggerContext(value, cursorPosition);
     if (atCtx) {
       atCtxMissRef.current = 0;

@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { Plus, Trash2, CheckCircle, XCircle, Edit2, Brain, Save, X, Loader2, Eye, EyeOff, Type, Image as ImageIcon, Video, Music, Download, Upload, ChevronDown, ChevronRight, Camera, Search, Check } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, XCircle, Edit2, Brain, Save, X, Loader2, Eye, EyeOff, Type, Image as ImageIcon, Video, Music, Download, Upload, ChevronDown, ChevronRight, Camera, Search, Check, RefreshCw } from 'lucide-react';
 import { 
   getLLMConfigs, createLLMConfig, updateLLMConfig, deleteLLMConfig, getLLMConfigApiKey, 
   LLMConfigFromDB, CreateLLMConfigRequest,
@@ -76,6 +76,196 @@ const downloadLogoFromLobeHub = async (provider: string): Promise<string | null>
   return null;
 };
 
+// Token 列表简化组件（只显示 token，点击弹出对话框）
+interface TokenListSimpleProps {
+  configs: LLMConfigFromDB[];
+  selectedProvider: LLMProvider | undefined;
+  getLLMConfigApiKey: (configId: string) => Promise<string>;
+  showTokenKeys: Record<string, boolean>;
+  setShowTokenKeys: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  tokenApiKeys: Record<string, string>;
+  setTokenApiKeys: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  loadingTokenApiKey: Record<string, boolean>;
+  setLoadingTokenApiKey: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  onTokenClick: (tokenKey: string, configs: LLMConfigFromDB[], apiKey: string) => void;
+  onDeleteToken: (tokenKey: string, configs: LLMConfigFromDB[]) => Promise<void>;
+}
+
+const TokenListSimple: React.FC<TokenListSimpleProps> = ({
+  configs,
+  selectedProvider,
+  getLLMConfigApiKey,
+  showTokenKeys,
+  setShowTokenKeys,
+  tokenApiKeys,
+  setTokenApiKeys,
+  loadingTokenApiKey,
+  setLoadingTokenApiKey,
+  onTokenClick,
+  onDeleteToken,
+}) => {
+  const [tokenGroups, setTokenGroups] = useState<Map<string, { apiKey: string; configs: LLMConfigFromDB[]; isActive: boolean }>>(new Map());
+  const [loadingTokens, setLoadingTokens] = useState(true);
+
+  useEffect(() => {
+    const loadTokenGroups = async () => {
+      setLoadingTokens(true);
+      const groups = new Map<string, { apiKey: string; configs: LLMConfigFromDB[]; isActive: boolean }>();
+      
+      for (const config of configs) {
+        try {
+          const apiKey = await getLLMConfigApiKey(config.config_id);
+          const tokenKey = apiKey || 'no-token';
+          
+          if (!groups.has(tokenKey)) {
+            groups.set(tokenKey, { apiKey, configs: [], isActive: false });
+          }
+          const group = groups.get(tokenKey)!;
+          group.configs.push(config);
+          // 如果有任何一个模型启用，则该 token 视为活跃
+          if (config.enabled) {
+            group.isActive = true;
+          }
+        } catch (error) {
+          const fallbackKey = `error-${config.config_id}`;
+          if (!groups.has(fallbackKey)) {
+            groups.set(fallbackKey, { apiKey: '', configs: [], isActive: false });
+          }
+          groups.get(fallbackKey)!.configs.push(config);
+        }
+      }
+      
+      setTokenGroups(groups);
+      setLoadingTokens(false);
+    };
+
+    if (configs.length > 0) {
+      loadTokenGroups();
+    } else {
+      setTokenGroups(new Map());
+      setLoadingTokens(false);
+    }
+  }, [configs, getLLMConfigApiKey]);
+
+  const maskApiKey = (key: string) => {
+    if (!key || key.length < 8) return '***';
+    return `${key.substring(0, 4)}...${key.substring(key.length - 4)}`;
+  };
+
+  const handleToggleShowToken = async (tokenKey: string, apiKey: string) => {
+    const isShowing = showTokenKeys[tokenKey] || false;
+    
+    if (!isShowing && !tokenApiKeys[tokenKey] && apiKey) {
+      setLoadingTokenApiKey(prev => ({ ...prev, [tokenKey]: true }));
+      try {
+        setTokenApiKeys(prev => ({ ...prev, [tokenKey]: apiKey }));
+      } catch (error) {
+        console.error('Failed to load API key:', error);
+      } finally {
+        setLoadingTokenApiKey(prev => ({ ...prev, [tokenKey]: false }));
+      }
+    }
+    
+    setShowTokenKeys(prev => ({ ...prev, [tokenKey]: !isShowing }));
+  };
+
+  if (loadingTokens) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+        <span className="ml-2 text-sm text-gray-500">加载 Token 列表...</span>
+      </div>
+    );
+  }
+
+  if (tokenGroups.size === 0) {
+    return (
+      <EmptyState
+        icon={Brain}
+        title="暂无 Token"
+        description="点击右上角按钮录入第一个 Token"
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {Array.from(tokenGroups.entries()).map(([tokenKey, group]) => {
+        const enabledCount = group.configs.filter(c => c.enabled).length;
+        const totalCount = group.configs.length;
+        const showKey = showTokenKeys[tokenKey] || false;
+        const displayKey = tokenApiKeys[tokenKey] || group.apiKey || '';
+
+        return (
+          <div
+            key={tokenKey}
+            className={`
+              border rounded-lg p-3 cursor-pointer transition-all
+              ${group.isActive 
+                ? 'border-green-500 dark:border-green-600 bg-green-50 dark:bg-green-900/10' 
+                : 'border-gray-200 dark:border-[#404040] hover:border-gray-300 dark:hover:border-gray-600'
+              }
+            `}
+            onClick={() => onTokenClick(tokenKey, group.configs, group.apiKey)}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${group.isActive ? 'bg-green-500' : 'bg-gray-400'}`} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                    {displayKey ? maskApiKey(displayKey) : '未设置 Token'}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">
+                    {enabledCount} / {totalCount} 个模型 {group.isActive ? '(当前使用)' : ''}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => handleToggleShowToken(tokenKey, group.apiKey)}
+                  disabled={loadingTokenApiKey[tokenKey]}
+                  title={showKey ? '隐藏 Token' : '查看 Token'}
+                >
+                  {loadingTokenApiKey[tokenKey] ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : showKey ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-red-600"
+                  onClick={async () => {
+                    if (confirm(`确定要删除这个 Token 及其下的 ${totalCount} 个模型吗？`)) {
+                      await onDeleteToken(tokenKey, group.configs);
+                    }
+                  }}
+                  title="删除 Token"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+            {showKey && displayKey && (
+              <div className="mt-2 p-2 bg-white dark:bg-[#363636] rounded border border-gray-200 dark:border-[#404040]">
+                <div className="text-xs font-mono text-gray-600 dark:text-gray-400 break-all">
+                  {displayKey}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 const LLMConfigPanel: React.FC = () => {
   // 供应商相关状态
   const [providers, setProviders] = useState<LLMProvider[]>([]);
@@ -127,6 +317,33 @@ const LLMConfigPanel: React.FC = () => {
   const [showApiKey, setShowApiKey] = useState(false); // 控制API密钥显示/隐藏
   const [loadingApiKey, setLoadingApiKey] = useState(false); // 加载API密钥状态
   const logoInputRef = useRef<HTMLInputElement>(null); // Logo 上传输入框引用
+  
+  // Token 管理相关状态（用于主流供应商）
+  const [newTokenApiKey, setNewTokenApiKey] = useState('');
+  const [isAddingToken, setIsAddingToken] = useState(false);
+  const [tokenAvailableModels, setTokenAvailableModels] = useState<string[]>([]);
+  const [selectedModelsForToken, setSelectedModelsForToken] = useState<Set<string>>(new Set());
+  const [isLoadingTokenModels, setIsLoadingTokenModels] = useState(false);
+  const [tokenApiKeys, setTokenApiKeys] = useState<Record<string, string>>({}); // 存储已加载的 API keys
+  const [loadingTokenApiKey, setLoadingTokenApiKey] = useState<Record<string, boolean>>({});
+  const [showTokenKeys, setShowTokenKeys] = useState<Record<string, boolean>>({}); // 控制每个 token 的显示/隐藏
+  const [tokenError, setTokenError] = useState<string | null>(null);
+  
+  // Token 录入对话框状态
+  const [showAddTokenDialog, setShowAddTokenDialog] = useState(false);
+  
+  // Token 模型管理对话框状态
+  const [showTokenModelsDialog, setShowTokenModelsDialog] = useState(false);
+  const [selectedTokenKey, setSelectedTokenKey] = useState<string | null>(null);
+  const [selectedTokenConfigs, setSelectedTokenConfigs] = useState<LLMConfigFromDB[]>([]);
+  const [selectedTokenApiKey, setSelectedTokenApiKey] = useState<string>('');
+  const [availableModelsForSelectedToken, setAvailableModelsForSelectedToken] = useState<string[]>([]);
+  const [isLoadingAvailableModels, setIsLoadingAvailableModels] = useState(false);
+  const [showAddModelsSection, setShowAddModelsSection] = useState(false);
+  const [selectedNewModels, setSelectedNewModels] = useState<Set<string>>(new Set());
+  
+  // Logo 设置对话框状态
+  const [showLogoDialog, setShowLogoDialog] = useState(false);
 
   // Handle logo upload
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -872,6 +1089,10 @@ const LLMConfigPanel: React.FC = () => {
                             key={supportedProvider.provider_type}
                             onClick={async () => {
                               try {
+                                // 检查是否已有该供应商
+                                let existingProvider = providers.find(p => p.provider_type === supportedProvider.provider_type);
+                                
+                                if (!existingProvider) {
                                 // 自动创建系统供应商
                                 const result = await createProvider({
                                   name: supportedProvider.name,
@@ -901,6 +1122,10 @@ const LLMConfigPanel: React.FC = () => {
                                   description: `已添加 ${supportedProvider.name}`,
                                   variant: 'success',
                                 });
+                                } else {
+                                  // 如果已存在，直接选中
+                                  setSelectedProviderId(existingProvider.provider_id);
+                                }
                               } catch (error) {
                                 toast({
                                   title: '添加供应商失败',
@@ -964,7 +1189,10 @@ const LLMConfigPanel: React.FC = () => {
                       `}
                     >
                       <button
-                        onClick={() => setSelectedProviderId(provider.provider_id)}
+                        onClick={() => {
+                          // 直接选中供应商，Token 管理界面会在右侧面板显示
+                          setSelectedProviderId(provider.provider_id);
+                        }}
                         className={`
                           flex-1 text-left flex items-center space-x-2
                           ${selectedProviderId === provider.provider_id
@@ -1068,159 +1296,146 @@ const LLMConfigPanel: React.FC = () => {
             />
           ) : (
             <div className="space-y-4">
-              {/* 供应商信息卡片 */}
-              <Card 
-                title={selectedProvider.name} 
-                size="compact"
-                description={providerConfigs.length > 0 ? `${providerConfigs.length} 个模型` : undefined}
-              >
-                <div className="flex items-center space-x-4">
-                  {/* Logo */}
-                  <div className="w-16 h-16 rounded-lg flex items-center justify-center overflow-hidden border border-gray-200 dark:border-[#404040] flex-shrink-0">
-                    {selectedProvider.logo_light || selectedProvider.logo_dark ? (
-                      <>
-                        {/* 浅色模式显示 */}
-                        {selectedProvider.logo_light && (
-                          <img
-                            src={selectedProvider.logo_light}
-                            alt={selectedProvider.name}
-                            className="w-full h-full object-cover dark:hidden"
-                          />
-                        )}
-                        {/* 深色模式显示 */}
-                        {selectedProvider.logo_dark && (
-                          <img
-                            src={selectedProvider.logo_dark}
-                            alt={selectedProvider.name}
-                            className="w-full h-full object-cover hidden dark:block"
-                          />
-                        )}
-                        {/* 如果只有一种logo，则都显示 */}
-                        {selectedProvider.logo_light && !selectedProvider.logo_dark && (
-                          <img
-                            src={selectedProvider.logo_light}
-                            alt={selectedProvider.name}
-                            className="w-full h-full object-cover hidden dark:block"
-                          />
-                        )}
-                        {!selectedProvider.logo_light && selectedProvider.logo_dark && (
-                          <img
-                            src={selectedProvider.logo_dark}
-                            alt={selectedProvider.name}
-                            className="w-full h-full object-cover dark:hidden"
-                          />
-                        )}
-                      </>
-                    ) : (
-                      <span className="text-2xl">
-                        {PROVIDER_INFO[selectedProvider.provider_type]?.icon || '📦'}
-                      </span>
-                    )}
-                  </div>
-                  
-                  {/* 供应商信息 */}
-                    <div className="flex-1">
-                      
-                    {selectedProvider.override_url && selectedProvider.default_api_url && (
-                      <div className="text-xs text-gray-400 mt-1">
-                        自定义 URL: {selectedProvider.default_api_url}
-                      </div>
-                    ) || selectedProvider.name}
-                    <div className="text-sm text-gray-500 dark:text-gray-400">
-                     模型类型: {PROVIDER_INFO[selectedProvider.provider_type]?.name}
-                    </div>
-                  </div>
-                  
-                  {/* Logo下载/上传按钮 */}
-                  <div className="flex items-center space-x-2">
+              {/* Token 管理界面（仅主流供应商：openai, anthropic, gemini, deepseek）- 替代供应商信息卡片 */}
+              {selectedProvider && ['openai', 'anthropic', 'gemini', 'deepseek'].includes(selectedProvider.provider_type) && (
+                <Card 
+                  title="Token 管理"
+                  description="录入和管理 API Token，系统会自动获取支持的模型列表"
+                  size="compact"
+                  headerAction={
+                    <div className="relative z-10">
                       <Button
-                        variant="outline"
+                        variant="primary"
                         size="sm"
-                        onClick={() => {
-                          if (!selectedProvider) return;
-                          // 直接打开logo选择对话框，默认使用当前供应商类型
-                          setLogoProviderInput(selectedProvider.provider_type);
-                          setLightLogoOptions([]);
-                          setDarkLogoOptions([]);
-                          setSelectedLightLogo(null);
-                          setSelectedDarkLogo(null);
-                          setShowLogoSelectDialog(true);
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          console.log('录入 Token 按钮被点击');
+                          setNewTokenApiKey('');
+                          setTokenAvailableModels([]);
+                          setTokenError(null);
+                          setSelectedModelsForToken(new Set());
+                          setShowAddTokenDialog(true);
+                          console.log('showAddTokenDialog 设置为 true');
                         }}
+                        className="relative z-10 pointer-events-auto"
                       >
-                        <Search className="w-4 h-4 mr-2" />
-                        选择在线Logo
-                      </Button>
-                      <input
-                        ref={logoInputRef}
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          if (!file) return;
-                          
-                          // 验证文件类型
-                          if (!file.type.startsWith('image/')) {
-                            toast({
-                              title: '无效的文件类型',
-                              description: '请选择图片文件',
-                              variant: 'destructive',
-                            });
-                            return;
-                          }
-                          
-                          // 验证文件大小（最大 2MB）
-                          if (file.size > 2 * 1024 * 1024) {
-                            toast({
-                              title: '文件过大',
-                              description: 'Logo 文件大小不能超过 2MB',
-                              variant: 'destructive',
-                            });
-                            return;
-                          }
-                          
-                          try {
-                            const reader = new FileReader();
-                            reader.onload = async (event) => {
-                              const base64 = event.target?.result as string;
-                              // 移除 data:image/...;base64, 前缀
-                              const base64Data = base64.split(',')[1];
-                              
-                              // 更新供应商的logo
-                              await updateProvider(selectedProvider.provider_id, {
-                                logo_light: base64Data,
-                                logo_dark: base64Data,
-                                logo_theme: 'auto',
-                              });
-                              await loadProviders();
-                              toast({
-                                title: 'Logo上传成功',
-                                variant: 'success',
-                              });
-                            };
-                            reader.readAsDataURL(file);
-                          } catch (error) {
-                            toast({
-                              title: 'Logo上传失败',
-                              description: error instanceof Error ? error.message : String(error),
-                              variant: 'destructive',
-                            });
-                          }
-                        }}
-                      />
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => logoInputRef.current?.click()}
-                      >
-                        <Upload className="w-4 h-4 mr-2" />
-                        上传Logo
+                        <Plus className="w-4 h-4 mr-2" />
+                        录入 Token
                       </Button>
                     </div>
-                </div>
-              </Card>
+                  }
+                >
+                  {/* Token 列表（只显示 token，不显示模型详情） */}
+                  <TokenListSimple
+                    configs={providerConfigs}
+                    selectedProvider={selectedProvider}
+                    getLLMConfigApiKey={getLLMConfigApiKey}
+                    showTokenKeys={showTokenKeys}
+                    setShowTokenKeys={setShowTokenKeys}
+                    tokenApiKeys={tokenApiKeys}
+                    setTokenApiKeys={setTokenApiKeys}
+                    loadingTokenApiKey={loadingTokenApiKey}
+                    setLoadingTokenApiKey={setLoadingTokenApiKey}
+                    onTokenClick={(tokenKey, configs, apiKey) => {
+                      setSelectedTokenKey(tokenKey);
+                      setSelectedTokenConfigs(configs);
+                      setSelectedTokenApiKey(apiKey);
+                      setShowTokenModelsDialog(true);
+                    }}
+                    onDeleteToken={async (tokenKey, configs) => {
+                      // 删除该 token 下的所有配置
+                      for (const config of configs) {
+                        await deleteLLMConfig(config.config_id);
+                      }
+                      await loadConfigs();
+                      toast({
+                        title: 'Token 已删除',
+                        description: `已删除 ${configs.length} 个模型配置`,
+                        variant: 'success',
+                      });
+                    }}
+                  />
+                </Card>
+              )}
 
-              {/* 已有模型列表 */}
+              {/* 供应商信息卡片（非主流供应商） */}
+              {selectedProvider && !['openai', 'anthropic', 'gemini', 'deepseek'].includes(selectedProvider.provider_type) && (
+                <Card 
+                  title={selectedProvider.name} 
+                  size="compact"
+                  description={providerConfigs.length > 0 ? `${providerConfigs.length} 个模型` : undefined}
+                >
+                  <div className="flex items-center space-x-4">
+                    {/* Logo - 点击弹出设置对话框 */}
+                    <button
+                      onClick={() => {
+                        setShowLogoDialog(true);
+                      }}
+                      className="w-16 h-16 rounded-lg flex items-center justify-center overflow-hidden border border-gray-200 dark:border-[#404040] flex-shrink-0 hover:border-primary-500 dark:hover:border-primary-600 transition-colors"
+                    >
+                      {selectedProvider.logo_light || selectedProvider.logo_dark ? (
+                        <>
+                          {/* 浅色模式显示 */}
+                          {selectedProvider.logo_light && (
+                            <img
+                              src={selectedProvider.logo_light}
+                              alt={selectedProvider.name}
+                              className="w-full h-full object-cover dark:hidden"
+                            />
+                          )}
+                          {/* 深色模式显示 */}
+                          {selectedProvider.logo_dark && (
+                            <img
+                              src={selectedProvider.logo_dark}
+                              alt={selectedProvider.name}
+                              className="w-full h-full object-cover hidden dark:block"
+                            />
+                          )}
+                          {/* 如果只有一种logo，则都显示 */}
+                          {selectedProvider.logo_light && !selectedProvider.logo_dark && (
+                            <img
+                              src={selectedProvider.logo_light}
+                              alt={selectedProvider.name}
+                              className="w-full h-full object-cover hidden dark:block"
+                            />
+                          )}
+                          {!selectedProvider.logo_light && selectedProvider.logo_dark && (
+                            <img
+                              src={selectedProvider.logo_dark}
+                              alt={selectedProvider.name}
+                              className="w-full h-full object-cover dark:hidden"
+                            />
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-2xl">
+                          {PROVIDER_INFO[selectedProvider.provider_type]?.icon || '📦'}
+                        </span>
+                      )}
+                    </button>
+                    
+                    {/* 供应商信息 */}
+                    <div className="flex-1">
+                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                        {selectedProvider.name}
+                      </div>
+                      {selectedProvider.override_url && selectedProvider.default_api_url && (
+                        <div className="text-xs text-gray-400 mt-1">
+                          自定义 URL: {selectedProvider.default_api_url}
+                        </div>
+                      )}
+                      <div className="text-sm text-gray-500 dark:text-gray-400">
+                        模型类型: {PROVIDER_INFO[selectedProvider.provider_type]?.name}
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+              )}
+
+              {/* 已有模型列表（非主流供应商或传统视图） */}
+              {(!selectedProvider || !['openai', 'anthropic', 'gemini', 'deepseek'].includes(selectedProvider.provider_type)) && (
               <Card 
                 title={providerConfigs.length === 0 ? '已添加的模型' : `已添加的模型 (${providerConfigs.length})`}
                 description={providerConfigs.length === 0 ? '为当前供应商添加模型配置，每个模型可以设置独立的API密钥和参数' : undefined} 
@@ -1389,6 +1604,7 @@ const LLMConfigPanel: React.FC = () => {
                   </div>
                 )}
               </Card>
+              )}
 
               {/* 添加新模型配置 */}
               {isAdding && selectedProvider && (
@@ -2449,6 +2665,786 @@ const LLMConfigPanel: React.FC = () => {
               disabled={!selectedLightLogo && !selectedDarkLogo}
             >
               应用
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Token 录入对话框 */}
+      <Dialog open={showAddTokenDialog} onOpenChange={setShowAddTokenDialog}>
+        <DialogContent className="chatee-dialog-standard max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>录入 Token</DialogTitle>
+            <DialogDescription>
+              输入 API Token，系统将自动获取支持的模型列表
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 max-h-[60vh] overflow-auto no-scrollbar">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                API Token <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="password"
+                value={newTokenApiKey}
+                onChange={(e) => setNewTokenApiKey(e.target.value)}
+                className="input-field w-full"
+                placeholder={selectedProvider ? getProviderPlaceholder(selectedProvider.provider_type) : '请输入 API Token'}
+              />
+            </div>
+            {tokenError && (
+              <div className="text-sm text-red-600 dark:text-red-400">
+                {tokenError}
+              </div>
+            )}
+            {tokenAvailableModels.length === 0 ? (
+              <Button
+                variant="primary"
+                onClick={async () => {
+                  if (!selectedProvider) return;
+                  if (!newTokenApiKey.trim()) {
+                    setTokenError('请输入 API Token');
+                    return;
+                  }
+                  
+                  setIsLoadingTokenModels(true);
+                  setTokenError(null);
+                  
+                  try {
+                    const defaultUrl = selectedProvider.default_api_url || getProviderDefaultUrl(selectedProvider.provider_type);
+                    const models = await fetchModelsForProvider(
+                      selectedProvider.provider_type,
+                      defaultUrl,
+                      newTokenApiKey.trim()
+                    );
+                    
+                    if (models.length === 0) {
+                      setTokenError('未获取到可用模型，请检查 Token 是否正确');
+                      setIsLoadingTokenModels(false);
+                      return;
+                    }
+                    
+                    setTokenAvailableModels(models);
+                    setSelectedModelsForToken(new Set(models));
+                  } catch (error) {
+                    setTokenError(error instanceof Error ? error.message : '获取模型列表失败');
+                  } finally {
+                    setIsLoadingTokenModels(false);
+                  }
+                }}
+                disabled={isLoadingTokenModels || !newTokenApiKey.trim()}
+                className="w-full"
+              >
+                {isLoadingTokenModels ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    获取模型列表...
+                  </>
+                ) : (
+                  '获取模型列表'
+                )}
+              </Button>
+            ) : (
+              <div>
+                <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  选择要启用的模型 ({selectedModelsForToken.size} / {tokenAvailableModels.length})
+                </div>
+                <div className="flex gap-2 mb-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setSelectedModelsForToken(new Set(tokenAvailableModels))}
+                  >
+                    全选
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setSelectedModelsForToken(new Set())}
+                  >
+                    全不选
+                  </Button>
+                </div>
+                <div className="max-h-60 overflow-y-auto border border-gray-200 dark:border-[#404040] rounded-lg p-2 space-y-1">
+                  {tokenAvailableModels.map(model => (
+                    <label
+                      key={model}
+                      className="flex items-center gap-2 p-2 hover:bg-gray-100 dark:hover:bg-[#363636] rounded cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedModelsForToken.has(model)}
+                        onChange={(e) => {
+                          const newSet = new Set(selectedModelsForToken);
+                          if (e.target.checked) {
+                            newSet.add(model);
+                          } else {
+                            newSet.delete(model);
+                          }
+                          setSelectedModelsForToken(newSet);
+                        }}
+                        className="rounded"
+                      />
+                      <span className="text-sm text-gray-700 dark:text-gray-300">{model}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setShowAddTokenDialog(false);
+                setNewTokenApiKey('');
+                setTokenAvailableModels([]);
+                setSelectedModelsForToken(new Set());
+                setTokenError(null);
+              }}
+            >
+              取消
+            </Button>
+            {tokenAvailableModels.length > 0 && (
+              <Button
+                variant="primary"
+                onClick={async () => {
+                  if (!selectedProvider) return;
+                  if (selectedModelsForToken.size === 0) {
+                    setTokenError('请至少选择一个模型');
+                    return;
+                  }
+                  
+                  try {
+                    const defaultUrl = selectedProvider.default_api_url || getProviderDefaultUrl(selectedProvider.provider_type);
+                    
+                    // 禁用当前供应商的所有现有配置
+                    for (const config of providerConfigs) {
+                      if (config.enabled) {
+                        await updateLLMConfig(config.config_id, { enabled: false });
+                      }
+                    }
+                    
+                    // 创建新的模型配置
+                    for (const model of selectedModelsForToken) {
+                      await createLLMConfig({
+                        name: model,
+                        provider: selectedProvider.provider_type,
+                        api_key: newTokenApiKey.trim(),
+                        api_url: defaultUrl,
+                        model: model,
+                        enabled: true,
+                        tags: [],
+                        description: '',
+                        metadata: {},
+                      });
+                    }
+                    
+                    await loadConfigs();
+                    
+                    toast({
+                      title: 'Token 录入成功',
+                      description: `已创建 ${selectedModelsForToken.size} 个模型配置并设为当前使用`,
+                      variant: 'success',
+                    });
+                    
+                    setShowAddTokenDialog(false);
+                    setNewTokenApiKey('');
+                    setTokenAvailableModels([]);
+                    setSelectedModelsForToken(new Set());
+                    setTokenError(null);
+                  } catch (error) {
+                    setTokenError(error instanceof Error ? error.message : '创建模型配置失败');
+                  }
+                }}
+                disabled={selectedModelsForToken.size === 0}
+              >
+                <Save className="w-4 h-4 mr-2" />
+                保存 ({selectedModelsForToken.size} 个模型)
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Token 模型管理对话框 */}
+      <Dialog open={showTokenModelsDialog} onOpenChange={setShowTokenModelsDialog}>
+        <DialogContent className="chatee-dialog-standard max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>管理 Token 模型</DialogTitle>
+            <DialogDescription>
+              查看和管理该 Token 下的所有模型，可以同时启用多个模型，但不同 Token 之间只能启用一个
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 max-h-[60vh] overflow-auto no-scrollbar">
+            {selectedTokenApiKey && (
+              <div className="p-3 bg-gray-50 dark:bg-[#2d2d2d] rounded-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs text-gray-500 dark:text-gray-400">API Token</div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      if (!selectedProvider || !selectedTokenApiKey) return;
+                      setIsLoadingAvailableModels(true);
+                      try {
+                        const defaultUrl = selectedProvider.default_api_url || getProviderDefaultUrl(selectedProvider.provider_type);
+                        const models = await fetchModelsForProvider(
+                          selectedProvider.provider_type,
+                          defaultUrl,
+                          selectedTokenApiKey
+                        );
+                        setAvailableModelsForSelectedToken(models);
+                        // 过滤出未添加的模型
+                        const existingModelNames = new Set(selectedTokenConfigs.map(c => c.model || c.name));
+                        const newModels = models.filter(m => !existingModelNames.has(m));
+                        setSelectedNewModels(new Set(newModels));
+                        setShowAddModelsSection(true);
+                        toast({
+                          title: '获取成功',
+                          description: `找到 ${models.length} 个可用模型`,
+                          variant: 'success',
+                        });
+                      } catch (error) {
+                        toast({
+                          title: '获取失败',
+                          description: error instanceof Error ? error.message : '无法获取模型列表',
+                          variant: 'destructive',
+                        });
+                      } finally {
+                        setIsLoadingAvailableModels(false);
+                      }
+                    }}
+                    disabled={isLoadingAvailableModels}
+                  >
+                    {isLoadingAvailableModels ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        获取中...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="w-4 h-4 mr-2" />
+                        重新获取模型列表
+                      </>
+                    )}
+                  </Button>
+                </div>
+                <div className="text-sm font-mono text-gray-700 dark:text-gray-300 break-all">
+                  {selectedTokenApiKey}
+                </div>
+              </div>
+            )}
+            
+            {/* 模型列表（统一显示所有模型） */}
+            {showAddModelsSection && availableModelsForSelectedToken.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    所有可用模型 ({availableModelsForSelectedToken.length})
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        const existingModelNames = new Set(selectedTokenConfigs.map(c => c.model || c.name));
+                        const newModels = availableModelsForSelectedToken.filter(m => !existingModelNames.has(m));
+                        setSelectedNewModels(new Set(newModels));
+                      }}
+                    >
+                      全选新模型
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setSelectedNewModels(new Set())}
+                    >
+                      全不选
+                    </Button>
+                  </div>
+                </div>
+                <div className="max-h-96 overflow-y-auto border border-gray-200 dark:border-[#404040] rounded-lg p-2 space-y-1">
+                  {availableModelsForSelectedToken.map(model => {
+                    // 查找是否已配置
+                    const existingConfig = selectedTokenConfigs.find(c => (c.model || c.name) === model);
+                    const isConfigured = !!existingConfig;
+                    
+                    if (isConfigured) {
+                      // 已配置的模型：显示启用/禁用开关
+                      return (
+                        <div
+                          key={model}
+                          className="flex items-center justify-between p-2 hover:bg-gray-50 dark:hover:bg-[#363636] rounded"
+                        >
+                          <div className="flex items-center gap-3 flex-1">
+                            <Switch
+                              checked={existingConfig.enabled}
+                              onCheckedChange={async () => {
+                                try {
+                                  const newEnabled = !existingConfig.enabled;
+                                  
+                                  // 如果启用，需要先禁用其他 token 的模型
+                                  if (newEnabled) {
+                                    for (const otherConfig of providerConfigs) {
+                                      try {
+                                        const otherApiKey = await getLLMConfigApiKey(otherConfig.config_id);
+                                        const isSameToken = otherApiKey === selectedTokenApiKey;
+                                        if (!isSameToken && otherConfig.enabled) {
+                                          await updateLLMConfig(otherConfig.config_id, { enabled: false });
+                                        }
+                                      } catch {
+                                        // 如果获取 api_key 失败，跳过
+                                      }
+                                    }
+                                  }
+                                  
+                                  await updateLLMConfig(existingConfig.config_id, { enabled: newEnabled });
+                                  await loadConfigs();
+                                  
+                                  // 重新获取该 token 的所有配置以更新状态
+                                  const allConfigs = await getLLMConfigs();
+                                  const tokenConfigsPromises = allConfigs.map(async (c) => {
+                                    try {
+                                      const apiKey = await getLLMConfigApiKey(c.config_id);
+                                      if (apiKey === selectedTokenApiKey) {
+                                        return c;
+                                      }
+                                      return null;
+                                    } catch {
+                                      return null;
+                                    }
+                                  });
+                                  const resolvedConfigs = await Promise.all(tokenConfigsPromises);
+                                  const updatedConfigs = resolvedConfigs.filter((c): c is LLMConfigFromDB => c !== null);
+                                  setSelectedTokenConfigs(updatedConfigs);
+                                  
+                                  toast({
+                                    title: newEnabled ? '已启用' : '已禁用',
+                                    variant: 'success',
+                                  });
+                                } catch (error) {
+                                  toast({
+                                    title: '更新失败',
+                                    description: error instanceof Error ? error.message : String(error),
+                                    variant: 'destructive',
+                                  });
+                                }
+                              }}
+                            />
+                            <div className="flex-1">
+                              <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                {model}
+                              </div>
+                              <div className="text-xs text-gray-500 dark:text-gray-400">
+                                {existingConfig.enabled ? '已启用' : '未启用'}
+                              </div>
+                            </div>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-red-600"
+                            onClick={async () => {
+                              if (confirm(`确定要删除模型 "${model}" 吗？`)) {
+                                try {
+                                  await deleteLLMConfig(existingConfig.config_id);
+                                  await loadConfigs();
+                                  
+                                  // 更新本地状态
+                                  const updatedConfigs = selectedTokenConfigs.filter(c => c.config_id !== existingConfig.config_id);
+                                  setSelectedTokenConfigs(updatedConfigs);
+                                  
+                                  // 如果显示了模型列表，需要刷新显示
+                                  if (showAddModelsSection && selectedProvider && selectedTokenApiKey) {
+                                    const defaultUrl = selectedProvider.default_api_url || getProviderDefaultUrl(selectedProvider.provider_type);
+                                    try {
+                                      const models = await fetchModelsForProvider(
+                                        selectedProvider.provider_type,
+                                        defaultUrl,
+                                        selectedTokenApiKey
+                                      );
+                                      setAvailableModelsForSelectedToken(models);
+                                    } catch (error) {
+                                      console.error('Failed to refresh models:', error);
+                                    }
+                                  }
+                                  
+                                  toast({
+                                    title: '已删除',
+                                    variant: 'success',
+                                  });
+                                } catch (error) {
+                                  toast({
+                                    title: '删除失败',
+                                    description: error instanceof Error ? error.message : String(error),
+                                    variant: 'destructive',
+                                  });
+                                }
+                              }
+                            }}
+                            title="删除模型"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      );
+                    } else {
+                      // 未配置的模型：显示灰色的未开启 Switch
+                      return (
+                        <div
+                          key={model}
+                          className="flex items-center justify-between p-2 hover:bg-gray-50 dark:hover:bg-[#363636] rounded"
+                        >
+                          <div className="flex items-center gap-3 flex-1">
+                            <Switch
+                              checked={false}
+                              onCheckedChange={async () => {
+                                if (!selectedProvider) return;
+                                try {
+                                  // 如果启用，需要先禁用其他 token 的模型
+                                  for (const otherConfig of providerConfigs) {
+                                    try {
+                                      const otherApiKey = await getLLMConfigApiKey(otherConfig.config_id);
+                                      const isSameToken = otherApiKey === selectedTokenApiKey;
+                                      if (!isSameToken && otherConfig.enabled) {
+                                        await updateLLMConfig(otherConfig.config_id, { enabled: false });
+                                      }
+                                    } catch {
+                                      // 如果获取 api_key 失败，跳过
+                                    }
+                                  }
+                                  
+                                  // 创建新配置并启用
+                                  const defaultUrl = selectedProvider.default_api_url || getProviderDefaultUrl(selectedProvider.provider_type);
+                                  const newConfig = await createLLMConfig({
+                                    name: model,
+                                    provider: selectedProvider.provider_type,
+                                    api_key: selectedTokenApiKey,
+                                    api_url: defaultUrl,
+                                    model: model,
+                                    enabled: true,
+                                    tags: [],
+                                    description: '',
+                                    metadata: {},
+                                  });
+                                  
+                                  await loadConfigs();
+                                  
+                                  // 重新获取该 token 的所有配置
+                                  const allConfigs = await getLLMConfigs();
+                                  const tokenConfigsPromises = allConfigs.map(async (c) => {
+                                    try {
+                                      const apiKey = await getLLMConfigApiKey(c.config_id);
+                                      if (apiKey === selectedTokenApiKey) {
+                                        return c;
+                                      }
+                                      return null;
+                                    } catch {
+                                      return null;
+                                    }
+                                  });
+                                  const resolvedConfigs = await Promise.all(tokenConfigsPromises);
+                                  const updatedConfigs = resolvedConfigs.filter((c): c is LLMConfigFromDB => c !== null);
+                                  setSelectedTokenConfigs(updatedConfigs);
+                                  
+                                  // 重新获取模型列表以更新显示状态
+                                  if (selectedProvider && selectedTokenApiKey) {
+                                    const defaultUrl = selectedProvider.default_api_url || getProviderDefaultUrl(selectedProvider.provider_type);
+                                    try {
+                                      const models = await fetchModelsForProvider(
+                                        selectedProvider.provider_type,
+                                        defaultUrl,
+                                        selectedTokenApiKey
+                                      );
+                                      setAvailableModelsForSelectedToken(models);
+                                    } catch (error) {
+                                      console.error('Failed to refresh models:', error);
+                                    }
+                                  }
+                                  
+                                  toast({
+                                    title: '已添加并启用',
+                                    description: `模型 "${model}" 已添加并启用`,
+                                    variant: 'success',
+                                  });
+                                } catch (error) {
+                                  toast({
+                                    title: '添加失败',
+                                    description: error instanceof Error ? error.message : '无法添加模型',
+                                    variant: 'destructive',
+                                  });
+                                }
+                              }}
+                              className="opacity-60"
+                            />
+                            <div className="flex-1">
+                              <div className="text-sm text-gray-700 dark:text-gray-300">{model}</div>
+                              <div className="text-xs text-gray-500 dark:text-gray-400">未配置</div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+                  })}
+                </div>
+              </div>
+            )}
+            
+            {/* 未重新获取时显示已配置的模型 */}
+            {!showAddModelsSection && (
+              <div className="space-y-2">
+                <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  已配置的模型 ({selectedTokenConfigs.length})
+                </div>
+                {selectedTokenConfigs.map(config => (
+                <div
+                  key={config.config_id}
+                  className="flex items-center justify-between p-3 rounded-lg border border-gray-200 dark:border-[#404040] hover:bg-gray-50 dark:hover:bg-[#363636]"
+                >
+                  <div className="flex items-center gap-3 flex-1">
+                    <Switch
+                      checked={config.enabled}
+                      onCheckedChange={async () => {
+                        try {
+                          const newEnabled = !config.enabled;
+                          
+                          // 如果启用，需要先禁用其他 token 的模型
+                          if (newEnabled) {
+                            // 禁用当前供应商下其他 token 的模型（通过比较 api_key）
+                            for (const otherConfig of providerConfigs) {
+                              // 检查是否是同一个 token（通过比较 api_key）
+                              try {
+                                const otherApiKey = await getLLMConfigApiKey(otherConfig.config_id);
+                                const isSameToken = otherApiKey === selectedTokenApiKey;
+                                if (!isSameToken && otherConfig.enabled) {
+                                  await updateLLMConfig(otherConfig.config_id, { enabled: false });
+                                }
+                              } catch {
+                                // 如果获取 api_key 失败，跳过
+                              }
+                            }
+                          }
+                          
+                          await updateLLMConfig(config.config_id, { enabled: newEnabled });
+                          await loadConfigs();
+                          const updatedConfigs = selectedTokenConfigs.map(c => 
+                            c.config_id === config.config_id ? { ...c, enabled: newEnabled } : c
+                          );
+                          setSelectedTokenConfigs(updatedConfigs);
+                          toast({
+                            title: newEnabled ? '已启用' : '已禁用',
+                            variant: 'success',
+                          });
+                        } catch (error) {
+                          toast({
+                            title: '更新失败',
+                            description: error instanceof Error ? error.message : String(error),
+                            variant: 'destructive',
+                          });
+                        }
+                      }}
+                    />
+                    <div className="flex-1">
+                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                        {config.name}
+                      </div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                        {config.model || '未设置模型'}
+                      </div>
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-red-600"
+                    onClick={async () => {
+                      if (confirm(`确定要删除模型 "${config.name}" 吗？`)) {
+                        try {
+                          await deleteLLMConfig(config.config_id);
+                          await loadConfigs();
+                          const updatedConfigs = selectedTokenConfigs.filter(c => c.config_id !== config.config_id);
+                          setSelectedTokenConfigs(updatedConfigs);
+                          toast({
+                            title: '已删除',
+                            variant: 'success',
+                          });
+                        } catch (error) {
+                          toast({
+                            title: '删除失败',
+                            description: error instanceof Error ? error.message : String(error),
+                            variant: 'destructive',
+                          });
+                        }
+                      }
+                    }}
+                    title="删除模型"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                </div>
+              ))}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setShowTokenModelsDialog(false);
+                setShowAddModelsSection(false);
+                setSelectedNewModels(new Set());
+                setAvailableModelsForSelectedToken([]);
+              }}
+            >
+              关闭
+            </Button>
+            <Button
+              variant="primary"
+              onClick={async () => {
+                try {
+                  // 禁用其他 token 的模型（通过比较 api_key）
+                  for (const config of providerConfigs) {
+                    try {
+                      const otherApiKey = await getLLMConfigApiKey(config.config_id);
+                      const isThisToken = otherApiKey === selectedTokenApiKey;
+                      if (!isThisToken && config.enabled) {
+                        await updateLLMConfig(config.config_id, { enabled: false });
+                      }
+                    } catch {
+                      // 如果获取 api_key 失败，跳过
+                    }
+                  }
+                  
+                  // 启用该 token 下所有已配置的模型
+                  for (const config of selectedTokenConfigs) {
+                    if (!config.enabled) {
+                      await updateLLMConfig(config.config_id, { enabled: true });
+                    }
+                  }
+                  
+                  await loadConfigs();
+                  
+                  // 重新获取该 token 的所有配置以更新状态
+                  const allConfigs = await getLLMConfigs();
+                  const tokenConfigsPromises = allConfigs.map(async (c) => {
+                    try {
+                      const apiKey = await getLLMConfigApiKey(c.config_id);
+                      if (apiKey === selectedTokenApiKey) {
+                        return c;
+                      }
+                      return null;
+                    } catch {
+                      return null;
+                    }
+                  });
+                  const resolvedConfigs = await Promise.all(tokenConfigsPromises);
+                  const updatedConfigs = resolvedConfigs.filter((c): c is LLMConfigFromDB => c !== null);
+                  setSelectedTokenConfigs(updatedConfigs);
+                  
+                  toast({
+                    title: '已设为当前使用',
+                    description: `已启用该 Token 下的 ${updatedConfigs.filter(c => c.enabled).length} 个模型`,
+                    variant: 'success',
+                  });
+                  
+                  // 如果显示了模型列表，需要刷新显示
+                  if (showAddModelsSection) {
+                    // 重新获取模型列表以更新状态
+                    if (selectedProvider && selectedTokenApiKey) {
+                      const defaultUrl = selectedProvider.default_api_url || getProviderDefaultUrl(selectedProvider.provider_type);
+                      try {
+                        const models = await fetchModelsForProvider(
+                          selectedProvider.provider_type,
+                          defaultUrl,
+                          selectedTokenApiKey
+                        );
+                        setAvailableModelsForSelectedToken(models);
+                      } catch (error) {
+                        console.error('Failed to refresh models:', error);
+                      }
+                    }
+                  }
+                } catch (error) {
+                  toast({
+                    title: '更新失败',
+                    description: error instanceof Error ? error.message : String(error),
+                    variant: 'destructive',
+                  });
+                }
+              }}
+            >
+              启用该 Token 的所有模型
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Logo 设置对话框 */}
+      <Dialog open={showLogoDialog} onOpenChange={setShowLogoDialog}>
+        <DialogContent className="chatee-dialog-standard">
+          <DialogHeader>
+            <DialogTitle>设置供应商 Logo</DialogTitle>
+            <DialogDescription>
+              上传自定义 Logo 或从在线资源中选择
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (!selectedProvider) return;
+                  setLogoProviderInput(selectedProvider.provider_type);
+                  setLightLogoOptions([]);
+                  setDarkLogoOptions([]);
+                  setSelectedLightLogo(null);
+                  setSelectedDarkLogo(null);
+                  setShowLogoSelectDialog(true);
+                  setShowLogoDialog(false);
+                }}
+                className="flex-1"
+              >
+                <Search className="w-4 h-4 mr-2" />
+                选择在线 Logo
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => logoInputRef.current?.click()}
+                className="flex-1"
+              >
+                <Upload className="w-4 h-4 mr-2" />
+                上传本地 Logo
+              </Button>
+            </div>
+            {selectedProvider && (selectedProvider.logo_light || selectedProvider.logo_dark) && (
+              <div className="p-4 border border-gray-200 dark:border-[#404040] rounded-lg">
+                <div className="text-sm text-gray-700 dark:text-gray-300 mb-2">当前 Logo</div>
+                <div className="w-16 h-16 rounded-lg flex items-center justify-center overflow-hidden border border-gray-200 dark:border-[#404040]">
+                  {selectedProvider.logo_light && (
+                    <img
+                      src={selectedProvider.logo_light}
+                      alt={selectedProvider.name}
+                      className="w-full h-full object-cover dark:hidden"
+                    />
+                  )}
+                  {selectedProvider.logo_dark && (
+                    <img
+                      src={selectedProvider.logo_dark}
+                      alt={selectedProvider.name}
+                      className="w-full h-full object-cover hidden dark:block"
+                    />
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              onClick={() => setShowLogoDialog(false)}
+            >
+              关闭
             </Button>
           </DialogFooter>
         </DialogContent>

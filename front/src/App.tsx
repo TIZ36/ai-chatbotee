@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
-import { Brain, Plug, Workflow as WorkflowIcon, Settings, Code, MessageCircle, Globe, Sparkles, Bot, Users, BookOpen, Activity, Plus, FolderOpen, Image as ImageIcon, Palette, Check, Type } from 'lucide-react';
+import { Brain, Plug, Settings, MessageCircle, Globe, Sparkles, Bot, Users, BookOpen, Plus, FolderOpen, Image as ImageIcon, Palette, Check, Type } from 'lucide-react';
 import appLogoDark from '../assets/app_logo_dark.png';
 import appLogoLight from '../assets/app_logo_light.png';
 import { Button } from './components/ui/Button';
@@ -18,18 +18,14 @@ import {
 import SettingsPanel from './components/SettingsPanel';
 import LLMConfigPanel from './components/LLMConfig';
 import MCPConfig from './components/MCPConfig';
-import WorkflowEditor from './components/WorkflowEditor';
 import Workflow from './components/Workflow';
 import CrawlerConfigPage from './components/CrawlerConfigPage';
 import AgentsPage from './components/AgentsPage';
 // 新架构组件
-import SystemStatusPanel from './components/SystemStatusPanel';
 import StatusBar from './components/StatusBar';
 import { getAgents, getSessions, createSession, deleteSession, type Session } from './services/sessionApi';
-import { getRoundTables, type RoundTable } from './services/roundTableApi';
 import { toast } from './components/ui/use-toast';
 import { ConfirmDialog } from './components/ui/ConfirmDialog';
-import MediaLibraryPage from './components/MediaLibraryPage';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -141,17 +137,26 @@ const App: React.FC = () => {
     return root.classList.contains('dark');
   });
 
-  // 应用主题（light/dark）与皮肤（default/niho）；移动端强制 niho
+  // 应用主题（light/dark/niho）
   useEffect(() => {
     const root = window.document.documentElement;
     const mobile = window.matchMedia('(max-width: 767px)').matches;
-    const skin = mobile ? 'niho' : settings.skin;
-    root.setAttribute('data-skin', skin);
+    
+    // 获取当前主题（兼容旧的 theme + skin 组合）
+    const currentTheme = settings.theme === 'niho' || settings.skin === 'niho' 
+      ? 'niho' 
+      : settings.theme === 'dark' 
+      ? 'dark' 
+      : 'light';
+    
+    // 移动端强制使用霓虹主题
+    const effectiveTheme = mobile ? 'niho' : currentTheme;
+    
+    root.setAttribute('data-skin', effectiveTheme === 'niho' ? 'niho' : 'default');
     root.setAttribute('data-mobile', mobile ? 'true' : 'false');
 
-    const isNiho = skin === 'niho';
-    const isDark = isNiho || settings.theme === 'dark' ||
-      (settings.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    const isNiho = effectiveTheme === 'niho';
+    const isDark = isNiho || effectiveTheme === 'dark';
 
     setIsDarkMode(isDark);
     if (isDark) {
@@ -168,13 +173,21 @@ const App: React.FC = () => {
       const root = document.documentElement;
       const mobile = mq.matches;
       root.setAttribute('data-mobile', mobile ? 'true' : 'false');
-      if (mobile) root.setAttribute('data-skin', 'niho');
-      else root.setAttribute('data-skin', settings.skin);
+      
+      // 获取当前主题
+      const currentTheme = settings.theme === 'niho' || settings.skin === 'niho' 
+        ? 'niho' 
+        : settings.theme === 'dark' 
+        ? 'dark' 
+        : 'light';
+      const effectiveTheme = mobile ? 'niho' : currentTheme;
+      
+      root.setAttribute('data-skin', effectiveTheme === 'niho' ? 'niho' : 'default');
     };
     sync();
     mq.addEventListener('change', sync);
     return () => mq.removeEventListener('change', sync);
-  }, [settings.skin]);
+  }, [settings.theme, settings.skin]);
 
   // 应用字体
   useEffect(() => {
@@ -209,7 +222,6 @@ const App: React.FC = () => {
   const [isCreatingTopic, setIsCreatingTopic] = useState(false);
   const [deleteSessionTarget, setDeleteSessionTarget] = useState<Session | null>(null);
 
-  // 媒体库已升级为主页面（/media-library），不再使用弹窗
 
   const loadSwitcherData = async () => {
     try {
@@ -339,12 +351,6 @@ const App: React.FC = () => {
             isActive={location.pathname === '/'}
           />
 
-          <NavItem
-            to="/media-library"
-            icon={<ImageIcon className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-            title="媒体库"
-            isActive={location.pathname === '/media-library'}
-          />
 
           <NavItem
             to="/mcp-config"
@@ -353,12 +359,6 @@ const App: React.FC = () => {
             isActive={location.pathname === '/mcp-config'}
           />
 
-          <NavItem
-            to="/workflow-editor"
-            icon={<WorkflowIcon className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-            title="工作流编辑器"
-            isActive={location.pathname === '/workflow-editor'}
-          />
 
           <NavItem
             to="/agents"
@@ -397,27 +397,6 @@ const App: React.FC = () => {
             isActive={location.pathname === '/crawler-config'}
           />
 
-          <NavItem
-            to="/system-status"
-            icon={<Activity className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-            title="系统状态"
-            isActive={location.pathname === '/system-status'}
-          />
-
-          {/* DevTools 按钮 */}
-          <div className="relative group">
-            <button
-              onClick={() => {
-                alert('在浏览器环境中，请使用以下快捷键打开开发者工具：\n\nWindows/Linux: F12 或 Ctrl+Shift+I\nMac: Cmd+Option+I');
-              }}
-              className="w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-200 ease-out text-gray-500 dark:text-[#a0a0a0] hover:bg-white/50 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white"
-              title="开发者工具 (F12)"
-            >
-              <div className="transition-transform duration-200 group-hover:scale-105">
-                <Code className="w-4 h-4" strokeWidth={1.5} />
-              </div>
-            </button>
-          </div>
         </div>
       </nav>
 
@@ -495,28 +474,35 @@ const App: React.FC = () => {
                       variant="ghost"
                       size="sm"
                       className="h-7 px-2 text-xs glass-toolbar gap-1.5"
-                      title="切换皮肤"
+                      title="切换主题"
                     >
                       <Palette className="w-3.5 h-3.5" />
                       <span className="hidden sm:inline">
-                        {settings.skin === 'niho' ? 'Niho' : '默认'}
+                        {settings.theme === 'niho' || settings.skin === 'niho' ? '霓虹' : settings.theme === 'dark' ? '深色' : '浅色'}
                       </span>
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="min-w-[140px]">
                     <DropdownMenuItem
-                      onClick={() => updateSettings({ skin: 'default' })}
+                      onClick={() => updateSettings({ theme: 'light' as any, skin: undefined })}
                       className="flex items-center justify-between"
                     >
-                      <span>Chatee 默认</span>
-                      {settings.skin === 'default' && <Check className="w-4 h-4" />}
+                      <span>浅色</span>
+                      {(settings.theme === 'light' || (!settings.theme && !settings.skin)) && <Check className="w-4 h-4" />}
                     </DropdownMenuItem>
                     <DropdownMenuItem
-                      onClick={() => updateSettings({ skin: 'niho' })}
+                      onClick={() => updateSettings({ theme: 'dark' as any, skin: undefined })}
                       className="flex items-center justify-between"
                     >
-                      <span>Niho 霓虹</span>
-                      {settings.skin === 'niho' && <Check className="w-4 h-4" />}
+                      <span>深色</span>
+                      {settings.theme === 'dark' && <Check className="w-4 h-4" />}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => updateSettings({ theme: 'niho' as any, skin: undefined })}
+                      className="flex items-center justify-between"
+                    >
+                      <span>霓虹</span>
+                      {(settings.theme === 'niho' || settings.skin === 'niho') && <Check className="w-4 h-4" />}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -766,8 +752,6 @@ const App: React.FC = () => {
                       }
                     />
 
-                    {/* 工作流编辑器 */}
-                    <Route path="/workflow-editor" element={<WorkflowEditor />} />
 
 
                     {/* LLM配置页面 */}
@@ -778,9 +762,6 @@ const App: React.FC = () => {
 
                     {/* 爬虫配置页面 */}
                     <Route path="/crawler-config" element={<CrawlerConfigPage />} />
-
-                    {/* 系统状态页面 */}
-                    <Route path="/system-status" element={<SystemStatusPanel />} />
 
                     {/* 设置页面 */}
                     <Route path="/settings" element={
@@ -794,8 +775,6 @@ const App: React.FC = () => {
                     {/* 智能体管理页面 */}
                     <Route path="/agents" element={<AgentsPage />} />
 
-                    {/* 媒体库 */}
-                    <Route path="/media-library" element={<MediaLibraryPage />} />
                   </Routes>
                 </div>
               </div>

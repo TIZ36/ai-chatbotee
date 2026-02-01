@@ -13,15 +13,12 @@ import { LLMClient, LLMMessage } from '../services/llmClient';
 import { getLLMConfigs, getLLMConfig, getLLMConfigApiKey, LLMConfigFromDB, getProviders, LLMProvider } from '../services/llmApi';
 import { mcpManager, MCPServer, MCPTool } from '../services/mcpClient';
 import { getMCPServers, MCPServerConfig } from '../services/mcpApi';
-import { getSessions, getAgents, getSession, createSession, getSessionMessages, saveMessage, summarizeSession, getSessionSummaries, deleteSession, clearSummarizeCache, deleteMessage, executeMessageComponent, updateSessionAvatar, updateSessionName, updateSessionSystemPrompt, updateSessionMediaOutputPath, updateSessionLLMConfig, upgradeToAgent, updateSessionType, Session, Summary, MessageExt } from '../services/sessionApi';
+import { getSessions, getAgents, getSession, createSession, saveMessage, summarizeSession, getSessionSummaries, deleteSession, clearSummarizeCache, deleteMessage, updateSessionAvatar, updateSessionName, updateSessionSystemPrompt, updateSessionMediaOutputPath, updateSessionLLMConfig, upgradeToAgent, updateSessionType, Session, Summary, MessageExt } from '../services/sessionApi';
 import { createRole } from '../services/roleApi';
 import { createSkillPack, saveSkillPack, optimizeSkillPackSummary, getSkillPacks, getSessionSkillPacks, createSopSkillPack, setCurrentSop, getCurrentSop, SkillPack, SessionSkillPack, SkillPackCreationResult, SkillPackProcessInfo } from '../services/skillPackApi';
 import { getBackendUrl } from '../utils/backendUrl';
 import { estimate_messages_tokens, get_model_max_tokens, estimate_tokens } from '../services/tokenCounter';
-import { getWorkflows, getWorkflow, Workflow as WorkflowType, WorkflowNode, WorkflowConnection } from '../services/workflowApi';
-import { workflowPool } from '../services/workflowPool';
 import { getBatch } from '../services/crawlerApi';
-import { getRoundTables, type RoundTable, deleteRoundTable, createRoundTable } from '../services/roundTableApi';
 import CrawlerModuleSelector from './CrawlerModuleSelector';
 import CrawlerBatchItemSelector from './CrawlerBatchItemSelector';
 import AttachmentMenu from './AttachmentMenu';
@@ -39,12 +36,10 @@ import {
 import { Label } from './ui/Label';
 import { Input } from './ui/Input';
 import { Textarea } from './ui/Textarea';
-import { ScrollArea } from './ui/ScrollArea';
 import { DataListItem } from './ui/DataListItem';
 import { toast } from './ui/use-toast';
 import { HistoryLoadTop } from './ui/HistoryLoadTop';
 import { PluginExecutionPanel } from './PluginExecutionPanel';
-import { MCPExecutionCard } from './MCPExecutionCard';
 import { MCPDetailOverlay } from './MCPDetailOverlay';
 import { emitSessionsChanged, SESSIONS_CHANGED_EVENT } from '../utils/sessionEvents';
 import { getDimensionOptions } from '../services/roleDimensionApi';
@@ -53,7 +48,6 @@ import { MediaGallery, MediaItem } from './ui/MediaGallery';
 import type { SessionMediaItem } from './ui/SessionMediaPanel';
 import { IconButton } from './ui/IconButton';
 import { MediaPreviewDialog } from './ui/MediaPreviewDialog';
-import { truncateBase64Strings } from '../utils/textUtils';
 import { ensureDataUrlFromMaybeBase64, normalizeBase64ForInlineData } from '../utils/dataUrl';
 import { useConversation } from '../conversation/useConversation';
 import { createSessionConversationAdapter } from '../conversation/adapters/sessionConversation';
@@ -65,14 +59,15 @@ import {
   extractProfession,
 } from './workflow/profession';
 import { useFloatingComposerPadding } from './workflow/useFloatingComposerPadding';
-import { parseMCPContentBlocks, renderMCPBlocks, renderMCPMedia } from './workflow/mcpRender';
-import { MessageContent, Message } from './workflow/MessageContent';
+import { parseMCPContentBlocks } from './workflow/mcpRender';
+import { MessageContent } from './workflow/MessageContent';
+import type { Message } from './workflow/types';
 import type { ProcessMessage } from '../types/processMessage';
 import type { ProcessStep } from '../types/processSteps';
-import { ProcessStepsViewer, type ExecutionLogEntry } from './ui/ProcessStepsViewer';
+import { ProcessStepsViewer } from './ui/ProcessStepsViewer';
+import type { ExecutionLogEntry } from './ui/ExecutionLogViewer';
 import { ExecutionLogViewer } from './ui/ExecutionLogViewer';
 import { useChatInput } from './workflow/useChatInput';
-import { calculateCursorPosition } from './workflow/utils';
 import { TokenCounter } from './workflow/TokenCounter';
 import { floatingComposerContainerClass, floatingComposerInnerClass } from './shared/floatingComposerStyles';
 import {
@@ -80,7 +75,6 @@ import {
   UpgradeToAgentDialog,
   AvatarConfigDialog,
   SkillPackDialog,
-  NewMeetingDialog,
   PersonaPanel,
   RoleGeneratorDialog,
   HeaderConfigDialog,
@@ -164,7 +158,6 @@ const getProviderIcon = (config: LLMConfigFromDB | null, providers: LLMProvider[
 interface WorkflowProps {
   sessionId?: string | null;
   onSelectSession?: (sessionId: string) => void;
-  onSelectMeeting?: (roundTableId: string) => void;
   enableToolCalling?: boolean;
   onToggleToolCalling?: (enabled: boolean) => void;
 }
@@ -172,11 +165,10 @@ interface WorkflowProps {
 const Workflow: React.FC<WorkflowProps> = ({
   sessionId: externalSessionId,
   onSelectSession,
-  onSelectMeeting,
   enableToolCalling,
   onToggleToolCalling,
 }) => {
-  const toolCallingEnabled = enableToolCalling !== undefined ? enableToolCalling : true;
+  const toolCallingEnabled = enableToolCalling !== undefined ? enableToolCalling : false;
   // Gemini inlineData.data 只接受“标准 base64”；这里统一归一化，并对明显不合法的内容返回 null（避免整包请求 400）
   const toInlineBase64 = useCallback((maybeDataUrlOrBase64: string): string | null => {
     return normalizeBase64ForInlineData(maybeDataUrlOrBase64);
@@ -279,7 +271,7 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [showModuleSelector, setShowModuleSelector] = useState(false); // 是否显示模块选择器（/ 命令）
   const [atSelectorQuery, setAtSelectorQuery] = useState(''); // @ 选择器的查询字符串
   const [selectedComponentIndex, setSelectedComponentIndex] = useState(0); // 当前选中的组件索引（用于键盘导航）
-  const [selectedComponents, setSelectedComponents] = useState<Array<{ type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string }>>([]); // 已选定的组件（tag）
+  const [selectedComponents, setSelectedComponents] = useState<Array<{ type: 'mcp' | 'skillpack' | 'agent'; id: string; name: string }>>([]); // 已选定的组件（tag）
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const editingMessageIdRef = useRef<string | null>(null);
   const selectorRef = useRef<HTMLDivElement>(null);
@@ -358,12 +350,14 @@ const Workflow: React.FC<WorkflowProps> = ({
     timestamp: number;
     processSteps?: any[];  // 决策过程步骤（旧协议）
     processMessages?: ProcessMessage[];  // 决策过程消息（新协议）
+    executionLogs?: ExecutionLogEntry[];  // 执行日志
   }
   const [agentDecidingStates, setAgentDecidingStates] = useState<Map<string, AgentDecidingState>>(new Map());
   
   const [isEditingSystemPrompt, setIsEditingSystemPrompt] = useState(false); // 是否正在编辑人设
   const [systemPromptDraft, setSystemPromptDraft] = useState(''); // 人设编辑草稿
   const [showModelSelectDialog, setShowModelSelectDialog] = useState(false); // 是否显示模型选择对话框
+  const [selectedProviderTab, setSelectedProviderTab] = useState<string | null>(null); // 当前选中的供应商 Tab
   const [showHelpTooltip, setShowHelpTooltip] = useState(false); // 是否显示帮助提示
   const [showSessionTypeDialog, setShowSessionTypeDialog] = useState(false); // 是否显示会话类型选择对话框
   const [showUpgradeToAgentDialog, setShowUpgradeToAgentDialog] = useState(false); // 是否显示升级为智能体对话框
@@ -372,13 +366,8 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [personaSearch, setPersonaSearch] = useState('');
   const [showRoleGenerator, setShowRoleGenerator] = useState(false);
   const [personaAgents, setPersonaAgents] = useState<Session[]>([]);
-  const [personaMeetings, setPersonaMeetings] = useState<RoundTable[]>([]);
   const [personaTopics, setPersonaTopics] = useState<Session[]>([]);
   const [isLoadingPersonaList, setIsLoadingPersonaList] = useState(false);
-  // 新建 Meeting 对话框
-  const [showNewMeetingDialog, setShowNewMeetingDialog] = useState(false);
-  const [newMeetingName, setNewMeetingName] = useState('');
-  const [isCreatingMeeting, setIsCreatingMeeting] = useState(false);
   const [agentName, setAgentName] = useState(''); // 升级为智能体时的名称
   const [agentAvatar, setAgentAvatar] = useState<string | null>(null); // 升级为智能体时的头像
   const [agentSystemPrompt, setAgentSystemPrompt] = useState(''); // 升级为智能体时的人设
@@ -468,7 +457,9 @@ const Workflow: React.FC<WorkflowProps> = ({
   const buildProcessMessages = useCallback((steps: ProcessStep[]): ProcessMessage[] => {
     return steps.map((step) => {
       const blocks = step.result ? parseMCPContentBlocks(step.result) : [];
-      const mediaBlocks = blocks.filter(b => b.kind === 'image' || b.kind === 'video' || b.kind === 'audio');
+      const mediaBlocks = blocks.filter((b): b is Extract<typeof b, { kind: 'image' | 'video' | 'audio' }> => 
+        b.kind === 'image' || b.kind === 'video' || b.kind === 'audio'
+      );
       let contentType: ProcessMessage['contentType'] = 'text';
       let images: ProcessMessage['images'];
       let image: ProcessMessage['image'];
@@ -542,14 +533,11 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [mcpTools, setMcpTools] = useState<Map<string, MCPTool[]>>(new Map());
   const [connectingServers, setConnectingServers] = useState<Set<string>>(new Set());
   
-  // 工作流列表
-  const [workflows, setWorkflows] = useState<WorkflowType[]>([]);
-  
   // 技能包列表
   const [allSkillPacks, setAllSkillPacks] = useState<SkillPack[]>([]);
   
   // 拖拽状态
-  const [draggingComponent, setDraggingComponent] = useState<{ type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string } | null>(null);
+  const [draggingComponent, setDraggingComponent] = useState<{ type: 'mcp' | 'skillpack'; id: string; name: string } | null>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement | null>(null);
@@ -679,9 +667,14 @@ const Workflow: React.FC<WorkflowProps> = ({
     if (messages.length <= lastMessageCountRef.current) {
       // 消息数量没有增加：可能是替换/编辑/流式更新（content 变化但 length 不变）
       // 对于流式更新，如果用户原本在底部附近，则持续跟随到底部
+      // 但如果用户正在手动滚动查看历史消息，不要强制滚动到底部
       const hasStreamingMessage = messages.some(m => m.isStreaming);
       if (hasStreamingMessage && wasAtBottom && !isUserScrollingRef.current) {
+        // 再次检查用户是否在底部（可能在滚动过程中离开了底部）
+        const stillAtBottom = shouldAutoScroll();
+        if (stillAtBottom) {
         setTimeout(() => scrollToBottom('auto'), 0);
+        }
       }
       // 更新计数但不走“新消息”逻辑
       lastMessageCountRef.current = messages.length;
@@ -733,7 +726,6 @@ const Workflow: React.FC<WorkflowProps> = ({
     loadLLMConfigs();
     loadMCPServers();
     loadSessions();
-    loadWorkflows();
     loadSkillPacks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -921,7 +913,15 @@ const Workflow: React.FC<WorkflowProps> = ({
 
           if (payload.type === 'new_message') {
             const msg = payload.data;
-            console.log('[Workflow] new_message received:', msg.message_id, 'sender_avatar:', msg.sender_avatar, 'ext.sender_avatar:', msg.ext?.sender_avatar);
+            // 避免在控制台打印 base64 头像（极大影响性能与可读性）
+            const _avatarPreview = (() => {
+              const a = (msg.sender_avatar || msg.ext?.sender_avatar) as string | undefined;
+              if (!a) return 'none';
+              if (typeof a !== 'string') return typeof a;
+              if (a.startsWith('data:image/')) return `data:image/* (len=${a.length})`;
+              return a.length > 120 ? `${a.slice(0, 60)}…(len=${a.length})` : a;
+            })();
+            console.log('[Workflow] new_message received:', msg.message_id, 'sender_avatar:', _avatarPreview);
             
             // 检查 ID 是否已存在（可能是流式消息的最终版本）
             const incomingProcessMessages = normalizeIncomingProcessMessages(msg.processMessages || msg.ext?.processMessages, msg.processSteps || msg.ext?.processSteps);
@@ -933,7 +933,6 @@ const Workflow: React.FC<WorkflowProps> = ({
                 const updated = [...prev];
                 const existing = updated[existingIndex];
                 const mergedSteps =
-                  existing.processSteps ||
                   existing.ext?.processSteps ||
                   msg.ext?.processSteps;
                 const normalizedMergedSteps = normalizeIncomingProcessSteps(mergedSteps);
@@ -944,19 +943,28 @@ const Workflow: React.FC<WorkflowProps> = ({
                   isStreaming: false,
                   // 合并 ext，保留现有的 processMessages
                   ext: {
+                    ...(existing.ext || {}),
                     ...(msg.ext || {}),
                     processSteps: normalizedMergedSteps || mergedSteps,
                     processMessages: mergedProcessMessages
                   },
-                  // 保留已有的 processSteps 和 processMessages
-                  processSteps: normalizedMergedSteps || existing.processSteps || msg.ext?.processSteps,
+                  // 保留已有的 processMessages
                   processMessages: mergedProcessMessages
                 };
                 return updated;
               }
 
               // 提取 sender 信息，优先从顶层获取，然后从 ext 中获取
-              const senderAvatar = msg.sender_avatar || msg.ext?.sender_avatar;
+              const sanitizeAvatar = (a?: string) => {
+                if (!a) return undefined;
+                if (typeof a !== 'string') return undefined;
+                // 不在每条消息里携带 data URI（base64），改为依赖 topicParticipants 的 avatar
+                if (a.startsWith('data:image/')) return undefined;
+                // 过长的字段也直接丢弃，避免撑爆消息体
+                if (a.length > 1024) return undefined;
+                return a;
+              };
+              const senderAvatar = sanitizeAvatar(msg.sender_avatar || msg.ext?.sender_avatar);
               const senderName = msg.sender_name || msg.ext?.sender_name;
               
               const newMessage: Message = {
@@ -964,16 +972,16 @@ const Workflow: React.FC<WorkflowProps> = ({
                 role: msg.role as any,
                 content: msg.content,
                 thinking: msg.thinking,
-                tool_calls: msg.tool_calls,
-                created_at: new Date(msg.timestamp * 1000).toISOString(),
+                toolCalls: msg.tool_calls,
                 sender_id: msg.sender_id,
                 sender_type: msg.sender_type,
                 sender_avatar: senderAvatar,
                 sender_name: senderName,
-                processSteps: normalizeIncomingProcessSteps(msg.ext?.processSteps),
                 processMessages: incomingProcessMessages,
                 ext: {
                   ...msg.ext,
+                  processSteps: normalizeIncomingProcessSteps(msg.ext?.processSteps),
+                  // 只保留“可传输”的 avatar；base64 头像不写入消息体
                   sender_avatar: senderAvatar,
                   sender_name: senderName,
                   processMessages: incomingProcessMessages
@@ -1120,13 +1128,17 @@ const Workflow: React.FC<WorkflowProps> = ({
           } else if (payload.type === 'execution_log') {
             // 后端发送的执行日志
             const data = payload.data;
+            const logType = (data.log_type || 'info') as ExecutionLogEntry['type'];
+            const msgText = typeof data.message === 'string' ? data.message.trim() : '';
+            // 不展示无意义/空的占位日志：后端应传递真实步骤文案
+            if (!msgText) return;
+            
             const logEntry: ExecutionLogEntry = {
               id: data.id || `log-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
               timestamp: data.timestamp || Date.now(),
-              type: data.log_type || 'info',
-              message: data.message || '',
+              type: logType,
+              message: msgText,
               detail: data.detail,
-              status: data.status,
               duration: data.duration,
             };
             setExecutionLogs(prev => [...prev.slice(-99), logEntry]); // 保留最近100条
@@ -1138,13 +1150,8 @@ const Workflow: React.FC<WorkflowProps> = ({
             const incomingProcessMessages = normalizeIncomingProcessMessages(data.processMessages, data.processSteps);
             console.log('[Workflow] Agent thinking:', data.agent_name, 'processMessages:', incomingProcessMessages?.length || 0);
             
-            // 开始执行，清空旧日志
-            setExecutionLogs([{
-              id: `start-${Date.now()}`,
-              timestamp: Date.now(),
-              type: 'info',
-              message: `${data.agent_name || 'Agent'} 开始处理...`,
-            }]);
+            // 清空旧日志，由后端 execution_log 事件推送有意义的步骤文案，不再写入无意义的「思考中...」
+            setExecutionLogs([]);
             setIsExecuting(true);
             
             // 移除决策状态（已开始回复）
@@ -1162,10 +1169,9 @@ const Workflow: React.FC<WorkflowProps> = ({
                 const updated = [...prev];
                 updated[existingIndex] = {
                   ...updated[existingIndex],
-                  processSteps: normalizeIncomingProcessSteps(data.processSteps) || updated[existingIndex].processSteps,
                   processMessages: incomingProcessMessages || updated[existingIndex].processMessages,
                   ext: {
-                    ...updated[existingIndex].ext,
+                    ...(updated[existingIndex].ext || {}),
                     processSteps: normalizeIncomingProcessSteps(data.processSteps) || (updated[existingIndex].ext as any)?.processSteps,
                     processMessages: incomingProcessMessages || (updated[existingIndex].ext as any)?.processMessages,
                   }
@@ -1181,12 +1187,11 @@ const Workflow: React.FC<WorkflowProps> = ({
                 sender_id: data.agent_id,
                 sender_type: 'agent',
                 isStreaming: true,
-                // 包含决策过程步骤
-                processSteps: normalizeIncomingProcessSteps(data.processSteps) || [],
                 processMessages: incomingProcessMessages || [],
                 ext: {
                   sender_name: data.agent_name,
-                  sender_avatar: data.agent_avatar,
+                  // 不在消息体里携带 base64 头像；由 topicParticipants/Session Avatar 兜底
+                  sender_avatar: (typeof data.agent_avatar === 'string' && data.agent_avatar.startsWith('data:image/')) ? undefined : data.agent_avatar,
                   processSteps: normalizeIncomingProcessSteps(data.processSteps) || [],
                   processMessages: incomingProcessMessages || [],
                   in_reply_to: data.in_reply_to
@@ -1218,11 +1223,10 @@ const Workflow: React.FC<WorkflowProps> = ({
                   sender_id: data.agent_id,
                   sender_type: 'agent',
                   isStreaming: true,
-                  processSteps: normalizeIncomingProcessSteps(data.processSteps) || [],
                   processMessages: incomingProcessMessages || [],
                   ext: {
                     sender_name: data.agent_name,
-                    sender_avatar: data.agent_avatar,
+                    sender_avatar: (typeof data.agent_avatar === 'string' && data.agent_avatar.startsWith('data:image/')) ? undefined : data.agent_avatar,
                     processSteps: normalizeIncomingProcessSteps(data.processSteps) || [],
                     processMessages: incomingProcessMessages || []
                   }
@@ -1237,8 +1241,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                 ...updated[index],
                 content: data.accumulated || (updated[index].content + data.chunk),
                 isStreaming: true,
-                // 更新 processSteps 和 processMessages
-                processSteps: normalizeIncomingProcessSteps(data.processSteps) || updated[index].processSteps || [],
+                // 更新 processMessages
                 processMessages: incomingProcessMessages || updated[index].processMessages || [],
                 ext: {
                   ...updated[index].ext,
@@ -1258,8 +1261,11 @@ const Workflow: React.FC<WorkflowProps> = ({
             const hasImage = (data.content || '').includes('![') || (data.content || '').includes('data:image');
             console.log('[Workflow] Agent stream done:', data.message_id, 'contentLen:', contentLength, 'hasImage:', hasImage, 'processMessages:', incomingProcessMessages?.length || 0, 'error:', data.error);
             
-            // 添加完成日志
-            const finalLogs = [...executionLogs, {
+            // 使用后端返回的执行日志，如果没有则使用前端的日志
+            const backendLogs = data.execution_logs || [];
+            const finalLogs = backendLogs.length > 0 
+              ? backendLogs 
+              : [...executionLogs, {
               id: `done-${Date.now()}`,
               timestamp: Date.now(),
               type: data.error ? 'error' : 'success',
@@ -1267,10 +1273,10 @@ const Workflow: React.FC<WorkflowProps> = ({
             }];
             setExecutionLogs(finalLogs);
             
-            // 延迟后清除执行状态和日志
+            // 延迟后清除执行状态（但保留日志，让它在消息中折叠显示）
             setTimeout(() => {
               setIsExecuting(false);
-              setExecutionLogs([]);
+              // 不再清除日志，让它保留在消息的 ext.log 中
             }, 2000);
             
             setMessages((prev) => {
@@ -1293,10 +1299,8 @@ const Workflow: React.FC<WorkflowProps> = ({
                 isStreaming: false,
                 // 如果后端返回了 media（例如 Gemini 图片生成），即时回显到消息气泡（MediaGallery）
                 media: incomingMedia ?? existing.media,
-                // 保存执行轨迹（包含错误步骤）
-                processSteps: normalizedSteps || existing.processSteps,
                 processMessages: incomingProcessMessages || existing.processMessages,
-                // 保存执行日志到 ext
+                // 保存执行日志到 ext.log（统一使用 log 字段）
                 executionLogs: finalLogs,
                 ext: {
                   ...existing.ext,
@@ -1304,7 +1308,8 @@ const Workflow: React.FC<WorkflowProps> = ({
                   media: incomingMedia ?? existing.ext?.media,
                   processSteps: normalizedSteps || existing.ext?.processSteps,
                   processMessages: incomingProcessMessages || (existing.ext as any)?.processMessages,
-                  executionLogs: finalLogs,  // 持久化执行日志
+                  log: finalLogs,  // 持久化执行日志到 ext.log
+                  executionLogs: finalLogs,  // 向后兼容
                   error: data.error
                 }
               };
@@ -1338,9 +1343,6 @@ const Workflow: React.FC<WorkflowProps> = ({
                     content: '',
                     sender_id: data.agent_id,
                     sender_type: 'agent',
-                    sender_name: data.agent_name,
-                    sender_avatar: data.agent_avatar,
-                    processSteps: normalizeIncomingProcessSteps(data.processSteps),
                     processMessages: incomingProcessMessages,
                     ext: {
                       sender_name: data.agent_name,
@@ -1352,13 +1354,9 @@ const Workflow: React.FC<WorkflowProps> = ({
                   };
                   updated.splice(nextIndex, 0, decisionMessage);
                 } else {
-                  // 如果已有回复消息，将决策步骤合并到其 processSteps 中
+                  // 如果已有回复消息，将决策步骤合并到其 ext.processSteps 中
                   updated[nextIndex] = {
                     ...updated[nextIndex],
-                    processSteps: [
-                      ...(updated[nextIndex].processSteps || []),
-                      ...(normalizeIncomingProcessSteps(data.processSteps) || []),
-                    ],
                     ext: {
                       ...updated[nextIndex].ext,
                       processSteps: [
@@ -1453,7 +1451,6 @@ const Workflow: React.FC<WorkflowProps> = ({
                 if (agentMessageIndex >= 0) {
                   updated[agentMessageIndex] = {
                     ...updated[agentMessageIndex],
-                    processSteps: [...(updated[agentMessageIndex].processSteps || []), ...(data.processSteps || [])],
                     ext: {
                       ...updated[agentMessageIndex].ext,
                       processSteps: [...(updated[agentMessageIndex].ext?.processSteps || []), ...(data.processSteps || [])]
@@ -1666,7 +1663,7 @@ const Workflow: React.FC<WorkflowProps> = ({
         }
       }, 10); // 稍微延迟以确保内容已渲染
     }
-  }, [showAtSelector, atSelectorQuery, mcpServers, workflows]);
+  }, [showAtSelector, atSelectorQuery, mcpServers]);
   
   // 监听点击外部关闭模块选择器
   useEffect(() => {
@@ -1940,11 +1937,6 @@ const Workflow: React.FC<WorkflowProps> = ({
     name: string;
   } | null>(null);
 
-  const [deleteRoundTableTarget, setDeleteRoundTableTarget] = useState<{
-    id: string;
-    name: string;
-  } | null>(null);
-
 
   // 删除会话（执行）
   const performDeleteSession = async (sessionId: string) => {
@@ -1977,30 +1969,6 @@ const Workflow: React.FC<WorkflowProps> = ({
     }
   };
 
-  // 删除会议（执行）
-  const performDeleteRoundTable = async (roundTableId: string) => {
-    try {
-      await deleteRoundTable(roundTableId);
-
-      // 刷新会议列表
-      const [agents, meetings, allSessions] = await Promise.all([
-        getAgents(),
-        getRoundTables(),
-        getSessions(),
-      ]);
-      setPersonaAgents(agents || []);
-      setPersonaMeetings(meetings || []);
-
-      toast({ title: '会议已删除', variant: 'success' });
-    } catch (error) {
-      console.error('[Workflow] Failed to delete round table:', error);
-      toast({
-        title: '删除会议失败',
-        description: error instanceof Error ? error.message : String(error),
-        variant: 'destructive',
-      });
-    }
-  };
 
   // 处理总结的通用函数
   const processSummarize = async (
@@ -2208,18 +2176,6 @@ const Workflow: React.FC<WorkflowProps> = ({
     }
   };
   
-  // 加载工作流列表
-  const loadWorkflows = async () => {
-    try {
-      console.log('[Workflow] Loading workflows...');
-      const workflowList = await getWorkflows();
-      console.log('[Workflow] Loaded workflows:', workflowList);
-      setWorkflows(workflowList);
-    } catch (error) {
-      console.error('[Workflow] Failed to load workflows:', error);
-      setWorkflows([]);
-    }
-  };
   
   // 加载技能包列表
   const loadSkillPacks = async () => {
@@ -2362,128 +2318,15 @@ const Workflow: React.FC<WorkflowProps> = ({
     }
 
     // 检查是否有选定的组件（tag）
-    // 只处理工作流，MCP通过selectedMcpServerIds在正常对话中使用工具
-    const workflowComponents = selectedComponents.filter(c => c.type === 'workflow');
-    if (workflowComponents.length > 0) {
-      // 使用第一个选定的工作流
-      const matchedComponent = workflowComponents[0];
-    const userInput = effectiveInput.trim();
-      
-      if (!userInput) {
-        alert('请输入要执行的内容');
-        return;
-      }
-      
-      if (matchedComponent) {
-        // 先保存用户输入消息
-        let sessionId = currentSessionId;
-        if (!sessionId) {
-          try {
-            const newSession = await createSession(selectedLLMConfigId, userInput.substring(0, 50));
-            sessionId = newSession.session_id;
-            setCurrentSessionId(sessionId);
-            await loadSessions();
-          } catch (error) {
-            console.error('[Workflow] Failed to create session:', error);
-          }
-        }
-        
-        const userMessageId = `msg-${Date.now()}`;
-        const userMessage: Message = {
-          id: userMessageId,
-          role: 'user',
-          content: userInput,
-        };
-        
-        // 发送消息时，强制跳转到最后一条消息
-        wasAtBottomRef.current = true;
-        // 新消息追加到数组后面（显示在底部）
-        setMessages(prev => [...prev, userMessage]);
-        
-        // 保存用户消息（临时会话不保存）
-        if (sessionId && !isTemporarySession) {
-          try {
-            await saveMessage(sessionId, {
-              message_id: userMessageId,
-              role: 'user',
-              content: userInput,
-              model: selectedLLMConfig.model || 'gpt-4',
-            });
-          } catch (error) {
-            console.error('[Workflow] Failed to save user message:', error);
-          }
-        }
-        
-        // 添加感知组件消息
-        await addWorkflowMessage(matchedComponent);
-        
-        // 等待消息添加到列表
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        // 找到刚添加的感知组件消息
-        const currentMessages = messages;
-        const workflowMessages = currentMessages.filter(m => m.role === 'tool' && m.workflowId === matchedComponent.id);
-        let latestWorkflowMessage = workflowMessages[workflowMessages.length - 1];
-        
-        // 如果找不到，从最新的消息中查找
-        if (!latestWorkflowMessage) {
-          // 等待状态更新
-          await new Promise(resolve => setTimeout(resolve, 200));
-          const updatedMessages = messages;
-          const updatedWorkflowMessages = updatedMessages.filter(m => m.role === 'tool' && m.workflowId === matchedComponent.id);
-          latestWorkflowMessage = updatedWorkflowMessages[updatedWorkflowMessages.length - 1];
-        }
-        
-        if (latestWorkflowMessage) {
-          // 添加提示消息给大模型（显示动画）
-          const instructionMessageId = `instruction-${Date.now()}`;
-          const instructionMessage: Message = {
-            id: instructionMessageId,
-            role: 'assistant',
-            content: '',
-            isThinking: true,
-          };
-          // 新消息追加到数组后面（显示在底部）
-          setMessages(prev => [...prev, instructionMessage]);
-          
-          // 更新提示消息内容（带动画效果）
-          setTimeout(() => {
-            setMessages(prev => prev.map(msg =>
-              msg.id === instructionMessageId
-                ? {
-                    ...msg,
-                    content: `📋 收到感知组件指令：${matchedComponent.name} (工作流)，正在执行该步骤...`,
-                    isThinking: false,
-                  }
-                : msg
-            ));
-          }, 500);
-          
-          // 执行感知组件
-          await handleExecuteWorkflow(latestWorkflowMessage.id);
-        }
-        
-        setInput('');
-        return;
-      }
-    }
+    // MCP通过selectedMcpServerIds在正常对话中使用工具
+    // 工作流功能已移除
 
-    // 检查是否有待执行的工作流，如果有则回退到工作流消息之前
-    const lastWorkflowMessage = messages.filter(m => m.role === 'tool' && m.workflowStatus === 'pending').pop();
-    if (lastWorkflowMessage) {
-      const workflowIndex = messages.findIndex(m => m.id === lastWorkflowMessage.id);
-      if (workflowIndex >= 0) {
-        // 回退到工作流消息之前（保留工作流消息之前的所有消息）
-        const targetMessage = workflowIndex > 0 ? messages[workflowIndex - 1] : messages[0];
-        await rollbackMessages(targetMessage.id);
-      }
-    }
 
     // 临时会话：不需要创建新会话，使用固定的临时会话ID
     let sessionId = isTemporarySession ? temporarySessionId : currentSessionId;
     if (!sessionId && !isTemporarySession) {
       try {
-        const newSession = await createSession(selectedLLMConfigId, effectiveInput.trim().substring(0, 50), 'temporary');
+        const newSession = await createSession(selectedLLMConfigId || undefined, effectiveInput.trim().substring(0, 50), 'temporary');
         sessionId = newSession.session_id;
         setCurrentSessionId(sessionId);
         setIsTemporarySession(false);
@@ -2567,6 +2410,10 @@ const Workflow: React.FC<WorkflowProps> = ({
     // 保存用户消息到数据库（临时会话不保存）
     if (sessionId && !isTemporarySession) {
       try {
+        if (!selectedLLMConfig) {
+          toast({ title: '请先选择 LLM 模型', variant: 'destructive' });
+          return;
+        }
         // 保存时包含媒体信息：必须放到 ext 中（后端 /api/sessions/<id>/messages 会忽略 tool_calls）
         const messageData: any = {
           message_id: userMessageId,
@@ -2600,9 +2447,6 @@ const Workflow: React.FC<WorkflowProps> = ({
         const isActorSession = sessionForActor?.session_type === 'topic_general' || sessionForActor?.session_type === 'agent';
         if (isActorSession) {
           const mcp_servers = Array.from(selectedMcpServerIds);
-          const workflow_ids = selectedComponents
-            .filter(c => c.type === 'workflow')
-            .map(c => c.id);
           const skill_pack_ids = selectedComponents
             .filter(c => c.type === 'skillpack')
             .map(c => c.id);
@@ -2611,9 +2455,8 @@ const Workflow: React.FC<WorkflowProps> = ({
             ...(messageData.ext || {}),
           };
           
-          if (mcp_servers.length > 0 || workflow_ids.length > 0 || skill_pack_ids.length > 0) {
+          if (mcp_servers.length > 0 || skill_pack_ids.length > 0) {
             messageData.ext.mcp_servers = mcp_servers;
-            messageData.ext.workflows = workflow_ids;
             messageData.ext.skill_packs = skill_pack_ids;
           }
           messageData.ext.use_tool_calling = toolCallingEnabled;
@@ -2646,6 +2489,10 @@ const Workflow: React.FC<WorkflowProps> = ({
     }
 
     try {
+      if (!selectedLLMConfigId || !selectedLLMConfig) {
+        toast({ title: '请先选择 LLM 模型', variant: 'destructive' });
+        return;
+      }
       // 获取API密钥（Ollama 不需要 API key）
       const apiKey = await getLLMConfigApiKey(selectedLLMConfigId);
       if (selectedLLMConfig.provider !== 'ollama' && !apiKey) {
@@ -2819,16 +2666,7 @@ const Workflow: React.FC<WorkflowProps> = ({
           continue;
         }
         
-        // 如果是 workflow 类型的 tool 消息，转换为 tool 类型
-        if (msg.role === 'tool' && msg.toolType === 'workflow') {
-          const workflowOutput = msg.content || '执行完成';
-          messageHistory.push({
-            role: 'tool',
-            name: msg.workflowName || 'workflow',
-            content: `我自己执行了一些操作，有这样的输出：${workflowOutput}`,
-          });
-        }
-        // 其他 tool 消息（如 MCP）排除
+        // tool 消息（如 MCP）排除
         else if (msg.role === 'tool') {
           continue;
         }
@@ -3994,7 +3832,7 @@ const Workflow: React.FC<WorkflowProps> = ({
         name: sopName.trim(),
         sop_text: sopText.trim(),
         assign_to_session_id: currentSessionId && currentSessionType === 'topic_general' ? currentSessionId : undefined,
-        set_as_current: currentSessionId && currentSessionType === 'topic_general',
+        set_as_current: currentSessionId && currentSessionType === 'topic_general' ? true : undefined,
       });
       
       toast({ title: `SOP "${result.name}" 创建成功`, variant: 'success' });
@@ -4252,17 +4090,13 @@ const Workflow: React.FC<WorkflowProps> = ({
       .filter(s => s.name.toLowerCase().includes(atSelectorQuery.toLowerCase()))
       .map(s => ({ type: 'mcp' as const, id: s.id, name: s.name, displayName: s.display_name || s.name }));
     
-    const workflowList = workflows
-      .filter(w => w.name.toLowerCase().includes(atSelectorQuery.toLowerCase()))
-      .map(w => ({ type: 'workflow' as const, id: w.workflow_id, name: w.name, displayName: w.name }));
-    
     // 话题参与者（Agent）
     const agentList = topicParticipants
       .filter(p => p.participant_type === 'agent' && (p.name || '').toLowerCase().includes(atSelectorQuery.toLowerCase()))
       .map(p => ({ type: 'agent' as const, id: p.participant_id, name: p.name || p.participant_id, displayName: p.name || p.participant_id, avatar: p.avatar }));
     
-    return [...agentList, ...mcpList, ...workflowList];
-  }, [mcpServers, workflows, atSelectorQuery, topicParticipants]);
+    return [...agentList, ...mcpList];
+  }, [mcpServers, atSelectorQuery, topicParticipants]);
   
   // 处理模块选择（/模块命令）
   const handleModuleSelect = async (moduleId: string, batchId: string, batchName: string) => {
@@ -4538,7 +4372,7 @@ const Workflow: React.FC<WorkflowProps> = ({
   };
   
   // 选择感知组件（添加为 tag）
-  const handleSelectComponent = async (component: { type: 'mcp' | 'workflow' | 'skillpack' | 'agent'; id: string; name: string }) => {
+  const handleSelectComponent = async (component: { type: 'mcp' | 'skillpack' | 'agent'; id: string; name: string }) => {
     if (atSelectorIndex === -1) return;
     
     // 如果是智能体，直接在文本中插入 @名字
@@ -4578,18 +4412,6 @@ const Workflow: React.FC<WorkflowProps> = ({
     );
     
     if (!isAlreadySelected) {
-      // 如果是workflow，自动初始化（使用池化管理）
-      if (component.type === 'workflow') {
-        try {
-          console.log(`[Workflow] Auto-initializing workflow: ${component.name} (${component.id})`);
-          const instance = await workflowPool.acquireWorkflow(component.id);
-          console.log(`[Workflow] Workflow initialized with ${instance.mcpClients.size} MCP clients`);
-        } catch (error) {
-          console.error(`[Workflow] Failed to initialize workflow:`, error);
-          // 即使初始化失败，也允许添加组件（可能后续会重试）
-        }
-      }
-      
       // 添加到已选定的组件列表
       setSelectedComponents(prev => [...prev, component]);
       
@@ -4648,12 +4470,6 @@ const Workflow: React.FC<WorkflowProps> = ({
   const handleRemoveComponent = (index: number) => {
     const component = selectedComponents[index];
     if (component) {
-      // 如果是workflow，将实例放回池中
-      if (component.type === 'workflow') {
-        workflowPool.returnToPool(component.id);
-        console.log(`[Workflow] Returned workflow instance to pool: ${component.name} (${component.id})`);
-      }
-      
       // 如果是MCP服务器，从selectedMcpServerIds中移除
       if (component.type === 'mcp') {
         setSelectedMcpServerIds(prev => {
@@ -4728,19 +4544,6 @@ const Workflow: React.FC<WorkflowProps> = ({
     });
   };
 
-  const handleSelectWorkflowFromThumbnail = (workflowId: string) => {
-    const workflow = workflows.find(w => w.workflow_id === workflowId);
-    if (workflow) {
-      const component = { type: 'workflow' as const, id: workflowId, name: workflow.name };
-      if (!selectedComponents.some(c => c.type === 'workflow' && c.id === workflowId)) {
-        setSelectedComponents(prev => [...prev, component]);
-      }
-    }
-  };
-
-  const handleDeselectWorkflowFromThumbnail = (workflowId: string) => {
-    setSelectedComponents(prev => prev.filter(c => !(c.type === 'workflow' && c.id === workflowId)));
-  };
 
   const handleSelectSkillPackFromThumbnail = (skillPackId: string) => {
     const skillPack = allSkillPacks.find(sp => sp.skill_pack_id === skillPackId);
@@ -4780,10 +4583,6 @@ const Workflow: React.FC<WorkflowProps> = ({
     });
   };
 
-  // 获取选中的workflow IDs
-  const selectedWorkflowIds = new Set(
-    selectedComponents.filter(c => c.type === 'workflow').map(c => c.id)
-  );
 
   // 获取选中的skill pack IDs
   const selectedSkillPackIds = new Set(
@@ -4791,7 +4590,7 @@ const Workflow: React.FC<WorkflowProps> = ({
   );
 
   // 处理拖拽组件到对话框
-  const handleDropComponent = async (component: { type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string }) => {
+  const handleDropComponent = async (component: { type: 'mcp' | 'skillpack'; id: string; name: string }) => {
     if (!currentSessionId) {
       // 如果没有会话，先创建
       try {
@@ -4812,8 +4611,8 @@ const Workflow: React.FC<WorkflowProps> = ({
     }
   };
   
-  // 添加工作流消息（保存到数据库，以便后端API能够找到并执行）
-  const addWorkflowMessage = async (component: { type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string }) => {
+  // 添加组件消息（仅支持 MCP 和技能包）
+  const addWorkflowMessage = async (component: { type: 'mcp' | 'skillpack'; id: string; name: string }) => {
     // 如果是技能包，不需要执行工作流，只需要在系统提示词中包含技能包内容
     if (component.type === 'skillpack') {
       // 技能包通过selectedComponents管理，在构建systemPrompt时包含
@@ -4829,152 +4628,21 @@ const Workflow: React.FC<WorkflowProps> = ({
       });
       return;
     }
-    const workflowMessageId = `workflow-${Date.now()}`;
     
-    // 如果是工作流，获取详细信息（包括节点）
-    let workflowDetails: WorkflowType | null = null;
-    if (component.type === 'workflow') {
-      try {
-        workflowDetails = await getWorkflow(component.id);
-        console.log('[Workflow] Loaded workflow details:', workflowDetails);
-      } catch (error) {
-        console.error('[Workflow] Failed to load workflow details:', error);
-      }
-    }
-    
-    const workflowMessage: Message = {
-      id: workflowMessageId,
-      role: 'tool',
-      content: '',
-      toolType: component.type, // 'workflow' 或 'mcp'
-      workflowId: component.id,
-      workflowName: component.name,
-      workflowStatus: 'pending',
-      workflowConfig: workflowDetails?.config, // 保存工作流配置（节点和连接）
-    };
-    
-    // 新消息追加到数组后面（显示在底部）
-    setMessages(prev => [...prev, workflowMessage]);
-    
-    // 保存消息到数据库，tool_calls字段包含组件信息，以便后端API能够找到并执行（临时会话不保存）
-    if (currentSessionId && !isTemporarySession) {
-      try {
-        await saveMessage(currentSessionId, {
-          message_id: workflowMessageId,
-          role: 'tool',
-          content: '',
-          tool_calls: {
-            toolType: component.type,
-            workflowId: component.id,
-            workflowName: component.name,
-            workflowStatus: 'pending',
-            workflowConfig: workflowDetails?.config,
-          },
-        });
-        console.log('[Workflow] Saved workflow message to database:', workflowMessageId);
-      } catch (error) {
-        console.error('[Workflow] Failed to save workflow message:', error);
-      }
+    // MCP 服务器通过 selectedMcpServerIds 管理，不需要添加消息
+    if (component.type === 'mcp') {
+      return;
     }
   };
   
-  // 执行工作流
+  // 执行工作流（已移除，不再支持工作流功能）
   const handleExecuteWorkflow = async (messageId: string) => {
-    const message = messages.find(m => m.id === messageId);
-    if (!message || !message.workflowId) {
-      console.error('[Workflow] Cannot execute workflow: message not found or missing workflowId', { messageId, message });
-      alert('无法执行工作流：缺少必要信息');
-      return;
-    }
-    
-    // 检查是否选择了LLM配置
-    if (!selectedLLMConfigId || !selectedLLMConfig) {
-      alert('请先选择 LLM 模型');
-      return;
-    }
-    
-    // 获取上一条消息作为输入（跳过其他工作流消息，找到用户或助手消息）
-    const messageIndex = messages.findIndex(m => m.id === messageId);
-    let previousMessage: Message | null = null;
-    for (let i = messageIndex - 1; i >= 0; i--) {
-      const msg = messages[i];
-      // 跳过工作流消息，找到用户或助手消息
-      if (msg.role === 'user' || msg.role === 'assistant') {
-        previousMessage = msg;
-        break;
-      }
-    }
-    
-    const input = previousMessage?.content || '';
-    
-    if (!input) {
-      alert('上一条消息为空，无法执行工作流');
-      return;
-    }
-    
-    // 更新消息状态为运行中
-    setMessages(prev => prev.map(msg =>
-      msg.id === messageId
-        ? { ...msg, workflowStatus: 'running' }
-        : msg
-    ));
-    
-    try {
-      // 使用新的 message_execution API 执行感知组件
-      const execution = await executeMessageComponent(
-        messageId,
-        selectedLLMConfigId,
-        input
-      );
-      
-      // 更新消息状态和结果
-      const result = execution.result || execution.error_message || '执行完成';
-      const status = execution.status === 'completed' ? 'completed' : 'error';
-      
-      setMessages(prev => prev.map(msg =>
-        msg.id === messageId
-          ? { 
-              ...msg, 
-              workflowStatus: status,
-              content: result,
-            }
-          : msg
-      ));
-      
-      // 注意：不再直接保存消息到数据库，执行结果已通过 message_execution 表管理
-      console.log('[Workflow] Execution completed:', execution);
-      
-    } catch (error) {
-      console.error('[Workflow] Failed to execute workflow:', error);
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      
-      setMessages(prev => prev.map(msg =>
-        msg.id === messageId
-          ? { 
-              ...msg, 
-              workflowStatus: 'error',
-              content: `❌ 执行失败: ${errorMsg}`,
-            }
-          : msg
-      ));
-      
-      // 注意：错误信息已通过 message_execution 表记录
-      console.error('[Workflow] Execution error:', errorMsg);
-    } finally {
-      // 执行完成后，将workflow实例放回池中
-      if (message?.workflowId) {
-        workflowPool.returnToPool(message.workflowId);
-        console.log(`[Workflow] Returned workflow instance to pool: ${message.workflowId}`);
-      }
-    }
+    console.warn('[Workflow] Workflow execution is no longer supported');
   };
 
-  // 删除工作流消息
+  // 删除工作流消息（已移除，不再支持工作流功能）
   const handleDeleteWorkflowMessage = async (messageId: string) => {
-    if (!confirm('确定要删除这个感知流程吗？')) {
-      return;
-    }
-    
+    console.warn('[Workflow] Workflow message deletion is no longer supported');
     // 从消息列表中删除
     setMessages(prev => prev.filter(msg => msg.id !== messageId));
     
@@ -5133,6 +4801,8 @@ const Workflow: React.FC<WorkflowProps> = ({
           hasMCPDetail ||
           hasToolCallsArray ||
           hasProcessMessages ||
+          // 流式/生成中也必须走 SplitView，才能在“思维链图标右侧同一行”展示滚动日志
+          message.isStreaming ||
           message.isThinking ||
           message.currentStep ||
           message.thoughtSignature);
@@ -5164,11 +4834,6 @@ const Workflow: React.FC<WorkflowProps> = ({
             isStreaming={message.isStreaming}
             currentStep={message.currentStep}
             toolType={message.toolType}
-            workflowId={message.workflowId}
-            workflowName={message.workflowName}
-            workflowStatus={message.workflowStatus}
-            workflowResult={message.workflowResult}
-            workflowConfig={message.workflowConfig}
             toolCalls={Array.isArray(message.toolCalls) ? message.toolCalls : undefined}
             mcpDetail={message.mcpdetail}
             thoughtSignature={message.thoughtSignature}
@@ -5187,7 +4852,16 @@ const Workflow: React.FC<WorkflowProps> = ({
             }}
             onRetry={() => handleRetryMessage(message.id)}
             processMessages={message.processMessages}
-            executionLogs={message.executionLogs || (message.ext as any)?.executionLogs}
+            executionLogs={
+              (() => {
+                // 将全局 executionLogs 绑定到“当前正在生成/思考的那条消息”
+                // 旧逻辑用 find() 取第一条 streaming 消息，若存在残留 isStreaming=true 的旧消息会绑定错，导致右侧日志不显示
+                if (message.isStreaming || message.isThinking) {
+                  return message.executionLogs ?? (message.ext as any)?.executionLogs ?? executionLogs;
+                }
+                return message.executionLogs || (message.ext as any)?.executionLogs;
+              })()
+            }
           />
         );
       }
@@ -5281,7 +4955,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                   />
                 </MessageBubbleContainer>
               </div>
-              {message.role === 'tool' && (message.toolType === 'mcp' || message.toolType === 'workflow') && (
+              {message.role === 'tool' && message.toolType === 'mcp' && (
                 <PluginExecutionPanel messageId={message.id} sessionId={currentSessionId} toolType={message.toolType} />
               )}
             </div>
@@ -5352,11 +5026,13 @@ const Workflow: React.FC<WorkflowProps> = ({
       collapsedThinking,
       currentSessionAvatar,
       currentSessionId,
+      executionLogs,
       getPrevMessageContent,
       handleExecuteWorkflow,
       handleRetryMessage,
       handleDeleteWorkflowMessage,
       isLoading,
+      messages,
       openSingleMediaViewer,
       renderMessageContent,
       selectedLLMConfig?.provider,
@@ -5403,10 +5079,6 @@ const Workflow: React.FC<WorkflowProps> = ({
     }
   };
 
-  const openMeetingFromPersona = (roundTableId: string) => {
-    setShowPersonaPanel(false);
-    onSelectMeeting?.(roundTableId);
-  };
 
   useEffect(() => {
     if (!showPersonaPanel) return;
@@ -5414,21 +5086,18 @@ const Workflow: React.FC<WorkflowProps> = ({
     (async () => {
       try {
         setIsLoadingPersonaList(true);
-        const [agents, meetings, sessions] = await Promise.all([
+        const [agents, sessions] = await Promise.all([
           getAgents(),
-          getRoundTables(),
           getSessions(),
         ]);
         if (canceled) return;
         setPersonaAgents(agents || []);
-        setPersonaMeetings(meetings || []);
         const topics = (sessions || []).filter(s => s.session_type === 'topic_general');
         setPersonaTopics(topics);
       } catch (error) {
         console.error('[Workflow] Failed to load persona list:', error);
         if (canceled) return;
         setPersonaAgents([]);
-        setPersonaMeetings([]);
         setPersonaTopics([]);
       } finally {
         if (!canceled) setIsLoadingPersonaList(false);
@@ -5469,32 +5138,6 @@ const Workflow: React.FC<WorkflowProps> = ({
     };
   }, [messages, avatarCacheTick]);
 
-  // 新建 Meeting
-  const handleCreateNewMeeting = async () => {
-    if (!newMeetingName.trim()) {
-      toast({ title: '请输入会议名称', variant: 'destructive' });
-      return;
-    }
-    setIsCreatingMeeting(true);
-    try {
-      const newMeeting = await createRoundTable(newMeetingName.trim());
-      toast({ title: '会议已创建', variant: 'success' });
-      setShowNewMeetingDialog(false);
-      setNewMeetingName('');
-      setShowPersonaPanel(false);
-      // 切换到新创建的会议
-      openMeetingFromPersona(newMeeting.round_table_id);
-    } catch (error) {
-      console.error('[Workflow] Failed to create meeting:', error);
-      toast({ 
-        title: '创建失败', 
-        description: error instanceof Error ? error.message : String(error),
-        variant: 'destructive'
-      });
-    } finally {
-      setIsCreatingMeeting(false);
-    }
-  };
 
 
   const {
@@ -5536,20 +5179,12 @@ const Workflow: React.FC<WorkflowProps> = ({
   return (
     <>
     <div className="workflow-chat-outer h-full flex flex-col bg-gray-50 dark:bg-[#1a1a1a]">
-
-      {/* 主要内容区域：聊天界面 - GNOME 风格布局 */}
       <div className="flex-1 flex min-h-0 p-2 gap-2">
-        {/* 左侧配置面板 - 已隐藏，功能移至底部工具栏 */}
-        {/* 聊天界面 - 全屏布局（主界面无外边框/无外边距） */}
         <div className="workflow-chat-panel flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-[#2d2d2d] overflow-hidden">
-        {/* 状态栏 - 优化样式 */}
           <div className="workflow-chat-header border-b border-gray-200 dark:border-[#404040] px-3 py-0.5 bg-gradient-to-r from-gray-50 to-white dark:from-gray-800 dark:to-gray-900 flex-shrink-0">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center space-x-2">
-              {/* 头像 - 可点击配置 */}
-              <div 
-                className="w-7 h-7 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary-400 hover:ring-offset-1 transition-all overflow-hidden"
-                onClick={async () => {
+                  <div className="w-7 h-7 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary-400 hover:ring-offset-1 transition-all overflow-hidden" onClick={async () => {
                   if (currentSessionId && !isTemporarySession) {
                     // 从当前会话获取数据
                     let currentSession =
@@ -5737,7 +5372,7 @@ const Workflow: React.FC<WorkflowProps> = ({
               setChatScrollEl(el);
             }}
             className="workflow-chat-messages flex-1 overflow-y-auto hide-scrollbar px-3 py-2 space-y-2 relative bg-gray-50/50 dark:bg-gray-950/50"
-            style={{ scrollBehavior: 'auto', paddingBottom: floatingComposerPadding }}
+            style={{ scrollBehavior: 'auto' }}
             onWheel={(e) => {
               // hybrid 自动触发：接近顶部时继续上拉（滚轮向上）只触发一次
               if (e.deltaY < 0 && isNearTop && scrollTopRef.current < 80) {
@@ -5758,11 +5393,16 @@ const Workflow: React.FC<WorkflowProps> = ({
               
               // 检测用户是否在滚动（排除程序控制的滚动）
               if (!isLoadingMoreRef.current) {
+                // 如果用户手动滚动离开底部，标记为用户正在查看历史消息
+                const atBottom = shouldAutoScroll();
+                if (!atBottom) {
                 isUserScrollingRef.current = true;
-                // 500ms 后重置，认为用户停止滚动
-                setTimeout(() => {
+                  // 用户手动滚动后，只有在用户主动滚动回底部时才重置
+                  // 不设置自动重置，让用户完全控制滚动行为
+                } else {
+                  // 用户滚动回底部，允许自动跟随
                   isUserScrollingRef.current = false;
-                }, 500);
+                }
               }
               
               // 检测是否接近顶部（距离顶部小于150px）- 用于显示和自动加载更多历史消息
@@ -5906,7 +5546,9 @@ const Workflow: React.FC<WorkflowProps> = ({
                       <div className="ml-3">
                         <ProcessStepsViewer 
                           processMessages={state.processMessages || []} 
+                          executionLogs={state.executionLogs || []}
                           isThinking={state.status === 'deciding'}
+                          isStreaming={false}
                           hideTitle
                           defaultExpanded
                         />
@@ -5918,17 +5560,7 @@ const Workflow: React.FC<WorkflowProps> = ({
             </div>
           )}
           
-          {/* 执行日志滚动区域（无边框，纯文本） */}
-          {(isExecuting || executionLogs.length > 0) && (
-            <div className="px-4 py-1">
-              <ExecutionLogViewer
-                logs={executionLogs}
-                isActive={isExecuting}
-                maxHeight={100}
-                collapsed={messages.some(m => m.isStreaming && m.content && m.content.length > 10)}
-              />
-            </div>
-          )}
+          {/* 执行日志已移至思维链图标右侧，不再在此处显示 */}
           
           <div ref={messagesEndRef} />
           
@@ -5983,7 +5615,7 @@ const Workflow: React.FC<WorkflowProps> = ({
           // 生成状态文本和工具信息
           let statusText = '';
           let activeToolName = '';
-          let activeToolType: 'mcp' | 'workflow' | 'thinking' | '' = '';
+          let activeToolType: 'mcp' | 'thinking' | '' = '';
           
           if (isLoading && streamingMessage) {
             if (currentThinkingStep) {
@@ -6012,11 +5644,11 @@ const Workflow: React.FC<WorkflowProps> = ({
           return null;
         })()}
 
-        {/* 输入框（浮岛悬浮，移动端预留安全区） */}
-          <div className={`floating-composer-container ${floatingComposerContainerClass.replace('z-10', 'z-20')}`}>
+        {/* 输入框（固定在底部，不再浮动） */}
+          <div className="flex-shrink-0 px-2 sm:px-4 pb-3 pt-2 bg-white dark:bg-[#2d2d2d] border-t border-gray-200 dark:border-[#404040] workflow-chat-input-area">
           <div 
             ref={floatingComposerRef}
-            className={`${floatingComposerInnerClass} relative transition-colors ${
+            className={`${floatingComposerInnerClass.replace('absolute left-2 right-2 sm:left-4 sm:right-4 bottom-3', '')} relative transition-colors ${
               isDraggingOver ? 'ring-2 ring-primary-400/30' : ''
             }`}
             onDragOver={handleDragOver}
@@ -6249,7 +5881,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                                 data: item.data,
                                 url: item.url,
                                 messageId: quotedMsg.id,
-                                role: quotedMsg.role,
+                                role: quotedMsg.role === 'system' ? 'user' : quotedMsg.role,
                               });
                             }}
                           />
@@ -6273,26 +5905,24 @@ const Workflow: React.FC<WorkflowProps> = ({
 
           {/* 工具 Tag 栏 - 常驻显示，左侧工具tag，右侧模型选择 */}
           <div className="flex items-center justify-between px-2.5 pt-2.5 pb-3">
-            {/* 左侧：附件入口（合并 MCP / 工作流 / 技能包 / 附件） */}
+            {/* 左侧：插件入口（合并 MCP / 技能包 / 媒体） */}
             <div className="flex items-center gap-1 flex-nowrap flex-1 min-w-0 overflow-hidden">
               <AttachmentMenu
                 mcpServers={mcpServers}
-                workflows={workflows}
                 skillPacks={allSkillPacks}
                 selectedMcpServerIds={selectedMcpServerIds}
-                selectedWorkflowIds={selectedWorkflowIds}
                 selectedSkillPackIds={selectedSkillPackIds}
                 connectedMcpServerIds={connectedMcpServerIds}
                 connectingMcpServerIds={connectingServers}
                 onSelectMCP={handleSelectMCPFromThumbnail}
                 onDeselectMCP={handleDeselectMCPFromThumbnail}
                 onConnectMCP={handleConnectServer}
-                onSelectWorkflow={handleSelectWorkflowFromThumbnail}
-                onDeselectWorkflow={handleDeselectWorkflowFromThumbnail}
                 onSelectSkillPack={handleSelectSkillPackFromThumbnail}
                 onDeselectSkillPack={handleDeselectSkillPackFromThumbnail}
                 onAttachFile={handleAttachFile}
                 attachedCount={attachedMedia.length}
+                toolCallingEnabled={toolCallingEnabled}
+                onToggleToolCalling={onToggleToolCalling}
               />
 
               {/* 人设按钮 - 话题会话中隐藏 */}
@@ -6385,10 +6015,10 @@ const Workflow: React.FC<WorkflowProps> = ({
                         const supportedInputs: string[] = selectedLLMConfig.metadata?.supportedInputs ?? [];
                         const supportedOutputs: string[] = selectedLLMConfig.metadata?.supportedOutputs ?? [];
                         const caps = [];
-                        if (enableThinking) caps.push(<Brain key="t" className="w-2.5 h-2.5 text-purple-400" title="深度思考" />);
-                        if (supportedInputs.includes('image')) caps.push(<Eye key="v" className="w-2.5 h-2.5 text-yellow-400" title="视觉" />);
-                        if (supportedInputs.includes('audio')) caps.push(<Volume2 key="a" className="w-2.5 h-2.5 text-neon-400" title="音频" />);
-                        if (supportedOutputs.includes('image')) caps.push(<Paintbrush key="i" className="w-2.5 h-2.5 text-red-400" title="生图" />);
+                        if (enableThinking) caps.push(<Brain key="t" className="w-2.5 h-2.5 text-purple-400" />);
+                        if (supportedInputs.includes('image')) caps.push(<Eye key="v" className="w-2.5 h-2.5 text-yellow-400" />);
+                        if (supportedInputs.includes('audio')) caps.push(<Volume2 key="a" className="w-2.5 h-2.5 text-neon-400" />);
+                        if (supportedOutputs.includes('image')) caps.push(<Paintbrush key="i" className="w-2.5 h-2.5 text-red-400" />);
                         return caps.length > 0 ? <div className="flex items-center gap-0.5">{caps}</div> : null;
                       })()}
                     </>
@@ -6417,27 +6047,12 @@ const Workflow: React.FC<WorkflowProps> = ({
                   );
                 })()}
 
-                {/* ToolCall 开关 */}
-                <div className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-gray-200/70 dark:border-[#404040]/70 bg-white/70 dark:bg-[#2d2d2d]/70">
-                  <Checkbox
-                    id="workflow-toolcall-toggle"
-                    checked={toolCallingEnabled}
-                    onCheckedChange={(checked) => onToggleToolCalling?.(Boolean(checked))}
-                  />
-                  <Label
-                    htmlFor="workflow-toolcall-toggle"
-                    className="text-[11px] text-gray-600 dark:text-[#a0a0a0] cursor-pointer"
-                    title={toolCallingEnabled ? '已启用 ToolCall' : '已关闭 ToolCall'}
-                  >
-                    ToolCall
-                  </Label>
-                </div>
               </div>
             )}
           </div>
 
           <div className="flex space-x-1.5 px-2 pb-1.5">
-            {/* 附件预览区域 - 缩略图画廊样式 */}
+            {/* 媒体预览区域 - 缩略图画廊样式 */}
             {attachedMedia.length > 0 && (
               <div className="mb-1 flex flex-wrap gap-1.5">
                 {attachedMedia.map((media, index) => (
@@ -6446,7 +6061,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                       <div className="w-12 h-12 rounded-lg overflow-hidden border border-gray-200/60 dark:border-[#404040]/60 hover:border-primary-500 dark:hover:border-primary-500 transition-all hover:scale-105">
                         <img
                           src={media.preview || ensureDataUrlFromMaybeBase64(media.data, media.mimeType)}
-                          alt={`附件 ${index + 1}`}
+                          alt={`媒体 ${index + 1}`}
                           className="w-full h-full object-cover"
                         />
                       </div>
@@ -6473,7 +6088,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                         setAttachedMedia(prev => prev.filter((_, i) => i !== index));
                       }}
                       className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
-                      title="删除附件"
+                      title="删除媒体"
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -6503,7 +6118,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                             <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-primary-100 dark:bg-primary-900/30 border border-primary-300 dark:border-primary-700 flex-shrink-0 animate-pulse">
                               <Plug className="w-3 h-3 text-primary-600 dark:text-primary-400" />
                               <span className="text-[11px] font-medium text-primary-700 dark:text-primary-300 max-w-[80px] truncate">
-                                {activeMcp?.displayName || activeToolName}
+                                {activeMcp?.display_name || activeToolName}
                               </span>
                             </div>
                           );
@@ -6740,7 +6355,10 @@ const Workflow: React.FC<WorkflowProps> = ({
                     <>
                       {/* 发送按钮 - 萤绿色 */}
                       <Button
-                        onClick={handleSend}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          handleSend();
+                        }}
                         disabled={(!input.trim() && attachedMedia.length === 0) || !selectedLLMConfig}
                         variant="primary"
                         size="sm"
@@ -6770,6 +6388,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                 </button>
               </div>
             )}
+          </div>
               
           {/* /模块 选择器 */}
           {showModuleSelector && (
@@ -6885,7 +6504,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                   <div className="text-xs font-medium text-gray-500 dark:text-[#b0b0b0] px-3 py-1.5 flex items-center justify-between">
                     <span>MCP 服务器</span>
                     <span className="text-[10px]">
-                      ({connectedMcpServerIds.size}/{mcpServers.length}已连接)
+                      ({connectedMcpServerIds.size} / {mcpServers.length} 已连接)
                     </span>
                   </div>
                   {mcpServers
@@ -6896,7 +6515,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                       const component = { type: 'mcp' as const, id: server.id, name: server.name };
                       const selectableComponents = getSelectableComponents();
                       const componentIndex = selectableComponents.findIndex(
-                        (c: { type: 'mcp' | 'workflow'; id: string; name: string }) =>
+                        (c) =>
                           c.id === component.id && c.type === component.type
                       );
                       const isSelected = componentIndex === selectedComponentIndex;
@@ -6960,53 +6579,8 @@ const Workflow: React.FC<WorkflowProps> = ({
                 </div>
               )}
 
-              {/* 工作流列表 */}
-              {workflows.filter(w => w.name.toLowerCase().includes(atSelectorQuery)).length > 0 && (
-                <div className="py-1">
-                  <div className="text-xs font-medium text-gray-500 dark:text-[#b0b0b0] px-3 py-1.5">
-                    工作流
-                  </div>
-                  {workflows
-                    .filter(w => w.name.toLowerCase().includes(atSelectorQuery))
-                    .map((workflow) => {
-                      const component = { type: 'workflow' as const, id: workflow.workflow_id, name: workflow.name };
-                      const selectableComponents = getSelectableComponents();
-                      const componentIndex = selectableComponents.findIndex(
-                        (c: { type: 'mcp' | 'workflow'; id: string; name: string }) =>
-                          c.id === component.id && c.type === component.type
-                      );
-                      const isSelected = componentIndex === selectedComponentIndex;
-
-                      return (
-                        <div
-                          key={workflow.workflow_id}
-                          onMouseDown={(e) => {
-                            e.preventDefault(); // 防止触发输入框的 blur
-                          }}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            if (blurTimeoutRef.current) {
-                              clearTimeout(blurTimeoutRef.current);
-                              blurTimeoutRef.current = null;
-                            }
-                            handleSelectComponent(component);
-                          }}
-                          className={`px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer flex items-center space-x-2 ${
-                            isSelected ? 'bg-primary-100 dark:bg-primary-900/30' : ''
-                          }`}
-                        >
-                          <WorkflowIcon className="w-4 h-4 text-primary-500 flex-shrink-0" />
-                          <span className="text-sm text-gray-900 dark:text-[#ffffff]">{workflow.name}</span>
-                        </div>
-                      );
-                    })}
-                </div>
-              )}
-
               {/* 无匹配结果 */}
               {mcpServers.filter(s => s.name.toLowerCase().includes(atSelectorQuery.toLowerCase())).length === 0 &&
-                workflows.filter(w => w.name.toLowerCase().includes(atSelectorQuery.toLowerCase())).length === 0 &&
                 topicParticipants.filter(p => p.participant_type === 'agent' && (p.name || '').toLowerCase().includes(atSelectorQuery.toLowerCase())).length === 0 && (
                   <div className="px-3 py-2 text-xs text-gray-500 dark:text-[#b0b0b0] text-center">
                     未找到匹配的组件或智能体
@@ -7014,9 +6588,6 @@ const Workflow: React.FC<WorkflowProps> = ({
                 )}
             </div>
           )}
-            </div>
-          </div>
-        </div>
           
           {/* 人设编辑弹窗 */}
           <SystemPromptEditDialog
@@ -7106,7 +6677,13 @@ const Workflow: React.FC<WorkflowProps> = ({
           />
 
           {/* 模型选择对话框 */}
-          <Dialog open={showModelSelectDialog} onOpenChange={setShowModelSelectDialog}>
+          <Dialog open={showModelSelectDialog} onOpenChange={(open) => {
+            setShowModelSelectDialog(open);
+            if (!open) {
+              // 关闭对话框时重置 Tab 选择
+              setSelectedProviderTab(null);
+            }
+          }}>
             <DialogContent className="max-w-md">
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
@@ -7117,17 +6694,140 @@ const Workflow: React.FC<WorkflowProps> = ({
                   选择一个 LLM 模型用于对话
                 </DialogDescription>
               </DialogHeader>
-              {/* 动态高度：根据模型数量自适应，最大 60vh 后变为滚动 */}
-              <div 
-                className="overflow-y-auto pr-2"
+              {/* Tab 页签和模型列表 */}
+              {(() => {
+                // 按供应商分组
+                const groupedByProvider = new Map<string, LLMConfigFromDB[]>();
+                llmConfigs.forEach(config => {
+                  const provider = config.provider || 'other';
+                  if (!groupedByProvider.has(provider)) {
+                    groupedByProvider.set(provider, []);
+                  }
+                  groupedByProvider.get(provider)!.push(config);
+                });
+                
+                const providerEntries = Array.from(groupedByProvider.entries());
+                
+                // 如果没有选中的 Tab，默认选中第一个
+                const currentTab = selectedProviderTab || (providerEntries.length > 0 ? providerEntries[0][0] : null);
+                
+                // 获取供应商信息
+                const getProviderName = (provider: string): string => {
+                  const providerObj = providers.find(p => p.provider_type === provider || p.provider_id === provider);
+                  if (providerObj) return providerObj.name;
+                  // 默认供应商名称映射
+                  const providerNames: Record<string, string> = {
+                    openai: 'OpenAI',
+                    anthropic: 'Anthropic',
+                    gemini: 'Google Gemini',
+                    deepseek: 'DeepSeek',
+                    ollama: 'Ollama',
+                    local: 'Local',
+                    custom: 'Custom',
+                  };
+                  return providerNames[provider] || provider;
+                };
+                
+                // 获取供应商图标
+                const getProviderIconElement = (provider: string, configs: LLMConfigFromDB[]): React.ReactNode => {
+                  const providerInfo = providers.find(p => p.provider_type === provider || p.provider_id === provider);
+                  if (!providerInfo) return null;
+                  
+                  const iconInfo = getProviderIcon(configs[0], providers);
+                  if (iconInfo.logoLight || iconInfo.logoDark) {
+                    return (
+                      <>
+                        {iconInfo.logoLight && (
+                          <img 
+                            src={iconInfo.logoLight} 
+                            alt={getProviderName(provider)} 
+                            className="w-4 h-4 object-cover rounded dark:hidden"
+                          />
+                        )}
+                        {iconInfo.logoDark && (
+                          <img 
+                            src={iconInfo.logoDark} 
+                            alt={getProviderName(provider)} 
+                            className="w-4 h-4 object-cover rounded hidden dark:block"
+                          />
+                        )}
+                        {iconInfo.logoLight && !iconInfo.logoDark && (
+                          <img 
+                            src={iconInfo.logoLight} 
+                            alt={getProviderName(provider)} 
+                            className="w-4 h-4 object-cover rounded hidden dark:block"
+                          />
+                        )}
+                        {!iconInfo.logoLight && iconInfo.logoDark && (
+                          <img 
+                            src={iconInfo.logoDark} 
+                            alt={getProviderName(provider)} 
+                            className="w-4 h-4 object-cover rounded dark:hidden"
+                          />
+                        )}
+                      </>
+                    );
+                  } else {
+                    return (
+                      <span className="text-sm" style={{ filter: 'saturate(1.2)' }}>
+                        {iconInfo.icon}
+                      </span>
+                    );
+                  }
+                };
+                
+                return (
+                  <div className="flex flex-col h-full">
+                    {/* Tab 页签 */}
+                    <div className="flex border-b border-gray-200 dark:border-[#404040] overflow-x-auto no-scrollbar">
+                      {providerEntries.map(([provider, configs]) => {
+                        const providerName = getProviderName(provider);
+                        const isActive = currentTab === provider;
+                        const providerIcon = getProviderIconElement(provider, configs);
+                        
+                        return (
+                          <button
+                            key={provider}
+                            onClick={() => setSelectedProviderTab(provider)}
+                            className={`
+                              flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors whitespace-nowrap
+                              border-b-2
+                              ${isActive
+                                ? 'border-primary-600 dark:border-primary-400 text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20'
+                                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
+                              }
+                            `}
+                          >
+                            {providerIcon && (
+                              <div className="w-4 h-4 flex items-center justify-center flex-shrink-0">
+                                {providerIcon}
+                              </div>
+                            )}
+                            <span>{providerName}</span>
+                            <span className={`
+                              text-xs px-1.5 py-0.5 rounded-full
+                              ${isActive
+                                ? 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300'
+                                : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+                              }
+                            `}>
+                              {configs.length}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    
+                    {/* 当前 Tab 的模型列表 */}
+                    <div 
+                      className="flex-1 overflow-y-auto pr-2"
                 style={{ 
-                  maxHeight: '60vh',
-                  height: llmConfigs.length <= 5 ? 'auto' : undefined,
+                        maxHeight: '50vh',
                 }}
               >
+                      {currentTab && groupedByProvider.has(currentTab) && (
                 <div className="space-y-1 py-2">
-                  {/* 模型列表 - 使用供应商 logo 或自定义 logo */}
-                  {llmConfigs.map((config) => {
+                          {groupedByProvider.get(currentTab)!.map((config) => {
                     const isSelected = selectedLLMConfigId === config.config_id;
                     const providerInfo = getProviderIcon(config, providers);
                     
@@ -7215,7 +6915,11 @@ const Workflow: React.FC<WorkflowProps> = ({
                     );
                   })}
                 </div>
+                      )}
               </div>
+                  </div>
+                );
+              })()}
             </DialogContent>
           </Dialog>
 
@@ -7334,7 +7038,6 @@ const Workflow: React.FC<WorkflowProps> = ({
               </DialogFooter>
             </DialogContent>
           </Dialog>
-          </div>
         </div>
       </div>
     </div>
@@ -7630,21 +7333,6 @@ const Workflow: React.FC<WorkflowProps> = ({
       />
     )}
 
-    <ConfirmDialog
-      open={deleteRoundTableTarget !== null}
-      onOpenChange={(open) => {
-        if (!open) setDeleteRoundTableTarget(null);
-      }}
-      title="删除会议"
-      description={`确定要删除会议「${deleteRoundTableTarget?.name}」吗？此操作不可恢复。`}
-      variant="destructive"
-      onConfirm={async () => {
-        if (!deleteRoundTableTarget) return;
-        const id = deleteRoundTableTarget.id;
-        setDeleteRoundTableTarget(null);
-        await performDeleteRoundTable(id);
-      }}
-    />
 
     {/* 角色生成器（从"人设Tag展开区"进入） */}
     <RoleGeneratorDialog
@@ -7667,26 +7355,13 @@ const Workflow: React.FC<WorkflowProps> = ({
       setPersonaSearch={setPersonaSearch}
       isLoadingPersonaList={isLoadingPersonaList}
       personaAgents={personaAgents}
-      personaMeetings={personaMeetings}
       personaTopics={personaTopics}
       isTemporarySession={isTemporarySession}
       currentSessionId={currentSessionId}
       temporarySessionId={temporarySessionId}
       onSwitchSession={switchSessionFromPersona}
-      onOpenMeeting={openMeetingFromPersona}
       onDeleteAgent={(id, name) => setDeleteSessionTarget({ id, name })}
-      onDeleteMeeting={(id, name) => setDeleteRoundTableTarget({ id, name })}
       onShowRoleGenerator={() => setShowRoleGenerator(true)}
-    />
-
-    {/* 新建 Meeting 对话框 */}
-    <NewMeetingDialog
-      open={showNewMeetingDialog}
-      onOpenChange={setShowNewMeetingDialog}
-      meetingName={newMeetingName}
-      setMeetingName={setNewMeetingName}
-      isCreating={isCreatingMeeting}
-      onCreate={handleCreateNewMeeting}
     />
 
     {/* MCP 详情遮罩层 */}
@@ -7742,6 +7417,9 @@ const Workflow: React.FC<WorkflowProps> = ({
       item={mediaPreviewItem}
       title="图片/媒体预览"
     />
+      </div>
+        </div>
+      </div>
     </>
   );
 };

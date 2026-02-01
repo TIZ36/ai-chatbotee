@@ -1,7 +1,7 @@
 /**
  * MCP API 服务
  * 提供 MCP 服务器配置管理
- * 通过后端API统一管理，支持Electron动态添加MCP服务器
+ * 通过后端API统一管理 MCP 服务器
  */
 
 import { MCPServer } from './mcpClient';

@@ -326,12 +326,6 @@ class MessageService:
         """
         # 先使缓存失效
         self.cache_service.invalidate_session_cache(session_id)
-        # 同时使媒体库缓存失效（否则 media-library 可能继续展示已回退消息的 ext.media）
-        try:
-            from services.media_library_service import get_media_library_service
-            get_media_library_service().invalidate_session(session_id)
-        except Exception as e:
-            print(f"[MessageService] Warning: Failed to invalidate media library cache: {e}")
         
         # 删除数据库中的消息
         return self.repository.delete_after(session_id, message_id)
@@ -344,12 +338,6 @@ class MessageService:
         """
         # 先使缓存失效
         self.cache_service.invalidate_session_cache(session_id)
-        # 同时使媒体库缓存失效
-        try:
-            from services.media_library_service import get_media_library_service
-            get_media_library_service().invalidate_session(session_id)
-        except Exception as e:
-            print(f"[MessageService] Warning: Failed to invalidate media library cache: {e}")
         
         return self.repository.delete_by_session(session_id)
     

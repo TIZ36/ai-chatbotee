@@ -8,6 +8,7 @@ import { Plus, Trash2, Edit2, Save, X, Server, AlertCircle, CheckCircle, Wrench,
 import QRCode from 'qrcode';
 import PageLayout, { Card, Section, Alert, EmptyState } from './ui/PageLayout';
 import { Button } from './ui/Button';
+import { Label } from './ui/Label';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { InputField, TextareaField, FormFieldGroup } from './ui/FormField';
 import { toast } from './ui/use-toast';
@@ -792,7 +793,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
       console.log(`[MCP Config] Testing connection to ${server.name} (${server.url})`);
       console.log(`[MCP Config] Server metadata:`, JSON.stringify(server.metadata, null, 2));
 
-      // stdio MCP 不支持（需要 Electron 或后端实现）
+      // stdio MCP 不支持（需要后端实现）
       if (server.type === 'stdio') {
         throw new Error('stdio MCP 暂不支持，请使用 HTTP 方式的 MCP 服务器');
       }
@@ -1180,7 +1181,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
             </div>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1">类型</label>
+                <Label className="block text-sm font-medium mb-1">类型</Label>
                 <Select
                   value={newServer.type || 'http-stream'}
                   onValueChange={(v) => setNewServer(prev => ({ ...prev, type: v as any }))}

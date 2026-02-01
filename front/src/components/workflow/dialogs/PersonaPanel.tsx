@@ -13,7 +13,6 @@ import {
   DialogFooter,
 } from '../../ui/Dialog';
 import type { Session } from '../../../services/sessionApi';
-import type { RoundTable } from '../../../services/roundTableApi';
 
 export interface PersonaPanelProps {
   open: boolean;
@@ -22,15 +21,12 @@ export interface PersonaPanelProps {
   setPersonaSearch: (value: string) => void;
   isLoadingPersonaList: boolean;
   personaAgents: Session[];
-  personaMeetings: RoundTable[];
   personaTopics: Session[];
   isTemporarySession: boolean;
   currentSessionId: string | null;
   temporarySessionId: string;
   onSwitchSession: (sessionId: string) => void;
-  onOpenMeeting: (roundTableId: string) => void;
   onDeleteAgent: (id: string, name: string) => void;
-  onDeleteMeeting: (id: string, name: string) => void;
   onShowRoleGenerator: () => void;
 }
 
@@ -41,15 +37,12 @@ export const PersonaPanel: React.FC<PersonaPanelProps> = ({
   setPersonaSearch,
   isLoadingPersonaList,
   personaAgents,
-  personaMeetings,
   personaTopics,
   isTemporarySession,
   currentSessionId,
   temporarySessionId,
   onSwitchSession,
-  onOpenMeeting,
   onDeleteAgent,
-  onDeleteMeeting,
   onShowRoleGenerator,
 }) => {
   return (
@@ -126,28 +119,6 @@ export const PersonaPanel: React.FC<PersonaPanelProps> = ({
                           onDelete={(e) => {
                             e.stopPropagation();
                             onDeleteAgent(a.session_id, a.name || a.title || `Agent ${a.session_id.slice(0, 8)}`);
-                          }}
-                        />
-                      ))
-                    }
-                    {personaMeetings
-                      .filter((m) => {
-                        const q = personaSearch.trim().toLowerCase();
-                        if (!q) return true;
-                        return (m.name || '').toLowerCase().includes(q);
-                      })
-                      .map((m) => (
-                        <DataListItem
-                          key={m.round_table_id}
-                          id={m.round_table_id}
-                          title={m.name || `群聊 ${m.round_table_id.slice(0, 8)}`}
-                          description={`群聊 · ${m.status === 'active' ? '进行中' : '已关闭'}`}
-                          icon={Users}
-                          isSelected={!isTemporarySession && currentSessionId === m.round_table_id}
-                          onClick={() => onOpenMeeting(m.round_table_id)}
-                          onDelete={(e) => {
-                            e.stopPropagation();
-                            onDeleteMeeting(m.round_table_id, m.name || `群聊 ${m.round_table_id.slice(0, 8)}`);
                           }}
                         />
                       ))

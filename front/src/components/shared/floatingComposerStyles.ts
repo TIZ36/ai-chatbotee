@@ -1,6 +1,6 @@
 /**
  * 浮岛输入框共享样式
- * 用于统一 RoundTablePanel、Workflow、ResearchPanel 等组件的输入框样式
+ * 用于统一 Workflow 等组件的输入框样式
  * 
  * 边框风格统一使用 Niho 弱化边框：rgba(0, 255, 136, 0.12~0.18)
  */

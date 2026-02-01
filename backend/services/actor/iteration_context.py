@@ -94,6 +94,34 @@ class IterationContext:
     # Agent ID（用于日志）
     _agent_id: Optional[str] = None
 
+    # ========== 新增：执行日志收集 ==========
+    
+    # 执行日志列表（用于保存到消息的 ext.log 中）
+    execution_logs: List[Dict[str, Any]] = field(default_factory=list)
+    
+    def add_execution_log(self, message: str, log_type: str = 'info', detail: str = None, duration: int = None):
+        """
+        添加执行日志
+        
+        Args:
+            message: 日志消息
+            log_type: 日志类型 (info, step, tool, llm, success, error, thinking)
+            detail: 详细信息
+            duration: 耗时（毫秒）
+        """
+        import time
+        log_entry = {
+            'id': f"log-{int(time.time() * 1000)}-{uuid4().hex[:8]}",
+            'timestamp': int(time.time() * 1000),
+            'type': log_type,
+            'message': message,
+        }
+        if detail:
+            log_entry['detail'] = detail
+        if duration is not None:
+            log_entry['duration'] = duration
+        self.execution_logs.append(log_entry)
+
     def set_step_callback(self, callback: callable, agent_id: str = None):
         """
         设置步骤变更回调函数

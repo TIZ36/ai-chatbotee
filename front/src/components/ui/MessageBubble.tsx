@@ -267,25 +267,8 @@ export const MessageStatusIndicator: React.FC<MessageStatusIndicatorProps> = ({
 
   // 等待响应动画（流式模式但还没有内容）
   if (isStreaming && !hasContent) {
-    return (
-      <div className="flex items-center space-x-2">
-        <div className="relative">
-          <Sparkles className="w-4 h-4 text-amber-500 animate-pulse" />
-        </div>
-        <div className="flex items-center space-x-1">
-          <div className="flex space-x-0.5">
-            <div className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" style={{ animationDelay: '0ms' }} />
-            <div className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" style={{ animationDelay: '200ms' }} />
-            <div className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" style={{ animationDelay: '400ms' }} />
-          </div>
-          {currentStep && currentStep.trim() && (
-            <span className="text-xs text-gray-400 dark:text-[#808080] font-normal truncate max-w-[200px]">
-              {currentStep}
-            </span>
-          )}
-        </div>
-      </div>
-    );
+    // 不再在气泡内显示黄色“等待响应”动画（与思维链图标动画重复）
+    return null;
   }
 
   // 回答中动画（正在流式输出内容）

@@ -27,56 +27,12 @@ import {
 } from 'lucide-react';
 import { MediaGallery, MediaItem } from '../ui/MediaGallery';
 import { MCPExecutionCard } from '../MCPExecutionCard';
+import { Button } from '../ui/Button';
 import { truncateBase64Strings } from '../../utils/textUtils';
 import { parseMCPContentBlocks, renderMCPBlocks, renderMCPMedia } from './mcpRender';
 import type { SessionMediaItem } from '../ui/SessionMediaPanel';
-import type { WorkflowNode, WorkflowConnection } from '../../services/workflowApi';
-import { ProcessStepsViewer as UnifiedProcessStepsViewer } from '../ui/ProcessStepsViewer';
-import type { ProcessMessage } from '../../types/processMessage';
-
-export interface Message {
-  id: string;
-  role: 'user' | 'assistant' | 'system' | 'tool';
-  content: string;
-  // Topic/多Agent消息元信息（可选）
-  sender_id?: string;
-  sender_avatar?: string;  // Agent 头像 URL
-  sender_name?: string;    // Agent 名称
-  sender_type?: 'user' | 'agent' | 'system';
-  thinking?: string;
-  toolCalls?: Array<{ name: string; arguments: any; result?: any }> | {
-    isSystemPrompt?: boolean;
-    batchName?: string;
-    item?: any;
-    canRetry?: boolean;
-    errorType?: 'network' | 'timeout' | 'api' | 'unknown';
-    [key: string]: any;
-  };
-  isStreaming?: boolean;
-  isThinking?: boolean;
-  currentStep?: string;
-  toolType?: 'workflow' | 'mcp';
-  workflowId?: string;
-  workflowName?: string;
-  workflowStatus?: 'pending' | 'running' | 'completed' | 'error';
-  workflowResult?: string;
-  workflowConfig?: { nodes: WorkflowNode[]; connections: WorkflowConnection[] };
-  isSummary?: boolean;
-  media?: Array<{
-    type: 'image' | 'video' | 'audio';
-    mimeType: string;
-    data: string;
-    url?: string;
-  }>;
-  thoughtSignature?: string;
-  toolCallSignatures?: Record<string, string>;
-  mcpdetail?: any;
-  processMessages?: ProcessMessage[];
-  executionLogs?: Array<{ id: string; timestamp: number; type: string; message: string; detail?: string; duration?: number }>;
-  avatarUrl?: string; // Add avatarUrl for assistant messages
-  agentName?: string; // Add agentName for assistant messages
-  ext?: any; // 扩展字段（用于 reaction/引用等装饰）
-}
+import { ExecutionLogViewer, type ExecutionLogEntry } from '../ui/ExecutionLogViewer';
+import type { Message } from './types';
 
 export interface MessageContentProps {
   /** The message to render */
@@ -231,8 +187,13 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
   // The abort button has been moved to the input box area (replaces send button when loading).
   // This only shows a simple loading indicator when the assistant is thinking/streaming.
   if (message.role === 'assistant' && (!message.content || message.content.length === 0) && (message.isThinking || message.isStreaming)) {
-    // 处于思考/生成状态且没有内容，不显示任何内容（状态已在输入框和侧边栏显示）
-    return null;
+    // 显示简单的加载指示器
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+        <Loader className="w-4 h-4 animate-spin" />
+        <span>{message.isThinking ? '思考中...' : '生成中...'}</span>
+      </div>
+    );
   }
   
   // Error message (with special styling)
@@ -302,232 +263,8 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
       );
     }
 
-    // Workflow message continues using original card
-    const workflowConfig = message.workflowConfig;
-    const nodes = workflowConfig?.nodes || [];
-    const connections = workflowConfig?.connections || [];
-    
-    // Get node type counts
-    const nodeTypeCounts = nodes.reduce((acc, node) => {
-      acc[node.type] = (acc[node.type] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-    
-    return (
-      <div className="w-full bg-gradient-to-br from-gray-50 to-white dark:from-gray-900 dark:to-gray-800 rounded-xl p-5 border border-gray-200 dark:border-[#404040] shadow-lg">
-        {/* Title bar and delete button */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center space-x-3">
-            <div className="p-2 rounded-lg bg-gray-900 dark:bg-gray-100">
-              <WorkflowIcon className="w-5 h-5 text-white dark:text-[#1e1e1e]" />
-            </div>
-            <div>
-              <div className="font-semibold text-base text-gray-900 dark:text-[#ffffff]">
-                {message.workflowName || '工作流组件'}
-              </div>
-              <div className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-0.5">
-                工作流组件
-              </div>
-            </div>
-          </div>
-          <button
-            onClick={() => handleDeleteWorkflowMessage(message.id)}
-            className="p-2 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
-            title="删除感知流程"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-        </div>
-        
-        {/* Workflow execution flow diagram - optimized design */}
-        <div className="w-full bg-white dark:bg-[#2d2d2d] rounded-lg p-5 border-2 border-gray-200 dark:border-[#404040] mb-4 shadow-inner">
-          <div className="flex items-center justify-between w-full">
-            {/* Input node */}
-            <div className="flex flex-col items-center flex-1">
-              <div className="w-20 h-20 rounded-2xl bg-gray-900 dark:bg-gray-100 text-white dark:text-[#1e1e1e] flex items-center justify-center text-sm font-bold shadow-lg mb-3 transition-all">
-                输入
-              </div>
-              <div className="text-xs text-gray-600 dark:text-[#b0b0b0] text-center max-w-[120px] px-2 py-1 bg-gray-50 dark:bg-[#2d2d2d] rounded">
-                {prevMessageContent?.substring(0, 25) || '等待输入...'}
-              </div>
-            </div>
-            
-            {/* Arrow */}
-            <ArrowRight className="w-10 h-10 text-gray-400 dark:text-[#b0b0b0] mx-3 flex-shrink-0" />
-            
-            {/* Workflow node */}
-            <div className="flex flex-col items-center flex-1">
-              <div className={`w-24 h-24 rounded-2xl ${
-                message.workflowStatus === 'running' 
-                  ? 'bg-gray-700 dark:bg-gray-300 animate-pulse shadow-xl' 
-                  : message.workflowStatus === 'completed'
-                  ? 'bg-gray-900 dark:bg-gray-100 shadow-xl'
-                  : message.workflowStatus === 'error'
-                  ? 'bg-gray-600 dark:bg-gray-500 shadow-lg'
-                  : 'bg-gray-800 dark:bg-gray-200 shadow-lg'
-              } text-white dark:text-[#1e1e1e] flex items-center justify-center text-xs font-bold text-center px-3 mb-3 transition-all`}>
-                <div className="truncate">{message.workflowName || '工作流'}</div>
-              </div>
-              <div className={`text-xs font-medium px-2 py-1 rounded ${
-                message.workflowStatus === 'pending' ? 'bg-gray-100 dark:bg-[#2d2d2d] text-gray-700 dark:text-[#ffffff]' :
-                message.workflowStatus === 'running' ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' :
-                message.workflowStatus === 'completed' ? 'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300' :
-                'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300'
-              }`}>
-                {message.workflowStatus === 'pending' ? '待执行' :
-                 message.workflowStatus === 'running' ? '执行中...' :
-                 message.workflowStatus === 'completed' ? '已完成' :
-                 message.workflowStatus === 'error' ? '执行失败' : '未知'}
-              </div>
-            </div>
-            
-            {/* Arrow */}
-            <ArrowRight className="w-10 h-10 text-gray-400 dark:text-[#b0b0b0] mx-3 flex-shrink-0" />
-            
-            {/* Output node */}
-            <div className="flex flex-col items-center flex-1">
-              <div className={`w-20 h-20 rounded-2xl ${
-                message.workflowStatus === 'completed' 
-                  ? 'bg-gray-900 dark:bg-gray-100 shadow-xl' 
-                  : message.workflowStatus === 'error'
-                  ? 'bg-gray-600 dark:bg-gray-500 shadow-lg'
-                  : 'bg-gray-300 dark:bg-[#363636] shadow-md'
-              } text-white dark:text-[#1e1e1e] flex items-center justify-center text-sm font-bold mb-3 transition-all`}>
-                输出
-              </div>
-              <div className="text-xs text-gray-600 dark:text-[#b0b0b0] text-center max-w-[120px] px-2 py-1 bg-gray-50 dark:bg-[#2d2d2d] rounded">
-                {message.workflowStatus === 'completed' ? '已生成结果' :
-                 message.workflowStatus === 'error' ? '执行失败' :
-                 '等待输出...'}
-              </div>
-            </div>
-          </div>
-        </div>
-        
-        {/* Workflow internal details (node info) */}
-        {message.toolType === 'workflow' && nodes.length > 0 && (
-          <div className="w-full bg-gray-50 dark:bg-[#363636] rounded-lg p-3 border border-gray-200 dark:border-[#404040] mb-3">
-            <div className="text-xs font-semibold text-gray-700 dark:text-[#ffffff] mb-2 uppercase tracking-wide">
-              工作流内部结构
-            </div>
-            <div className="space-y-2">
-              {/* Node type statistics */}
-              <div className="flex flex-wrap gap-2">
-                {Object.entries(nodeTypeCounts).map(([type, count]) => (
-                  <div
-                    key={type}
-                    className="px-2.5 py-1 bg-white dark:bg-[#2d2d2d] border border-gray-300 dark:border-[#404040] rounded text-xs text-gray-700 dark:text-[#ffffff]"
-                  >
-                    <span className="font-medium">{type}:</span> {count}
-                  </div>
-                ))}
-              </div>
-              
-              {/* Node list */}
-              <div className="mt-3 space-y-1.5">
-                <div className="text-xs font-medium text-gray-600 dark:text-[#b0b0b0] mb-1.5">
-                  节点详情:
-                </div>
-                {nodes.map((node) => (
-                  <div
-                    key={node.id}
-                    className="flex items-center space-x-2 px-2 py-1.5 bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-[#404040] rounded text-xs"
-                  >
-                    <div className="w-2 h-2 rounded-full bg-gray-600 dark:bg-gray-400 flex-shrink-0"></div>
-                    <span className="text-gray-700 dark:text-[#ffffff] font-medium">{node.type}</span>
-                    {node.data.label && (
-                      <span className="text-gray-500 dark:text-[#808080] truncate">- {node.data.label}</span>
-                    )}
-                  </div>
-                ))}
-              </div>
-              
-              {/* Connection info */}
-              {connections.length > 0 && (
-                <div className="mt-3">
-                  <div className="text-xs font-medium text-gray-600 dark:text-[#b0b0b0] mb-1.5">
-                    连接关系: {connections.length} 条
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-        
-        {/* Execute button or execution result */}
-        {message.workflowId ? (
-          message.workflowStatus === 'pending' ? (
-            <button
-              onClick={() => handleExecuteWorkflow(message.id)}
-              className="w-full bg-gray-900 dark:bg-gray-100 text-white dark:text-[#1e1e1e] hover:bg-gray-800 dark:hover:bg-gray-200 px-4 py-2.5 rounded-lg font-medium text-sm transition-colors flex items-center justify-center space-x-2 shadow-sm"
-            >
-              <Play className="w-4 h-4" />
-              <span>开始执行</span>
-            </button>
-          ) : message.workflowStatus === 'running' ? (
-            <div className="flex items-center justify-center space-x-2 text-gray-700 dark:text-[#ffffff] py-2.5">
-              <Loader className="w-4 h-4 animate-spin" />
-              <span className="text-sm font-medium">执行中...</span>
-            </div>
-          ) : message.workflowStatus === 'completed' || message.workflowStatus === 'error' ? (
-            <div className="space-y-3">
-              {/* Execution result */}
-              <div className="bg-gray-50 dark:bg-[#363636] rounded-lg p-3 border border-gray-200 dark:border-[#404040]">
-                <div className="text-xs font-semibold text-gray-700 dark:text-[#ffffff] mb-2 uppercase tracking-wide">
-                  {message.workflowStatus === 'completed' ? '执行结果' : '执行失败'}
-                </div>
-                {(() => {
-                  const content = message.content || '';
-                  const logMatch = content.match(/执行日志:\s*\n(.*)/s);
-                  const mainContent = logMatch ? content.substring(0, logMatch.index) : content;
-                  const logs = logMatch ? logMatch[1].trim().split('\n') : [];
-                  
-                  return (
-                    <div className="space-y-3">
-                      {/* Main content */}
-                      {mainContent && (
-                        <div className="text-sm text-gray-900 dark:text-[#ffffff] whitespace-pre-wrap break-words">
-                          {mainContent.trim()}
-                        </div>
-                      )}
-                      
-                      {/* Execution logs */}
-                      {logs.length > 0 && (
-                        <div className="border-t border-gray-200 dark:border-[#404040] pt-3 mt-3">
-                          <div className="text-xs font-semibold text-gray-600 dark:text-[#b0b0b0] mb-2">
-                            执行日志
-                          </div>
-                          <div className="bg-gray-900 dark:bg-gray-950 text-green-400 dark:text-green-300 font-mono text-xs p-3 rounded border border-gray-700 dark:border-[#404040] max-h-64 overflow-y-auto">
-                            {logs.map((log, idx) => (
-                              <div key={idx} className="mb-1">
-                                {log}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-              </div>
-              
-              {/* Re-execute button */}
-              <button
-                onClick={() => handleExecuteWorkflow(message.id)}
-                className="w-full bg-gray-800 dark:bg-gray-200 text-white dark:text-[#1e1e1e] hover:bg-gray-700 dark:hover:bg-gray-300 px-4 py-2.5 rounded-lg font-medium text-sm transition-colors flex items-center justify-center space-x-2 shadow-sm"
-              >
-                <Play className="w-4 h-4" />
-                <span>重新执行</span>
-              </button>
-            </div>
-          ) : null
-        ) : (
-          <div className="text-xs text-gray-500 dark:text-[#b0b0b0] text-center py-2">
-            无法执行：缺少工作流信息
-          </div>
-        )}
-      </div>
-    );
+    // 工作流功能已移除，不再支持工作流消息
+    return null;
   }
   
   // Tool message (not perception component) - check if content contains MCP media
@@ -742,7 +479,7 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
                             {children}
                           </code>
                         </pre>
-                        <button
+                        <Button
                           onClick={async () => {
                             try {
                               await navigator.clipboard.writeText(codeText);
@@ -752,7 +489,9 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
                               console.error('Failed to copy:', err);
                             }
                           }}
-                          className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white px-2 py-1 rounded text-xs flex items-center space-x-1 z-10"
+                          variant="ghost"
+                          size="sm"
+                          className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white z-10"
                           title="复制代码"
                         >
                           {copied ? (
@@ -766,7 +505,7 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
                               <span>复制</span>
                             </>
                           )}
-                        </button>
+                        </Button>
                       </div>
                     );
                   };
@@ -931,13 +670,37 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
         </div>
       )}
       
-      {/* Process Steps / Execution Trace (执行轨迹展示) */}
-      <UnifiedProcessStepsViewer
-        processMessages={message.processMessages}
-        ext={message.ext}
-        isThinking={message.isThinking}
-        isStreaming={message.isStreaming}
-      />
+      {/* Execution Logs：assistant 且含过程信息时由思维链图标右侧 ExecutionLogScroller 统一展示，此处不再重复 */}
+      {(() => {
+        const hasProcessInfo =
+          message.role === 'assistant' &&
+          (!!(message.processMessages && message.processMessages.length > 0) ||
+            !!((message.ext as any)?.processSteps && (message.ext as any).processSteps.length > 0) ||
+            !!((message.ext as any)?.log && Array.isArray((message.ext as any).log) && (message.ext as any).log.length > 0) ||
+            !!(message.thinking && message.thinking.trim().length > 0));
+        if (hasProcessInfo) return null;
+        const msgExecutionLogs = (message.ext as any)?.log || message.executionLogs || (message.ext as any)?.executionLogs;
+        if (msgExecutionLogs && Array.isArray(msgExecutionLogs) && msgExecutionLogs.length > 0) {
+          return (
+            <div className="mt-2 px-2 py-1">
+              <ExecutionLogViewer
+                logs={msgExecutionLogs.map((log: any) => ({
+                  ...log,
+                  type: (log.type === 'tool' || log.type === 'thinking' || log.type === 'error' || log.type === 'success' || log.type === 'info' || log.type === 'step' || log.type === 'llm') 
+                    ? log.type 
+                    : 'info' as const
+                }))}
+                isActive={false}
+                maxHeight={80}
+                collapsed={true}
+              />
+            </div>
+          );
+        }
+        return null;
+      })()}
+      
+      {/* Process Steps / 执行轨迹：仅在 SplitViewMessage 首行（头像右侧）展示，不在此处重复，避免出现在输出框下方 */}
     </div>
   );
 };

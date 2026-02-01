@@ -393,6 +393,12 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   background: #000 !important;
 }
 
+/* Niho 下输入框区域 - 纯黑背景 + 霓虹绿边框 */
+[data-skin="niho"] .workflow-chat-input-area {
+  background: #000 !important;
+  border-top-color: rgba(0, 255, 136, 0.18) !important;
+}
+
 /* Niho 下对话头部 - 纯黑 + 粉雾动态光 */
 [data-skin="niho"] .workflow-chat-header {
   background: #000 !important;
@@ -725,6 +731,40 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   border-color: rgba(0, 255, 136, 0.3) !important;
 }
 
+/* 思维链执行中图标 - Niho：绿色大脑 + 雾粉色波纹 + 轻微震动（与人设雾粉 #ff7fb4/#ff9fc4 一致） */
+@keyframes thinking-brain-ripple {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 127, 180, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(255, 127, 180, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 127, 180, 0);
+  }
+}
+@keyframes thinking-brain-vibrate {
+  0%, 100% {
+    transform: translateX(0) scale(1);
+  }
+  25% {
+    transform: translateX(-0.5px) scale(1.02);
+  }
+  75% {
+    transform: translateX(0.5px) scale(1.02);
+  }
+}
+[data-skin="niho"] .thinking-brain-icon {
+  background-color: transparent !important;
+  color: #00ff88 !important;
+  animation: thinking-brain-ripple 1.5s ease-out infinite;
+}
+[data-skin="niho"] .thinking-brain-icon .animate-bounce {
+  background-color: transparent !important;
+  color: #00ff88 !important;
+  animation: thinking-brain-vibrate 0.6s ease-in-out infinite;
+}
+
 /* 输入框聚焦 - 绿环光晕 */
 [data-skin="niho"] input:focus,
 [data-skin="niho"] textarea:focus,
@@ -818,7 +858,7 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   border-color: var(--niho-text-border) !important;
 }
 
-/* 附件弹窗滚动条隐藏 */
+/* 插件/通用弹窗滚动条隐藏 */
 .no-scrollbar {
   scrollbar-width: none;
 }
@@ -827,7 +867,7 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   height: 0;
 }
 
-/* 附件弹窗 - Niho 配色 */
+/* 插件弹窗 / 原附件面板 - Niho 配色（保留兼容） */
 [data-skin="niho"] .attachment-panel {
   background-color: rgba(10, 10, 10, 0.92) !important;
   border-color: rgba(255, 255, 255, 0.08) !important;
@@ -1440,9 +1480,9 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
     scrollbar-width: none;
   }
   
-  /* Electron App Region */
+  /* App Region (保留样式，兼容性) */
   .app-drag {
-    -webkit-app-region: drag;
+    /* 已移除 Electron，此样式保留用于兼容性 */
     border: 0 !important;
     box-shadow: none !important;
     background: transparent !important;

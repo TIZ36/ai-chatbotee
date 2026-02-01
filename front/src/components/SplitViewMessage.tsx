@@ -154,6 +154,8 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
     hasToolCalls || 
     hasProcessSteps ||  // 支持非思考模型的 MCP/工作流过程显示
     isThinking || 
+    // 流式生成中也展示“头像行”的过程区域（思维链图标+右侧滚动日志）
+    isStreaming ||
     currentStep ||
     thoughtSignature
   );
@@ -258,8 +260,11 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
               )}
             </div>
 
-            {/* 模型输出（消息气泡） */}
+            {/* 模型输出（消息气泡）：与上方思考/执行过程区分，明确为正式输出 */}
             <div ref={leftRef} className="min-w-0">
+              {shouldShowSidePanel && (content?.trim() || isStreaming) && (
+                <div className="text-[10px] text-muted-foreground mb-0.5 px-0.5">正式输出</div>
+              )}
               <MessageBubble role={role as MessageRole} toolType={toolType as ToolType}>
                 {renderContent(messageObj)}
               </MessageBubble>

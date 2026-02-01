@@ -57,23 +57,56 @@ export const ExecutionLogViewer: React.FC<ExecutionLogViewerProps> = ({
     setIsCollapsed(defaultCollapsed);
   }, [defaultCollapsed]);
 
+  // 如果没有日志且不在执行中，返回 null
+  // 但如果日志存在（即使不在执行中），也要显示（折叠状态）
   if (!logs.length && !isActive) {
     return null;
   }
 
   const lastLog = logs[logs.length - 1];
+  
+  // 如果没有最后一条日志但正在执行，显示默认提示
+  if (!lastLog && isActive) {
+    return (
+      <div className={`execution-log-viewer text-[11px] leading-relaxed ${className}`}>
+        <div className="text-muted-foreground/65 dark:text-muted-foreground/65 italic">
+          思考中...
+        </div>
+      </div>
+    );
+  }
+
+  // 根据日志类型获取样式类
+  const getLogStyle = (type: ExecutionLogEntry['type']) => {
+    switch (type) {
+      case 'error':
+        return 'text-red-500/70 dark:text-red-400/70';
+      case 'success':
+        return 'text-green-600/70 dark:text-green-400/70';
+      case 'thinking':
+        return 'text-purple-600/70 dark:text-purple-400/70';
+      case 'tool':
+        return 'text-blue-600/70 dark:text-blue-400/70';
+      case 'llm':
+        return 'text-indigo-600/70 dark:text-indigo-400/70';
+      case 'step':
+        return 'text-amber-600/70 dark:text-amber-400/70';
+      default:
+        return 'text-muted-foreground/65 dark:text-muted-foreground/65';
+    }
+  };
 
   return (
-    <div className={`execution-log-viewer text-[10px] leading-relaxed ${className}`}>
+    <div className={`execution-log-viewer text-[11px] leading-relaxed ${className}`}>
       {/* 折叠时只显示最后一条 */}
       {isCollapsed ? (
         <div 
-          className="cursor-pointer text-muted-foreground/50 hover:text-muted-foreground/70 transition-colors truncate italic"
+          className={`cursor-pointer ${getLogStyle(lastLog?.type || 'info')} hover:opacity-100 transition-opacity truncate`}
           onClick={() => setIsCollapsed(false)}
         >
-          {lastLog?.message || '执行中...'}
+          {lastLog?.message || (isActive ? '执行中...' : '已完成')}
           {lastLog?.duration != null && (
-            <span className="ml-1 opacity-60">({formatDuration(lastLog.duration)})</span>
+            <span className="ml-1 opacity-70">({formatDuration(lastLog.duration)})</span>
           )}
         </div>
       ) : (
@@ -85,25 +118,36 @@ export const ExecutionLogViewer: React.FC<ExecutionLogViewerProps> = ({
           {logs.map((log, index) => (
             <div
               key={log.id || index}
-              className="text-muted-foreground/50 italic"
+              className={`${getLogStyle(log.type)} transition-opacity hover:opacity-100`}
             >
-              {log.message}
-              {log.duration != null && (
-                <span className="ml-1 opacity-60">
-                  ({formatDuration(log.duration)})
-                </span>
-              )}
-              {log.detail && (
-                <span className="ml-1 opacity-40 text-[9px]">
-                  {log.detail}
-                </span>
+              {log.type === 'thinking' && log.detail ? (
+                <>
+                  <span className="font-medium">思考内容：</span>
+                  <span className="ml-1 opacity-90">
+                    {log.detail.length > 200 ? `${log.detail.slice(0, 200)}…` : log.detail}
+                  </span>
+                </>
+              ) : (
+                <>
+                  {log.message}
+                  {log.duration != null && (
+                    <span className="ml-1 opacity-70">
+                      ({formatDuration(log.duration)})
+                    </span>
+                  )}
+                  {log.detail && log.type !== 'thinking' && (
+                    <span className="ml-1 opacity-60 text-[10px]">
+                      {log.detail}
+                    </span>
+                  )}
+                </>
               )}
             </div>
           ))}
           
           {/* 活动状态时显示光标 */}
           {isActive && (
-            <span className="inline-block w-1 h-3 bg-muted-foreground/30 animate-pulse" />
+            <span className="inline-block w-1 h-3 bg-muted-foreground/40 animate-pulse" />
           )}
           
           <div ref={bottomRef} />

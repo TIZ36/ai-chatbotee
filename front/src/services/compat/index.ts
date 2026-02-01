@@ -28,11 +28,8 @@ export type { MCPServer, MCPTool, MCPClientOptions } from '../mcpClient';
 export { MCPClient, MCPManager, mcpManager } from '../mcpClient';
 
 // ============================================================================
-// Workflow 相关导出（旧 API）
+// Workflow 相关导出（已移除）
 // ============================================================================
-
-// 重新导出旧的 workflowPool
-export { workflowPool } from '../workflowPool';
 
 // ============================================================================
 // 新架构别名（便于迁移）

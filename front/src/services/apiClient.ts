@@ -43,7 +43,7 @@ export class ApiClient {
     // 太小不压缩（减少 CPU/延迟）
     if (body.length < 2048) return { body, headers };
 
-    // Chromium/Electron 支持 CompressionStream；不支持则直接返回原 body
+    // 现代浏览器支持 CompressionStream；不支持则直接返回原 body
     const CS = (globalThis as any).CompressionStream as
       | (new (format: 'gzip' | 'deflate' | 'deflate-raw') => CompressionStream)
       | undefined;

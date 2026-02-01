@@ -23,7 +23,7 @@ export interface UnifiedMessage {
   /** ISO string */
   createdAt: string;
   media?: UnifiedMedia[];
-  /** 兼容现有 Workflow/RoundTable/Research 的常用字段（避免大面积改动） */
+  /** 兼容现有 Workflow/Research 的常用字段（避免大面积改动） */
   thinking?: string;
   toolCalls?: any;
   tokenCount?: number;
@@ -61,7 +61,7 @@ export interface SendMessagePayload {
 }
 
 export interface ConversationAdapter {
-  /** 用于缓存的唯一 key，例如 `session:${id}` / `roundTable:${id}` */
+  /** 用于缓存的唯一 key，例如 `session:${id}` */
   key: string;
 
   listMessages: (params: ListMessagesParams) => Promise<ListMessagesResult>;

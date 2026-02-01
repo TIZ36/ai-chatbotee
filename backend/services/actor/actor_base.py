@@ -767,45 +767,92 @@ class ActorBase(ABC):
             
             # 步骤 1: 加载 LLM 配置和 MCP 工具
             ctx.add_step('load_llm_tool', thinking='加载 LLM 配置和工具...')
+            ctx.add_execution_log('开始加载 LLM 配置和工具...', log_type='step')
+            self._send_execution_log(ctx, '开始加载 LLM 配置和工具...', log_type='step')
+            start_time = time.time()
             if not self._load_llm_and_tools(ctx):
                 ctx.update_last_step(status='error', error='加载配置失败')
+                ctx.add_execution_log('加载 LLM 配置和工具失败', log_type='error')
+                self._send_execution_log(ctx, '加载 LLM 配置和工具失败', log_type='error')
                 raise RuntimeError("Failed to load LLM and tools")
+            duration = int((time.time() - start_time) * 1000)
             ctx.update_last_step(status='completed')
+            ctx.add_execution_log('LLM 配置和工具加载完成', log_type='success', duration=duration)
+            self._send_execution_log(ctx, 'LLM 配置和工具加载完成', log_type='success', duration=duration)
             
             # 步骤 2: 准备上下文消息
             ctx.add_step('prepare_context', thinking='准备上下文消息...')
+            ctx.add_execution_log('开始准备上下文消息...', log_type='step')
+            self._send_execution_log(ctx, '开始准备上下文消息...', log_type='step')
+            start_time = time.time()
             if not self._prepare_context_message(ctx):
                 ctx.update_last_step(status='error', error='准备上下文失败')
+                ctx.add_execution_log('准备上下文消息失败', log_type='error')
+                self._send_execution_log(ctx, '准备上下文消息失败', log_type='error')
                 raise RuntimeError("Failed to prepare context message")
+            duration = int((time.time() - start_time) * 1000)
             ctx.update_last_step(status='completed')
+            ctx.add_execution_log('上下文消息准备完成', log_type='success', duration=duration)
+            self._send_execution_log(ctx, '上下文消息准备完成', log_type='success', duration=duration)
             
             # 步骤 3: 消息类型分类
             ctx.add_step('msg_classify', thinking='分析消息类型...')
+            ctx.add_execution_log('开始分析消息类型...', log_type='step')
+            self._send_execution_log(ctx, '开始分析消息类型...', log_type='step')
+            start_time = time.time()
             msg_type = self._classify_msg_type(ctx)
+            duration = int((time.time() - start_time) * 1000)
             ctx.update_last_step(status='completed', msg_type=msg_type)
+            ctx.add_execution_log(f'消息类型分析完成: {msg_type}', log_type='success', duration=duration)
+            self._send_execution_log(ctx, f'消息类型分析完成: {msg_type}', log_type='success', duration=duration)
             
             # 步骤 4: 消息预处理
             ctx.add_step('msg_pre_deal', thinking='消息预处理...')
+            ctx.add_execution_log('开始消息预处理...', log_type='step')
+            self._send_execution_log(ctx, '开始消息预处理...', log_type='step')
+            start_time = time.time()
             if not self._msg_pre_deal(ctx):
                 # 如果返回 False，可能是跳过处理（如自己的 agent_msg）
+                duration = int((time.time() - start_time) * 1000)
                 ctx.update_last_step(status='completed', action='skipped')
+                ctx.add_execution_log('消息预处理跳过', log_type='info', duration=duration)
+                self._send_execution_log(ctx, '消息预处理跳过', log_type='info', duration=duration)
                 logger.info(f"[ActorBase:{self.agent_id}] Message pre-deal returned False, skipping")
                 return
+            duration = int((time.time() - start_time) * 1000)
             ctx.update_last_step(status='completed')
+            ctx.add_execution_log('消息预处理完成', log_type='success', duration=duration)
+            self._send_execution_log(ctx, '消息预处理完成', log_type='success', duration=duration)
             
             # 步骤 5: 消息处理（LLM 调用）
             ctx.add_step('msg_deal', thinking='处理消息...')
+            ctx.add_execution_log('开始处理消息（调用 LLM）...', log_type='thinking')
+            self._send_execution_log(ctx, '开始处理消息（调用 LLM）...', log_type='thinking')
+            start_time = time.time()
             if not self._msg_deal(ctx):
                 ctx.update_last_step(status='error', error='消息处理失败')
+                ctx.add_execution_log('消息处理失败', log_type='error')
+                self._send_execution_log(ctx, '消息处理失败', log_type='error')
                 raise RuntimeError("Failed to deal with message")
+            duration = int((time.time() - start_time) * 1000)
             ctx.update_last_step(status='completed', decision=ctx.llm_decision)
+            ctx.add_execution_log(f'消息处理完成，决策: {ctx.llm_decision}', log_type='llm', duration=duration)
+            self._send_execution_log(ctx, f'消息处理完成，决策: {ctx.llm_decision}', log_type='llm', duration=duration)
             
             # 步骤 6: 消息后处理
             ctx.add_step('post_msg_deal', thinking='后处理...')
+            ctx.add_execution_log('开始消息后处理...', log_type='step')
+            self._send_execution_log(ctx, '开始消息后处理...', log_type='step')
+            start_time = time.time()
             if not self._post_msg_deal(ctx):
                 ctx.update_last_step(status='error', error='后处理失败')
+                ctx.add_execution_log('消息后处理失败', log_type='error')
+                self._send_execution_log(ctx, '消息后处理失败', log_type='error')
                 raise RuntimeError("Failed to post-deal message")
+            duration = int((time.time() - start_time) * 1000)
             ctx.update_last_step(status='completed')
+            ctx.add_execution_log('消息后处理完成', log_type='success', duration=duration)
+            self._send_execution_log(ctx, '消息后处理完成', log_type='success', duration=duration)
             
             # 如果决策是继续（工具调用），且有下一个工具调用
             # 这里不需要递归，因为工具调用消息会通过 topic 再次触发 _handle_new_message
@@ -817,6 +864,14 @@ class ActorBase(ABC):
                 ext_data = ctx.build_ext_data()
                 media_data = ext_data.get('media') if ext_data else None
                 
+                # 添加完成日志
+                ctx.add_execution_log('处理完成', log_type='success')
+                self._send_execution_log(ctx, '处理完成', log_type='success')
+                
+                # 将执行日志添加到 ext_data 中
+                if ctx.execution_logs:
+                    ext_data['log'] = ctx.execution_logs
+                
                 get_topic_service()._publish_event(topic_id, 'agent_stream_done', {
                     'agent_id': self.agent_id,
                     'agent_name': self.info.get('name', 'Agent'),
@@ -826,6 +881,7 @@ class ActorBase(ABC):
                     'processSteps': ctx.to_process_steps_dict(),
                     'process_version': 'v2',
                     'media': media_data,  # 包含 thoughtSignature
+                    'execution_logs': ctx.execution_logs,  # 包含执行日志
                 })
                 
                 # 追加到本地历史
@@ -1812,6 +1868,17 @@ class ActorBase(ABC):
                 params = tool_call.get('params', {})
                 
                 if server_id and tool_name:
+                    # 记录 MCP 调用决策日志
+                    ctx.add_execution_log(
+                        f'选择MCP工具: {tool_name} (服务器: {server_id})',
+                        log_type='step',
+                        detail={
+                            'server_id': server_id,
+                            'tool_name': tool_name,
+                            'params': params,
+                        }
+                    )
+                    
                     # 创建 MCP 调用 Action
                     action = Action.mcp(
                         server_id=server_id,
@@ -1821,6 +1888,33 @@ class ActorBase(ABC):
                     
                     # 执行 MCP 调用
                     result = self._call_mcp(action, ctx)
+                    
+                    # 记录 MCP 调用结果日志
+                    if result.success:
+                        result_text = result.text_result or ''
+                        result_preview = result_text[:100] + '...' if len(result_text) > 100 else result_text
+                        ctx.add_execution_log(
+                            f'MCP调用完成: {tool_name}',
+                            log_type='tool',
+                            detail={
+                                'server_id': server_id,
+                                'tool_name': tool_name,
+                                'result': result_preview,
+                                'has_media': bool(result.media),
+                            },
+                            duration=result.duration_ms
+                        )
+                    else:
+                        ctx.add_execution_log(
+                            f'MCP调用失败: {tool_name}',
+                            log_type='error',
+                            detail={
+                                'server_id': server_id,
+                                'tool_name': tool_name,
+                                'error': result.error,
+                            },
+                            duration=result.duration_ms
+                        )
                     
                     # 将结果存储为 result_msg
                     result_msg = {
@@ -1977,6 +2071,31 @@ class ActorBase(ABC):
             # 3. 解析 LLM 决策
             decision, decision_data = self._parse_llm_decision(content, ctx)
             ctx.set_llm_decision(decision, decision_data)
+            
+            # 记录决策日志
+            decision_detail = {
+                'decision': decision,
+                'has_tool_call': bool(ctx.next_tool_call),
+            }
+            if ctx.next_tool_call:
+                tool_call = ctx.next_tool_call
+                decision_detail['tool_name'] = tool_call.get('tool_name')
+                decision_detail['server_id'] = tool_call.get('server_id')
+            
+            # 检查是否是自迭代（通过检查是否有 action_plan 或 chain_append）
+            if ctx.action_plan or ctx.plan_index > 0:
+                decision_detail['is_self_iteration'] = True
+                ctx.add_execution_log(
+                    f'决策: {decision} (自迭代)',
+                    log_type='step',
+                    detail=decision_detail
+                )
+            else:
+                ctx.add_execution_log(
+                    f'决策: {decision}',
+                    log_type='llm',
+                    detail=decision_detail
+                )
             
             # 更新决策步骤为完成
             ctx.update_last_step(
@@ -3709,6 +3828,10 @@ class ActorBase(ABC):
                 ext_data['media'] = self._normalize_media_for_ext(self._pending_reply_media)
                 self._pending_reply_media = None
             
+            # 将执行日志保存到 ext.log 中
+            if ctx.execution_logs:
+                ext_data['log'] = ctx.execution_logs
+            
             # 保存消息
             get_topic_service().send_message(
                 topic_id=topic_id,
@@ -3732,7 +3855,7 @@ class ActorBase(ABC):
                 'sender_type': 'agent',
             })
             
-            # 发送完成事件
+            # 发送完成事件（含 processMessages 与 execution_logs，供前端区分思考内容与正式输出）
             get_topic_service()._publish_event(topic_id, 'agent_stream_done', {
                 'agent_id': self.agent_id,
                 'agent_name': self.info.get('name', 'Agent'),
@@ -3740,6 +3863,8 @@ class ActorBase(ABC):
                 'message_id': message_id,
                 'content': full_content,
                 'processSteps': ctx.to_process_steps_dict(),
+                'processMessages': ctx.to_process_messages(),
+                'execution_logs': ctx.execution_logs,
                 'media': ext_data.get('media'),
             })
             
@@ -4052,6 +4177,12 @@ class ActorBase(ABC):
                         finish_reason=getattr(resp, "finish_reason", None),
                         raw_response=getattr(resp, "raw", None),
                     )
+                    # 将思考内容写入步骤与执行日志，供前端区分显示「思考」与「正式输出」
+                    thinking = getattr(resp, "thinking", None)
+                    if thinking and isinstance(thinking, str) and thinking.strip():
+                        ctx.update_last_step(thinking=thinking)
+                        ctx.add_execution_log("思考完成", log_type="thinking", detail=thinking)
+                        self._send_execution_log(ctx, "思考完成", log_type="thinking", detail=thinking)
                 
                 print(f"{CYAN}[Actor Mode] ✅ 流式生成完成，共 {chunk_count} 个 chunk，总长度: {total_length} 字符{RESET}")
                 print(f"{CYAN}{BOLD}[Actor Mode] ========== 流式生成回复 LLM 调用完成 =========={RESET}\n")
