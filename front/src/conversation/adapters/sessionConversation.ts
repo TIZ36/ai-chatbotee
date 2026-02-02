@@ -103,7 +103,6 @@ function mapSessionMessage(msg: Message): UnifiedMessage {
     tokenCount: (msg as any).token_count,
     // Expose processMessages at top level for UI rendering
     processMessages,
-    processMessages,
     // Expose thoughtSignature at top level
     thoughtSignature,
     // Expose mcpdetail at top level
