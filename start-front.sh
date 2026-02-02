@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Chatee 前端启动脚本
+# Chaya 前端启动脚本
 
 set -e
 
@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FRONT_DIR="$SCRIPT_DIR/front"
 
 echo "=========================================="
-echo "  Chatee 前端启动"
+echo "  🦆 Chaya 前端启动"
 echo "=========================================="
 
 # 检查 Node.js

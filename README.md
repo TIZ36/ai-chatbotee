@@ -1,147 +1,245 @@
-# Chatee
+<p align="center">
+  <img src="front/assets/app_logo_dark.png" alt="Chaya Logo" width="120" height="120">
+</p>
 
-AI 智能体对话平台，支持多 Agent 协作、MCP 工具调用、工作流编排。
+<h1 align="center">Chaya</h1>
 
-## 功能特性
+<p align="center">
+  <strong>🦆 下一代 AI 智能体对话平台</strong>
+</p>
 
-- **多模型支持**：OpenAI、Anthropic、DeepSeek、Google Gemini、Ollama 等
-- **MCP 工具集成**：连接外部 MCP 服务器，扩展 AI 能力
-- **Agent 协作**：多 Agent 圆桌会议、任务委派
-- **思考链展示**：实时显示 AI 思考过程（支持 DeepSeek Reasoner 等思考模型）
-- **工作流编排**：可视化工作流设计与执行
+<p align="center">
+  多模型 · 多 Agent · MCP 工具 · 思考链 · 工作流
+</p>
 
-## 技术栈
+<p align="center">
+  <a href="#-功能特性">功能</a> •
+  <a href="#-快速开始">安装</a> •
+  <a href="#-使用指南">使用</a> •
+  <a href="#-技术架构">架构</a> •
+  <a href="#-贡献">贡献</a>
+</p>
 
-| 层级 | 技术 |
-|------|------|
-| 前端 | React + TypeScript + Vite + Tailwind CSS |
-| 后端 | Flask + Python 3.10+ |
-| 数据库 | MySQL 8.0+ |
-| 缓存 | Redis |
-| 协议 | MCP (Model Context Protocol) |
+<p align="center">
+  <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
+  <img src="https://img.shields.io/badge/python-3.10+-green.svg" alt="Python">
+  <img src="https://img.shields.io/badge/node-18+-green.svg" alt="Node.js">
+  <img src="https://img.shields.io/badge/react-18-61dafb.svg" alt="React">
+</p>
 
-## 快速开始
+---
+
+## ✨ 功能特性
+
+<table>
+<tr>
+<td width="50%">
+
+### 🧠 多模型支持
+- OpenAI GPT-4 / GPT-4o
+- Anthropic Claude 3.5
+- DeepSeek (含 Reasoner 思考模型)
+- Google Gemini
+- Ollama 本地模型
+
+</td>
+<td width="50%">
+
+### 🔧 MCP 工具集成
+- 连接任意 MCP 服务器
+- 自动工具发现与调用
+- 实时执行日志
+- 支持 OAuth 认证
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+### 🤝 多 Agent 协作
+- 多 Agent 圆桌会议
+- 智能任务委派
+- 角色扮演与人设
+- 记忆与上下文管理
+
+</td>
+<td width="50%">
+
+### 💭 思考链展示
+- 实时流式显示思考过程
+- 支持 DeepSeek Reasoner
+- 执行日志可视化
+- 决策过程透明
+
+</td>
+</tr>
+</table>
+
+## 🎬 演示
+
+> 💡 **提示**：添加你的产品截图或 GIF 到这里
+
+```
+┌─────────────────────────────────────────────────────┐
+│  🦆 Chaya - AI 对话界面                             │
+├─────────────────────────────────────────────────────┤
+│                                                     │
+│  👤 用户: 帮我搜索小红书上关于咖啡的笔记            │
+│                                                     │
+│  🤖 AI: [思考中...]                                 │
+│     └─ 💭 思考: 用户想要搜索小红书内容...           │
+│     └─ 🔧 调用: xiaohongshu.search_feeds            │
+│     └─ ✅ 完成: 找到 15 条相关笔记                   │
+│                                                     │
+│  📝 搜索结果:                                       │
+│  1. ☕ 手冲咖啡入门指南 (👍 2.3k)                   │
+│  2. 🏠 家用咖啡机推荐 (👍 1.8k)                     │
+│  ...                                                │
+│                                                     │
+└─────────────────────────────────────────────────────┘
+```
+
+## 🚀 快速开始
 
 ### 环境要求
 
-- Node.js 18+
-- Python 3.10+
-- MySQL 8.0+
-- Redis
+| 依赖 | 版本 | 说明 |
+|------|------|------|
+| Node.js | 18+ | 前端运行时 |
+| Python | 3.10+ | 后端运行时 |
+| MySQL | 8.0+ | 数据存储 |
+| Redis | 6.0+ | 缓存与消息 |
 
-### 1. 克隆项目
+### 一键启动
 
 ```bash
-git clone <repo-url>
+# 克隆项目
+git clone https://github.com/your-username/ai-chatbotee.git
 cd ai-chatbotee
-```
 
-### 2. 启动后端
-
-```bash
+# 启动后端
 cd backend
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 python app.py
+
+# 启动前端（新终端）
+./start-front.sh
 ```
 
-后端默认运行在 `http://localhost:3002`
+访问 http://localhost:5177 开始使用 🎉
 
-### 3. 启动前端
+## 📖 使用指南
+
+### 1️⃣ 配置 LLM
+
+进入「设置 → LLM 配置」添加你的 API 密钥：
+
+```yaml
+# 支持的模型提供商
+- OpenAI (gpt-4, gpt-4o, gpt-3.5-turbo)
+- Anthropic (claude-3-5-sonnet, claude-3-opus)
+- DeepSeek (deepseek-chat, deepseek-reasoner)
+- Google (gemini-pro, gemini-1.5-pro)
+- Ollama (llama3, mistral, qwen...)
+```
+
+### 2️⃣ 添加 MCP 服务
+
+进入「设置 → MCP 服务器」添加工具服务：
 
 ```bash
-# 方式一：使用脚本
-./start-front.sh
+# 示例：小红书 MCP
+http://127.0.0.1:18060/mcp
 
-# 方式二：手动启动
-cd front
-npm install
-npm run dev
+# 示例：Notion MCP  
+http://127.0.0.1:18061/mcp
 ```
 
-前端默认运行在 `http://localhost:5177`
+### 3️⃣ 开始对话
 
-## 配置说明
+创建新会话，选择 Agent，开始智能对话！
 
-### 数据库配置
+## 🏗 技术架构
 
-在 `backend/config.yaml` 中配置 MySQL 连接：
-
-```yaml
-database:
-  host: localhost
-  port: 3306
-  user: root
-  password: your_password
-  database: chatee
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Frontend                              │
+│         React + TypeScript + Vite + Tailwind CSS            │
+├─────────────────────────────────────────────────────────────┤
+│                         Backend                              │
+│                    Flask + Python 3.10+                      │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐          │
+│  │   Actor     │  │     LLM     │  │     MCP     │          │
+│  │   System    │  │  Providers  │  │   Client    │          │
+│  └─────────────┘  └─────────────┘  └─────────────┘          │
+├─────────────────────────────────────────────────────────────┤
+│                      Data Layer                              │
+│              MySQL 8.0+  │  Redis 6.0+                       │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### Redis 配置
-
-```yaml
-redis:
-  host: localhost
-  port: 6379
-  password: your_password  # 可选
-```
-
-### LLM 配置
-
-在应用内的「设置 → LLM 配置」中添加 API 密钥：
-
-- OpenAI / Azure OpenAI
-- Anthropic Claude
-- DeepSeek
-- Google Gemini
-- Ollama（本地）
-
-## 目录结构
+## 📁 项目结构
 
 ```
 ai-chatbotee/
-├── backend/                # Flask 后端
-│   ├── api/               # API 路由
-│   ├── models/            # 数据模型
-│   ├── services/          # 业务逻辑
-│   │   ├── actor/         # Agent Actor 模型
-│   │   ├── providers/     # LLM Provider 实现
-│   │   └── mcp/           # MCP 相关服务
-│   └── app.py             # 入口
-├── front/                  # React 前端
-│   └── src/
-│       ├── components/    # UI 组件
-│       ├── services/      # 前端服务
-│       └── conversation/  # 对话适配器
-├── start-front.sh         # 前端启动脚本
-└── README.md
+├── 📂 backend/              # Flask 后端
+│   ├── 📂 api/             # REST API
+│   ├── 📂 services/        # 业务逻辑
+│   │   ├── 📂 actor/       # Agent Actor 模型
+│   │   ├── 📂 providers/   # LLM 适配器
+│   │   └── 📂 mcp/         # MCP 工具服务
+│   └── 📄 app.py           # 入口文件
+├── 📂 front/                # React 前端
+│   └── 📂 src/
+│       ├── 📂 components/  # UI 组件
+│       └── 📂 services/    # 前端服务
+├── 📄 start-front.sh       # 前端启动脚本
+└── 📄 README.md
 ```
 
-## MCP 服务集成
+## 🤝 贡献
 
-在「设置 → MCP 服务器」中添加 MCP 服务器 URL，例如：
+欢迎贡献！请查看 [贡献指南](CONTRIBUTING.md)。
 
-- 小红书 MCP：`http://127.0.0.1:18060/mcp`
-- Notion MCP：`http://127.0.0.1:18061/mcp`
+1. Fork 本仓库
+2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add AmazingFeature'`)
+4. 推送分支 (`git push origin feature/AmazingFeature`)
+5. 提交 Pull Request
 
-## 开发指南
+## ☕ 支持项目
 
-### 前端开发
+如果这个项目对你有帮助，欢迎请我喝杯咖啡！
 
-```bash
-cd front
-npm run dev      # 开发模式
-npm run build    # 构建
-npm run lint     # 代码检查
-```
+<p align="center">
+  <a href="https://www.buymeacoffee.com/your-username">
+    <img src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=☕&slug=your-username&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" />
+  </a>
+</p>
 
-### 后端开发
+<p align="center">
+  <a href="https://afdian.net/a/your-username">
+    <img src="https://img.shields.io/badge/爱发电-支持我-946ce6?style=for-the-badge" alt="爱发电">
+  </a>
+</p>
 
-```bash
-cd backend
-python app.py    # 启动服务
-```
+## ⭐ Star 历史
 
-## License
+如果你觉得这个项目有用，请给个 Star ⭐，这对我很重要！
 
-MIT
+[![Star History Chart](https://api.star-history.com/svg?repos=your-username/ai-chatbotee&type=Date)](https://star-history.com/#your-username/ai-chatbotee&Date)
+
+## 📄 开源协议
+
+本项目基于 [MIT License](LICENSE) 开源。
+
+---
+
+<p align="center">
+  Made with ❤️ by <a href="https://github.com/your-username">Your Name</a>
+</p>
+
+<p align="center">
+  <a href="#top">⬆️ 回到顶部</a>
+</p>
