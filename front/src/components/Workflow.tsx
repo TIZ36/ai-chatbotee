@@ -994,6 +994,11 @@ const Workflow: React.FC<WorkflowProps> = ({
                 wasAtBottomRef.current = true;
               }
               
+              // 如果是用户消息，清空执行日志（准备接收新的 AI 响应日志）
+              if (msg.role === 'user') {
+                setExecutionLogs([]);
+              }
+              
               return [...prev, newMessage];
             });
             
@@ -1126,10 +1131,12 @@ const Workflow: React.FC<WorkflowProps> = ({
             });
             
           } else if (payload.type === 'execution_log') {
-            // 后端发送的执行日志
+            // 后端发送的执行日志（实时滚动显示）
             const data = payload.data;
-            const logType = (data.log_type || 'info') as ExecutionLogEntry['type'];
+            // 兼容 type 和 log_type 字段
+            const logType = (data.type || data.log_type || 'info') as ExecutionLogEntry['type'];
             const msgText = typeof data.message === 'string' ? data.message.trim() : '';
+            
             // 不展示无意义/空的占位日志：后端应传递真实步骤文案
             if (!msgText) return;
             
@@ -1140,8 +1147,46 @@ const Workflow: React.FC<WorkflowProps> = ({
               message: msgText,
               detail: data.detail,
               duration: data.duration,
+              agent_id: data.agent_id,
+              agent_name: data.agent_name,
             };
-            setExecutionLogs(prev => [...prev.slice(-99), logEntry]); // 保留最近100条
+            
+            // 对于 thinking 类型的日志，特殊处理
+            if (logType === 'thinking') {
+              setExecutionLogs(prev => {
+                if (msgText === '思考中...') {
+                  // 流式更新：查找现有的"思考中..."日志并更新
+                  const existingIdx = prev.findIndex(
+                    log => log.type === 'thinking' && log.message === '思考中...'
+                  );
+                  if (existingIdx >= 0) {
+                    // 更新现有日志的 detail
+                    const updated = [...prev];
+                    updated[existingIdx] = { ...updated[existingIdx], detail: data.detail, timestamp: Date.now() };
+                    return updated;
+                  }
+                  // 没有现有日志，添加新的
+                  return [...prev.slice(-99), logEntry];
+                } else if (msgText === '思考完成') {
+                  // 思考完成：替换"思考中..."为"思考完成"
+                  const existingIdx = prev.findIndex(
+                    log => log.type === 'thinking' && log.message === '思考中...'
+                  );
+                  if (existingIdx >= 0) {
+                    // 替换现有日志
+                    const updated = [...prev];
+                    updated[existingIdx] = logEntry;
+                    return updated;
+                  }
+                  // 没有现有的"思考中..."日志，直接添加
+                  return [...prev.slice(-99), logEntry];
+                }
+                // 其他 thinking 类型的日志，直接添加
+                return [...prev.slice(-99), logEntry];
+              });
+            } else {
+              setExecutionLogs(prev => [...prev.slice(-99), logEntry]); // 保留最近100条
+            }
             setIsExecuting(true);
             
           } else if (payload.type === 'agent_thinking') {
@@ -1150,8 +1195,8 @@ const Workflow: React.FC<WorkflowProps> = ({
             const incomingProcessMessages = normalizeIncomingProcessMessages(data.processMessages, data.processSteps);
             console.log('[Workflow] Agent thinking:', data.agent_name, 'processMessages:', incomingProcessMessages?.length || 0);
             
-            // 清空旧日志，由后端 execution_log 事件推送有意义的步骤文案，不再写入无意义的「思考中...」
-            setExecutionLogs([]);
+            // 不再清空日志，保留流式生成过程中的执行日志（包括思考内容）
+            // 日志会在下一次新消息开始时自然被新日志替换
             setIsExecuting(true);
             
             // 移除决策状态（已开始回复）
@@ -4854,12 +4899,19 @@ const Workflow: React.FC<WorkflowProps> = ({
             processMessages={message.processMessages}
             executionLogs={
               (() => {
-                // 将全局 executionLogs 绑定到“当前正在生成/思考的那条消息”
+                // 从消息中提取执行日志（优先级：agent_log > log > executionLogs）
+                const getLogsFromMessage = (msg: typeof message) => {
+                  const ext = (msg.ext || {}) as any;
+                  return ext.agent_log || ext.log || msg.executionLogs || ext.executionLogs;
+                };
+                
+                // 将全局 executionLogs 绑定到"当前正在生成/思考的那条消息"
                 // 旧逻辑用 find() 取第一条 streaming 消息，若存在残留 isStreaming=true 的旧消息会绑定错，导致右侧日志不显示
                 if (message.isStreaming || message.isThinking) {
-                  return message.executionLogs ?? (message.ext as any)?.executionLogs ?? executionLogs;
+                  return getLogsFromMessage(message) ?? executionLogs;
                 }
-                return message.executionLogs || (message.ext as any)?.executionLogs;
+                // 历史消息：从持久化的 ext 中读取
+                return getLogsFromMessage(message);
               })()
             }
           />

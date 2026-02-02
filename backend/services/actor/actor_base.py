@@ -31,7 +31,7 @@ from models.llm_config import LLMConfigRepository
 
 from .actor_state import ActorState
 from .iteration_context import IterationContext, DecisionContext, MessageType, ProcessPhase, LLMDecision
-from .actions import Action, ActionResult, ResponseDecision
+from .actions import Action, ActionResult, ResponseDecision, ActionType
 from .capability_registry import CapabilityRegistry
 from .action_chain import (
     ActionChain, ActionStep, ActionChainStore,
@@ -616,6 +616,10 @@ class ActorBase(ABC):
         )
         ctx.update_last_step(status='completed')
         
+        # 添加执行日志：开始处理
+        ctx.add_execution_log('开始处理消息...', log_type='step')
+        self._send_execution_log(ctx, '开始处理消息...', log_type='step')
+        
         # 通知前端：开始处理
         self._sync_message('agent_thinking', '', ext={
             'message_id': reply_message_id,
@@ -628,8 +632,13 @@ class ActorBase(ABC):
             self._stats["messages_processed"] = self._stats.get("messages_processed", 0) + 1
         try:
             # 迭代处理
+            iteration_start = time.time()
             while not ctx.is_complete and ctx.iteration < ctx.max_iterations:
                 ctx.iteration += 1
+                
+                # 添加执行日志：迭代开始
+                ctx.add_execution_log(f'开始第 {ctx.iteration} 轮迭代...', log_type='step')
+                self._send_execution_log(ctx, f'开始第 {ctx.iteration} 轮迭代...', log_type='step')
                 
                 # 执行单轮迭代
                 self._iterate(ctx)
@@ -637,9 +646,17 @@ class ActorBase(ABC):
                 # 检查打断
                 if self._check_interruption(ctx):
                     ctx.mark_interrupted()
+                    ctx.add_execution_log('处理被打断', log_type='info')
+                    self._send_execution_log(ctx, '处理被打断', log_type='info')
                     break
             
+            iteration_duration = int((time.time() - iteration_start) * 1000)
+            ctx.add_execution_log(f'迭代完成，共 {ctx.iteration} 轮', log_type='success', duration=iteration_duration)
+            self._send_execution_log(ctx, f'迭代完成，共 {ctx.iteration} 轮', log_type='success', duration=iteration_duration)
+            
             # 生成最终回复
+            ctx.add_execution_log('开始生成回复...', log_type='thinking')
+            self._send_execution_log(ctx, '开始生成回复...', log_type='thinking')
             self._generate_final_response(ctx)
             
         except Exception as e:
@@ -658,11 +675,18 @@ class ActorBase(ABC):
             ctx: 迭代上下文
         """
         # 1. 规划下一步行动
+        ctx.add_execution_log('规划行动...', log_type='thinking')
+        self._send_execution_log(ctx, '规划行动...', log_type='thinking')
+        
+        plan_start = time.time()
         actions = self._plan_actions(ctx)
         ctx.planned_actions = actions
+        plan_duration = int((time.time() - plan_start) * 1000)
         
         if not actions:
             # 没有行动需要执行，直接生成回复
+            ctx.add_execution_log('无需执行行动，准备生成回复', log_type='info', duration=plan_duration)
+            self._send_execution_log(ctx, '无需执行行动，准备生成回复', log_type='info', duration=plan_duration)
             ctx.mark_complete()
             return
         
@@ -673,13 +697,43 @@ class ActorBase(ABC):
         )
         ctx.update_last_step(status='completed')
         
+        ctx.add_execution_log(f'规划了 {len(actions)} 个行动', log_type='step', duration=plan_duration)
+        self._send_execution_log(ctx, f'规划了 {len(actions)} 个行动', log_type='step', duration=plan_duration)
+        
         # 3. 执行第一个行动
         action = actions[0]
+        action_desc = self._get_action_description(action)
+        ctx.add_execution_log(f'执行: {action_desc}', log_type='tool')
+        self._send_execution_log(ctx, f'执行: {action_desc}', log_type='tool')
+        
+        exec_start = time.time()
         result = self._execute_action(action, ctx)
+        exec_duration = int((time.time() - exec_start) * 1000)
         ctx.executed_results.append(result)
+        
+        # 记录执行结果
+        if result.success:
+            ctx.add_execution_log(f'执行成功: {action_desc}', log_type='success', duration=exec_duration)
+            self._send_execution_log(ctx, f'执行成功: {action_desc}', log_type='success', duration=exec_duration)
+        else:
+            ctx.add_execution_log(f'执行失败: {action_desc}', log_type='error', detail=result.error, duration=exec_duration)
+            self._send_execution_log(ctx, f'执行失败: {action_desc}', log_type='error', detail=result.error, duration=exec_duration)
         
         # 4. 观察结果，决定是否继续
         ctx.is_complete = not self._should_continue(ctx)
+    
+    def _get_action_description(self, action: 'Action') -> str:
+        """获取行动的描述文本"""
+        if action.type == ActionType.MCP or action.type == 'mcp':
+            return f"MCP {action.server_id}:{action.mcp_tool_name}"
+        elif action.type == ActionType.LLM or action.type == 'llm':
+            return "调用 LLM"
+        elif action.type == 'reply':
+            return "生成回复"
+        elif hasattr(action, 'delegate_to') and action.delegate_to:
+            return f"委托给 {action.delegate_to}"
+        else:
+            return str(action.type)
     
     def process_message_v2(
         self,
@@ -1878,6 +1932,7 @@ class ActorBase(ABC):
                             'params': params,
                         }
                     )
+                    self._send_execution_log(ctx, f'选择MCP工具: {tool_name} (服务器: {server_id})', log_type='step')
                     
                     # 创建 MCP 调用 Action
                     action = Action.mcp(
@@ -1904,6 +1959,7 @@ class ActorBase(ABC):
                             },
                             duration=result.duration_ms
                         )
+                        self._send_execution_log(ctx, f'MCP调用完成: {tool_name}', log_type='tool', duration=result.duration_ms)
                     else:
                         ctx.add_execution_log(
                             f'MCP调用失败: {tool_name}',
@@ -1915,6 +1971,7 @@ class ActorBase(ABC):
                             },
                             duration=result.duration_ms
                         )
+                        self._send_execution_log(ctx, f'MCP调用失败: {tool_name}', log_type='error', detail=result.error, duration=result.duration_ms)
                     
                     # 将结果存储为 result_msg
                     result_msg = {
@@ -2090,12 +2147,14 @@ class ActorBase(ABC):
                     log_type='step',
                     detail=decision_detail
                 )
+                self._send_execution_log(ctx, f'决策: {decision} (自迭代)', log_type='step')
             else:
                 ctx.add_execution_log(
                     f'决策: {decision}',
                     log_type='llm',
                     detail=decision_detail
                 )
+                self._send_execution_log(ctx, f'决策: {decision}', log_type='llm')
             
             # 更新决策步骤为完成
             ctx.update_last_step(
@@ -3692,7 +3751,7 @@ class ActorBase(ABC):
         log_data = {
             'id': f"log-{int(time.time() * 1000)}-{id(self)}",
             'timestamp': int(time.time() * 1000),
-            'log_type': log_type,
+            'type': log_type,  # 使用 'type' 以与前端统一
             'message': message,
             'agent_id': self.agent_id,
             'agent_name': self.info.get('name', 'Agent'),
@@ -3814,6 +3873,10 @@ class ActorBase(ABC):
                 is_final_iteration=not ctx.should_continue,  # 是否是最终轮次
             )
             ctx.final_content = full_content
+            
+            # 发送执行完成日志
+            ctx.add_execution_log('执行完成', log_type='success')
+            self._send_execution_log(ctx, '执行完成', log_type='success')
             
             # 构建扩展数据
             ext_data = ctx.build_ext_data()
@@ -4158,11 +4221,32 @@ class ActorBase(ABC):
         stream = llm_provider.chat_stream(llm_messages)
         chunk_count = 0
         total_length = 0
+        thinking_buffer = ""  # 用于累积思考内容
+        
         while True:
             try:
                 chunk = next(stream)
+                
+                # 检查是否是思考内容（字典格式）
+                if isinstance(chunk, dict) and chunk.get('type') == 'thinking':
+                    # 累积思考内容
+                    thinking_content = chunk.get('content', '')
+                    thinking_buffer += thinking_content
+                    
+                    # 实时发送思考内容到前端
+                    if ctx and len(thinking_buffer) > 0:
+                        self._send_execution_log(
+                            ctx, 
+                            "思考中...", 
+                            log_type="thinking", 
+                            detail=thinking_buffer
+                        )
+                    continue  # 不 yield 思考内容，只发送日志
+                
+                # 正常内容
                 chunk_count += 1
-                total_length += len(chunk)
+                if isinstance(chunk, str):
+                    total_length += len(chunk)
                 yield chunk
             except StopIteration as e:
                 resp = getattr(e, "value", None)
@@ -4177,10 +4261,11 @@ class ActorBase(ABC):
                         finish_reason=getattr(resp, "finish_reason", None),
                         raw_response=getattr(resp, "raw", None),
                     )
-                    # 将思考内容写入步骤与执行日志，供前端区分显示「思考」与「正式输出」
-                    thinking = getattr(resp, "thinking", None)
+                    # 将最终的完整思考内容写入步骤（用于持久化）
+                    thinking = getattr(resp, "thinking", None) or thinking_buffer
                     if thinking and isinstance(thinking, str) and thinking.strip():
                         ctx.update_last_step(thinking=thinking)
+                        # 始终添加到执行日志（用于持久化），并发送最终版本
                         ctx.add_execution_log("思考完成", log_type="thinking", detail=thinking)
                         self._send_execution_log(ctx, "思考完成", log_type="thinking", detail=thinking)
                 

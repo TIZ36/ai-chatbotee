@@ -492,25 +492,225 @@ class IterationContext:
             self.final_ext['llmResponse'] = llm_metadata
 
     def build_ext_data(self) -> Dict[str, Any]:
-        """构建扩展数据（用于消息存储）"""
-        ext = {
-            'processMessages': self.to_process_messages(),
-            **self.final_ext,
-        }
-
+        """
+        构建扩展数据（用于消息存储）
+        
+        新的四大分类结构：
+        - agent_log: 滚动日志，显示AI agent的处理过程
+        - agent_mind: 思维链，关注关键时间点（思考、MCP选择、自迭代）
+        - agent_ext_content: 外部内容（MCP返回信息、媒体资源等）
+        - agent_output 的信息存储在 message.content 中
+        
+        同时保持向后兼容旧字段
+        """
         # 合并所有媒体数据：final_media + mcp_media
         all_media = []
         if self.final_media:
             all_media.extend(self.final_media)
         if self.mcp_media:
             all_media.extend(self.mcp_media)
-
+        
+        # 构建 agent_mind（思维链）
+        mind_nodes = self._build_mind_nodes()
+        agent_mind = {
+            'nodes': mind_nodes,
+        }
+        
+        # 构建 agent_ext_content（外部内容）
+        agent_ext_content = {}
+        if all_media:
+            agent_ext_content['media'] = all_media
+        
+        # 提取 MCP 结果
+        mcp_results = self._extract_mcp_results()
+        if mcp_results:
+            agent_ext_content['mcpResults'] = mcp_results
+        
+        # 构建新的 ext 结构
+        ext = {
+            # 新的四大分类
+            'agent_log': self.execution_logs if self.execution_logs else [],
+            'agent_mind': agent_mind,
+            'agent_ext_content': agent_ext_content if agent_ext_content else None,
+            
+            # 向后兼容旧字段
+            'processMessages': self.to_process_messages(),
+            'log': self.execution_logs if self.execution_logs else [],
+            
+            # 保留 final_ext 中的其他数据
+            **self.final_ext,
+        }
+        
+        # 向后兼容：media 也放在顶层
         if all_media:
             ext['media'] = all_media
 
         if self.error:
             ext['error'] = self.error
+        
         return ext
+    
+    def _build_mind_nodes(self) -> List[Dict[str, Any]]:
+        """
+        从 process_steps 构建思维链节点
+        
+        思维链关注关键时间点：
+        - thinking: 思考过程
+        - mcp_selection: MCP工具选择
+        - iteration: 自迭代选择
+        - decision: 决策
+        """
+        nodes = []
+        for step in self.process_steps:
+            if not isinstance(step, dict):
+                continue
+            
+            step_type = step.get('type', 'unknown')
+            
+            # 映射到思维节点类型
+            mind_type = self._map_step_to_mind_type(step_type)
+            
+            node = {
+                'id': step.get('step_id', f"node-{step.get('timestamp', int(time.time() * 1000))}"),
+                'type': mind_type,
+                'timestamp': step.get('timestamp', int(time.time() * 1000)),
+                'status': step.get('status', 'completed'),
+                'title': step.get('toolName') or step.get('action') or step_type,
+                'content': step.get('thinking'),
+                'duration': step.get('duration'),
+            }
+            
+            # MCP 相关信息
+            if step.get('mcpServer') or step.get('toolName'):
+                node['mcp'] = {
+                    'server': step.get('mcpServer'),
+                    'serverName': step.get('mcpServerName'),
+                    'toolName': step.get('toolName'),
+                    'arguments': step.get('arguments'),
+                    # 注意：不在思维链中包含完整result，避免数据冗余
+                }
+            
+            # 迭代相关信息
+            if step.get('iteration') is not None:
+                node['iteration'] = {
+                    'round': step.get('iteration'),
+                    'maxRounds': step.get('max_iterations', self.max_iterations),
+                    'isFinal': step.get('is_final_iteration', False),
+                }
+            
+            # 决策相关信息
+            if step.get('action'):
+                node['decision'] = {
+                    'action': step.get('action'),
+                    'reason': step.get('thinking'),
+                }
+            
+            # 错误信息
+            if step.get('error'):
+                node['error'] = step.get('error')
+            
+            nodes.append(node)
+        
+        return nodes
+    
+    def _map_step_to_mind_type(self, step_type: str) -> str:
+        """映射处理步骤类型到思维节点类型"""
+        mapping = {
+            'thinking': 'thinking',
+            'mcp_call': 'mcp_selection',
+            'mcp_selection': 'mcp_selection',
+            'tool_call': 'mcp_selection',
+            'iteration': 'iteration',
+            'agent_decision': 'decision',
+            'planning': 'planning',
+            'reflection': 'reflection',
+            'llm_generating': 'thinking',
+            'llm_call': 'thinking',
+        }
+        return mapping.get(step_type, step_type)
+    
+    def _extract_mcp_results(self) -> List[Dict[str, Any]]:
+        """
+        从 process_steps 中提取 MCP 调用结果
+        用于填充 agent_ext_content.mcpResults
+        """
+        results = []
+        for step in self.process_steps:
+            if not isinstance(step, dict):
+                continue
+            
+            step_type = step.get('type', '')
+            if step_type not in ('mcp_call', 'mcp_selection', 'tool_call'):
+                continue
+            
+            if not step.get('mcpServer') and not step.get('toolName'):
+                continue
+            
+            result_data = step.get('result')
+            
+            mcp_result = {
+                'serverId': step.get('mcpServer', ''),
+                'serverName': step.get('mcpServerName', ''),
+                'toolName': step.get('toolName', ''),
+                'arguments': step.get('arguments'),
+                'result': result_data,
+                'status': step.get('status', 'completed'),
+                'duration': step.get('duration'),
+            }
+            
+            if step.get('error'):
+                mcp_result['errorMessage'] = step.get('error')
+            
+            # 提取媒体
+            extracted_media = self._extract_media_from_result(result_data)
+            if extracted_media:
+                mcp_result['extractedMedia'] = extracted_media
+            
+            results.append(mcp_result)
+        
+        return results
+    
+    def _extract_media_from_result(self, result: Any) -> List[Dict[str, Any]]:
+        """从 MCP 结果中提取媒体资源"""
+        media = []
+        if not result:
+            return media
+        
+        content = None
+        if isinstance(result, dict):
+            if isinstance(result.get('result'), dict):
+                content = result['result'].get('content')
+            if content is None:
+                content = result.get('content')
+        
+        if not isinstance(content, list):
+            return media
+        
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            
+            item_type = item.get('type')
+            if item_type == 'image':
+                mime_type = item.get('mimeType') or item.get('mime_type') or 'image/png'
+                data = item.get('data')
+                if isinstance(data, str) and data:
+                    media.append({
+                        'type': 'image',
+                        'mimeType': mime_type,
+                        'data': data,
+                    })
+            elif item_type in ('video', 'audio'):
+                mime_type = item.get('mimeType') or item.get('mime_type')
+                data = item.get('data') or item.get('url')
+                if data:
+                    media.append({
+                        'type': item_type,
+                        'mimeType': mime_type,
+                        'data': data,
+                    })
+        
+        return media
     
     # ========== 新增方法：支持消息处理流程 ==========
     

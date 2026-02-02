@@ -9,9 +9,12 @@ import {
   Square,
   Edit2,
   RotateCw,
-  Plug
+  Plug,
+  Quote,
 } from 'lucide-react';
-import { ProcessStepsViewer, type ExecutionLogEntry } from './ui/ProcessStepsViewer';
+import { SimpleLogViewer } from './ui/SimpleLogViewer';
+import { ProcessStepsViewer } from './ui/ProcessStepsViewer';
+import type { ExecutionLogEntry } from './ui/ExecutionLogViewer';
 import { Button } from './ui/Button';
 import type { ProcessMessage } from '../types/processMessage';
 import { 
@@ -21,7 +24,7 @@ import {
   type ToolType
 } from './ui/MessageBubble';
 import type { MCPDetail } from '../services/sessionApi';
-import type { WorkflowNode, WorkflowConnection } from '../services/workflowApi';
+import type { WorkflowNode, WorkflowConnection } from '../types';
 
 /** 多模态媒体内容类型 */
 export interface MediaItem {
@@ -146,20 +149,8 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
     return false;
   })();
   const hasToolCalls = toolCalls && Array.isArray(toolCalls) && toolCalls.length > 0;
-  const hasProcessSteps = processMessages && processMessages.length > 0;
-  
-  const shouldShowSidePanel = role === 'assistant' && (
-    hasThinking || 
-    hasMCPDetail || 
-    hasToolCalls || 
-    hasProcessSteps ||  // 支持非思考模型的 MCP/工作流过程显示
-    isThinking || 
-    // 流式生成中也展示“头像行”的过程区域（思维链图标+右侧滚动日志）
-    isStreaming ||
-    currentStep ||
-    thoughtSignature
-  );
-
+  // 保留变量引用用于未来扩展
+  void hasThinking; void hasMCPDetail; void hasToolCalls;
 
   // 用户消息不显示分栏
   const isUserMessage = role === 'user';
@@ -232,39 +223,58 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
       {/* 消息内容区域 */}
       <div className={`group relative ${isAssistantMessage ? 'w-full' : 'flex-1'}`}>
         {isAssistantMessage ? (
-          /* AI 消息：堆叠布局：上方过程（默认自动展开/折叠），下方模型输出 */
-          <div className="space-y-2">
-            {/* AI 消息：头像行 */}
-            <div className="flex items-center gap-2 flex-wrap">
-              {/* 小头像 */}
+          /* AI 消息：堆叠布局：头像+按钮 -> 日志（折叠） -> 输出 */
+          <div className="space-y-1.5">
+            {/* AI 消息：头像行（头像 + 引用/思维链按钮） */}
+            <div className="flex items-center gap-2">
               <MessageAvatar 
                 role={role as MessageRole} 
                 toolType={toolType as ToolType} 
                 avatarUrl={avatarUrl}
                 size="sm"
               />
-              {/* 执行过程标签（显示工具调用、思考等状态） */}
-              {(shouldShowSidePanel || (executionLogs && executionLogs.length > 0)) && (
-                <>
-                  <ProcessStepsViewer
-                    processMessages={processMessages}
-                    executionLogs={executionLogs}
-                    isThinking={isThinking}
-                    isStreaming={isStreaming}
-                    hideTitle
-                    showTags={false}
-                    defaultExpanded
-                    onQuote={onQuote}
-                  />
-                </>
+              {/* 引用按钮 */}
+              {onQuote && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={onQuote}
+                  aria-label="引用此消息"
+                  title="引用此消息"
+                  className="h-6 w-6 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+                >
+                  <Quote className="w-3 h-3" />
+                </Button>
+              )}
+              {/* 思维链按钮（有执行日志或 processMessages 时显示） */}
+              {/* 思维链按钮（有执行日志或 processMessages 时显示） */}
+              {((executionLogs && executionLogs.length > 0) || (processMessages && processMessages.length > 0)) && (
+                <ProcessStepsViewer
+                  processMessages={processMessages}
+                  executionLogs={executionLogs}
+                  isThinking={isThinking}
+                  isStreaming={isStreaming}
+                  hideTitle
+                  showTags={false}
+                  defaultExpanded={false}
+                />
               )}
             </div>
+            
+            {/* 执行日志（头像下方，朴素小灰字风格） */}
+            {(executionLogs && executionLogs.length > 0) && (
+              <div className="ml-0.5">
+                <SimpleLogViewer
+                  logs={executionLogs}
+                  isActive={isThinking || isStreaming}
+                  defaultCollapsed={!isThinking && !isStreaming && !!content?.trim()}
+                  maxHeight={100}
+                />
+              </div>
+            )}
 
-            {/* 模型输出（消息气泡）：与上方思考/执行过程区分，明确为正式输出 */}
+            {/* 模型输出（消息气泡） */}
             <div ref={leftRef} className="min-w-0">
-              {shouldShowSidePanel && (content?.trim() || isStreaming) && (
-                <div className="text-[10px] text-muted-foreground mb-0.5 px-0.5">正式输出</div>
-              )}
               <MessageBubble role={role as MessageRole} toolType={toolType as ToolType}>
                 {renderContent(messageObj)}
               </MessageBubble>

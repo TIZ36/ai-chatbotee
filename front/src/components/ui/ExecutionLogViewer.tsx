@@ -12,6 +12,10 @@ export interface ExecutionLogEntry {
   message: string;
   detail?: string;
   duration?: number;
+  /** Agent ID (用于多 Agent 场景) */
+  agent_id?: string;
+  /** Agent 名称 (用于多 Agent 场景) */
+  agent_name?: string;
 }
 
 export interface ExecutionLogViewerProps {

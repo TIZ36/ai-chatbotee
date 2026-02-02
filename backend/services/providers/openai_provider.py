@@ -62,10 +62,11 @@ class OpenAIProvider(BaseLLMProvider):
     
     def chat_stream(self, messages: List[LLMMessage], **kwargs) -> Generator[str, None, LLMResponse]:
         """流式聊天"""
+        # 注意：使用 return (yield from ...) 以正确传递 generator 的返回值（包括 thinking）
         if self.sdk_available and self._client:
-            yield from self._chat_stream_sdk(messages, **kwargs)
+            return (yield from self._chat_stream_sdk(messages, **kwargs))
         else:
-            yield from self._chat_stream_rest(messages, **kwargs)
+            return (yield from self._chat_stream_rest(messages, **kwargs))
     
     def _chat_sdk(self, messages: List[LLMMessage], **kwargs) -> LLMResponse:
         """使用 SDK 的非流式聊天"""
@@ -107,19 +108,42 @@ class OpenAIProvider(BaseLLMProvider):
             )
             
             full_content = ""
+            full_thinking = ""
             finish_reason = None
             
             for chunk in stream:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    text = chunk.choices[0].delta.content
-                    full_content += text
-                    yield text
-                
-                if chunk.choices and chunk.choices[0].finish_reason:
-                    finish_reason = chunk.choices[0].finish_reason
+                if chunk.choices:
+                    delta = chunk.choices[0].delta
+                    
+                    # 处理思考内容（DeepSeek reasoner 等模型）
+                    # DeepSeek API 返回 reasoning_content 字段
+                    # 方法1: 直接属性访问
+                    if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                        full_thinking += delta.reasoning_content
+                    # 方法2: 从 model_extra 中获取（OpenAI SDK 会把未知字段放在这里）
+                    elif hasattr(delta, 'model_extra') and delta.model_extra:
+                        reasoning = delta.model_extra.get('reasoning_content')
+                        if reasoning:
+                            full_thinking += reasoning
+                    # 方法3: 尝试从 __dict__ 获取
+                    elif hasattr(delta, '__dict__'):
+                        reasoning = getattr(delta, '__dict__', {}).get('reasoning_content')
+                        if reasoning:
+                            full_thinking += reasoning
+                    
+                    # 处理正常内容
+                    if delta.content:
+                        text = delta.content
+                        full_content += text
+                        yield text
+                    
+                    if chunk.choices[0].finish_reason:
+                        finish_reason = chunk.choices[0].finish_reason
+            
             
             return LLMResponse(
                 content=full_content,
+                thinking=full_thinking if full_thinking else None,
                 finish_reason=finish_reason
             )
         except Exception as e:
@@ -152,8 +176,15 @@ class OpenAIProvider(BaseLLMProvider):
         data = response.json()
         choice = data['choices'][0]
 
+        # 提取思考内容（DeepSeek reasoner 模型）
+        thinking = None
+        msg = choice.get('message', {})
+        if msg.get('reasoning_content'):
+            thinking = msg['reasoning_content']
+        
         return LLMResponse(
             content=choice['message']['content'],
+            thinking=thinking,
             finish_reason=choice.get('finish_reason'),
             raw=data
         )
@@ -182,6 +213,7 @@ class OpenAIProvider(BaseLLMProvider):
             raise RuntimeError(f"{'DeepSeek' if self.provider_type == 'deepseek' else 'OpenAI'} API error ({response.status_code}): {error_msg}")
 
         full_content = ""
+        full_thinking = ""
         finish_reason = None
 
         for line in response.iter_lines():
@@ -193,17 +225,31 @@ class OpenAIProvider(BaseLLMProvider):
                         break
                     try:
                         chunk = json.loads(data)
-                        if chunk.get('choices') and chunk['choices'][0].get('delta', {}).get('content'):
-                            text = chunk['choices'][0]['delta']['content']
-                            full_content += text
-                            yield text
-                        if chunk.get('choices') and chunk['choices'][0].get('finish_reason'):
-                            finish_reason = chunk['choices'][0]['finish_reason']
+                        if chunk.get('choices'):
+                            delta = chunk['choices'][0].get('delta', {})
+                            
+                            # 处理思考内容（DeepSeek reasoner 等模型）
+                            # 实时 yield 思考内容，让外层可以流式显示
+                            if delta.get('reasoning_content'):
+                                thinking_chunk = delta['reasoning_content']
+                                full_thinking += thinking_chunk
+                                # yield 特殊标记，让外层区分思考内容和正式输出
+                                yield {'type': 'thinking', 'content': thinking_chunk}
+                            
+                            # 处理正常内容
+                            if delta.get('content'):
+                                text = delta['content']
+                                full_content += text
+                                yield text
+                            
+                            if chunk['choices'][0].get('finish_reason'):
+                                finish_reason = chunk['choices'][0]['finish_reason']
                     except json.JSONDecodeError:
                         continue
 
         return LLMResponse(
             content=full_content,
+            thinking=full_thinking if full_thinking else None,
             finish_reason=finish_reason
         )
     
@@ -286,6 +332,23 @@ class DeepSeekProvider(OpenAIProvider):
             api_url = 'https://api.deepseek.com/v1/chat/completions'
         super().__init__(api_key, api_url, model or 'deepseek-chat', **kwargs)
 
+    def chat_stream(self, messages: List[LLMMessage], **kwargs) -> Generator[str, None, LLMResponse]:
+        """
+        流式聊天
+        
+        对于 deepseek-reasoner 模型，强制使用 REST API 以正确获取 reasoning_content
+        因为 OpenAI SDK 可能不完全兼容 DeepSeek 的 reasoning_content 字段
+        """
+        # 对于 reasoner 模型，强制使用 REST API
+        # 注意：使用 return (yield from ...) 以正确传递 generator 的返回值
+        if self.model and 'reasoner' in self.model.lower():
+            self._log(f"Using REST API for reasoner model: {self.model}")
+            return (yield from self._chat_stream_rest(messages, **kwargs))
+        elif self.sdk_available and self._client:
+            return (yield from self._chat_stream_sdk(messages, **kwargs))
+        else:
+            return (yield from self._chat_stream_rest(messages, **kwargs))
+
     def _chat_sdk(self, messages: List[LLMMessage], **kwargs) -> LLMResponse:
         """使用 SDK 的非流式聊天（DeepSeek 特殊处理）"""
         try:
@@ -301,8 +364,13 @@ class DeepSeekProvider(OpenAIProvider):
             )
 
             choice = response.choices[0]
+            
+            # 提取思考内容（DeepSeek reasoner 模型会返回 reasoning_content）
+            thinking = self._extract_thinking(choice.message, response.model_dump())
+            
             return LLMResponse(
                 content=choice.message.content or '',
+                thinking=thinking,
                 finish_reason=choice.finish_reason,
                 tool_calls=self._parse_tool_calls(choice.message.tool_calls) if choice.message.tool_calls else None,
                 usage={
@@ -315,6 +383,33 @@ class DeepSeekProvider(OpenAIProvider):
         except Exception as e:
             self._log_error(f"DeepSeek SDK chat error: {e}", e)
             raise RuntimeError(f"DeepSeek API error: {str(e)}")
+    
+    def _extract_thinking(self, message, raw_response: Dict[str, Any]) -> Optional[str]:
+        """
+        提取思考内容（支持多种模型格式）
+        
+        - DeepSeek reasoner: message.reasoning_content
+        - OpenAI o1: 在 raw_response 中可能有 reasoning 字段
+        """
+        thinking = None
+        
+        # DeepSeek reasoner 模型
+        if hasattr(message, 'reasoning_content') and message.reasoning_content:
+            thinking = message.reasoning_content
+        
+        # 从 raw_response 中提取（兼容不同格式）
+        if not thinking and raw_response:
+            choices = raw_response.get('choices', [])
+            if choices:
+                msg = choices[0].get('message', {})
+                # DeepSeek 格式
+                if msg.get('reasoning_content'):
+                    thinking = msg['reasoning_content']
+                # OpenAI o1 格式（如果有）
+                elif msg.get('reasoning'):
+                    thinking = msg['reasoning']
+        
+        return thinking
 
     def _filter_deepseek_params(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
         """过滤 DeepSeek 不支持的参数"""

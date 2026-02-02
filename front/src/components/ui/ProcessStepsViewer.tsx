@@ -24,7 +24,55 @@ import {
 import { truncateBase64Strings } from '../../utils/textUtils';
 import { parseMCPContentBlocks, renderMCPBlocks } from '../workflow/mcpRender';
 import type { ProcessMessage } from '../../types/processMessage';
+import type { MindNode } from '../../types/agentResponse';
 import { Button } from './Button';
+
+/**
+ * 将新的 MindNode 转换为 ProcessMessage 格式
+ * 用于向后兼容现有的渲染逻辑
+ */
+function convertMindNodeToProcessMessage(node: MindNode): ProcessMessage {
+  // 映射思维节点类型到处理消息类型
+  const typeMapping: Record<string, string> = {
+    'thinking': 'thinking',
+    'mcp_selection': 'mcp_call',
+    'iteration': 'agent_decision',
+    'decision': 'agent_decision',
+    'planning': 'agent_decision',
+    'reflection': 'thinking',
+  };
+  
+  const type = typeMapping[node.type] || node.type;
+  
+  return {
+    type,
+    contentType: 'text',
+    timestamp: node.timestamp,
+    title: node.title,
+    content: node.content,
+    meta: {
+      step_id: node.id,
+      status: node.status,
+      duration: node.duration,
+      error: node.error,
+      // MCP 信息
+      mcpServer: node.mcp?.server,
+      mcpServerName: node.mcp?.serverName,
+      toolName: node.mcp?.toolName,
+      arguments: node.mcp?.arguments,
+      result: node.mcp?.result,
+      // 迭代信息
+      iteration: node.iteration?.round,
+      max_iterations: node.iteration?.maxRounds,
+      is_final_iteration: node.iteration?.isFinal,
+      // 决策信息
+      action: node.decision?.action,
+      thinking: node.content || node.decision?.reason,
+      // 保留原始数据
+      _mindNode: node,
+    },
+  };
+}
 import {
   Dialog,
   DialogContent,
@@ -126,6 +174,7 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [pinnedIndex, setPinnedIndex] = useState<number | null>(null);
   const [timelineOpen, setTimelineOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<'mind' | 'log'>('mind');
   const [popoverPos, setPopoverPos] = useState<{ top: number; left: number; transform?: string; marginTop?: number } | null>(null);
   const tagRefs = useRef<(HTMLSpanElement | null)[]>([]);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -143,10 +192,21 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
   };
 
   const orderedSteps = useMemo(() => {
-    const baseMessages: ProcessMessage[] =
-      processMessages?.length
-        ? processMessages
-        : (ext?.processMessages && Array.isArray(ext.processMessages) ? ext.processMessages : []);
+    // 优先使用新结构 ext.agent_mind.nodes，向后兼容 processMessages
+    let baseMessages: ProcessMessage[] = [];
+    
+    // 1. 直接传入的 processMessages
+    if (processMessages?.length) {
+      baseMessages = processMessages;
+    }
+    // 2. 新结构：ext.agent_mind.nodes
+    else if (ext?.agent_mind?.nodes && Array.isArray(ext.agent_mind.nodes)) {
+      baseMessages = ext.agent_mind.nodes.map((node: any) => convertMindNodeToProcessMessage(node));
+    }
+    // 3. 旧结构：ext.processMessages
+    else if (ext?.processMessages && Array.isArray(ext.processMessages)) {
+      baseMessages = ext.processMessages;
+    }
     
     // 即使没有消息，如果正在流式输出，也要显示占位
     if (!baseMessages.length && !isStreaming && !isThinking) return [];
@@ -204,9 +264,26 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
     return sorted;
   }, [processMessages, ext?.processMessages, isStreaming, isThinking]);
 
-  // 思维链右侧垂直滚动：优先展示后端 executionLogs；若后端未推送 execution_log，则从 orderedSteps 生成（包含 thinking 文本）
+  // 思维链右侧垂直滚动：优先展示 ext.agent_log，向后兼容 executionLogs
   const inlineLogs: ExecutionLogEntry[] = useMemo(() => {
-    if (Array.isArray(executionLogs) && executionLogs.length > 0) return executionLogs;
+    // 标准化日志条目（兼容 type 和 log_type）
+    const normalizeLog = (log: any): ExecutionLogEntry => ({
+      ...log,
+      type: log.type || log.log_type || 'info',
+    });
+    
+    // 1. 新结构：ext.agent_log
+    if (ext?.agent_log && Array.isArray(ext.agent_log) && ext.agent_log.length > 0) {
+      return ext.agent_log.map(normalizeLog);
+    }
+    // 2. 向后兼容：ext.log
+    if (ext?.log && Array.isArray(ext.log) && ext.log.length > 0) {
+      return ext.log.map(normalizeLog);
+    }
+    // 3. 传入的 executionLogs
+    if (Array.isArray(executionLogs) && executionLogs.length > 0) {
+      return executionLogs.map(normalizeLog);
+    }
     const base = (orderedSteps || []).filter(Boolean) as ProcessMessage[];
     if (base.length === 0) return [];
 
@@ -497,24 +574,16 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
                 <Quote className="w-3 h-3" />
               </Button>
             )}
-            <div className="flex items-center gap-1.5 flex-1 min-w-0">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setTimelineOpen(true)}
-                aria-label="查看过程详情"
-                title="查看过程详情"
-                className={`h-6 w-6 flex-shrink-0 ${(isThinking || isStreaming) ? 'thinking-brain-icon' : ''}`}
-              >
-                <Brain className={`w-3 h-3 transition-transform ${(isThinking || isStreaming) ? 'animate-bounce text-primary' : ''}`} />
-              </Button>
-              {/* 执行日志垂直滚动显示（类似 Cursor）：仅在有日志时展示 */}
-              <div className="flex-1 min-w-0 max-w-[300px] sm:max-w-[400px] overflow-hidden">
-                {inlineLogs.length > 0 ? (
-                  <ExecutionLogScroller logs={inlineLogs} isActive={isThinking || isStreaming} maxHeight={120} />
-                ) : null}
-              </div>
-            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setTimelineOpen(true)}
+              aria-label="查看过程详情"
+              title="查看过程详情"
+              className={`h-6 w-6 flex-shrink-0 ${(isThinking || isStreaming) ? 'thinking-brain-icon' : ''}`}
+            >
+              <Brain className={`w-3 h-3 transition-transform ${(isThinking || isStreaming) ? 'animate-bounce text-primary' : ''}`} />
+            </Button>
           </div>
         </div>
       )}
@@ -562,82 +631,206 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
       <Dialog open={timelineOpen} onOpenChange={setTimelineOpen}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>思维链</DialogTitle>
+            <DialogTitle>Agent 处理详情</DialogTitle>
           </DialogHeader>
+          
+          {/* Tab 切换 */}
+          <div className="flex items-center gap-1 border-b border-border">
+            <button
+              onClick={() => setActiveTab('mind')}
+              className={`px-4 py-2 text-sm font-medium transition-colors relative ${
+                activeTab === 'mind'
+                  ? 'text-primary'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <div className="flex items-center gap-1.5">
+                <Brain className="w-4 h-4" />
+                <span>思维链</span>
+                <span className="text-[10px] opacity-60">({orderedSteps.length})</span>
+              </div>
+              {activeTab === 'mind' && (
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab('log')}
+              className={`px-4 py-2 text-sm font-medium transition-colors relative ${
+                activeTab === 'log'
+                  ? 'text-primary'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <div className="flex items-center gap-1.5">
+                <Cpu className="w-4 h-4" />
+                <span>执行日志</span>
+                <span className="text-[10px] opacity-60">
+                  ({(() => {
+                    const logs = (ext as any)?.agent_log || (ext as any)?.log || executionLogs || [];
+                    return Array.isArray(logs) ? logs.length : 0;
+                  })()})
+                </span>
+              </div>
+              {activeTab === 'log' && (
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+              )}
+            </button>
+          </div>
+          
           <div className="max-h-[70vh] overflow-auto space-y-3 pr-1 no-scrollbar mt-2">
-            {/* 执行日志区域 - 从 ext.log 读取 */}
-            {(() => {
-              // 优先从 ext.log 读取，向后兼容 executionLogs
-              const logs = (ext as any)?.log || executionLogs;
-              if (logs && Array.isArray(logs) && logs.length > 0) {
-                return (
-                  <div className="rounded-md border border-border/60 bg-muted/20">
-                    <div className="px-3 py-2 border-b border-border/60">
-                      <span className="text-[11px] font-medium text-muted-foreground">执行日志 ({logs.length})</span>
-                    </div>
-                    <div className="px-3 py-2 space-y-0.5 text-[10px] text-muted-foreground/70 italic">
-                      {logs.map((log: any, idx: number) => (
-                        <div key={log.id || idx} className="leading-relaxed">
-                          <span className="opacity-40 text-[9px] mr-1.5">
-                            {new Date(log.timestamp).toLocaleTimeString('zh-CN', { hour12: false })}
+            {/* 思维链 Tab */}
+            {activeTab === 'mind' && (
+              <>
+                {orderedSteps.map((step, idx) => {
+                  const cat = stepCategory(step);
+                  const label = stepTagLabel(step);
+                  const isRunning = isRunningStatus(step.meta?.status) || (step.type === 'thinking' && isThinking) || (step.type === 'output' && isStreaming);
+                  return (
+                    <div
+                      key={`${step.type}-${step.timestamp ?? idx}`}
+                      className="rounded-md border border-border/60 bg-muted/30"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-border/60">
+                        <div className="flex flex-wrap items-center gap-2 min-w-0">
+                          <span className="text-[11px] text-muted-foreground">
+                            {formatTime(step.timestamp)}
+                            {step.meta?.duration != null && (
+                              <span className="opacity-60 ml-1">({formatDuration(step.meta.duration)})</span>
+                            )}
                           </span>
-                          {log.message}
-                          {log.duration != null && (
-                            <span className="ml-1 opacity-60">({log.duration < 1000 ? `${log.duration}ms` : `${(log.duration / 1000).toFixed(1)}s`})</span>
-                          )}
-                          {log.detail && (
-                            <span className="ml-1 opacity-50 text-[9px]">{log.detail}</span>
-                          )}
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${categoryStyle(cat)}`}
+                          >
+                            {label}
+                          </span>
                         </div>
-                      ))}
+                        <div className="flex items-center gap-1 text-muted-foreground">
+                          {isRunning ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : step.meta?.status === 'error' ? (
+                            <X className="w-3 h-3 text-red-500" />
+                          ) : step.meta?.status === 'completed' ? (
+                            <Check className="w-3 h-3 text-emerald-500" />
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="px-1 pb-1">
+                        {renderDetailBody(step, { showMetaLine: false })}
+                      </div>
                     </div>
+                  );
+                })}
+                {orderedSteps.length === 0 && (
+                  <div className="text-center py-8 text-muted-foreground text-sm">
+                    暂无思维链数据
                   </div>
-                );
-              }
-              return null;
-            })()}
+                )}
+              </>
+            )}
             
-            {/* 思维链步骤 */}
-            {orderedSteps.map((step, idx) => {
-              const cat = stepCategory(step);
-              const label = stepTagLabel(step);
-              const isRunning = isRunningStatus(step.meta?.status) || (step.type === 'thinking' && isThinking) || (step.type === 'output' && isStreaming);
-              return (
-                <div
-                  key={`${step.type}-${step.timestamp ?? idx}`}
-                  className="rounded-md border border-border/60 bg-muted/30"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-border/60">
-                    <div className="flex flex-wrap items-center gap-2 min-w-0">
-                      <span className="text-[11px] text-muted-foreground">{formatTime(step.timestamp)}</span>
-                      <span
-                        className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${categoryStyle(cat)}`}
+            {/* 执行日志 Tab */}
+            {activeTab === 'log' && (
+              <>
+                {(() => {
+                  // 优先从 ext.agent_log 读取，向后兼容 ext.log 和 executionLogs
+                  const logs = (ext as any)?.agent_log || (ext as any)?.log || executionLogs || [];
+                  if (!Array.isArray(logs) || logs.length === 0) {
+                    return (
+                      <div className="text-center py-8 text-muted-foreground text-sm">
+                        暂无执行日志
+                      </div>
+                    );
+                  }
+                  
+                  // 获取日志类型（兼容 type 和 log_type）
+                  const getLogType = (log: any): string => log.type || log.log_type || 'info';
+                  
+                  // 按类型分组日志
+                  const logTypeIcon = (type: string) => {
+                    switch (type) {
+                      case 'thinking': return <Brain className="w-3 h-3 text-violet-500" />;
+                      case 'tool': case 'mcp': return <Wrench className="w-3 h-3 text-cyan-500" />;
+                      case 'llm': return <Cpu className="w-3 h-3 text-blue-500" />;
+                      case 'step': return <Target className="w-3 h-3 text-orange-500" />;
+                      case 'success': return <Check className="w-3 h-3 text-emerald-500" />;
+                      case 'error': return <X className="w-3 h-3 text-red-500" />;
+                      case 'iteration': return <Sparkles className="w-3 h-3 text-purple-500" />;
+                      case 'info': return <Lightbulb className="w-3 h-3 text-yellow-500" />;
+                      default: return <MessageSquare className="w-3 h-3 text-muted-foreground" />;
+                    }
+                  };
+                  
+                  const logTypeBg = (type: string) => {
+                    switch (type) {
+                      case 'thinking': return 'bg-violet-500/5 border-violet-500/20';
+                      case 'tool': case 'mcp': return 'bg-cyan-500/5 border-cyan-500/20';
+                      case 'llm': return 'bg-blue-500/5 border-blue-500/20';
+                      case 'step': return 'bg-orange-500/5 border-orange-500/20';
+                      case 'success': return 'bg-emerald-500/5 border-emerald-500/20';
+                      case 'error': return 'bg-red-500/5 border-red-500/20';
+                      case 'iteration': return 'bg-purple-500/5 border-purple-500/20';
+                      case 'info': return 'bg-yellow-500/5 border-yellow-500/20';
+                      default: return 'bg-muted/30 border-border/60';
+                    }
+                  };
+                  
+                  // 格式化详情（支持对象和字符串）
+                  const formatDetail = (detail: any): string => {
+                    if (!detail) return '';
+                    if (typeof detail === 'string') return detail;
+                    try {
+                      return JSON.stringify(detail, null, 2);
+                    } catch {
+                      return String(detail);
+                    }
+                  };
+                  
+                  return logs.map((log: any, idx: number) => {
+                    const logType = getLogType(log);
+                    const detailStr = formatDetail(log.detail);
+                    return (
+                      <div
+                        key={log.id || idx}
+                        className={`rounded-md border p-3 ${logTypeBg(logType)}`}
                       >
-                        {label}
-                      </span>
-                      {step.meta?.status && (
-                        <span className="text-[11px] text-muted-foreground">状态: {step.meta.status}</span>
-                      )}
-                      {step.meta?.duration != null && (
-                        <span className="text-[11px] text-muted-foreground">耗时: {formatDuration(step.meta.duration)}</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1 text-muted-foreground">
-                      {isRunning ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                      ) : step.meta?.status === 'error' ? (
-                        <X className="w-3 h-3 text-red-500" />
-                      ) : step.meta?.status === 'completed' ? (
-                        <Check className="w-3 h-3 text-emerald-500" />
-                      ) : null}
-                    </div>
-                  </div>
-                  <div className="px-1 pb-1">
-                    {renderDetailBody(step, { showMetaLine: false })}
-                  </div>
-                </div>
-              );
-            })}
+                        <div className="flex items-start gap-2">
+                          <div className="flex-shrink-0 mt-0.5">
+                            {logTypeIcon(logType)}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[10px] text-muted-foreground">
+                              {new Date(log.timestamp).toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                              <span className="opacity-50">.{String(log.timestamp % 1000).padStart(3, '0')}</span>
+                              {log.duration != null && (
+                                <span className="opacity-60 ml-1">({log.duration < 1000 ? `${log.duration}ms` : `${(log.duration / 1000).toFixed(2)}s`})</span>
+                              )}
+                            </span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                              {logType}
+                            </span>
+                            {log.agent_name && (
+                              <span className="text-[10px] text-muted-foreground opacity-70">
+                                {log.agent_name}
+                              </span>
+                            )}
+                          </div>
+                            <div className="mt-1 text-sm text-foreground">
+                              {log.message}
+                            </div>
+                            {detailStr && (
+                              <div className="mt-1 text-[11px] text-muted-foreground whitespace-pre-wrap break-words max-h-32 overflow-auto bg-muted/30 rounded p-1.5">
+                                {detailStr}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
+              </>
+            )}
           </div>
           <DialogFooter>
             <Button

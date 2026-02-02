@@ -1027,8 +1027,9 @@ def execute_mcp_with_llm(
                                     }
                 return None
             
-            # 尝试快速匹配
-            fast_matched_tool = _try_fast_tool_match(effective_input, tools)
+            # 尝试快速匹配（暂时禁用，总是使用 LLM 选择工具）
+            # 快速匹配可能导致误匹配，先禁用以确保准确性
+            fast_matched_tool = None  # _try_fast_tool_match(effective_input, tools)
             if fast_matched_tool and not forced_tool_name:
                 print(f"{GREEN}[MCP EXEC] ⚡ 快速匹配成功: {fast_matched_tool['name']}（跳过 LLM 选择）{RESET}")
                 log(f"⚡ 快速匹配工具: {fast_matched_tool['name']}（跳过 LLM）")
