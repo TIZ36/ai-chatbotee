@@ -3,7 +3,7 @@
  * 使用新后端 API 路由
  */
 
-import { getBackendUrl } from '../compat/electron';
+import { getBackendUrl } from '../../utils/backendUrl';
 
 // ============================================================================
 // 基础请求函数
@@ -16,7 +16,8 @@ interface RequestOptions {
 }
 
 async function request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-  const backendUrl = await getBackendUrl();
+  // 使用同步的 getBackendUrl，支持根据当前访问域名动态推断后端地址（支持局域网访问）
+  const backendUrl = getBackendUrl();
   const url = `${backendUrl}${endpoint}`;
   
   const config: RequestInit = {
@@ -440,27 +441,8 @@ export interface CreateWorkflowParams {
   config?: Record<string, any>;
 }
 
-export const workflowApi = {
-  /** 获取所有工作流 */
-  getWorkflows: () => 
-    request<Workflow[]>('/api/workflows'),
-  
-  /** 获取单个工作流 */
-  getWorkflow: (workflowId: string) => 
-    request<Workflow>(`/api/workflows/${workflowId}`),
-  
-  /** 创建工作流 */
-  createWorkflow: (data: CreateWorkflowParams) => 
-    request<Workflow>('/api/workflows', { method: 'POST', body: data }),
-  
-  /** 更新工作流 */
-  updateWorkflow: (workflowId: string, data: Partial<CreateWorkflowParams>) => 
-    request<Workflow>(`/api/workflows/${workflowId}`, { method: 'PUT', body: data }),
-  
-  /** 删除工作流 */
-  deleteWorkflow: (workflowId: string) => 
-    request<{ success: boolean }>(`/api/workflows/${workflowId}`, { method: 'DELETE' }),
-};
+// 工作流 API 已移除
+export const workflowApi = {};
 
 // ============================================================================
 // Health API
@@ -485,7 +467,6 @@ export const api = {
   mcp: mcpApi,
   session: sessionApi,
   message: messageApi,
-  workflow: workflowApi,
   health: healthApi,
 };
 

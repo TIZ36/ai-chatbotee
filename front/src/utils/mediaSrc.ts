@@ -54,7 +54,7 @@ export function resolveMediaSrc(raw: string, mimeType?: string): string {
     return ensureDataUrlFromMaybeBase64(src, mimeType || 'application/octet-stream');
   }
 
-  // local absolute file path (Electron)
+  // local absolute file path (浏览器环境)
   if (isProbablyLocalAbsolutePath(src)) return toFileUrl(src);
 
   // backend-relative (e.g. /uploads/xxx.png)

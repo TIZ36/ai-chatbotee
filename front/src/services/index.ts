@@ -42,11 +42,7 @@ export {
   MCPClient,
 } from './providers';
 
-// Workflow Layer
-export {
-  WorkflowPool,
-  WorkflowExecutor,
-} from './workflow';
+// Workflow Layer (已移除)
 
 // Session Layer
 export {
@@ -54,7 +50,4 @@ export {
   Session,
 } from './session';
 
-// Apps Layer
-export {
-  RoundTableOrchestrator,
-} from './apps';
+// Apps Layer (已移除 RoundTable)

@@ -12,6 +12,7 @@ from .session import session_bp
 from .message import message_bp
 from .workflow import workflow_bp, init_workflow_api
 from .health import health_bp
+from .actor_pool import actor_pool_bp
 
 
 def register_api_routes(app, get_connection=None, config=None):
@@ -50,5 +51,6 @@ def register_api_routes(app, get_connection=None, config=None):
     app.register_blueprint(message_bp, url_prefix='/api/messages')
     app.register_blueprint(workflow_bp, url_prefix='/api/workflows')
     app.register_blueprint(health_bp, url_prefix='/api/health')
+    app.register_blueprint(actor_pool_bp, url_prefix='/api/actor-pool')
     
     print("[API] All API routes registered successfully")

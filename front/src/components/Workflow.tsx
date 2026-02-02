@@ -5,7 +5,7 @@
 
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Send, Loader, Loader2, Bot, Wrench, AlertCircle, CheckCircle, Brain, Plug, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Sparkles, Workflow as WorkflowIcon, Play, ArrowRight, Trash2, X, Edit2, RotateCw, Database, Paperclip, Music, HelpCircle, Package, CheckSquare, Square, Quote, Lightbulb, Eye, Volume2, Paintbrush, Image, Plus } from 'lucide-react';
+import { Send, Loader, Loader2, Bot, Wrench, AlertCircle, CheckCircle, Brain, Plug, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Sparkles, Workflow as WorkflowIcon, Play, ArrowRight, Trash2, X, Edit2, RotateCw, Database, Paperclip, Music, HelpCircle, Package, CheckSquare, Square, Quote, Lightbulb, Eye, Volume2, Paintbrush, Image, Plus, CornerDownRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Virtuoso } from 'react-virtuoso';
@@ -13,20 +13,17 @@ import { LLMClient, LLMMessage } from '../services/llmClient';
 import { getLLMConfigs, getLLMConfig, getLLMConfigApiKey, LLMConfigFromDB, getProviders, LLMProvider } from '../services/llmApi';
 import { mcpManager, MCPServer, MCPTool } from '../services/mcpClient';
 import { getMCPServers, MCPServerConfig } from '../services/mcpApi';
-import { getSessions, getAgents, getSession, createSession, getSessionMessages, saveMessage, summarizeSession, getSessionSummaries, deleteSession, clearSummarizeCache, deleteMessage, executeMessageComponent, updateSessionAvatar, updateSessionName, updateSessionSystemPrompt, updateSessionMediaOutputPath, updateSessionLLMConfig, upgradeToAgent, updateSessionType, Session, Summary, MessageExt } from '../services/sessionApi';
-import { getUserAccess, createOrUpdateUserAccess, UserAccess } from '../services/userAccessApi';
+import { getSessions, getAgents, getSession, createSession, saveMessage, summarizeSession, getSessionSummaries, deleteSession, clearSummarizeCache, deleteMessage, updateSessionAvatar, updateSessionName, updateSessionSystemPrompt, updateSessionMediaOutputPath, updateSessionLLMConfig, upgradeToAgent, updateSessionType, Session, Summary, MessageExt } from '../services/sessionApi';
 import { createRole } from '../services/roleApi';
 import { createSkillPack, saveSkillPack, optimizeSkillPackSummary, getSkillPacks, getSessionSkillPacks, createSopSkillPack, setCurrentSop, getCurrentSop, SkillPack, SessionSkillPack, SkillPackCreationResult, SkillPackProcessInfo } from '../services/skillPackApi';
 import { getBackendUrl } from '../utils/backendUrl';
 import { estimate_messages_tokens, get_model_max_tokens, estimate_tokens } from '../services/tokenCounter';
-import { getWorkflows, getWorkflow, Workflow as WorkflowType, WorkflowNode, WorkflowConnection } from '../services/workflowApi';
-import { workflowPool } from '../services/workflowPool';
 import { getBatch } from '../services/crawlerApi';
-import { getRoundTables, type RoundTable, deleteRoundTable, createRoundTable } from '../services/roundTableApi';
 import CrawlerModuleSelector from './CrawlerModuleSelector';
 import CrawlerBatchItemSelector from './CrawlerBatchItemSelector';
-import ComponentThumbnails from './ComponentThumbnails';
+import AttachmentMenu from './AttachmentMenu';
 import { Button } from './ui/Button';
+import { Checkbox } from './ui/Checkbox';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import {
   Dialog,
@@ -39,12 +36,10 @@ import {
 import { Label } from './ui/Label';
 import { Input } from './ui/Input';
 import { Textarea } from './ui/Textarea';
-import { ScrollArea } from './ui/ScrollArea';
 import { DataListItem } from './ui/DataListItem';
 import { toast } from './ui/use-toast';
 import { HistoryLoadTop } from './ui/HistoryLoadTop';
 import { PluginExecutionPanel } from './PluginExecutionPanel';
-import { MCPExecutionCard } from './MCPExecutionCard';
 import { MCPDetailOverlay } from './MCPDetailOverlay';
 import { emitSessionsChanged, SESSIONS_CHANGED_EVENT } from '../utils/sessionEvents';
 import { getDimensionOptions } from '../services/roleDimensionApi';
@@ -53,7 +48,6 @@ import { MediaGallery, MediaItem } from './ui/MediaGallery';
 import type { SessionMediaItem } from './ui/SessionMediaPanel';
 import { IconButton } from './ui/IconButton';
 import { MediaPreviewDialog } from './ui/MediaPreviewDialog';
-import { truncateBase64Strings } from '../utils/textUtils';
 import { ensureDataUrlFromMaybeBase64, normalizeBase64ForInlineData } from '../utils/dataUrl';
 import { useConversation } from '../conversation/useConversation';
 import { createSessionConversationAdapter } from '../conversation/adapters/sessionConversation';
@@ -65,11 +59,15 @@ import {
   extractProfession,
 } from './workflow/profession';
 import { useFloatingComposerPadding } from './workflow/useFloatingComposerPadding';
-import { parseMCPContentBlocks, renderMCPBlocks, renderMCPMedia } from './workflow/mcpRender';
-import { MessageContent, Message, ProcessStep } from './workflow/MessageContent';
+import { parseMCPContentBlocks } from './workflow/mcpRender';
+import { MessageContent } from './workflow/MessageContent';
+import type { Message } from './workflow/types';
+import type { ProcessMessage } from '../types/processMessage';
+import type { ProcessStep } from '../types/processSteps';
 import { ProcessStepsViewer } from './ui/ProcessStepsViewer';
+import type { ExecutionLogEntry } from './ui/ExecutionLogViewer';
+import { ExecutionLogViewer } from './ui/ExecutionLogViewer';
 import { useChatInput } from './workflow/useChatInput';
-import { calculateCursorPosition } from './workflow/utils';
 import { TokenCounter } from './workflow/TokenCounter';
 import { floatingComposerContainerClass, floatingComposerInnerClass } from './shared/floatingComposerStyles';
 import {
@@ -77,9 +75,6 @@ import {
   UpgradeToAgentDialog,
   AvatarConfigDialog,
   SkillPackDialog,
-  NewMeetingDialog,
-  NewResearchDialog,
-  NicknameDialog,
   PersonaPanel,
   RoleGeneratorDialog,
   HeaderConfigDialog,
@@ -163,16 +158,17 @@ const getProviderIcon = (config: LLMConfigFromDB | null, providers: LLMProvider[
 interface WorkflowProps {
   sessionId?: string | null;
   onSelectSession?: (sessionId: string) => void;
-  onSelectMeeting?: (roundTableId: string) => void;
-  onSelectResearch?: (researchSessionId: string) => void;
+  enableToolCalling?: boolean;
+  onToggleToolCalling?: (enabled: boolean) => void;
 }
 
 const Workflow: React.FC<WorkflowProps> = ({
   sessionId: externalSessionId,
   onSelectSession,
-  onSelectMeeting,
-  onSelectResearch,
+  enableToolCalling,
+  onToggleToolCalling,
 }) => {
+  const toolCallingEnabled = enableToolCalling !== undefined ? enableToolCalling : false;
   // Gemini inlineData.data 只接受“标准 base64”；这里统一归一化，并对明显不合法的内容返回 null（避免整包请求 400）
   const toInlineBase64 = useCallback((maybeDataUrlOrBase64: string): string | null => {
     return normalizeBase64ForInlineData(maybeDataUrlOrBase64);
@@ -214,8 +210,22 @@ const Workflow: React.FC<WorkflowProps> = ({
     ? setTempMessages
     : (setPersistedMessages as unknown as React.Dispatch<React.SetStateAction<Message[]>>));
 
+  const avatarCacheRef = useRef(new Map<string, string | null>());
+  const avatarLoadingRef = useRef(new Set<string>());
+  const [avatarCacheTick, setAvatarCacheTick] = useState(0);
+  const resolveAgentAvatar = useCallback((senderId?: string, fallback?: string) => {
+    if (!senderId) return fallback;
+    if (avatarCacheRef.current.has(senderId)) {
+      return avatarCacheRef.current.get(senderId) || undefined;
+    }
+    return fallback;
+  }, []);
+
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  // 执行日志（Cursor 风格滚动区域）
+  const [executionLogs, setExecutionLogs] = useState<ExecutionLogEntry[]>([]);
+  const [isExecuting, setIsExecuting] = useState(false);
   // 多模态内容（图片、视频、音频）
   const [attachedMedia, setAttachedMedia] = useState<Array<{
     type: 'image' | 'video' | 'audio';
@@ -240,6 +250,14 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [collapsedThinking, setCollapsedThinking] = useState<Set<string>>(new Set()); // 已折叠的思考过程
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null); // 正在编辑的消息ID
   const [quotedMessageId, setQuotedMessageId] = useState<string | null>(null); // 引用的消息ID
+  const [quotedMessageSnapshot, setQuotedMessageSnapshot] = useState<{
+    id: string;
+    role: 'user' | 'assistant' | 'system' | 'tool';
+    senderName: string;
+    content: string;
+    media?: Array<{ type: 'image' | 'video' | 'audio'; mimeType: string; data: string; url?: string }>;
+  } | null>(null);
+  const [quoteDetailOpen, setQuoteDetailOpen] = useState(false);
   const [isDraggingOver, setIsDraggingOver] = useState(false); // 是否正在拖拽文件
   const [isInputExpanded, setIsInputExpanded] = useState(false); // 输入框是否扩大
   const [isInputFocused, setIsInputFocused] = useState(false); // 输入框是否聚焦
@@ -253,7 +271,7 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [showModuleSelector, setShowModuleSelector] = useState(false); // 是否显示模块选择器（/ 命令）
   const [atSelectorQuery, setAtSelectorQuery] = useState(''); // @ 选择器的查询字符串
   const [selectedComponentIndex, setSelectedComponentIndex] = useState(0); // 当前选中的组件索引（用于键盘导航）
-  const [selectedComponents, setSelectedComponents] = useState<Array<{ type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string }>>([]); // 已选定的组件（tag）
+  const [selectedComponents, setSelectedComponents] = useState<Array<{ type: 'mcp' | 'skillpack' | 'agent'; id: string; name: string }>>([]); // 已选定的组件（tag）
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const editingMessageIdRef = useRef<string | null>(null);
   const selectorRef = useRef<HTMLDivElement>(null);
@@ -273,12 +291,18 @@ const Workflow: React.FC<WorkflowProps> = ({
   // 会话管理
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSessionMeta, setCurrentSessionMeta] = useState<Session | null>(null);
+
+  const filterVisibleSessions = useCallback((list: Session[]) => {
+    return (list || []).filter(s => s.session_type !== 'memory' && s.session_type !== 'research');
+  }, []);
   
   // 当前会话类型 (派生状态)
   const currentSessionType = useMemo(() => {
     if (isTemporarySession) return 'temporary';
     const session = sessions.find(s => s.session_id === currentSessionId) || currentSessionMeta;
-    return session?.session_type || 'memory';
+    const type = session?.session_type;
+    if (type === 'memory' || type === 'research') return 'temporary';
+    return type || 'temporary';
   }, [currentSessionId, sessions, currentSessionMeta, isTemporarySession]);
 
   const [currentSessionAvatar, setCurrentSessionAvatar] = useState<string | null>(null); // 当前会话的头像
@@ -304,7 +328,7 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [headerConfigActiveTab, setHeaderConfigActiveTab] = useState<'basic' | 'skillpacks'>('basic');
   const [isSavingHeaderAsRole, setIsSavingHeaderAsRole] = useState(false);
   
-  // Topic 配置对话框状态（用于话题/记忆体会话）
+  // Topic 配置对话框状态（用于话题会话）
   const [showTopicConfigDialog, setShowTopicConfigDialog] = useState(false);
   const [topicConfigEditName, setTopicConfigEditName] = useState('');
   const [topicConfigEditAvatar, setTopicConfigEditAvatar] = useState<string | null>(null);
@@ -324,13 +348,16 @@ const Workflow: React.FC<WorkflowProps> = ({
     action?: string;
     inReplyTo?: string;
     timestamp: number;
-    processSteps?: any[];  // 决策过程步骤
+    processSteps?: any[];  // 决策过程步骤（旧协议）
+    processMessages?: ProcessMessage[];  // 决策过程消息（新协议）
+    executionLogs?: ExecutionLogEntry[];  // 执行日志
   }
   const [agentDecidingStates, setAgentDecidingStates] = useState<Map<string, AgentDecidingState>>(new Map());
   
   const [isEditingSystemPrompt, setIsEditingSystemPrompt] = useState(false); // 是否正在编辑人设
   const [systemPromptDraft, setSystemPromptDraft] = useState(''); // 人设编辑草稿
   const [showModelSelectDialog, setShowModelSelectDialog] = useState(false); // 是否显示模型选择对话框
+  const [selectedProviderTab, setSelectedProviderTab] = useState<string | null>(null); // 当前选中的供应商 Tab
   const [showHelpTooltip, setShowHelpTooltip] = useState(false); // 是否显示帮助提示
   const [showSessionTypeDialog, setShowSessionTypeDialog] = useState(false); // 是否显示会话类型选择对话框
   const [showUpgradeToAgentDialog, setShowUpgradeToAgentDialog] = useState(false); // 是否显示升级为智能体对话框
@@ -339,17 +366,8 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [personaSearch, setPersonaSearch] = useState('');
   const [showRoleGenerator, setShowRoleGenerator] = useState(false);
   const [personaAgents, setPersonaAgents] = useState<Session[]>([]);
-  const [personaMeetings, setPersonaMeetings] = useState<RoundTable[]>([]);
-  const [personaResearchSessions, setPersonaResearchSessions] = useState<Session[]>([]);
   const [personaTopics, setPersonaTopics] = useState<Session[]>([]);
   const [isLoadingPersonaList, setIsLoadingPersonaList] = useState(false);
-  // 新建 Meeting/Research 对话框
-  const [showNewMeetingDialog, setShowNewMeetingDialog] = useState(false);
-  const [newMeetingName, setNewMeetingName] = useState('');
-  const [isCreatingMeeting, setIsCreatingMeeting] = useState(false);
-  const [showNewResearchDialog, setShowNewResearchDialog] = useState(false);
-  const [newResearchName, setNewResearchName] = useState('');
-  const [isCreatingResearch, setIsCreatingResearch] = useState(false);
   const [agentName, setAgentName] = useState(''); // 升级为智能体时的名称
   const [agentAvatar, setAgentAvatar] = useState<string | null>(null); // 升级为智能体时的头像
   const [agentSystemPrompt, setAgentSystemPrompt] = useState(''); // 升级为智能体时的人设
@@ -372,11 +390,7 @@ const Workflow: React.FC<WorkflowProps> = ({
     setHasMoreMessages(hasMorePersistedMessages);
   }, [hasMorePersistedMessages, isLoadingPersistedMessages, isTemporarySession]);
   
-  // 首次访问弹窗相关状态
-  const [showNicknameDialog, setShowNicknameDialog] = useState(false);
-  const [nicknameInput, setNicknameInput] = useState('');
-  const [isSubmittingNickname, setIsSubmittingNickname] = useState(false);
-  const [userAccess, setUserAccess] = useState<UserAccess | null>(null);
+  // 首次访问弹窗相关状态（已移除用户登录/访问模块）
   
   // 技能包相关状态
   const [isCreatingSkillPack, setIsCreatingSkillPack] = useState(false);
@@ -421,7 +435,7 @@ const Workflow: React.FC<WorkflowProps> = ({
   // 兼容历史数据：把 processSteps 里“使用用户选择的模型: <id>”替换为可读名称
   const normalizeIncomingProcessSteps = useCallback((steps?: any[]): any[] | undefined => {
     if (!Array.isArray(steps) || steps.length === 0) return steps;
-    return steps.map((s) => {
+    const normalized = steps.map((s) => {
       const thinking = s?.thinking;
       if (typeof thinking !== 'string') return s;
       const m = thinking.match(/^使用用户选择的模型:\s*(\S+)\s*$/);
@@ -431,7 +445,73 @@ const Workflow: React.FC<WorkflowProps> = ({
       if (!label || label === id) return s;
       return { ...s, thinking: `使用用户选择的模型: ${label}` };
     });
+    // 合并更新：优先使用 step_id（若存在），否则用 type+timestamp 兜底
+    const map = new Map<string, any>();
+    for (const s of normalized) {
+      const key = s?.step_id ? `id:${s.step_id}` : `t:${s?.type ?? 'unknown'}:${s?.timestamp ?? ''}`;
+      map.set(key, s);
+    }
+    return Array.from(map.values()).sort((a, b) => (a?.timestamp ?? 0) - (b?.timestamp ?? 0));
   }, [formatLLMConfigLabel]);
+
+  const buildProcessMessages = useCallback((steps: ProcessStep[]): ProcessMessage[] => {
+    return steps.map((step) => {
+      const blocks = step.result ? parseMCPContentBlocks(step.result) : [];
+      const mediaBlocks = blocks.filter((b): b is Extract<typeof b, { kind: 'image' | 'video' | 'audio' }> => 
+        b.kind === 'image' || b.kind === 'video' || b.kind === 'audio'
+      );
+      let contentType: ProcessMessage['contentType'] = 'text';
+      let images: ProcessMessage['images'];
+      let image: ProcessMessage['image'];
+      if (mediaBlocks.length > 1) {
+        contentType = 'images';
+        images = mediaBlocks.map(b => ({ mimeType: b.mimeType, data: b.data }));
+      } else if (mediaBlocks.length === 1) {
+        contentType = 'image';
+        image = { mimeType: mediaBlocks[0].mimeType, data: mediaBlocks[0].data };
+      }
+      const content = step.thinking || step.error || (typeof step.result === 'string' ? step.result : undefined);
+      return {
+        type: step.type,
+        contentType,
+        timestamp: step.timestamp ?? Date.now(),
+        title: step.toolName || step.workflowInfo?.name || step.action || step.type,
+        content,
+        image,
+        images,
+        meta: {
+          ...step,
+          blocks,
+        },
+      };
+    });
+  }, []);
+
+  // 兜底：如果历史消息只有 processSteps，补齐 processMessages（保持一致协议）
+  useEffect(() => {
+    setMessages(prev => {
+      let changed = false;
+      const next = prev.map(msg => {
+        const anyMsg = msg as any;
+        if (!anyMsg.processMessages && Array.isArray(anyMsg.processSteps) && anyMsg.processSteps.length > 0) {
+          changed = true;
+          return { ...msg, processMessages: buildProcessMessages(anyMsg.processSteps) };
+        }
+        if (!anyMsg.processMessages && anyMsg.ext?.processMessages) {
+          changed = true;
+          return { ...msg, processMessages: anyMsg.ext.processMessages };
+        }
+        return msg;
+      });
+      return changed ? next : prev;
+    });
+  }, [buildProcessMessages, setMessages]);
+
+  const normalizeIncomingProcessMessages = useCallback((messages?: any[], steps?: any[]) => {
+    if (Array.isArray(messages) && messages.length > 0) return messages;
+    const normalizedSteps = normalizeIncomingProcessSteps(steps) || [];
+    return normalizedSteps.length > 0 ? buildProcessMessages(normalizedSteps) : undefined;
+  }, [normalizeIncomingProcessSteps, buildProcessMessages]);
 
   // 兜底：当 llmConfigs 迟到加载时，也要把当前 Agent 的偏好模型同步到选择框
   useEffect(() => {
@@ -453,14 +533,11 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [mcpTools, setMcpTools] = useState<Map<string, MCPTool[]>>(new Map());
   const [connectingServers, setConnectingServers] = useState<Set<string>>(new Set());
   
-  // 工作流列表
-  const [workflows, setWorkflows] = useState<WorkflowType[]>([]);
-  
   // 技能包列表
   const [allSkillPacks, setAllSkillPacks] = useState<SkillPack[]>([]);
   
   // 拖拽状态
-  const [draggingComponent, setDraggingComponent] = useState<{ type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string } | null>(null);
+  const [draggingComponent, setDraggingComponent] = useState<{ type: 'mcp' | 'skillpack'; id: string; name: string } | null>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement | null>(null);
@@ -486,6 +563,11 @@ const Workflow: React.FC<WorkflowProps> = ({
   // 消息引用，用于在回调中访问最新消息而不触发重渲染
   const messagesRef = useRef<Message[]>(messages);
   messagesRef.current = messages;
+
+  const clearQuotedMessage = useCallback(() => {
+    setQuotedMessageId(null);
+    setQuotedMessageSnapshot(null);
+  }, []);
   
   // 预计算“上一条消息内容”映射：避免每次渲染都在 messages 上 findIndex（可见项多时会明显拖慢）
   const prevMessageContentMap = useMemo(() => {
@@ -585,9 +667,14 @@ const Workflow: React.FC<WorkflowProps> = ({
     if (messages.length <= lastMessageCountRef.current) {
       // 消息数量没有增加：可能是替换/编辑/流式更新（content 变化但 length 不变）
       // 对于流式更新，如果用户原本在底部附近，则持续跟随到底部
+      // 但如果用户正在手动滚动查看历史消息，不要强制滚动到底部
       const hasStreamingMessage = messages.some(m => m.isStreaming);
       if (hasStreamingMessage && wasAtBottom && !isUserScrollingRef.current) {
+        // 再次检查用户是否在底部（可能在滚动过程中离开了底部）
+        const stillAtBottom = shouldAutoScroll();
+        if (stillAtBottom) {
         setTimeout(() => scrollToBottom('auto'), 0);
+        }
       }
       // 更新计数但不走“新消息”逻辑
       lastMessageCountRef.current = messages.length;
@@ -622,7 +709,7 @@ const Workflow: React.FC<WorkflowProps> = ({
   const loadSessions = async () => {
     try {
       const sessionList = await getSessions();
-      setSessions(sessionList);
+      setSessions(filterVisibleSessions(sessionList));
     } catch (error) {
       console.error('[Workflow] Failed to load sessions:', error);
       // 如果加载失败，设置为空数组，避免后续错误
@@ -634,66 +721,12 @@ const Workflow: React.FC<WorkflowProps> = ({
   // 注意：必须使用 setSearchParams 来清理参数，避免 window.history.replaceState 导致 react-router 的 searchParams 不同步
   const [searchParams, setSearchParams] = useSearchParams();
   
-  // 检查用户访问信息，首次访问时弹出昵称输入对话框
-  const checkUserAccess = async () => {
-    try {
-      const access = await getUserAccess();
-      setUserAccess(access);
-      
-      // 如果用户不在访问列表中或需要填写昵称，显示对话框
-      if (access.needs_nickname || !access.is_enabled) {
-        setShowNicknameDialog(true);
-      }
-    } catch (error) {
-      console.error('[Workflow] Failed to check user access:', error);
-      // 如果获取失败，也显示对话框（可能是首次访问）
-      setShowNicknameDialog(true);
-    }
-  };
-  
-  // 提交昵称
-  const handleSubmitNickname = async () => {
-    if (!nicknameInput.trim()) {
-      toast({
-        title: '请输入昵称',
-        variant: 'destructive',
-      });
-      return;
-    }
-    
-    try {
-      setIsSubmittingNickname(true);
-      await createOrUpdateUserAccess(nicknameInput.trim());
-      setShowNicknameDialog(false);
-      setNicknameInput('');
-      // 重新检查用户访问信息
-      await checkUserAccess();
-      toast({
-        title: '欢迎！',
-        description: `你好，${nicknameInput.trim()}！`,
-        variant: 'success',
-      });
-    } catch (error: any) {
-      console.error('[Workflow] Failed to submit nickname:', error);
-      toast({
-        title: '保存失败',
-        description: error.message || '请稍后重试',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsSubmittingNickname(false);
-    }
-  };
-  
   // 加载LLM配置和MCP服务器列表
   useEffect(() => {
     loadLLMConfigs();
     loadMCPServers();
     loadSessions();
-    loadWorkflows();
     loadSkillPacks();
-    // 检查用户访问信息（首次访问弹窗）
-    checkUserAccess();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -703,7 +736,7 @@ const Workflow: React.FC<WorkflowProps> = ({
       void (async () => {
         try {
           const sessionList = await getSessions();
-          setSessions(sessionList);
+          setSessions(filterVisibleSessions(sessionList));
         } catch (error) {
           console.error('[Workflow] Failed to reload sessions (event):', error);
           setSessions([]);
@@ -880,38 +913,58 @@ const Workflow: React.FC<WorkflowProps> = ({
 
           if (payload.type === 'new_message') {
             const msg = payload.data;
-            console.log('[Workflow] new_message received:', msg.message_id, 'sender_avatar:', msg.sender_avatar, 'ext.sender_avatar:', msg.ext?.sender_avatar);
+            // 避免在控制台打印 base64 头像（极大影响性能与可读性）
+            const _avatarPreview = (() => {
+              const a = (msg.sender_avatar || msg.ext?.sender_avatar) as string | undefined;
+              if (!a) return 'none';
+              if (typeof a !== 'string') return typeof a;
+              if (a.startsWith('data:image/')) return `data:image/* (len=${a.length})`;
+              return a.length > 120 ? `${a.slice(0, 60)}…(len=${a.length})` : a;
+            })();
+            console.log('[Workflow] new_message received:', msg.message_id, 'sender_avatar:', _avatarPreview);
             
             // 检查 ID 是否已存在（可能是流式消息的最终版本）
+            const incomingProcessMessages = normalizeIncomingProcessMessages(msg.processMessages || msg.ext?.processMessages, msg.processSteps || msg.ext?.processSteps);
             setMessages((prev) => {
               const existingIndex = prev.findIndex((m) => m.id === msg.message_id || m.id === msg.id);
               if (existingIndex >= 0) {
                 // 更新现有消息（流式消息完成后的最终内容）
-                // 但保留 processSteps 等扩展信息
+                // 但保留 processMessages 等扩展信息
                 const updated = [...prev];
                 const existing = updated[existingIndex];
                 const mergedSteps =
-                  existing.processSteps ||
                   existing.ext?.processSteps ||
                   msg.ext?.processSteps;
                 const normalizedMergedSteps = normalizeIncomingProcessSteps(mergedSteps);
+                const mergedProcessMessages = incomingProcessMessages || existing.processMessages || (existing.ext as any)?.processMessages;
                 updated[existingIndex] = {
                   ...existing,
                   content: msg.content,
                   isStreaming: false,
-                  // 合并 ext，保留现有的 processSteps
+                  // 合并 ext，保留现有的 processMessages
                   ext: {
+                    ...(existing.ext || {}),
                     ...(msg.ext || {}),
-                    processSteps: normalizedMergedSteps || mergedSteps
+                    processSteps: normalizedMergedSteps || mergedSteps,
+                    processMessages: mergedProcessMessages
                   },
-                  // 保留已有的 processSteps
-                  processSteps: normalizedMergedSteps || existing.processSteps || msg.ext?.processSteps
+                  // 保留已有的 processMessages
+                  processMessages: mergedProcessMessages
                 };
                 return updated;
               }
 
               // 提取 sender 信息，优先从顶层获取，然后从 ext 中获取
-              const senderAvatar = msg.sender_avatar || msg.ext?.sender_avatar;
+              const sanitizeAvatar = (a?: string) => {
+                if (!a) return undefined;
+                if (typeof a !== 'string') return undefined;
+                // 不在每条消息里携带 data URI（base64），改为依赖 topicParticipants 的 avatar
+                if (a.startsWith('data:image/')) return undefined;
+                // 过长的字段也直接丢弃，避免撑爆消息体
+                if (a.length > 1024) return undefined;
+                return a;
+              };
+              const senderAvatar = sanitizeAvatar(msg.sender_avatar || msg.ext?.sender_avatar);
               const senderName = msg.sender_name || msg.ext?.sender_name;
               
               const newMessage: Message = {
@@ -919,17 +972,19 @@ const Workflow: React.FC<WorkflowProps> = ({
                 role: msg.role as any,
                 content: msg.content,
                 thinking: msg.thinking,
-                tool_calls: msg.tool_calls,
-                created_at: new Date(msg.timestamp * 1000).toISOString(),
+                toolCalls: msg.tool_calls,
                 sender_id: msg.sender_id,
                 sender_type: msg.sender_type,
                 sender_avatar: senderAvatar,
                 sender_name: senderName,
-                processSteps: normalizeIncomingProcessSteps(msg.ext?.processSteps),
+                processMessages: incomingProcessMessages,
                 ext: {
                   ...msg.ext,
+                  processSteps: normalizeIncomingProcessSteps(msg.ext?.processSteps),
+                  // 只保留“可传输”的 avatar；base64 头像不写入消息体
                   sender_avatar: senderAvatar,
-                  sender_name: senderName
+                  sender_name: senderName,
+                  processMessages: incomingProcessMessages
                 }
               };
               
@@ -937,6 +992,11 @@ const Workflow: React.FC<WorkflowProps> = ({
               if (msg.role === 'assistant') {
                 setIsLoading(false);
                 wasAtBottomRef.current = true;
+              }
+              
+              // 如果是用户消息，清空执行日志（准备接收新的 AI 响应日志）
+              if (msg.role === 'user') {
+                setExecutionLogs([]);
               }
               
               return [...prev, newMessage];
@@ -982,7 +1042,8 @@ const Workflow: React.FC<WorkflowProps> = ({
           } else if (payload.type === 'agent_deciding') {
             // Agent 开始决策是否回答
             const data = payload.data;
-            console.log('[Workflow] Agent deciding:', data.agent_name, 'processSteps:', data.processSteps?.length || 0);
+            const incomingProcessMessages = normalizeIncomingProcessMessages(data.processMessages, data.processSteps);
+            console.log('[Workflow] Agent deciding:', data.agent_name, 'processMessages:', incomingProcessMessages?.length || 0);
             
             setAgentDecidingStates((prev) => {
               const next = new Map(prev);
@@ -996,13 +1057,22 @@ const Workflow: React.FC<WorkflowProps> = ({
                   mergedSteps.push(step);
                 }
               }
+              // 合并 processMessages
+              const existingMessages = current?.processMessages || [];
+              const mergedMessages = [...existingMessages];
+              for (const msg of (incomingProcessMessages || [])) {
+                if (!mergedMessages.some(m => m.timestamp === msg.timestamp && m.type === msg.type)) {
+                  mergedMessages.push(msg);
+                }
+              }
               next.set(data.agent_id, {
                 agentName: data.agent_name,
                 agentAvatar: data.agent_avatar,
                 status: 'deciding',
                 inReplyTo: data.in_reply_to,
                 timestamp: data.timestamp || Date.now() / 1000,
-                processSteps: mergedSteps
+                processSteps: mergedSteps,
+                processMessages: mergedMessages.length > 0 ? mergedMessages : undefined
               });
               return next;
             });
@@ -1010,7 +1080,8 @@ const Workflow: React.FC<WorkflowProps> = ({
           } else if (payload.type === 'agent_decision') {
             // Agent 决策完成
             const data = payload.data;
-            console.log('[Workflow] Agent decision:', data.agent_name, data.action, 'processSteps:', data.processSteps?.length || 0);
+            const incomingProcessMessages = normalizeIncomingProcessMessages(data.processMessages, data.processSteps);
+            console.log('[Workflow] Agent decision:', data.agent_name, data.action, 'processMessages:', incomingProcessMessages?.length || 0);
             
             setAgentDecidingStates((prev) => {
               const next = new Map(prev);
@@ -1028,12 +1099,24 @@ const Workflow: React.FC<WorkflowProps> = ({
                     mergedSteps.push(step);
                   }
                 }
+                // 合并 processMessages
+                const existingMessages = current.processMessages || [];
+                const mergedMessages = [...existingMessages];
+                for (const msg of (incomingProcessMessages || [])) {
+                  const existingIdx = mergedMessages.findIndex(m => m.timestamp === msg.timestamp && m.type === msg.type);
+                  if (existingIdx >= 0) {
+                    mergedMessages[existingIdx] = { ...mergedMessages[existingIdx], ...msg };
+                  } else {
+                    mergedMessages.push(msg);
+                  }
+                }
                 next.set(data.agent_id, {
                   ...current,
                   status: 'decided',
                   action: data.action,
                   timestamp: data.timestamp || Date.now() / 1000,
-                  processSteps: mergedSteps
+                  processSteps: mergedSteps,
+                  processMessages: mergedMessages.length > 0 ? mergedMessages : undefined
                 });
               }
               // 决策完成后，延迟2秒移除状态（淡出效果）
@@ -1047,10 +1130,74 @@ const Workflow: React.FC<WorkflowProps> = ({
               return next;
             });
             
+          } else if (payload.type === 'execution_log') {
+            // 后端发送的执行日志（实时滚动显示）
+            const data = payload.data;
+            // 兼容 type 和 log_type 字段
+            const logType = (data.type || data.log_type || 'info') as ExecutionLogEntry['type'];
+            const msgText = typeof data.message === 'string' ? data.message.trim() : '';
+            
+            // 不展示无意义/空的占位日志：后端应传递真实步骤文案
+            if (!msgText) return;
+            
+            const logEntry: ExecutionLogEntry = {
+              id: data.id || `log-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              timestamp: data.timestamp || Date.now(),
+              type: logType,
+              message: msgText,
+              detail: data.detail,
+              duration: data.duration,
+              agent_id: data.agent_id,
+              agent_name: data.agent_name,
+            };
+            
+            // 对于 thinking 类型的日志，特殊处理
+            if (logType === 'thinking') {
+              setExecutionLogs(prev => {
+                if (msgText === '思考中...') {
+                  // 流式更新：查找现有的"思考中..."日志并更新
+                  const existingIdx = prev.findIndex(
+                    log => log.type === 'thinking' && log.message === '思考中...'
+                  );
+                  if (existingIdx >= 0) {
+                    // 更新现有日志的 detail
+                    const updated = [...prev];
+                    updated[existingIdx] = { ...updated[existingIdx], detail: data.detail, timestamp: Date.now() };
+                    return updated;
+                  }
+                  // 没有现有日志，添加新的
+                  return [...prev.slice(-99), logEntry];
+                } else if (msgText === '思考完成') {
+                  // 思考完成：替换"思考中..."为"思考完成"
+                  const existingIdx = prev.findIndex(
+                    log => log.type === 'thinking' && log.message === '思考中...'
+                  );
+                  if (existingIdx >= 0) {
+                    // 替换现有日志
+                    const updated = [...prev];
+                    updated[existingIdx] = logEntry;
+                    return updated;
+                  }
+                  // 没有现有的"思考中..."日志，直接添加
+                  return [...prev.slice(-99), logEntry];
+                }
+                // 其他 thinking 类型的日志，直接添加
+                return [...prev.slice(-99), logEntry];
+              });
+            } else {
+              setExecutionLogs(prev => [...prev.slice(-99), logEntry]); // 保留最近100条
+            }
+            setIsExecuting(true);
+            
           } else if (payload.type === 'agent_thinking') {
             // Agent 开始生成回复，创建占位消息（包含决策步骤）
             const data = payload.data;
-            console.log('[Workflow] Agent thinking:', data.agent_name, 'processSteps:', data.processSteps?.length || 0);
+            const incomingProcessMessages = normalizeIncomingProcessMessages(data.processMessages, data.processSteps);
+            console.log('[Workflow] Agent thinking:', data.agent_name, 'processMessages:', incomingProcessMessages?.length || 0);
+            
+            // 不再清空日志，保留流式生成过程中的执行日志（包括思考内容）
+            // 日志会在下一次新消息开始时自然被新日志替换
+            setIsExecuting(true);
             
             // 移除决策状态（已开始回复）
             setAgentDecidingStates((prev) => {
@@ -1063,14 +1210,15 @@ const Workflow: React.FC<WorkflowProps> = ({
               // 检查是否已有该消息
               const existingIndex = prev.findIndex(m => m.id === data.message_id);
               if (existingIndex >= 0) {
-                // 消息已存在，更新 processSteps（实时步骤更新）
+                // 消息已存在，更新 processMessages（实时步骤更新）
                 const updated = [...prev];
                 updated[existingIndex] = {
                   ...updated[existingIndex],
-                  processSteps: normalizeIncomingProcessSteps(data.processSteps) || updated[existingIndex].processSteps,
+                  processMessages: incomingProcessMessages || updated[existingIndex].processMessages,
                   ext: {
-                    ...updated[existingIndex].ext,
+                    ...(updated[existingIndex].ext || {}),
                     processSteps: normalizeIncomingProcessSteps(data.processSteps) || (updated[existingIndex].ext as any)?.processSteps,
+                    processMessages: incomingProcessMessages || (updated[existingIndex].ext as any)?.processMessages,
                   }
                 };
                 return updated;
@@ -1084,12 +1232,13 @@ const Workflow: React.FC<WorkflowProps> = ({
                 sender_id: data.agent_id,
                 sender_type: 'agent',
                 isStreaming: true,
-                // 包含决策过程步骤
-                processSteps: normalizeIncomingProcessSteps(data.processSteps) || [],
+                processMessages: incomingProcessMessages || [],
                 ext: {
                   sender_name: data.agent_name,
-                  sender_avatar: data.agent_avatar,
+                  // 不在消息体里携带 base64 头像；由 topicParticipants/Session Avatar 兜底
+                  sender_avatar: (typeof data.agent_avatar === 'string' && data.agent_avatar.startsWith('data:image/')) ? undefined : data.agent_avatar,
                   processSteps: normalizeIncomingProcessSteps(data.processSteps) || [],
+                  processMessages: incomingProcessMessages || [],
                   in_reply_to: data.in_reply_to
                 }
               };
@@ -1098,14 +1247,15 @@ const Workflow: React.FC<WorkflowProps> = ({
             });
             
           } else if (payload.type === 'agent_stream_chunk') {
-            // 收到流式 chunk，更新消息内容（包含实时的 processSteps）
+            // 收到流式 chunk，更新消息内容（包含实时的 processMessages）
             const data = payload.data;
+            const incomingProcessMessages = normalizeIncomingProcessMessages(data.processMessages, data.processSteps);
             
             // 调试：检查是否包含图片内容
             const contentPreview = (data.accumulated || data.chunk || '').substring(0, 200);
             const contentLength = (data.accumulated || data.chunk || '').length;
             const hasImage = contentPreview.includes('![') || contentPreview.includes('data:image');
-            console.log(`[Workflow] agent_stream_chunk: msgId=${data.message_id}, contentLen=${contentLength}, hasImage=${hasImage}, preview=${contentPreview}`);
+            console.log(`[Workflow] agent_stream_chunk: msgId=${data.message_id}, contentLen=${contentLength}, hasImage=${hasImage}, processMessages=${incomingProcessMessages?.length || 0}`);
             
             setMessages((prev) => {
               const index = prev.findIndex(m => m.id === data.message_id);
@@ -1118,28 +1268,30 @@ const Workflow: React.FC<WorkflowProps> = ({
                   sender_id: data.agent_id,
                   sender_type: 'agent',
                   isStreaming: true,
-                  processSteps: normalizeIncomingProcessSteps(data.processSteps) || [],
+                  processMessages: incomingProcessMessages || [],
                   ext: {
                     sender_name: data.agent_name,
-                    sender_avatar: data.agent_avatar,
-                    processSteps: normalizeIncomingProcessSteps(data.processSteps) || []
+                    sender_avatar: (typeof data.agent_avatar === 'string' && data.agent_avatar.startsWith('data:image/')) ? undefined : data.agent_avatar,
+                    processSteps: normalizeIncomingProcessSteps(data.processSteps) || [],
+                    processMessages: incomingProcessMessages || []
                   }
                 };
                 wasAtBottomRef.current = true;
                 return [...prev, newMsg];
               }
               
-              // 更新现有消息，合并 processSteps
+              // 更新现有消息，合并 processMessages
               const updated = [...prev];
               updated[index] = {
                 ...updated[index],
                 content: data.accumulated || (updated[index].content + data.chunk),
                 isStreaming: true,
-                // 更新 processSteps
-                processSteps: normalizeIncomingProcessSteps(data.processSteps) || updated[index].processSteps || [],
+                // 更新 processMessages
+                processMessages: incomingProcessMessages || updated[index].processMessages || [],
                 ext: {
                   ...updated[index].ext,
-                  processSteps: normalizeIncomingProcessSteps(data.processSteps) || updated[index].ext?.processSteps || []
+                  processSteps: normalizeIncomingProcessSteps(data.processSteps) || updated[index].ext?.processSteps || [],
+                  processMessages: incomingProcessMessages || (updated[index].ext as any)?.processMessages || []
                 }
               };
               wasAtBottomRef.current = true;
@@ -1149,9 +1301,28 @@ const Workflow: React.FC<WorkflowProps> = ({
           } else if (payload.type === 'agent_stream_done') {
             // 流式完成（可能包含错误）
             const data = payload.data;
+            const incomingProcessMessages = normalizeIncomingProcessMessages(data.processMessages, data.processSteps);
             const contentLength = (data.content || '').length;
             const hasImage = (data.content || '').includes('![') || (data.content || '').includes('data:image');
-            console.log('[Workflow] Agent stream done:', data.message_id, 'contentLen:', contentLength, 'hasImage:', hasImage, 'processSteps:', data.processSteps?.length || 0, 'error:', data.error);
+            console.log('[Workflow] Agent stream done:', data.message_id, 'contentLen:', contentLength, 'hasImage:', hasImage, 'processMessages:', incomingProcessMessages?.length || 0, 'error:', data.error);
+            
+            // 使用后端返回的执行日志，如果没有则使用前端的日志
+            const backendLogs = data.execution_logs || [];
+            const finalLogs = backendLogs.length > 0 
+              ? backendLogs 
+              : [...executionLogs, {
+              id: `done-${Date.now()}`,
+              timestamp: Date.now(),
+              type: data.error ? 'error' : 'success',
+              message: data.error ? `执行失败: ${data.error}` : '执行完成',
+            }];
+            setExecutionLogs(finalLogs);
+            
+            // 延迟后清除执行状态（但保留日志，让它在消息中折叠显示）
+            setTimeout(() => {
+              setIsExecuting(false);
+              // 不再清除日志，让它保留在消息的 ext.log 中
+            }, 2000);
             
             setMessages((prev) => {
               const index = prev.findIndex(m => m.id === data.message_id);
@@ -1162,7 +1333,7 @@ const Workflow: React.FC<WorkflowProps> = ({
               const incomingMedia = Array.isArray(data.media) ? data.media : undefined;
               const normalizedSteps = normalizeIncomingProcessSteps(data.processSteps);
               
-              // 如果有错误，更新内容为错误信息，但保留 processSteps
+              // 如果有错误，更新内容为错误信息，但保留 processMessages
               const content = data.error 
                 ? `[错误] ${data.agent_name || 'Agent'} 无法产生回复: ${data.error}`
                 : (data.content || existing.content);
@@ -1173,13 +1344,17 @@ const Workflow: React.FC<WorkflowProps> = ({
                 isStreaming: false,
                 // 如果后端返回了 media（例如 Gemini 图片生成），即时回显到消息气泡（MediaGallery）
                 media: incomingMedia ?? existing.media,
-                // 保存执行轨迹（包含错误步骤）
-                processSteps: normalizedSteps || existing.processSteps,
+                processMessages: incomingProcessMessages || existing.processMessages,
+                // 保存执行日志到 ext.log（统一使用 log 字段）
+                executionLogs: finalLogs,
                 ext: {
                   ...existing.ext,
                   // 同步写入 ext.media，保证刷新/重进会话后也能回显
                   media: incomingMedia ?? existing.ext?.media,
                   processSteps: normalizedSteps || existing.ext?.processSteps,
+                  processMessages: incomingProcessMessages || (existing.ext as any)?.processMessages,
+                  log: finalLogs,  // 持久化执行日志到 ext.log
+                  executionLogs: finalLogs,  // 向后兼容
                   error: data.error
                 }
               };
@@ -1187,11 +1362,12 @@ const Workflow: React.FC<WorkflowProps> = ({
               return updated;
             });
           } else if (payload.type === 'agent_silent') {
-            // Agent决定不回答，将信息添加到对应消息的 processSteps 中
+            // Agent决定不回答，将信息添加到对应消息的 processMessages 中
             const data = payload.data;
-            console.log('[Workflow] Agent silent:', data.agent_name, 'processSteps:', data.processSteps?.length || 0);
+            const incomingProcessMessages = normalizeIncomingProcessMessages(data.processMessages, data.processSteps);
+            console.log('[Workflow] Agent silent:', data.agent_name, 'processMessages:', incomingProcessMessages?.length || 0);
             
-            // 找到对应的用户消息，将决策信息添加到其 processSteps 中
+            // 找到对应的用户消息，将决策信息添加到其 processMessages 中
             if (data.in_reply_to) {
               setMessages((prev) => {
                 const index = prev.findIndex(m => m.id === data.in_reply_to);
@@ -1212,25 +1388,20 @@ const Workflow: React.FC<WorkflowProps> = ({
                     content: '',
                     sender_id: data.agent_id,
                     sender_type: 'agent',
-                    sender_name: data.agent_name,
-                    sender_avatar: data.agent_avatar,
-                    processSteps: normalizeIncomingProcessSteps(data.processSteps),
+                    processMessages: incomingProcessMessages,
                     ext: {
                       sender_name: data.agent_name,
                       sender_avatar: data.agent_avatar,
                       processSteps: normalizeIncomingProcessSteps(data.processSteps),
+                      processMessages: incomingProcessMessages,
                       decision_type: 'silent'
                     }
                   };
                   updated.splice(nextIndex, 0, decisionMessage);
                 } else {
-                  // 如果已有回复消息，将决策步骤合并到其 processSteps 中
+                  // 如果已有回复消息，将决策步骤合并到其 ext.processSteps 中
                   updated[nextIndex] = {
                     ...updated[nextIndex],
-                    processSteps: [
-                      ...(updated[nextIndex].processSteps || []),
-                      ...(normalizeIncomingProcessSteps(data.processSteps) || []),
-                    ],
                     ext: {
                       ...updated[nextIndex].ext,
                       processSteps: [
@@ -1325,7 +1496,6 @@ const Workflow: React.FC<WorkflowProps> = ({
                 if (agentMessageIndex >= 0) {
                   updated[agentMessageIndex] = {
                     ...updated[agentMessageIndex],
-                    processSteps: [...(updated[agentMessageIndex].processSteps || []), ...(data.processSteps || [])],
                     ext: {
                       ...updated[agentMessageIndex].ext,
                       processSteps: [...(updated[agentMessageIndex].ext?.processSteps || []), ...(data.processSteps || [])]
@@ -1419,10 +1589,10 @@ const Workflow: React.FC<WorkflowProps> = ({
           messageCacheRef.current.delete(temporarySessionId);
         }
       } else {
-        // 记忆体或智能体：正常加载
+        // 临时会话或智能体：正常加载
         // 先获取会话信息，判断是否是agent会话
         const session = sessions.find(s => s.session_id === currentSessionId);
-        // NOTE: 旧逻辑里区分 agent/memory 的分支已不再依赖该布尔值
+        // NOTE: 旧逻辑里区分 agent/temporary 的分支已不再依赖该布尔值
         
         // 统一使用分页加载（懒加载），避免消息过多时性能问题
         loadSessionMessages(currentSessionId, 1);
@@ -1463,7 +1633,7 @@ const Workflow: React.FC<WorkflowProps> = ({
               }
 
               // 拉取参与者（如果是话题模式）
-              const freshIsTopic = fresh.session_type === 'topic_general' || fresh.session_type === 'memory';
+              const freshIsTopic = fresh.session_type === 'topic_general';
               if (freshIsTopic) {
                 const participants = await getParticipants(currentSessionId);
                 setTopicParticipants(participants);
@@ -1477,7 +1647,7 @@ const Workflow: React.FC<WorkflowProps> = ({
           };
         } else {
           // 如果列表里已有，根据类型决定是否拉取参与者
-          const isTopic = session.session_type === 'topic_general' || session.session_type === 'memory';
+          const isTopic = session.session_type === 'topic_general';
           if (isTopic) {
             getParticipants(currentSessionId).then(participants => {
               setTopicParticipants(participants);
@@ -1538,7 +1708,7 @@ const Workflow: React.FC<WorkflowProps> = ({
         }
       }, 10); // 稍微延迟以确保内容已渲染
     }
-  }, [showAtSelector, atSelectorQuery, mcpServers, workflows]);
+  }, [showAtSelector, atSelectorQuery, mcpServers]);
   
   // 监听点击外部关闭模块选择器
   useEffect(() => {
@@ -1709,24 +1879,6 @@ const Workflow: React.FC<WorkflowProps> = ({
     }
   };
 
-  // 创建记忆体会话
-  const handleCreateMemorySession = async () => {
-    try {
-      const newSession = await createSession(
-        selectedLLMConfigId || undefined,
-        '新会话',
-        'memory'
-      );
-      setCurrentSessionId(newSession.session_id);
-      setIsTemporarySession(false);
-      setShowSessionTypeDialog(false);
-      await loadSessions();
-    } catch (error) {
-      console.error('[Workflow] Failed to create memory session:', error);
-      alert('创建记忆体失败，请重试');
-    }
-  };
-
   // 切换到临时会话
   const handleSwitchToTemporarySession = () => {
     setCurrentSessionId(temporarySessionId);
@@ -1788,7 +1940,7 @@ const Workflow: React.FC<WorkflowProps> = ({
         messageCacheRef.current.delete(temporarySessionId);
       }
     } else {
-      // 选择记忆体或智能体
+      // 选择临时会话或智能体
       setIsTemporarySession(false);
       setCurrentSessionId(session_id);
       setMessagePage(1);
@@ -1830,15 +1982,6 @@ const Workflow: React.FC<WorkflowProps> = ({
     name: string;
   } | null>(null);
 
-  const [deleteRoundTableTarget, setDeleteRoundTableTarget] = useState<{
-    id: string;
-    name: string;
-  } | null>(null);
-
-  const [deleteResearchTarget, setDeleteResearchTarget] = useState<{
-    id: string;
-    name: string;
-  } | null>(null);
 
   // 删除会话（执行）
   const performDeleteSession = async (sessionId: string) => {
@@ -1871,60 +2014,7 @@ const Workflow: React.FC<WorkflowProps> = ({
     }
   };
 
-  // 删除会议（执行）
-  const performDeleteRoundTable = async (roundTableId: string) => {
-    try {
-      await deleteRoundTable(roundTableId);
 
-      // 刷新会议列表
-      const [agents, meetings, allSessions] = await Promise.all([
-        getAgents(),
-        getRoundTables(),
-        getSessions(),
-      ]);
-      setPersonaAgents(agents || []);
-      setPersonaMeetings(meetings || []);
-      const researchSessions = (allSessions || []).filter((s) => s.session_type === 'research');
-      setPersonaResearchSessions(researchSessions);
-
-      toast({ title: '会议已删除', variant: 'success' });
-    } catch (error) {
-      console.error('[Workflow] Failed to delete round table:', error);
-      toast({
-        title: '删除会议失败',
-        description: error instanceof Error ? error.message : String(error),
-        variant: 'destructive',
-      });
-    }
-  };
-
-  // 删除Research会话（执行）
-  const performDeleteResearch = async (sessionId: string) => {
-    try {
-      await deleteSession(sessionId);
-
-      // 刷新列表
-      const [agents, meetings, allSessions] = await Promise.all([
-        getAgents(),
-        getRoundTables(),
-        getSessions(),
-      ]);
-      setPersonaAgents(agents || []);
-      setPersonaMeetings(meetings || []);
-      const researchSessions = (allSessions || []).filter((s) => s.session_type === 'research');
-      setPersonaResearchSessions(researchSessions);
-
-      toast({ title: 'Research会话已删除', variant: 'success' });
-    } catch (error) {
-      console.error('[Workflow] Failed to delete research session:', error);
-      toast({
-        title: '删除Research会话失败',
-        description: error instanceof Error ? error.message : String(error),
-        variant: 'destructive',
-      });
-    }
-  };
-  
   // 处理总结的通用函数
   const processSummarize = async (
     sessionId: string,
@@ -2131,18 +2221,6 @@ const Workflow: React.FC<WorkflowProps> = ({
     }
   };
   
-  // 加载工作流列表
-  const loadWorkflows = async () => {
-    try {
-      console.log('[Workflow] Loading workflows...');
-      const workflowList = await getWorkflows();
-      console.log('[Workflow] Loaded workflows:', workflowList);
-      setWorkflows(workflowList);
-    } catch (error) {
-      console.error('[Workflow] Failed to load workflows:', error);
-      setWorkflows([]);
-    }
-  };
   
   // 加载技能包列表
   const loadSkillPacks = async () => {
@@ -2240,14 +2318,15 @@ const Workflow: React.FC<WorkflowProps> = ({
     }
   };
 
-  const handleSend = async () => {
+  const handleSend = async (overrideInput?: string) => {
+    const effectiveInput = overrideInput ?? input;
     // 允许发送文本或图片（至少有一个）
-    if ((!input.trim() && attachedMedia.length === 0) || isLoading) return;
+    if ((!effectiveInput.trim() && attachedMedia.length === 0) || isLoading) return;
 
     // 检查会话类型，确定是否使用 AgentActor 模型
     // - topic_general：多人话题，使用 AgentActor，需要检查是否有 Agent 参与者
     // - agent：私聊，使用 AgentActor，Agent 就是会话本身
-    // - memory：普通记忆体，前端直接调用 LLM
+    // - temporary：临时会话，前端直接调用 LLM
     const session = sessions.find(s => s.session_id === currentSessionId) || currentSessionMeta;
     const isAgentActorMode = session?.session_type === 'topic_general' || session?.session_type === 'agent';
     
@@ -2279,133 +2358,20 @@ const Workflow: React.FC<WorkflowProps> = ({
 
     // 如果是编辑模式，先处理重新发送
     if (editingMessageIdRef.current) {
-      await handleResendMessage(editingMessageIdRef.current, input.trim());
+      await handleResendMessage(editingMessageIdRef.current, effectiveInput.trim());
       return;
     }
 
     // 检查是否有选定的组件（tag）
-    // 只处理工作流，MCP通过selectedMcpServerIds在正常对话中使用工具
-    const workflowComponents = selectedComponents.filter(c => c.type === 'workflow');
-    if (workflowComponents.length > 0) {
-      // 使用第一个选定的工作流
-      const matchedComponent = workflowComponents[0];
-      const userInput = input.trim();
-      
-      if (!userInput) {
-        alert('请输入要执行的内容');
-        return;
-      }
-      
-      if (matchedComponent) {
-        // 先保存用户输入消息
-        let sessionId = currentSessionId;
-        if (!sessionId) {
-          try {
-            const newSession = await createSession(selectedLLMConfigId, userInput.substring(0, 50));
-            sessionId = newSession.session_id;
-            setCurrentSessionId(sessionId);
-            await loadSessions();
-          } catch (error) {
-            console.error('[Workflow] Failed to create session:', error);
-          }
-        }
-        
-        const userMessageId = `msg-${Date.now()}`;
-        const userMessage: Message = {
-          id: userMessageId,
-          role: 'user',
-          content: userInput,
-        };
-        
-        // 发送消息时，强制跳转到最后一条消息
-        wasAtBottomRef.current = true;
-        // 新消息追加到数组后面（显示在底部）
-        setMessages(prev => [...prev, userMessage]);
-        
-        // 保存用户消息（临时会话不保存）
-        if (sessionId && !isTemporarySession) {
-          try {
-            await saveMessage(sessionId, {
-              message_id: userMessageId,
-              role: 'user',
-              content: userInput,
-              model: selectedLLMConfig.model || 'gpt-4',
-            });
-          } catch (error) {
-            console.error('[Workflow] Failed to save user message:', error);
-          }
-        }
-        
-        // 添加感知组件消息
-        await addWorkflowMessage(matchedComponent);
-        
-        // 等待消息添加到列表
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        // 找到刚添加的感知组件消息
-        const currentMessages = messages;
-        const workflowMessages = currentMessages.filter(m => m.role === 'tool' && m.workflowId === matchedComponent.id);
-        let latestWorkflowMessage = workflowMessages[workflowMessages.length - 1];
-        
-        // 如果找不到，从最新的消息中查找
-        if (!latestWorkflowMessage) {
-          // 等待状态更新
-          await new Promise(resolve => setTimeout(resolve, 200));
-          const updatedMessages = messages;
-          const updatedWorkflowMessages = updatedMessages.filter(m => m.role === 'tool' && m.workflowId === matchedComponent.id);
-          latestWorkflowMessage = updatedWorkflowMessages[updatedWorkflowMessages.length - 1];
-        }
-        
-        if (latestWorkflowMessage) {
-          // 添加提示消息给大模型（显示动画）
-          const instructionMessageId = `instruction-${Date.now()}`;
-          const instructionMessage: Message = {
-            id: instructionMessageId,
-            role: 'assistant',
-            content: '',
-            isThinking: true,
-          };
-          // 新消息追加到数组后面（显示在底部）
-          setMessages(prev => [...prev, instructionMessage]);
-          
-          // 更新提示消息内容（带动画效果）
-          setTimeout(() => {
-            setMessages(prev => prev.map(msg =>
-              msg.id === instructionMessageId
-                ? {
-                    ...msg,
-                    content: `📋 收到感知组件指令：${matchedComponent.name} (工作流)，正在执行该步骤...`,
-                    isThinking: false,
-                  }
-                : msg
-            ));
-          }, 500);
-          
-          // 执行感知组件
-          await handleExecuteWorkflow(latestWorkflowMessage.id);
-        }
-        
-        setInput('');
-        return;
-      }
-    }
+    // MCP通过selectedMcpServerIds在正常对话中使用工具
+    // 工作流功能已移除
 
-    // 检查是否有待执行的工作流，如果有则回退到工作流消息之前
-    const lastWorkflowMessage = messages.filter(m => m.role === 'tool' && m.workflowStatus === 'pending').pop();
-    if (lastWorkflowMessage) {
-      const workflowIndex = messages.findIndex(m => m.id === lastWorkflowMessage.id);
-      if (workflowIndex >= 0) {
-        // 回退到工作流消息之前（保留工作流消息之前的所有消息）
-        const targetMessage = workflowIndex > 0 ? messages[workflowIndex - 1] : messages[0];
-        await rollbackMessages(targetMessage.id);
-      }
-    }
 
     // 临时会话：不需要创建新会话，使用固定的临时会话ID
     let sessionId = isTemporarySession ? temporarySessionId : currentSessionId;
     if (!sessionId && !isTemporarySession) {
       try {
-        const newSession = await createSession(selectedLLMConfigId, input.trim().substring(0, 50), 'memory');
+        const newSession = await createSession(selectedLLMConfigId || undefined, effectiveInput.trim().substring(0, 50), 'temporary');
         sessionId = newSession.session_id;
         setCurrentSessionId(sessionId);
         setIsTemporarySession(false);
@@ -2421,17 +2387,20 @@ const Workflow: React.FC<WorkflowProps> = ({
     const userMessageId = `msg-${Date.now()}`;
     
     // 如果有引用消息，在内容前添加引用信息
-    let messageContent = input.trim() || (attachedMedia.length > 0 ? '[包含媒体内容]' : '');
+    let messageContent = effectiveInput.trim() || (attachedMedia.length > 0 ? '[包含媒体内容]' : '');
     if (quotedMessageId) {
-      const quotedMsg = messages.find(m => m.id === quotedMessageId);
+      const quotedMsg =
+        quotedMessageSnapshot ||
+        messages.find(m => m.id === quotedMessageId);
       if (quotedMsg) {
-        const quotedContent = quotedMsg.content.length > 200 
-          ? quotedMsg.content.substring(0, 200) + '...' 
-          : quotedMsg.content;
+        const content = quotedMsg.content || '';
+        const quotedContent = content.length > 200 
+          ? content.substring(0, 200) + '...' 
+          : content;
         // 如果是 Agent 消息，添加发送者信息
-        const msgExt = (quotedMsg.ext || {}) as Record<string, any>;
+        const msgExt = ('ext' in quotedMsg ? (quotedMsg.ext || {}) : {}) as Record<string, any>;
         const senderName = quotedMsg.role === 'assistant'
-          ? (msgExt.sender_name || (quotedMsg as any).sender_name || 'Agent')
+          ? (quotedMessageSnapshot?.senderName || msgExt.sender_name || (quotedMsg as any).sender_name || 'Agent')
           : '用户';
         const quoteHeader = quotedMsg.role === 'assistant' 
           ? `[引用 ${senderName} 的消息]`
@@ -2480,12 +2449,16 @@ const Workflow: React.FC<WorkflowProps> = ({
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setAttachedMedia([]); // 清空已发送的媒体
-    setQuotedMessageId(null); // 清空引用消息
+    clearQuotedMessage(); // 清空引用消息
     setIsLoading(true);
     
     // 保存用户消息到数据库（临时会话不保存）
     if (sessionId && !isTemporarySession) {
       try {
+        if (!selectedLLMConfig) {
+          toast({ title: '请先选择 LLM 模型', variant: 'destructive' });
+          return;
+        }
         // 保存时包含媒体信息：必须放到 ext 中（后端 /api/sessions/<id>/messages 会忽略 tool_calls）
         const messageData: any = {
           message_id: userMessageId,
@@ -2519,17 +2492,24 @@ const Workflow: React.FC<WorkflowProps> = ({
         const isActorSession = sessionForActor?.session_type === 'topic_general' || sessionForActor?.session_type === 'agent';
         if (isActorSession) {
           const mcp_servers = Array.from(selectedMcpServerIds);
-          const workflow_ids = selectedComponents
-            .filter(c => c.type === 'workflow')
+          const skill_pack_ids = selectedComponents
+            .filter(c => c.type === 'skillpack')
             .map(c => c.id);
           
           messageData.ext = {
             ...(messageData.ext || {}),
           };
           
-          if (mcp_servers.length > 0 || workflow_ids.length > 0) {
+          if (mcp_servers.length > 0 || skill_pack_ids.length > 0) {
             messageData.ext.mcp_servers = mcp_servers;
-            messageData.ext.workflows = workflow_ids;
+            messageData.ext.skill_packs = skill_pack_ids;
+          }
+          messageData.ext.use_tool_calling = toolCallingEnabled;
+          if (attachedMedia.length > 0) {
+            messageData.ext.attachments = attachedMedia.map(item => ({
+              type: item.type,
+              mimeType: item.mimeType,
+            }));
           }
           
           // 私聊模式（agent类型）：传递用户选择的模型配置ID
@@ -2545,7 +2525,7 @@ const Workflow: React.FC<WorkflowProps> = ({
           setIsLoading(false);
           setInput('');
           setAttachedMedia([]);
-          setQuotedMessageId(null);
+          clearQuotedMessage();
           return;
         }
       } catch (error) {
@@ -2554,6 +2534,10 @@ const Workflow: React.FC<WorkflowProps> = ({
     }
 
     try {
+      if (!selectedLLMConfigId || !selectedLLMConfig) {
+        toast({ title: '请先选择 LLM 模型', variant: 'destructive' });
+        return;
+      }
       // 获取API密钥（Ollama 不需要 API key）
       const apiKey = await getLLMConfigApiKey(selectedLLMConfigId);
       if (selectedLLMConfig.provider !== 'ollama' && !apiKey) {
@@ -2568,6 +2552,7 @@ const Workflow: React.FC<WorkflowProps> = ({
           allTools.push(...tools);
         }
       }
+      const toolsForRequest = toolCallingEnabled && allTools.length > 0 ? allTools : [];
 
       // 创建LLM客户端（传递 thinking 配置）
       // 使用模型配置中的 thinking 模式，而不是用户切换的状态
@@ -2634,7 +2619,7 @@ const Workflow: React.FC<WorkflowProps> = ({
         });
       }
       
-      if (allTools.length > 0) {
+      if (toolCallingEnabled && allTools.length > 0) {
         systemPrompt += `\n\n你可以使用以下 MCP 工具来帮助用户完成任务：\n\n${allTools.map(tool => `- ${tool.name}: ${tool.description}`).join('\n')}\n\n当用户需要执行操作时，使用相应的工具。用中文回复用户，并清晰地说明你执行的操作和结果。`;
       } else {
         systemPrompt += '请根据用户的问题提供有用的回答和建议。用中文回复用户。';
@@ -2726,16 +2711,7 @@ const Workflow: React.FC<WorkflowProps> = ({
           continue;
         }
         
-        // 如果是 workflow 类型的 tool 消息，转换为 tool 类型
-        if (msg.role === 'tool' && msg.toolType === 'workflow') {
-          const workflowOutput = msg.content || '执行完成';
-          messageHistory.push({
-            role: 'tool',
-            name: msg.workflowName || 'workflow',
-            content: `我自己执行了一些操作，有这样的输出：${workflowOutput}`,
-          });
-        }
-        // 其他 tool 消息（如 MCP）排除
+        // tool 消息（如 MCP）排除
         else if (msg.role === 'tool') {
           continue;
         }
@@ -2870,6 +2846,8 @@ const Workflow: React.FC<WorkflowProps> = ({
       } | null = null;
       let rafId: number | null = null;
       
+      const buildProcessMessagesSafe = () => buildProcessMessages(currentProcessSteps);
+
       const flushPendingUpdate = () => {
         if (!pendingUpdate) return;
         const { content, thinking, isThinking, isStreaming, currentStep } = pendingUpdate;
@@ -2883,6 +2861,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                 isStreaming: isStreaming !== undefined ? isStreaming : msg.isStreaming,
                 currentStep: currentStep !== undefined ? currentStep : msg.currentStep,
                 processSteps: [...currentProcessSteps],
+                processMessages: buildProcessMessagesSafe(),
               }
             : msg
         ));
@@ -2902,6 +2881,7 @@ const Workflow: React.FC<WorkflowProps> = ({
             // 更新现有思考步骤的内容
             console.log(`[Workflow] 更新现有思考步骤`);
             existingThinkingStep.thinking = thinkingContent;
+            if (!existingThinkingStep.status) existingThinkingStep.status = 'running';
           } else {
             // 创建新的思考步骤
             console.log(`[Workflow] 创建新的思考步骤`);
@@ -2909,6 +2889,7 @@ const Workflow: React.FC<WorkflowProps> = ({
               type: 'thinking',
               timestamp: Date.now(),
               thinking: thinkingContent,
+              status: 'running',
             });
           }
           lastThinkingLength = thinkingContent.length;
@@ -2916,6 +2897,15 @@ const Workflow: React.FC<WorkflowProps> = ({
         
         // 如果 isStreaming=false，立即刷新（最终状态）
         if (isStreaming === false) {
+          // 结束生成：将思考步骤标记为完成
+          currentProcessSteps.forEach((s) => {
+            if (s.type === 'thinking' && s.status === 'running') {
+              s.status = 'completed';
+              if (s.timestamp) {
+                s.duration = Date.now() - s.timestamp;
+              }
+            }
+          });
           if (rafId) {
             cancelAnimationFrame(rafId);
             rafId = null;
@@ -3033,7 +3023,7 @@ const Workflow: React.FC<WorkflowProps> = ({
       const requestInfo = {
         userMessage: userMessage.content,
         systemPrompt,
-        tools: allTools.length > 0 ? allTools : undefined,
+        tools: toolsForRequest.length > 0 ? toolsForRequest : undefined,
         messageHistory,
         sessionId: sessionId || undefined, // 将 null 转换为 undefined
         messageId: assistantMessageId,
@@ -3076,7 +3066,7 @@ const Workflow: React.FC<WorkflowProps> = ({
           const response = await llmClient.handleUserRequestWithThinking(
             userMessage.content || '', // 即使没有文本内容，也传递空字符串
             systemPrompt,
-            allTools.length > 0 ? allTools : undefined,
+            toolsForRequest.length > 0 ? toolsForRequest : undefined,
             true, // 启用流式响应
             (chunk: string, thinking?: string) => {
               // 流式更新消息内容
@@ -3221,7 +3211,7 @@ const Workflow: React.FC<WorkflowProps> = ({
               }
               // 保存过程步骤（思考和MCP调用历史）
               if (currentProcessSteps.length > 0) {
-                extData.processSteps = currentProcessSteps;
+                extData.processMessages = buildProcessMessages(currentProcessSteps);
                 console.log(`[Workflow] 保存 ${currentProcessSteps.length} 个过程步骤到数据库:`, currentProcessSteps.map(s => ({
                   type: s.type,
                   toolName: s.toolName,
@@ -3296,7 +3286,7 @@ const Workflow: React.FC<WorkflowProps> = ({
           const response = await llmClient.handleUserRequestWithThinking(
             userMessage.content || '', // 即使没有文本内容，也传递空字符串
             systemPrompt,
-            allTools.length > 0 ? allTools : undefined,
+            toolsForRequest.length > 0 ? toolsForRequest : undefined,
             false, // 禁用流式响应
             undefined, // 非流式模式不需要 onChunk
             messageHistoryWithUser, // 传递包含多模态内容的消息历史
@@ -3373,7 +3363,7 @@ const Workflow: React.FC<WorkflowProps> = ({
               }
               // 保存过程步骤（思考和MCP调用历史）
               if (currentProcessSteps.length > 0) {
-                extData.processSteps = currentProcessSteps;
+                extData.processMessages = buildProcessMessages(currentProcessSteps);
                 console.log(`[Workflow] 保存 ${currentProcessSteps.length} 个过程步骤到数据库:`, currentProcessSteps.map(s => ({
                   type: s.type,
                   toolName: s.toolName,
@@ -3887,7 +3877,7 @@ const Workflow: React.FC<WorkflowProps> = ({
         name: sopName.trim(),
         sop_text: sopText.trim(),
         assign_to_session_id: currentSessionId && currentSessionType === 'topic_general' ? currentSessionId : undefined,
-        set_as_current: currentSessionId && currentSessionType === 'topic_general',
+        set_as_current: currentSessionId && currentSessionType === 'topic_general' ? true : undefined,
       });
       
       toast({ title: `SOP "${result.name}" 创建成功`, variant: 'success' });
@@ -4003,6 +3993,17 @@ const Workflow: React.FC<WorkflowProps> = ({
     if (!message || (message.role !== 'user' && message.role !== 'assistant')) return;
 
     setQuotedMessageId(messageId);
+    const msgExt = (message.ext || {}) as Record<string, any>;
+    const senderName = message.role === 'assistant'
+      ? (msgExt.sender_name || (message as any).sender_name || 'Agent')
+      : '用户';
+    setQuotedMessageSnapshot({
+      id: message.id,
+      role: message.role,
+      senderName,
+      content: message.content || '',
+      media: message.media || [],
+    });
 
     // 将被引用消息的媒体附件合并到当前附件里（去重）
     if (message.media && message.media.length > 0) {
@@ -4043,7 +4044,7 @@ const Workflow: React.FC<WorkflowProps> = ({
       // 退出编辑/引用状态
       editingMessageIdRef.current = null;
       setEditingMessageId(null);
-      setQuotedMessageId(null);
+      clearQuotedMessage();
       // 触发回滚
       await rollbackMessages(messageId);
     } catch (e) {
@@ -4111,12 +4112,9 @@ const Workflow: React.FC<WorkflowProps> = ({
     editingMessageIdRef.current = null;
     setEditingMessageId(null);
     
-    // 使用新内容发送消息
+    // 使用新内容发送消息（直接走统一发送逻辑，避免移动端状态延迟）
     setInput(contentToSend);
-    // 等待状态更新后发送
-    setTimeout(() => {
-      handleSend();
-    }, 100);
+    await handleSend(contentToSend);
   };
 
   const toggleThinkingCollapse = (messageId: string) => {
@@ -4137,17 +4135,13 @@ const Workflow: React.FC<WorkflowProps> = ({
       .filter(s => s.name.toLowerCase().includes(atSelectorQuery.toLowerCase()))
       .map(s => ({ type: 'mcp' as const, id: s.id, name: s.name, displayName: s.display_name || s.name }));
     
-    const workflowList = workflows
-      .filter(w => w.name.toLowerCase().includes(atSelectorQuery.toLowerCase()))
-      .map(w => ({ type: 'workflow' as const, id: w.workflow_id, name: w.name, displayName: w.name }));
-    
     // 话题参与者（Agent）
     const agentList = topicParticipants
       .filter(p => p.participant_type === 'agent' && (p.name || '').toLowerCase().includes(atSelectorQuery.toLowerCase()))
       .map(p => ({ type: 'agent' as const, id: p.participant_id, name: p.name || p.participant_id, displayName: p.name || p.participant_id, avatar: p.avatar }));
     
-    return [...agentList, ...mcpList, ...workflowList];
-  }, [mcpServers, workflows, atSelectorQuery, topicParticipants]);
+    return [...agentList, ...mcpList];
+  }, [mcpServers, atSelectorQuery, topicParticipants]);
   
   // 处理模块选择（/模块命令）
   const handleModuleSelect = async (moduleId: string, batchId: string, batchName: string) => {
@@ -4423,7 +4417,7 @@ const Workflow: React.FC<WorkflowProps> = ({
   };
   
   // 选择感知组件（添加为 tag）
-  const handleSelectComponent = async (component: { type: 'mcp' | 'workflow' | 'skillpack' | 'agent'; id: string; name: string }) => {
+  const handleSelectComponent = async (component: { type: 'mcp' | 'skillpack' | 'agent'; id: string; name: string }) => {
     if (atSelectorIndex === -1) return;
     
     // 如果是智能体，直接在文本中插入 @名字
@@ -4457,41 +4451,12 @@ const Workflow: React.FC<WorkflowProps> = ({
       return;
     }
     
-    // 检查是否已经选择了组件（限制只能选择一个）
-    if (selectedComponents.length > 0) {
-      console.log('[Workflow] Component already selected, cannot add another');
-      // 显示提示信息
-      const errorMsg: Message = {
-        id: Date.now().toString(),
-        role: 'assistant',
-        content: '⚠️ 只能选择一个感知组件。请先删除已选择的组件，然后再选择新的组件。',
-      };
-      // 新消息追加到数组后面（显示在底部）
-      setMessages(prev => [...prev, errorMsg]);
-      setShowAtSelector(false);
-      setAtSelectorIndex(-1);
-      setAtSelectorQuery('');
-      return;
-    }
-    
     // 检查是否已经添加过该组件
     const isAlreadySelected = selectedComponents.some(
       c => c.id === component.id && c.type === component.type
     );
     
     if (!isAlreadySelected) {
-      // 如果是workflow，自动初始化（使用池化管理）
-      if (component.type === 'workflow') {
-        try {
-          console.log(`[Workflow] Auto-initializing workflow: ${component.name} (${component.id})`);
-          const instance = await workflowPool.acquireWorkflow(component.id);
-          console.log(`[Workflow] Workflow initialized with ${instance.mcpClients.size} MCP clients`);
-        } catch (error) {
-          console.error(`[Workflow] Failed to initialize workflow:`, error);
-          // 即使初始化失败，也允许添加组件（可能后续会重试）
-        }
-      }
-      
       // 添加到已选定的组件列表
       setSelectedComponents(prev => [...prev, component]);
       
@@ -4550,12 +4515,6 @@ const Workflow: React.FC<WorkflowProps> = ({
   const handleRemoveComponent = (index: number) => {
     const component = selectedComponents[index];
     if (component) {
-      // 如果是workflow，将实例放回池中
-      if (component.type === 'workflow') {
-        workflowPool.returnToPool(component.id);
-        console.log(`[Workflow] Returned workflow instance to pool: ${component.name} (${component.id})`);
-      }
-      
       // 如果是MCP服务器，从selectedMcpServerIds中移除
       if (component.type === 'mcp') {
         setSelectedMcpServerIds(prev => {
@@ -4630,19 +4589,6 @@ const Workflow: React.FC<WorkflowProps> = ({
     });
   };
 
-  const handleSelectWorkflowFromThumbnail = (workflowId: string) => {
-    const workflow = workflows.find(w => w.workflow_id === workflowId);
-    if (workflow) {
-      const component = { type: 'workflow' as const, id: workflowId, name: workflow.name };
-      if (selectedComponents.length === 0) {
-        setSelectedComponents([component]);
-      }
-    }
-  };
-
-  const handleDeselectWorkflowFromThumbnail = (workflowId: string) => {
-    setSelectedComponents(prev => prev.filter(c => !(c.type === 'workflow' && c.id === workflowId)));
-  };
 
   const handleSelectSkillPackFromThumbnail = (skillPackId: string) => {
     const skillPack = allSkillPacks.find(sp => sp.skill_pack_id === skillPackId);
@@ -4682,10 +4628,6 @@ const Workflow: React.FC<WorkflowProps> = ({
     });
   };
 
-  // 获取选中的workflow IDs
-  const selectedWorkflowIds = new Set(
-    selectedComponents.filter(c => c.type === 'workflow').map(c => c.id)
-  );
 
   // 获取选中的skill pack IDs
   const selectedSkillPackIds = new Set(
@@ -4693,7 +4635,7 @@ const Workflow: React.FC<WorkflowProps> = ({
   );
 
   // 处理拖拽组件到对话框
-  const handleDropComponent = async (component: { type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string }) => {
+  const handleDropComponent = async (component: { type: 'mcp' | 'skillpack'; id: string; name: string }) => {
     if (!currentSessionId) {
       // 如果没有会话，先创建
       try {
@@ -4714,8 +4656,8 @@ const Workflow: React.FC<WorkflowProps> = ({
     }
   };
   
-  // 添加工作流消息（保存到数据库，以便后端API能够找到并执行）
-  const addWorkflowMessage = async (component: { type: 'mcp' | 'workflow' | 'skillpack'; id: string; name: string }) => {
+  // 添加组件消息（仅支持 MCP 和技能包）
+  const addWorkflowMessage = async (component: { type: 'mcp' | 'skillpack'; id: string; name: string }) => {
     // 如果是技能包，不需要执行工作流，只需要在系统提示词中包含技能包内容
     if (component.type === 'skillpack') {
       // 技能包通过selectedComponents管理，在构建systemPrompt时包含
@@ -4731,152 +4673,21 @@ const Workflow: React.FC<WorkflowProps> = ({
       });
       return;
     }
-    const workflowMessageId = `workflow-${Date.now()}`;
     
-    // 如果是工作流，获取详细信息（包括节点）
-    let workflowDetails: WorkflowType | null = null;
-    if (component.type === 'workflow') {
-      try {
-        workflowDetails = await getWorkflow(component.id);
-        console.log('[Workflow] Loaded workflow details:', workflowDetails);
-      } catch (error) {
-        console.error('[Workflow] Failed to load workflow details:', error);
-      }
-    }
-    
-    const workflowMessage: Message = {
-      id: workflowMessageId,
-      role: 'tool',
-      content: '',
-      toolType: component.type, // 'workflow' 或 'mcp'
-      workflowId: component.id,
-      workflowName: component.name,
-      workflowStatus: 'pending',
-      workflowConfig: workflowDetails?.config, // 保存工作流配置（节点和连接）
-    };
-    
-    // 新消息追加到数组后面（显示在底部）
-    setMessages(prev => [...prev, workflowMessage]);
-    
-    // 保存消息到数据库，tool_calls字段包含组件信息，以便后端API能够找到并执行（临时会话不保存）
-    if (currentSessionId && !isTemporarySession) {
-      try {
-        await saveMessage(currentSessionId, {
-          message_id: workflowMessageId,
-          role: 'tool',
-          content: '',
-          tool_calls: {
-            toolType: component.type,
-            workflowId: component.id,
-            workflowName: component.name,
-            workflowStatus: 'pending',
-            workflowConfig: workflowDetails?.config,
-          },
-        });
-        console.log('[Workflow] Saved workflow message to database:', workflowMessageId);
-      } catch (error) {
-        console.error('[Workflow] Failed to save workflow message:', error);
-      }
+    // MCP 服务器通过 selectedMcpServerIds 管理，不需要添加消息
+    if (component.type === 'mcp') {
+      return;
     }
   };
   
-  // 执行工作流
+  // 执行工作流（已移除，不再支持工作流功能）
   const handleExecuteWorkflow = async (messageId: string) => {
-    const message = messages.find(m => m.id === messageId);
-    if (!message || !message.workflowId) {
-      console.error('[Workflow] Cannot execute workflow: message not found or missing workflowId', { messageId, message });
-      alert('无法执行工作流：缺少必要信息');
-      return;
-    }
-    
-    // 检查是否选择了LLM配置
-    if (!selectedLLMConfigId || !selectedLLMConfig) {
-      alert('请先选择 LLM 模型');
-      return;
-    }
-    
-    // 获取上一条消息作为输入（跳过其他工作流消息，找到用户或助手消息）
-    const messageIndex = messages.findIndex(m => m.id === messageId);
-    let previousMessage: Message | null = null;
-    for (let i = messageIndex - 1; i >= 0; i--) {
-      const msg = messages[i];
-      // 跳过工作流消息，找到用户或助手消息
-      if (msg.role === 'user' || msg.role === 'assistant') {
-        previousMessage = msg;
-        break;
-      }
-    }
-    
-    const input = previousMessage?.content || '';
-    
-    if (!input) {
-      alert('上一条消息为空，无法执行工作流');
-      return;
-    }
-    
-    // 更新消息状态为运行中
-    setMessages(prev => prev.map(msg =>
-      msg.id === messageId
-        ? { ...msg, workflowStatus: 'running' }
-        : msg
-    ));
-    
-    try {
-      // 使用新的 message_execution API 执行感知组件
-      const execution = await executeMessageComponent(
-        messageId,
-        selectedLLMConfigId,
-        input
-      );
-      
-      // 更新消息状态和结果
-      const result = execution.result || execution.error_message || '执行完成';
-      const status = execution.status === 'completed' ? 'completed' : 'error';
-      
-      setMessages(prev => prev.map(msg =>
-        msg.id === messageId
-          ? { 
-              ...msg, 
-              workflowStatus: status,
-              content: result,
-            }
-          : msg
-      ));
-      
-      // 注意：不再直接保存消息到数据库，执行结果已通过 message_execution 表管理
-      console.log('[Workflow] Execution completed:', execution);
-      
-    } catch (error) {
-      console.error('[Workflow] Failed to execute workflow:', error);
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      
-      setMessages(prev => prev.map(msg =>
-        msg.id === messageId
-          ? { 
-              ...msg, 
-              workflowStatus: 'error',
-              content: `❌ 执行失败: ${errorMsg}`,
-            }
-          : msg
-      ));
-      
-      // 注意：错误信息已通过 message_execution 表记录
-      console.error('[Workflow] Execution error:', errorMsg);
-    } finally {
-      // 执行完成后，将workflow实例放回池中
-      if (message?.workflowId) {
-        workflowPool.returnToPool(message.workflowId);
-        console.log(`[Workflow] Returned workflow instance to pool: ${message.workflowId}`);
-      }
-    }
+    console.warn('[Workflow] Workflow execution is no longer supported');
   };
 
-  // 删除工作流消息
+  // 删除工作流消息（已移除，不再支持工作流功能）
   const handleDeleteWorkflowMessage = async (messageId: string) => {
-    if (!confirm('确定要删除这个感知流程吗？')) {
-      return;
-    }
-    
+    console.warn('[Workflow] Workflow message deletion is no longer supported');
     // 从消息列表中删除
     setMessages(prev => prev.filter(msg => msg.id !== messageId));
     
@@ -5028,13 +4839,15 @@ const Workflow: React.FC<WorkflowProps> = ({
         })();
       const hasToolCallsArray =
         message.toolCalls && Array.isArray(message.toolCalls) && message.toolCalls.length > 0;
-      const hasProcessSteps = message.processSteps && message.processSteps.length > 0;
+      const hasProcessMessages = message.processMessages && message.processMessages.length > 0;
       const shouldUseSplitView =
         message.role === 'assistant' &&
         (hasThinkingContent ||
           hasMCPDetail ||
           hasToolCallsArray ||
-          hasProcessSteps ||
+          hasProcessMessages ||
+          // 流式/生成中也必须走 SplitView，才能在“思维链图标右侧同一行”展示滚动日志
+          message.isStreaming ||
           message.isThinking ||
           message.currentStep ||
           message.thoughtSignature);
@@ -5042,8 +4855,8 @@ const Workflow: React.FC<WorkflowProps> = ({
       if (shouldUseSplitView) {
         const senderType = (message as any).sender_type as string | undefined;
         const senderId = (message as any).sender_id as string | undefined;
-        // topic_general、agent 私聊和 memory 都可能需要显示 Agent 头像
-        const needAgentInfo = currentSessionType === 'topic_general' || currentSessionType === 'agent' || currentSessionType === 'memory';
+        // topic_general、agent 私聊会显示 Agent 头像
+        const needAgentInfo = currentSessionType === 'topic_general' || currentSessionType === 'agent';
         // 优先使用消息中的 sender_avatar/sender_name，降级查找 topicParticipants
         const msgExt = (message.ext || {}) as Record<string, any>;
         const msgSenderAvatar = msgExt.sender_avatar || (message as any).sender_avatar;
@@ -5051,7 +4864,11 @@ const Workflow: React.FC<WorkflowProps> = ({
           ? topicParticipants.find(p => p.participant_type === 'agent' && p.participant_id === senderId)
           : undefined;
         // 对于 agent 私聊，使用 currentSessionAvatar 作为默认头像
-        const assistantAvatarUrl = msgSenderAvatar || agentP?.avatar || currentSessionAvatar || undefined;
+        const messageAvatarFallback = currentSessionType === 'topic_general' ? msgSenderAvatar : undefined;
+        const assistantAvatarUrl = resolveAgentAvatar(
+          senderId,
+          messageAvatarFallback || agentP?.avatar || currentSessionAvatar || undefined,
+        );
         return (
           <SplitViewMessage
             id={message.id}
@@ -5062,11 +4879,6 @@ const Workflow: React.FC<WorkflowProps> = ({
             isStreaming={message.isStreaming}
             currentStep={message.currentStep}
             toolType={message.toolType}
-            workflowId={message.workflowId}
-            workflowName={message.workflowName}
-            workflowStatus={message.workflowStatus}
-            workflowResult={message.workflowResult}
-            workflowConfig={message.workflowConfig}
             toolCalls={Array.isArray(message.toolCalls) ? message.toolCalls : undefined}
             mcpDetail={message.mcpdetail}
             thoughtSignature={message.thoughtSignature}
@@ -5084,7 +4896,24 @@ const Workflow: React.FC<WorkflowProps> = ({
               setShowMCPDetailOverlay(true);
             }}
             onRetry={() => handleRetryMessage(message.id)}
-            processSteps={message.processSteps}
+            processMessages={message.processMessages}
+            executionLogs={
+              (() => {
+                // 从消息中提取执行日志（优先级：agent_log > log > executionLogs）
+                const getLogsFromMessage = (msg: typeof message) => {
+                  const ext = (msg.ext || {}) as any;
+                  return ext.agent_log || ext.log || msg.executionLogs || ext.executionLogs;
+                };
+                
+                // 将全局 executionLogs 绑定到"当前正在生成/思考的那条消息"
+                // 旧逻辑用 find() 取第一条 streaming 消息，若存在残留 isStreaming=true 的旧消息会绑定错，导致右侧日志不显示
+                if (message.isStreaming || message.isThinking) {
+                  return getLogsFromMessage(message) ?? executionLogs;
+                }
+                // 历史消息：从持久化的 ext 中读取
+                return getLogsFromMessage(message);
+              })()
+            }
           />
         );
       }
@@ -5093,12 +4922,12 @@ const Workflow: React.FC<WorkflowProps> = ({
         <div
           data-message-id={message.id}
           onClick={() => toggleMessageSelection(message.id)}
-          className={`flex items-start fade-in-up stagger-item ${
+          className={`flex items-start gap-2 fade-in-up stagger-item w-full ${
             message.role === 'user'
-              ? 'flex-row-reverse space-x-reverse space-x-2'
+              ? 'flex-row'
               : message.role === 'assistant' || message.role === 'tool'
-                ? 'flex-col w-full'
-                : 'space-x-2'
+                ? 'flex-row'
+                : 'flex-row'
           } ${
             skillPackSelectionMode
               ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-[#404040] rounded-lg p-2 -m-2 transition-all duration-200'
@@ -5111,7 +4940,7 @@ const Workflow: React.FC<WorkflowProps> = ({
         >
           {/* 选择复选框（仅在选择模式下显示） */}
           {skillPackSelectionMode && (
-            <div className={`flex-shrink-0 mt-0.5 ${message.role === 'user' ? 'ml-1.5' : 'mr-1.5'}`}>
+            <div className={`flex-shrink-0 mt-0.5 ${message.role === 'user' ? 'order-last ml-1.5' : 'mr-1.5'}`}>
               {isSelected ? (
                 <CheckSquare className="w-4 h-4 text-primary-500" />
               ) : (
@@ -5121,51 +4950,47 @@ const Workflow: React.FC<WorkflowProps> = ({
           )}
 
           {(message.role === 'assistant' || message.role === 'tool') ? (
-            <div className="w-full">
-              <div className="flex items-center space-x-2 mb-2">
+            <div className="w-full min-w-0">
+              {/* 第一行：头像 + 名称 + 状态（不占气泡空间） */}
+              <div className="flex flex-row items-center gap-1.5 w-full min-w-0">
                 {(() => {
                   const senderType = (message as any).sender_type as string | undefined;
                   const senderId = (message as any).sender_id as string | undefined;
-                  // topic_general、agent 私聊和 memory 都可能需要显示 Agent 头像
-                  const needAgentInfo = currentSessionType === 'topic_general' || currentSessionType === 'agent' || currentSessionType === 'memory';
-                  // 优先使用消息中的 sender_avatar/sender_name，降级查找 topicParticipants
+                  const needAgentInfo = currentSessionType === 'topic_general' || currentSessionType === 'agent';
                   const msgExt = (message.ext || {}) as Record<string, any>;
                   const msgSenderAvatar = msgExt.sender_avatar || (message as any).sender_avatar;
                   const msgSenderName = msgExt.sender_name || (message as any).sender_name;
                   const agentP = needAgentInfo && senderType === 'agent' && senderId && !msgSenderAvatar
                     ? topicParticipants.find(p => p.participant_type === 'agent' && p.participant_id === senderId)
                     : undefined;
-                  // 对于 agent 私聊，使用 currentSessionAvatar 作为默认头像
+                  const messageAvatarFallback = currentSessionType === 'topic_general' ? msgSenderAvatar : undefined;
                   const assistantAvatarUrl = message.role === 'assistant'
-                    ? (msgSenderAvatar || agentP?.avatar || currentSessionAvatar || undefined)
+                    ? resolveAgentAvatar(senderId, messageAvatarFallback || agentP?.avatar || currentSessionAvatar || undefined)
                     : undefined;
                   const assistantName = msgSenderName || agentP?.name || '';
                   return (
                     <>
-                <MessageAvatar
-                  role={message.role}
-                  avatarUrl={assistantAvatarUrl}
-                  toolType={message.toolType}
-                />
-                {needAgentInfo && message.role === 'assistant' && senderType === 'agent' && assistantName && (
-                  <span className="text-xs text-gray-700 dark:text-[#d0d0d0] font-medium truncate max-w-[120px]" title={assistantName}>
-                    {assistantName}
-                  </span>
-                )}
-                {message.role === 'assistant' && (
-                  <MessageStatusIndicator
-                    isThinking={message.isThinking}
-                    isStreaming={message.isStreaming}
-                    hasContent={!!message.content && message.content.length > 0}
-                    currentStep={message.currentStep}
-                    llmProvider={selectedLLMConfig?.provider}
-                  />
-                )}
+                      <MessageAvatar role={message.role} avatarUrl={assistantAvatarUrl} toolType={message.toolType} size="sm" />
+                      {needAgentInfo && message.role === 'assistant' && senderType === 'agent' && assistantName && (
+                        <span className="text-xs text-gray-700 dark:text-[#d0d0d0] font-medium truncate max-w-[80px]" title={assistantName}>
+                          {assistantName}
+                        </span>
+                      )}
+                      {message.role === 'assistant' && (
+                        <MessageStatusIndicator
+                          isThinking={message.isThinking}
+                          isStreaming={message.isStreaming}
+                          hasContent={!!message.content && message.content.length > 0}
+                          currentStep={message.currentStep}
+                          llmProvider={selectedLLMConfig?.provider}
+                        />
+                      )}
                     </>
                   );
                 })()}
               </div>
-              <div className="w-full group relative">
+              {/* 第二行：气泡换行顶格贴左（抵消列表 px-3），不空头像位 */}
+              <div className="w-full min-w-0 group relative mt-1 -ml-3">
                 <MessageBubbleContainer role={message.role} toolType={message.toolType} className="w-full">
                   <MessageContent
                     message={message}
@@ -5182,19 +5007,16 @@ const Workflow: React.FC<WorkflowProps> = ({
                   />
                 </MessageBubbleContainer>
               </div>
-              {message.role === 'tool' && (message.toolType === 'mcp' || message.toolType === 'workflow') && (
+              {message.role === 'tool' && message.toolType === 'mcp' && (
                 <PluginExecutionPanel messageId={message.id} sessionId={currentSessionId} toolType={message.toolType} />
               )}
             </div>
           ) : (
-            <>
-              <div className="flex-shrink-0 flex items-center space-x-1.5">
-                <MessageAvatar role={message.role} toolType={message.toolType} />
-              </div>
-              <div className={`flex-1 group relative ${message.role === 'user' ? 'flex justify-end' : ''}`}>
-                {/* 用户消息操作：引用 / 编辑 / 回滚 */}
+            /* 用户消息：头像一行，气泡下一行（右对齐） */
+            <div className="w-full min-w-0 flex flex-col items-end gap-2">
+              <div className="flex items-center justify-end gap-1.5">
                 {message.role === 'user' && !skillPackSelectionMode && (
-                  <div className="absolute -top-7 right-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-[#2d2d2d] rounded-lg shadow-md border border-gray-200 dark:border-[#404040] px-1 py-0.5">
+                  <div className="flex items-center gap-1 bg-muted/50 rounded-md px-1 py-0.5">
                     <IconButton
                       icon={Quote}
                       label="引用此消息"
@@ -5202,7 +5024,8 @@ const Workflow: React.FC<WorkflowProps> = ({
                         e.stopPropagation();
                         void handleQuoteMessage(message.id);
                       }}
-                      className="h-7 w-7"
+                      className="h-6 w-6 text-muted-foreground hover:text-primary-600 dark:hover:text-primary-400"
+                      iconClassName="w-3 h-3"
                     />
                     <IconButton
                       icon={Edit2}
@@ -5211,7 +5034,8 @@ const Workflow: React.FC<WorkflowProps> = ({
                         e.stopPropagation();
                         handleStartEdit(message.id);
                       }}
-                      className="h-7 w-7"
+                      className="h-6 w-6 text-muted-foreground hover:text-primary-600 dark:hover:text-primary-400"
+                      iconClassName="w-3 h-3"
                     />
                     <IconButton
                       icon={RotateCw}
@@ -5220,11 +5044,15 @@ const Workflow: React.FC<WorkflowProps> = ({
                         e.stopPropagation();
                         void handleRollbackToMessage(message.id);
                       }}
-                      className="h-7 w-7"
+                      className="h-6 w-6 text-muted-foreground hover:text-green-600 dark:hover:text-green-400"
+                      iconClassName="w-3 h-3"
                     />
                   </div>
                 )}
-                <MessageBubbleContainer role={message.role} toolType={message.toolType} className="max-w-[85%]">
+                <MessageAvatar role={message.role} toolType={message.toolType} size="md" />
+              </div>
+              <div className="w-full min-w-0 flex justify-end">
+                <MessageBubbleContainer role={message.role} toolType={message.toolType} className="max-w-[85%] w-max">
                   <MessageContent
                     message={message}
                     prevMessageContent={getPrevMessageContent(message.id)}
@@ -5240,7 +5068,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                   />
                 </MessageBubbleContainer>
               </div>
-            </>
+            </div>
           )}
         </div>
       );
@@ -5250,11 +5078,13 @@ const Workflow: React.FC<WorkflowProps> = ({
       collapsedThinking,
       currentSessionAvatar,
       currentSessionId,
+      executionLogs,
       getPrevMessageContent,
       handleExecuteWorkflow,
       handleRetryMessage,
       handleDeleteWorkflowMessage,
       isLoading,
+      messages,
       openSingleMediaViewer,
       renderMessageContent,
       selectedLLMConfig?.provider,
@@ -5301,15 +5131,6 @@ const Workflow: React.FC<WorkflowProps> = ({
     }
   };
 
-  const openMeetingFromPersona = (roundTableId: string) => {
-    setShowPersonaPanel(false);
-    onSelectMeeting?.(roundTableId);
-  };
-
-  const openResearchFromPersona = (researchSessionId: string) => {
-    setShowPersonaPanel(false);
-    onSelectResearch?.(researchSessionId);
-  };
 
   useEffect(() => {
     if (!showPersonaPanel) return;
@@ -5317,24 +5138,18 @@ const Workflow: React.FC<WorkflowProps> = ({
     (async () => {
       try {
         setIsLoadingPersonaList(true);
-        const [agents, meetings, allSessions, topics] = await Promise.all([
+        const [agents, sessions] = await Promise.all([
           getAgents(),
-          getRoundTables(),
           getSessions(),
-          getMemories(),
         ]);
         if (canceled) return;
         setPersonaAgents(agents || []);
-        setPersonaMeetings(meetings || []);
-        setPersonaTopics(topics || []);
-        const researchSessions = (allSessions || []).filter((s) => s.session_type === 'research');
-        setPersonaResearchSessions(researchSessions);
+        const topics = (sessions || []).filter(s => s.session_type === 'topic_general');
+        setPersonaTopics(topics);
       } catch (error) {
         console.error('[Workflow] Failed to load persona list:', error);
         if (canceled) return;
         setPersonaAgents([]);
-        setPersonaMeetings([]);
-        setPersonaResearchSessions([]);
         setPersonaTopics([]);
       } finally {
         if (!canceled) setIsLoadingPersonaList(false);
@@ -5345,59 +5160,37 @@ const Workflow: React.FC<WorkflowProps> = ({
     };
   }, [showPersonaPanel]);
 
-  // 新建 Meeting
-  const handleCreateNewMeeting = async () => {
-    if (!newMeetingName.trim()) {
-      toast({ title: '请输入会议名称', variant: 'destructive' });
-      return;
-    }
-    setIsCreatingMeeting(true);
-    try {
-      const newMeeting = await createRoundTable(newMeetingName.trim());
-      toast({ title: '会议已创建', variant: 'success' });
-      setShowNewMeetingDialog(false);
-      setNewMeetingName('');
-      setShowPersonaPanel(false);
-      // 切换到新创建的会议
-      openMeetingFromPersona(newMeeting.round_table_id);
-    } catch (error) {
-      console.error('[Workflow] Failed to create meeting:', error);
-      toast({ 
-        title: '创建失败', 
-        description: error instanceof Error ? error.message : String(error),
-        variant: 'destructive'
-      });
-    } finally {
-      setIsCreatingMeeting(false);
-    }
-  };
+  useEffect(() => {
+    let canceled = false;
+    const agentIds = new Set<string>();
+    messages.forEach(msg => {
+      if (msg.sender_type === 'agent' && msg.sender_id) {
+        agentIds.add(msg.sender_id);
+      }
+    });
+    agentIds.forEach(async (agentId) => {
+      if (avatarCacheRef.current.has(agentId) || avatarLoadingRef.current.has(agentId)) return;
+      avatarLoadingRef.current.add(agentId);
+      try {
+        const session = await getSession(agentId);
+        if (canceled) return;
+        avatarCacheRef.current.set(agentId, session.avatar || null);
+        setAvatarCacheTick(v => v + 1);
+      } catch (error) {
+        if (!canceled) {
+          avatarCacheRef.current.set(agentId, null);
+          setAvatarCacheTick(v => v + 1);
+        }
+      } finally {
+        avatarLoadingRef.current.delete(agentId);
+      }
+    });
+    return () => {
+      canceled = true;
+    };
+  }, [messages, avatarCacheTick]);
 
-  // 新建 Research
-  const handleCreateNewResearch = async () => {
-    if (!newResearchName.trim()) {
-      toast({ title: '请输入研究任务名称', variant: 'destructive' });
-      return;
-    }
-    setIsCreatingResearch(true);
-    try {
-      const newSession = await createSession(undefined, newResearchName.trim(), 'research');
-      toast({ title: '研究任务已创建', variant: 'success' });
-      setShowNewResearchDialog(false);
-      setNewResearchName('');
-      setShowPersonaPanel(false);
-      // 切换到新创建的研究任务
-      openResearchFromPersona(newSession.session_id);
-    } catch (error) {
-      console.error('[Workflow] Failed to create research:', error);
-      toast({ 
-        title: '创建失败', 
-        description: error instanceof Error ? error.message : String(error),
-        variant: 'destructive'
-      });
-    } finally {
-      setIsCreatingResearch(false);
-    }
-  };
+
 
   const {
     moduleSelectorIndex,
@@ -5437,21 +5230,13 @@ const Workflow: React.FC<WorkflowProps> = ({
 
   return (
     <>
-    <div className="h-full flex flex-col bg-gray-50 dark:bg-[#1a1a1a]">
-
-      {/* 主要内容区域：聊天界面 - GNOME 风格布局 */}
+    <div className="workflow-chat-outer h-full flex flex-col bg-gray-50 dark:bg-[#1a1a1a]">
       <div className="flex-1 flex min-h-0 p-2 gap-2">
-        {/* 左侧配置面板 - 已隐藏，功能移至底部工具栏 */}
-        {/* 聊天界面 - 全屏布局（主界面无外边框/无外边距） */}
-        <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-[#2d2d2d] overflow-hidden">
-        {/* 状态栏 - 优化样式 */}
-          <div className="border-b border-gray-200 dark:border-[#404040] px-3 py-1 bg-gradient-to-r from-gray-50 to-white dark:from-gray-800 dark:to-gray-900 flex-shrink-0">
+        <div className="workflow-chat-panel flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-[#2d2d2d] overflow-hidden">
+          <div className="workflow-chat-header border-b border-gray-200 dark:border-[#404040] px-3 py-0.5 bg-gradient-to-r from-gray-50 to-white dark:from-gray-800 dark:to-gray-900 flex-shrink-0">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center space-x-2">
-              {/* 头像 - 可点击配置 */}
-              <div 
-                className="w-7 h-7 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary-400 hover:ring-offset-1 transition-all overflow-hidden"
-                onClick={async () => {
+                  <div className="w-7 h-7 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary-400 hover:ring-offset-1 transition-all overflow-hidden" onClick={async () => {
                   if (currentSessionId && !isTemporarySession) {
                     // 从当前会话获取数据
                     let currentSession =
@@ -5468,13 +5253,14 @@ const Workflow: React.FC<WorkflowProps> = ({
                     if (currentSession) {
                       // 根据会话类型显示不同的配置对话框
                       const sessionType = currentSession.session_type;
-                      if (sessionType === 'memory' || sessionType === 'topic_general') {
-                        // Topic/记忆体会话 - 显示 TopicConfigDialog
+                      if (sessionType === 'topic_general') {
+                        // Topic 会话 - 显示 TopicConfigDialog
                         setTopicConfigEditName(currentSession.name || currentSession.title || '');
                         setTopicConfigEditAvatar(currentSession.avatar || null);
                         // 从 ext 中读取 displayType
                         const ext = currentSession.ext || {};
-                        setTopicConfigEditDisplayType((ext.displayType as TopicDisplayType) || 'chat');
+                        const displayType = ext.displayType === 'research' ? 'chat' : ext.displayType;
+                        setTopicConfigEditDisplayType((displayType as TopicDisplayType) || 'chat');
                         // 加载参与者
                         try {
                           const participants = await getParticipants(currentSessionId);
@@ -5509,9 +5295,9 @@ const Workflow: React.FC<WorkflowProps> = ({
                   <Bot className="w-4 h-4 text-primary-600 dark:text-primary-400" />
                 )}
               </div>
-              <div className="flex items-center gap-2 min-w-0">
+              <div className="flex flex-col min-w-0 flex-1">
                 <span 
-                  className="text-xs font-semibold text-gray-900 dark:text-[#ffffff] leading-tight truncate min-w-0"
+                  className="text-xs font-semibold text-gray-900 dark:text-[#ffffff] leading-tight truncate min-w-0 flex items-center gap-1.5"
                 >
                   {(() => {
                     const currentSession =
@@ -5519,13 +5305,25 @@ const Workflow: React.FC<WorkflowProps> = ({
                       (currentSessionMeta?.session_id === currentSessionId ? currentSessionMeta : null);
                     if (isTemporarySession) return '临时会话';
                     if (currentSession?.name) return currentSession.name;
-                    if (currentSession?.session_type === 'agent') return '智能体';
+                    if (currentSession?.session_type === 'agent') return 'AI 工作流助手';
                     return 'AI 工作流助手';
                   })()}
                 </span>
+                {currentSessionType !== 'agent' && (
+                  <div className="flex items-center gap-1.5 text-[10px] text-gray-500 dark:text-[#9a9a9a] truncate">
+                    <span className="inline-flex items-center rounded-full px-1.5 py-0.5 border border-border/60 bg-muted/60">
+                      {currentSessionType === 'topic_general' ? '话题' : '临时会话'}
+                    </span>
+                    {(selectedLLMConfig?.shortname || selectedLLMConfig?.name) && (
+                      <span className="inline-flex items-center rounded-full px-1.5 py-0.5 border border-border/60 bg-muted/50">
+                        {selectedLLMConfig.shortname || selectedLLMConfig.name}
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 {/* 话题参与者头像列表 */}
-                {(currentSessionType === 'topic_general' || currentSessionType === 'memory') && topicParticipants.length > 0 && (
+                {currentSessionType === 'topic_general' && topicParticipants.length > 0 && (
                   <div className="flex -space-x-1.5 overflow-hidden ml-1 flex-shrink-0">
                     {topicParticipants
                       .filter(p => p.participant_type === 'agent')
@@ -5582,28 +5380,36 @@ const Workflow: React.FC<WorkflowProps> = ({
                 </div>
               )}
               
-              {/* 添加SOP按钮 */}
-              <button
-                onClick={() => setShowAddSopDialog(true)}
-                className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 dark:text-[#a0a0a0] hover:text-primary-600 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-[#363636] rounded transition-colors"
-                title="添加SOP技能包"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">添加SOP</span>
-              </button>
+              {/* 添加SOP按钮（非单Agent） */}
+              {currentSessionType !== 'agent' && (
+                <button
+                  onClick={() => setShowAddSopDialog(true)}
+                  className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 dark:text-[#a0a0a0] hover:text-primary-600 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-[#363636] rounded transition-colors"
+                  title="添加SOP技能包"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">添加SOP</span>
+                </button>
+              )}
               
               {/* 制作技能包按钮 - 在有消息时显示 */}
               {currentSessionId && !isTemporarySession && messages.filter(m => m.role !== 'system').length > 0 && !skillPackSelectionMode && (
                 <button
                   onClick={() => {
+                    if (currentSessionType === 'agent') {
+                      setShowAddSopDialog(true);
+                      return;
+                    }
                     setSkillPackSelectionMode(true);
                     setSelectedMessageIds(new Set());
                   }}
                   className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 dark:text-[#a0a0a0] hover:text-primary-600 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-[#363636] rounded transition-colors"
-                  title="选择消息范围，创建技能包"
+                  title={currentSessionType === 'agent' ? '设置SOP' : '选择消息范围，创建技能包'}
                 >
                   <Package className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">制作技能包</span>
+                  <span className="hidden sm:inline">
+                    {currentSessionType === 'agent' ? '设置SOP' : '制作技能包'}
+                  </span>
                 </button>
               )}
               {/* 流式响应开关已移至输入框上方 */}
@@ -5617,8 +5423,8 @@ const Workflow: React.FC<WorkflowProps> = ({
               chatContainerRef.current = el;
               setChatScrollEl(el);
             }}
-            className="flex-1 overflow-y-auto hide-scrollbar px-3 py-2 space-y-2 relative bg-gray-50/50 dark:bg-gray-950/50"
-            style={{ scrollBehavior: 'auto', paddingBottom: floatingComposerPadding }}
+            className="workflow-chat-messages flex-1 overflow-y-auto hide-scrollbar px-3 py-2 space-y-2 relative bg-gray-50/50 dark:bg-gray-950/50"
+            style={{ scrollBehavior: 'auto' }}
             onWheel={(e) => {
               // hybrid 自动触发：接近顶部时继续上拉（滚轮向上）只触发一次
               if (e.deltaY < 0 && isNearTop && scrollTopRef.current < 80) {
@@ -5639,11 +5445,16 @@ const Workflow: React.FC<WorkflowProps> = ({
               
               // 检测用户是否在滚动（排除程序控制的滚动）
               if (!isLoadingMoreRef.current) {
+                // 如果用户手动滚动离开底部，标记为用户正在查看历史消息
+                const atBottom = shouldAutoScroll();
+                if (!atBottom) {
                 isUserScrollingRef.current = true;
-                // 500ms 后重置，认为用户停止滚动
-                setTimeout(() => {
+                  // 用户手动滚动后，只有在用户主动滚动回底部时才重置
+                  // 不设置自动重置，让用户完全控制滚动行为
+                } else {
+                  // 用户滚动回底部，允许自动跟随
                   isUserScrollingRef.current = false;
-                }, 500);
+                }
               }
               
               // 检测是否接近顶部（距离顶部小于150px）- 用于显示和自动加载更多历史消息
@@ -5729,9 +5540,12 @@ const Workflow: React.FC<WorkflowProps> = ({
             <div className="px-4 py-2 space-y-2">
               {Array.from(agentDecidingStates.entries()).map(([agentId, state]) => {
                 // 判断是否有 MCP 调用步骤（重要步骤）
-                const hasMcpStep = state.processSteps?.some(s => s.type === 'mcp_call');
+                const hasMcpStep = state.processMessages?.some(m => m.type === 'mcp_call' || m.type === 'ag_use_mcp') || state.processSteps?.some(s => s.type === 'mcp_call');
                 // 判断是否立即回答（无决策过程或决策步骤很少）
-                const isImmediateReply = state.action === 'reply' && (!state.processSteps || state.processSteps.length <= 1);
+                const isImmediateReply = state.action === 'reply' && (
+                  (!state.processMessages || state.processMessages.length <= 1) &&
+                  (!state.processSteps || state.processSteps.length <= 1)
+                );
                 
                 return (
                   <div 
@@ -5780,10 +5594,13 @@ const Workflow: React.FC<WorkflowProps> = ({
                     </div>
                     
                     {/* 执行轨迹（使用统一的 ProcessStepsViewer 组件） */}
-                    {state.processSteps && state.processSteps.length > 0 && !isImmediateReply && (
+                    {(state.status === 'deciding' || (state.processMessages && state.processMessages.length > 0)) && !isImmediateReply && (
                       <div className="ml-3">
                         <ProcessStepsViewer 
-                          processSteps={state.processSteps} 
+                          processMessages={state.processMessages || []} 
+                          executionLogs={state.executionLogs || []}
+                          isThinking={state.status === 'deciding'}
+                          isStreaming={false}
                           hideTitle
                           defaultExpanded
                         />
@@ -5794,6 +5611,8 @@ const Workflow: React.FC<WorkflowProps> = ({
               })}
             </div>
           )}
+          
+          {/* 执行日志已移至思维链图标右侧，不再在此处显示 */}
           
           <div ref={messagesEndRef} />
           
@@ -5848,7 +5667,7 @@ const Workflow: React.FC<WorkflowProps> = ({
           // 生成状态文本和工具信息
           let statusText = '';
           let activeToolName = '';
-          let activeToolType: 'mcp' | 'workflow' | 'thinking' | '' = '';
+          let activeToolType: 'mcp' | 'thinking' | '' = '';
           
           if (isLoading && streamingMessage) {
             if (currentThinkingStep) {
@@ -5877,11 +5696,11 @@ const Workflow: React.FC<WorkflowProps> = ({
           return null;
         })()}
 
-        {/* 输入框（浮岛悬浮） */}
-          <div className={floatingComposerContainerClass.replace('z-10', 'z-20')}>
+        {/* 输入框（固定在底部，不再浮动） */}
+          <div className="flex-shrink-0 px-2 sm:px-4 pb-3 pt-2 bg-white dark:bg-[#2d2d2d] border-t border-gray-200 dark:border-[#404040] workflow-chat-input-area">
           <div 
             ref={floatingComposerRef}
-            className={`${floatingComposerInnerClass} relative transition-colors ${
+            className={`${floatingComposerInnerClass.replace('absolute left-2 right-2 sm:left-4 sm:right-4 bottom-3', '')} relative transition-colors ${
               isDraggingOver ? 'ring-2 ring-primary-400/30' : ''
             }`}
             onDragOver={handleDragOver}
@@ -6021,74 +5840,154 @@ const Workflow: React.FC<WorkflowProps> = ({
 
           {/* 引用消息显示 */}
           {quotedMessageId && (() => {
-            const quotedMsg = messages.find(m => m.id === quotedMessageId);
+            const quotedMsg = quotedMessageSnapshot || messages.find(m => m.id === quotedMessageId);
             if (!quotedMsg) return null;
             // 获取发送者信息（用于显示 Agent 名称）
-            const msgExt = (quotedMsg.ext || {}) as Record<string, any>;
+            const msgExt = ('ext' in quotedMsg ? (quotedMsg.ext || {}) : {}) as Record<string, any>;
             const senderName = quotedMsg.role === 'assistant' 
-              ? (msgExt.sender_name || (quotedMsg as any).sender_name || 'Agent')
+              ? (quotedMessageSnapshot?.senderName || msgExt.sender_name || (quotedMsg as any).sender_name || 'Agent')
               : '用户';
             const isAgentMessage = quotedMsg.role === 'assistant';
             return (
-              <div className="mb-2 p-2 bg-gray-50 dark:bg-[#2d2d2d] border-l-4 border-primary-500 rounded-r-lg">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs text-gray-500 dark:text-[#b0b0b0] mb-1 flex items-center gap-1">
-                      引用
-                      {isAgentMessage && (
-                        <span className="text-primary-500 dark:text-primary-400 font-medium">{senderName}</span>
-                      )}
-                      {!isAgentMessage && <span>消息</span>}
-                    </div>
-                    <div className="text-sm text-gray-700 dark:text-[#ffffff] line-clamp-2">
-                      {quotedMsg.content.substring(0, 100)}{quotedMsg.content.length > 100 ? '...' : ''}
-                    </div>
-                    {/* 引用媒体缩略图已移至下方附件预览区统一展示，此处不再重复显示 */}
+              <div
+                className="mb-3 flex items-start gap-2 p-2 bg-muted/60 rounded-md border border-border/60 cursor-pointer"
+                role="button"
+                tabIndex={0}
+                onClick={() => setQuoteDetailOpen(true)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    setQuoteDetailOpen(true);
+                  }
+                }}
+                title="点击查看引用详情"
+              >
+                <CornerDownRight className="w-4 h-4 text-muted-foreground flex-shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1 text-xs text-gray-500 mb-0.5">
+                    <span>引用</span>
+                    {isAgentMessage ? (
+                      <span className="font-medium text-gray-700 dark:text-gray-300">{senderName}</span>
+                    ) : (
+                      <span>消息</span>
+                    )}
                   </div>
-                  <button
-                    onClick={() => setQuotedMessageId(null)}
-                    className="ml-2 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc]"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-2">
+                    {(quotedMsg.content || '').substring(0, 100)}{(quotedMsg.content || '').length > 100 ? '...' : ''}
+                  </p>
+                  {/* 引用媒体缩略图已移至下方附件预览区统一展示，此处不再重复显示 */}
                 </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    clearQuotedMessage();
+                  }}
+                  className="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"
+                  title="取消引用"
+                >
+                  <X className="w-3.5 h-3.5 text-gray-400" />
+                </button>
               </div>
             );
           })()}
 
-          {/* 工具 Tag（气泡/图标样式）- 在玻璃底板内部，仅在focus时显示 */}
-          {isInputFocused && (
-            <div className="flex items-center gap-1.5 flex-wrap px-3 pt-2 pb-1 animate-in fade-in slide-in-from-bottom-1 duration-200">
-              <ComponentThumbnails
+          <Dialog open={quoteDetailOpen} onOpenChange={setQuoteDetailOpen}>
+            <DialogContent className="quote-detail-dialog">
+              <DialogHeader>
+                <DialogTitle>引用详情</DialogTitle>
+              </DialogHeader>
+              <div className="quote-detail-body no-scrollbar mt-2">
+                {quotedMessageId && (() => {
+                  const quotedMsg = quotedMessageSnapshot || messages.find(m => m.id === quotedMessageId);
+                  if (!quotedMsg) return null;
+                  const msgExt = ('ext' in quotedMsg ? (quotedMsg.ext || {}) : {}) as Record<string, any>;
+                  const senderName = quotedMsg.role === 'assistant'
+                    ? (quotedMessageSnapshot?.senderName || msgExt.sender_name || (quotedMsg as any).sender_name || 'Agent')
+                    : '用户';
+                  const quotedMedia: MediaItem[] = ((quotedMsg.media || []) as Array<{ type: 'image' | 'video' | 'audio'; mimeType: string; data: string; url?: string }>).map(item => ({
+                    type: item.type,
+                    mimeType: item.mimeType,
+                    data: item.data,
+                    url: item.url,
+                  }));
+                  return (
+                    <div className="quote-detail-content">
+                      <div className="text-xs text-muted-foreground mb-2">
+                        引用自：{senderName}
+                      </div>
+                      <div className="text-sm whitespace-pre-wrap break-words">
+                        {quotedMsg.content || '[空内容]'}
+                      </div>
+                      {quotedMedia.length > 0 && (
+                        <div className="mt-3">
+                          <MediaGallery
+                            media={quotedMedia}
+                            thumbnailSize="sm"
+                            maxVisible={6}
+                            showDownload
+                            onOpenSessionGallery={(index) => {
+                              const item = quotedMedia[index];
+                              if (!item) return;
+                              openSingleMediaViewer({
+                                type: item.type,
+                                mimeType: item.mimeType,
+                                data: item.data,
+                                url: item.url,
+                                messageId: quotedMsg.id,
+                                role: quotedMsg.role === 'system' ? 'user' : quotedMsg.role,
+                              });
+                            }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+              <DialogFooter className="justify-end">
+                <Button
+                  variant="outline"
+                  onClick={() => setQuoteDetailOpen(false)}
+                  className="niho-close-pink"
+                >
+                  关闭
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* 工具 Tag 栏 - 常驻显示，左侧工具tag，右侧模型选择 */}
+          <div className="flex items-center justify-between px-2.5 pt-2.5 pb-3">
+            {/* 左侧：插件入口（合并 MCP / 技能包 / 媒体） */}
+            <div className="flex items-center gap-1 flex-nowrap flex-1 min-w-0 overflow-hidden">
+              <AttachmentMenu
                 mcpServers={mcpServers}
-                workflows={workflows}
                 skillPacks={allSkillPacks}
                 selectedMcpServerIds={selectedMcpServerIds}
-                selectedWorkflowIds={selectedWorkflowIds}
                 selectedSkillPackIds={selectedSkillPackIds}
                 connectedMcpServerIds={connectedMcpServerIds}
                 connectingMcpServerIds={connectingServers}
                 onSelectMCP={handleSelectMCPFromThumbnail}
                 onDeselectMCP={handleDeselectMCPFromThumbnail}
                 onConnectMCP={handleConnectServer}
-                onSelectWorkflow={handleSelectWorkflowFromThumbnail}
-                onDeselectWorkflow={handleDeselectWorkflowFromThumbnail}
                 onSelectSkillPack={handleSelectSkillPackFromThumbnail}
                 onDeselectSkillPack={handleDeselectSkillPackFromThumbnail}
                 onAttachFile={handleAttachFile}
+                attachedCount={attachedMedia.length}
+                toolCallingEnabled={toolCallingEnabled}
+                onToggleToolCalling={onToggleToolCalling}
               />
 
               {/* 人设按钮 - 话题会话中隐藏 */}
-              {currentSessionType !== 'topic_general' && currentSessionType !== 'memory' && currentSessionId && (
+              {currentSessionType !== 'topic_general' && currentSessionId && (
                 <button
                   onClick={() => {
                     setSystemPromptDraft(currentSystemPrompt || '');
                     setIsEditingSystemPrompt(true);
                   }}
-                  className={`flex items-center space-x-1 px-1.5 py-0.5 rounded-md text-[11px] transition-all shadow-sm ${
+                  className={`niho-persona-btn ring-0 flex items-center space-x-1 px-1.5 py-0.5 rounded text-[11px] transition-all whitespace-nowrap ${
                     currentSystemPrompt
-                      ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 font-medium border border-indigo-200 dark:border-indigo-800'
-                      : 'bg-gray-100/80 dark:bg-[#363636]/80 text-gray-400 dark:text-[#808080] hover:text-gray-500 dark:hover:text-gray-400 border border-gray-200 dark:border-[#404040]'
+                      ? 'niho-persona-btn--active font-medium'
+                      : 'niho-persona-btn--inactive'
                   }`}
                   title={currentSystemPrompt ? `人设: ${currentSystemPrompt.length > 50 ? currentSystemPrompt.slice(0, 50) + '...' : currentSystemPrompt}` : '点击设置人设'}
                 >
@@ -6097,24 +5996,129 @@ const Workflow: React.FC<WorkflowProps> = ({
                 </button>
               )}
             </div>
-          )}
 
-          <div className="flex space-x-2 px-2 pb-2">
-            {/* 附件预览区域 - 缩略图画廊样式 */}
+            {/* 右侧：模型选择（非话题模式时显示） */}
+            {currentSessionType !== 'topic_general' && !isLoading && (
+              <div className="flex items-center gap-1.5 ml-2 flex-shrink-0">
+                {/* 流式响应开关 */}
+                <label className="flex items-center space-x-1 cursor-pointer group px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-[#1a1a1a] transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={streamEnabled}
+                    onChange={(e) => setStreamEnabled(e.target.checked)}
+                    className="w-2.5 h-2.5 text-neon-500 border-gray-300 dark:border-[#444] rounded focus:ring-neon-500 accent-neon-500"
+                  />
+                  <span className="text-[9px] font-medium text-gray-500 dark:text-[#666] group-hover:text-neon-600 dark:group-hover:text-neon-400">流式</span>
+                </label>
+
+                {/* 模型选择按钮 */}
+                <button
+                  onClick={() => setShowModelSelectDialog(true)}
+                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition-all ${
+                    selectedLLMConfig
+                      ? 'bg-emerald-50 dark:bg-[rgba(0,212,170,0.08)] text-emerald-600 dark:text-[#00d4aa] font-medium ring-1 ring-emerald-200 dark:ring-[rgba(0,212,170,0.25)]'
+                      : 'text-gray-400 dark:text-[#555] hover:text-gray-600 dark:hover:text-[#888]'
+                  }`}
+                  title={selectedLLMConfig ? `${selectedLLMConfig.name}${selectedLLMConfig.model ? ` (${selectedLLMConfig.model})` : ''}` : '选择模型'}
+                >
+                  {selectedLLMConfig ? (
+                    <>
+                      {(() => {
+                        const providerInfo = getProviderIcon(selectedLLMConfig, providers);
+                        if (providerInfo.logoLight || providerInfo.logoDark) {
+                          return (
+                            <>
+                              {providerInfo.logoLight && (
+                                <img src={providerInfo.logoLight} alt="" className="w-3.5 h-3.5 object-cover rounded dark:hidden" />
+                              )}
+                              {providerInfo.logoDark && (
+                                <img src={providerInfo.logoDark} alt="" className="w-3.5 h-3.5 object-cover rounded hidden dark:block" />
+                              )}
+                              {providerInfo.logoLight && !providerInfo.logoDark && (
+                                <img src={providerInfo.logoLight} alt="" className="w-3.5 h-3.5 object-cover rounded hidden dark:block" />
+                              )}
+                              {!providerInfo.logoLight && providerInfo.logoDark && (
+                                <img src={providerInfo.logoDark} alt="" className="w-3.5 h-3.5 object-cover rounded dark:hidden" />
+                              )}
+                            </>
+                          );
+                        }
+                        if (providerInfo.customLogo) {
+                          return (
+                            <img 
+                              src={providerInfo.customLogo} 
+                              alt="" 
+                              className="w-3.5 h-3.5 object-cover rounded"
+                              style={{ 
+                                objectPosition: providerInfo.logoPosition ? `${providerInfo.logoPosition.x}% ${providerInfo.logoPosition.y}%` : '50% 50%',
+                                transform: `scale(${(providerInfo.logoScale ?? 100) / 100})`,
+                              }}
+                            />
+                          );
+                        }
+                        return <span className="text-xs">{providerInfo.icon}</span>;
+                      })()}
+                      <span className="font-medium truncate max-w-[80px]">
+                        {selectedLLMConfig.shortname || selectedLLMConfig.name}
+                      </span>
+                      {/* 模型能力图标 */}
+                      {(() => {
+                        const enableThinking = selectedLLMConfig.metadata?.enableThinking ?? false;
+                        const supportedInputs: string[] = selectedLLMConfig.metadata?.supportedInputs ?? [];
+                        const supportedOutputs: string[] = selectedLLMConfig.metadata?.supportedOutputs ?? [];
+                        const caps = [];
+                        if (enableThinking) caps.push(<Brain key="t" className="w-2.5 h-2.5 text-purple-400" />);
+                        if (supportedInputs.includes('image')) caps.push(<Eye key="v" className="w-2.5 h-2.5 text-yellow-400" />);
+                        if (supportedInputs.includes('audio')) caps.push(<Volume2 key="a" className="w-2.5 h-2.5 text-neon-400" />);
+                        if (supportedOutputs.includes('image')) caps.push(<Paintbrush key="i" className="w-2.5 h-2.5 text-red-400" />);
+                        return caps.length > 0 ? <div className="flex items-center gap-0.5">{caps}</div> : null;
+                      })()}
+                    </>
+                  ) : (
+                    <>
+                      <Brain className="w-3 h-3" />
+                      <span>选择模型</span>
+                    </>
+                  )}
+                </button>
+
+                {/* 签名回灌开关（生图模型时显示） */}
+                {(() => {
+                  const isImageGenModel = (selectedLLMConfig?.model || '').toLowerCase().includes('image');
+                  if (!isImageGenModel) return null;
+                  return (
+                    <Button
+                      onClick={() => setUseThoughtSignature(v => !v)}
+                      variant={useThoughtSignature ? 'secondary' : 'outline'}
+                      size="sm"
+                      className="h-7 px-2 text-xs"
+                      title={useThoughtSignature ? '已开启签名回灌' : '已关闭签名回灌'}
+                    >
+                      {useThoughtSignature ? '签名:开' : '签名:关'}
+                    </Button>
+                  );
+                })()}
+
+              </div>
+            )}
+          </div>
+
+          <div className="flex space-x-1.5 px-2 pb-1.5">
+            {/* 媒体预览区域 - 缩略图画廊样式 */}
             {attachedMedia.length > 0 && (
-              <div className="mb-2 flex flex-wrap gap-2">
+              <div className="mb-1 flex flex-wrap gap-1.5">
                 {attachedMedia.map((media, index) => (
                   <div key={index} className="relative group">
                     {media.type === 'image' ? (
-                      <div className="w-16 h-16 rounded-lg overflow-hidden border border-gray-200 dark:border-[#404040] hover:border-primary-500 dark:hover:border-primary-500 transition-all hover:scale-105">
+                      <div className="w-12 h-12 rounded-lg overflow-hidden border border-gray-200/60 dark:border-[#404040]/60 hover:border-primary-500 dark:hover:border-primary-500 transition-all hover:scale-105">
                         <img
                           src={media.preview || ensureDataUrlFromMaybeBase64(media.data, media.mimeType)}
-                          alt={`附件 ${index + 1}`}
+                          alt={`媒体 ${index + 1}`}
                           className="w-full h-full object-cover"
                         />
                       </div>
                     ) : media.type === 'video' ? (
-                      <div className="w-16 h-16 rounded-lg overflow-hidden border border-gray-200 dark:border-[#404040] hover:border-primary-500 dark:hover:border-primary-500 transition-all hover:scale-105 relative bg-gray-900">
+                      <div className="w-12 h-12 rounded-lg overflow-hidden border border-gray-200/60 dark:border-[#404040]/60 hover:border-primary-500 dark:hover:border-primary-500 transition-all hover:scale-105 relative bg-gray-900">
                         <video
                           src={media.preview || ensureDataUrlFromMaybeBase64(media.data, media.mimeType)}
                           className="w-full h-full object-cover"
@@ -6127,8 +6131,8 @@ const Workflow: React.FC<WorkflowProps> = ({
                         </div>
                       </div>
                     ) : media.type === 'audio' ? (
-                      <div className="w-16 h-16 flex items-center justify-center rounded-lg border border-gray-200 dark:border-[#404040] hover:border-primary-500 dark:hover:border-primary-500 transition-all hover:scale-105 bg-gradient-to-br from-primary-500 to-primary-700">
-                        <Music className="w-6 h-6 text-white/80" />
+                      <div className="w-12 h-12 flex items-center justify-center rounded-lg border border-gray-200/60 dark:border-[#404040]/60 hover:border-primary-500 dark:hover:border-primary-500 transition-all hover:scale-105 bg-gradient-to-br from-primary-500 to-primary-700">
+                        <Music className="w-5 h-5 text-white/80" />
                       </div>
                     ) : null}
                     <button
@@ -6136,7 +6140,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                         setAttachedMedia(prev => prev.filter((_, i) => i !== index));
                       }}
                       className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
-                      title="删除附件"
+                      title="删除媒体"
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -6147,11 +6151,11 @@ const Workflow: React.FC<WorkflowProps> = ({
             
             <div className="flex-1 relative at-selector-container">
               {/* 输入框和右侧按钮容器 */}
-              <div className="flex items-end gap-2">
+              <div className="flex items-end gap-1.5">
                 {/* 加载时显示状态文本 + 左侧高亮工具，否则显示输入框 */}
                 {isLoading ? (
                   <div 
-                    className="flex-1 px-2 py-2 min-h-[36px] max-h-[36px] bg-transparent text-gray-500 dark:text-[#808080] text-[13px] flex items-center overflow-hidden"
+                    className="flex-1 px-2.5 py-2 min-h-[40px] max-h-[40px] bg-transparent text-gray-500 dark:text-[#666] text-[12px] flex items-center overflow-hidden"
                   >
                     <div className="flex items-center gap-2 w-full overflow-hidden">
                       {/* 左侧：正在使用的工具高亮显示 */}
@@ -6166,7 +6170,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                             <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-primary-100 dark:bg-primary-900/30 border border-primary-300 dark:border-primary-700 flex-shrink-0 animate-pulse">
                               <Plug className="w-3 h-3 text-primary-600 dark:text-primary-400" />
                               <span className="text-[11px] font-medium text-primary-700 dark:text-primary-300 max-w-[80px] truncate">
-                                {activeMcp?.displayName || activeToolName}
+                                {activeMcp?.display_name || activeToolName}
                               </span>
                             </div>
                           );
@@ -6365,273 +6369,68 @@ const Workflow: React.FC<WorkflowProps> = ({
                     ? `输入你的任务，我可以使用 ${totalTools} 个工具帮助你完成...`
                     : '输入你的问题，我会尽力帮助你...'
               }
-                  className={`flex-1 resize-none transition-all duration-300 bg-transparent border-none focus:outline-none focus:ring-0 text-gray-900 dark:text-[#ffffff] placeholder-gray-400 dark:placeholder-[#808080] ${
-                    isInputFocused ? 'px-3 py-2.5' : 'px-3 py-2 overflow-hidden'
+                  className={`flex-1 resize-none no-scrollbar overflow-y-auto transition-all duration-200 bg-transparent border-none focus:outline-none focus:ring-0 text-gray-900 dark:text-[#ffffff] placeholder-gray-400 dark:placeholder-[#606060] ${
+                    isInputFocused ? 'px-2.5 py-2' : 'px-2.5 py-1.5 overflow-hidden'
                   } ${
                     isInputExpanded 
-                      ? 'min-h-[200px] max-h-[400px]' 
-                      : isInputFocused ? 'min-h-[52px] max-h-[140px]' : 'min-h-[36px] max-h-[36px]'
+                      ? 'min-h-[180px] max-h-[360px]' 
+                      : isInputFocused ? 'min-h-[52px] max-h-[140px]' : 'min-h-[40px] max-h-[40px]'
                   }`}
-                  style={{ fontSize: isInputFocused ? '14px' : '13px', lineHeight: '1.5' }}
+                  style={{ fontSize: isInputFocused ? '13px' : '12px', lineHeight: '1.5' }}
                   rows={1}
                   disabled={isLoading || !selectedLLMConfig}
                 />
                 )}
                 
-                {/* 右侧：加载时显示中断按钮，正常时显示模型选择+发送按钮 */}
-                {isLoading ? (
-                  // 加载时：只显示中断按钮
-                  <div className="flex items-center gap-1.5 flex-shrink-0 pb-1">
+                {/* 右侧：发送/中断按钮 */}
+                <div className="flex flex-col items-end gap-0.5 flex-shrink-0 pb-0.5">
+                  <div className="flex items-center gap-1">
+                  {isLoading ? (
+                    // 加载时：显示中断按钮
                     <Button
                       onClick={() => {
                         if (abortController) {
                           abortController.abort();
                           setAbortController(null);
-                          // 删除正在流式的消息
                           setMessages(prev => prev.filter(msg => !msg.isStreaming && !msg.isThinking));
                           setIsLoading(false);
                         }
                       }}
                       variant="destructive"
                       size="sm"
-                      className="gap-1 px-2 py-1 h-7 text-xs flex-shrink-0"
+                      className="gap-1 px-2 py-1 h-7 text-xs"
                     >
                       <XCircle className="w-3.5 h-3.5" />
                       <span className="hidden sm:inline">中断</span>
                     </Button>
+                  ) : (
+                    <>
+                      {/* 发送按钮 - 萤绿色 */}
+                      <Button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          handleSend();
+                        }}
+                        disabled={(!input.trim() && attachedMedia.length === 0) || !selectedLLMConfig}
+                        variant="primary"
+                        size="sm"
+                        className="gap-1 px-3 py-1 h-7 text-xs font-medium dark:bg-neon-500 dark:hover:bg-neon-400 dark:text-black dark:shadow-glow-neon/50"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">{editingMessageId ? '重发' : '发送'}</span>
+                      </Button>
+                    </>
+                  )}
                   </div>
-                ) : isInputFocused && (
-                  // 非加载时且聚焦：显示模型选择和发送按钮
-                  <div className="flex items-end gap-1.5 flex-shrink-0 pb-1 animate-in fade-in slide-in-from-right-2 duration-200">
-                    {/* 模型选择显示与Token计数（垂直布局） */}
-                    <div className="flex items-center gap-1.5">
-                      <div className="flex flex-col items-end">
-                        {/* 上方：模型名称 + 能力图标 (仅非话题模式) */}
-                        {(() => {
-                          const session = sessions.find(s => s.session_id === currentSessionId) || currentSessionMeta;
-                          const isTopic = session?.session_type === 'topic_general' || session?.session_type === 'memory';
-                          if (isTopic || !selectedLLMConfig) return null;
-
-                          return (
-                            <div 
-                              className="flex items-center space-x-1 cursor-pointer hover:opacity-80 transition-opacity mb-0.5"
-                              onClick={() => setShowModelSelectDialog(true)}
-                            >
-                              <span className="text-[10px] text-primary-600 dark:text-primary-400 font-medium">
-                                {selectedLLMConfig.shortname || selectedLLMConfig.name}
-                              </span>
-                              {/* 模型能力图标 */}
-                              {(() => {
-                                const enableThinking = selectedLLMConfig.metadata?.enableThinking ?? false;
-                                const supportedInputs: string[] = selectedLLMConfig.metadata?.supportedInputs ?? [];
-                                const supportedOutputs: string[] = selectedLLMConfig.metadata?.supportedOutputs ?? [];
-                                
-                                const capabilities = [];
-                                
-                                // 输入能力
-                                if (enableThinking) {
-                                  capabilities.push(
-                                    <Brain 
-                                      key="thinking" 
-                                      className="w-2.5 h-2.5 text-purple-500 dark:text-purple-400" 
-                                      title="深度思考模式" 
-                                    />
-                                  );
-                                }
-                                if (supportedInputs.includes('image')) {
-                                  capabilities.push(
-                                    <Eye 
-                                      key="vision" 
-                                      className="w-2.5 h-2.5 text-yellow-500 dark:text-yellow-400" 
-                                      title="视觉输入" 
-                                    />
-                                  );
-                                }
-                                if (supportedInputs.includes('audio')) {
-                                  capabilities.push(
-                                    <Volume2 
-                                      key="audio" 
-                                      className="w-2.5 h-2.5 text-green-500 dark:text-green-400" 
-                                      title="音频输入" 
-                                    />
-                                  );
-                                }
-                                
-                                // 输出能力
-                                if (supportedOutputs.includes('image')) {
-                                  capabilities.push(
-                                    <Paintbrush 
-                                      key="image-output" 
-                                      className="w-2.5 h-2.5 text-red-500 dark:text-red-400" 
-                                      title="图片生成" 
-                                    />
-                                  );
-                                }
-                                
-                                if (capabilities.length === 0) return null;
-                                
-                                return (
-                                  <div className="flex items-center gap-0.5">
-                                    {capabilities}
-                                  </div>
-                                );
-                              })()}
-                            </div>
-                          );
-                        })()}
-
-                        {/* 下方：流式按钮和Token计数 */}
-                        <div className="flex items-center gap-2">
-                          {/* 流式响应开关 */}
-                          <label className="flex items-center space-x-1 cursor-pointer group px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-[#363636] transition-colors">
-                            <input
-                              type="checkbox"
-                              checked={streamEnabled}
-                              onChange={(e) => setStreamEnabled(e.target.checked)}
-                              className="w-2.5 h-2.5 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
-                            />
-                            <span className="text-[9px] font-medium text-gray-500 dark:text-[#808080] group-hover:text-gray-700 dark:group-hover:text-[#b0b0b0]">流式</span>
-                          </label>
-                          {selectedLLMConfig && (
-                            <TokenCounter selectedLLMConfig={selectedLLMConfig} messages={messages} />
-                          )}
-                        </div>
-                      </div>
-
-                      {/* 模型选择图标按钮 - 在话题会话中隐藏，因为由 Agent 决定模型 */}
-                      {currentSessionType !== 'topic_general' && currentSessionType !== 'memory' && (
-                        <button
-                          onClick={() => setShowModelSelectDialog(true)}
-                          className={`flex items-center justify-center w-6 h-6 rounded transition-colors overflow-hidden ${
-                            selectedLLMConfig
-                              ? 'hover:bg-gray-100 dark:hover:bg-[#363636]'
-                              : 'bg-gray-100 dark:bg-[#363636] text-gray-500 dark:text-[#808080] hover:bg-gray-200 dark:hover:bg-[#404040]'
-                          }`}
-                          title={selectedLLMConfig ? `${selectedLLMConfig.name}${selectedLLMConfig.model ? ` (${selectedLLMConfig.model})` : ''}` : '选择模型'}
-                        >
-                          {selectedLLMConfig ? (
-                            (() => {
-                              const providerInfo = getProviderIcon(selectedLLMConfig, providers);
-                              // 优先使用供应商的 logo（主题自适应）
-                              if (providerInfo.logoLight || providerInfo.logoDark) {
-                                return (
-                                  <>
-                                    {/* 浅色模式显示 */}
-                                    {providerInfo.logoLight && (
-                                      <img 
-                                        src={providerInfo.logoLight} 
-                                        alt={selectedLLMConfig.provider} 
-                                        className="w-5 h-5 object-cover rounded dark:hidden"
-                                      />
-                                    )}
-                                    {/* 深色模式显示 */}
-                                    {providerInfo.logoDark && (
-                                      <img 
-                                        src={providerInfo.logoDark} 
-                                        alt={selectedLLMConfig.provider} 
-                                        className="w-5 h-5 object-cover rounded hidden dark:block"
-                                      />
-                                    )}
-                                    {/* 如果只有一种logo，则都显示 */}
-                                    {providerInfo.logoLight && !providerInfo.logoDark && (
-                                      <img 
-                                        src={providerInfo.logoLight} 
-                                        alt={selectedLLMConfig.provider} 
-                                        className="w-5 h-5 object-cover rounded hidden dark:block"
-                                      />
-                                    )}
-                                    {!providerInfo.logoLight && providerInfo.logoDark && (
-                                      <img 
-                                        src={providerInfo.logoDark} 
-                                        alt={selectedLLMConfig.provider} 
-                                        className="w-5 h-5 object-cover rounded dark:hidden"
-                                      />
-                                    )}
-                                  </>
-                                );
-                              }
-                              // 其次使用用户上传的自定义 logo（应用位置和缩放设置）
-                              if (providerInfo.customLogo) {
-                                return (
-                                  <img 
-                                    src={providerInfo.customLogo} 
-                                    alt={selectedLLMConfig.provider} 
-                                    className="w-5 h-5 object-cover rounded"
-                                    style={{ 
-                                      objectPosition: providerInfo.logoPosition 
-                                        ? `${providerInfo.logoPosition.x}% ${providerInfo.logoPosition.y}%` 
-                                        : '50% 50%',
-                                      transform: `scale(${(providerInfo.logoScale ?? 100) / 100})`,
-                                    }}
-                                  />
-                                );
-                              }
-                              // 最后显示默认的 emoji 图标
-                              return (
-                                <span className="text-sm" style={{ filter: 'saturate(1.2)' }}>
-                                  {providerInfo.icon}
-                                </span>
-                              );
-                            })()
-                          ) : (
-                            <Brain className="w-3.5 h-3.5" />
-                          )}
-                        </button>
-                      )}
-                    </div>
-
-                    {/* 发送按钮 */}
-                    <Button
-                      onClick={() => {
-                        scrollToBottom('smooth');
-                        setShowScrollToBottom(false);
-                        setShowNewMessagePrompt(false);
-                        setUnreadMessageCount(0);
-                      }}
-                      disabled={!showScrollToBottom}
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-xs text-primary-600 dark:text-primary-400 hover:bg-transparent hover:underline disabled:opacity-40 disabled:no-underline"
-                      title="回到最新消息"
-                    >
-                      到最新
-                    </Button>
-                    <Button
-                      onClick={handleSend}
-                      disabled={(!input.trim() && attachedMedia.length === 0) || !selectedLLMConfig}
-                      variant="primary"
-                      size="sm"
-                      className="gap-1 px-2 py-1 h-7 text-xs flex-shrink-0"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">{editingMessageId ? '重发' : '发送'}</span>
-                    </Button>
-
-                    {/* 生图开关：仅在 image / image-preview 模型下显示 */}
-                    {(() => {
-                      const isImageGenModel = (selectedLLMConfig?.model || '').toLowerCase().includes('image');
-                      if (!isImageGenModel) return null;
-                      return (
-                        <Button
-                          onClick={() => setUseThoughtSignature(v => !v)}
-                          variant={useThoughtSignature ? 'secondary' : 'outline'}
-                          size="sm"
-                          className="h-7 px-2 text-xs flex-shrink-0"
-                          title={useThoughtSignature
-                            ? '已开启：会回灌历史生成图片的 thoughtSignature（用于基于上次修改继续）'
-                            : '已关闭：不回灌历史生成图片（更适合全新生图）'}
-                        >
-                          {useThoughtSignature ? '签名:开' : '签名:关'}
-                        </Button>
-                      );
-                    })()}
-                  </div>
-                )}
+                  {/* Context 用量 */}
+                  {selectedLLMConfig && (
+                    <TokenCounter selectedLLMConfig={selectedLLMConfig} messages={messages} />
+                  )}
+                </div>
               </div>
             {/* 编辑模式提示和取消按钮 */}
             {editingMessageId && (
               <div className="absolute top-2 right-2 flex items-center space-x-2">
-                <span className="text-xs text-yellow-600 dark:text-yellow-400 font-medium">编辑模式</span>
                 <button
                   onClick={handleCancelEdit}
                   className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-[#cccccc] transition-colors"
@@ -6641,6 +6440,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                 </button>
               </div>
             )}
+          </div>
               
           {/* /模块 选择器 */}
           {showModuleSelector && (
@@ -6756,7 +6556,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                   <div className="text-xs font-medium text-gray-500 dark:text-[#b0b0b0] px-3 py-1.5 flex items-center justify-between">
                     <span>MCP 服务器</span>
                     <span className="text-[10px]">
-                      ({connectedMcpServerIds.size}/{mcpServers.length}已连接)
+                      ({connectedMcpServerIds.size} / {mcpServers.length} 已连接)
                     </span>
                   </div>
                   {mcpServers
@@ -6767,7 +6567,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                       const component = { type: 'mcp' as const, id: server.id, name: server.name };
                       const selectableComponents = getSelectableComponents();
                       const componentIndex = selectableComponents.findIndex(
-                        (c: { type: 'mcp' | 'workflow'; id: string; name: string }) =>
+                        (c) =>
                           c.id === component.id && c.type === component.type
                       );
                       const isSelected = componentIndex === selectedComponentIndex;
@@ -6831,53 +6631,8 @@ const Workflow: React.FC<WorkflowProps> = ({
                 </div>
               )}
 
-              {/* 工作流列表 */}
-              {workflows.filter(w => w.name.toLowerCase().includes(atSelectorQuery)).length > 0 && (
-                <div className="py-1">
-                  <div className="text-xs font-medium text-gray-500 dark:text-[#b0b0b0] px-3 py-1.5">
-                    工作流
-                  </div>
-                  {workflows
-                    .filter(w => w.name.toLowerCase().includes(atSelectorQuery))
-                    .map((workflow) => {
-                      const component = { type: 'workflow' as const, id: workflow.workflow_id, name: workflow.name };
-                      const selectableComponents = getSelectableComponents();
-                      const componentIndex = selectableComponents.findIndex(
-                        (c: { type: 'mcp' | 'workflow'; id: string; name: string }) =>
-                          c.id === component.id && c.type === component.type
-                      );
-                      const isSelected = componentIndex === selectedComponentIndex;
-
-                      return (
-                        <div
-                          key={workflow.workflow_id}
-                          onMouseDown={(e) => {
-                            e.preventDefault(); // 防止触发输入框的 blur
-                          }}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            if (blurTimeoutRef.current) {
-                              clearTimeout(blurTimeoutRef.current);
-                              blurTimeoutRef.current = null;
-                            }
-                            handleSelectComponent(component);
-                          }}
-                          className={`px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer flex items-center space-x-2 ${
-                            isSelected ? 'bg-primary-100 dark:bg-primary-900/30' : ''
-                          }`}
-                        >
-                          <WorkflowIcon className="w-4 h-4 text-primary-500 flex-shrink-0" />
-                          <span className="text-sm text-gray-900 dark:text-[#ffffff]">{workflow.name}</span>
-                        </div>
-                      );
-                    })}
-                </div>
-              )}
-
               {/* 无匹配结果 */}
               {mcpServers.filter(s => s.name.toLowerCase().includes(atSelectorQuery.toLowerCase())).length === 0 &&
-                workflows.filter(w => w.name.toLowerCase().includes(atSelectorQuery.toLowerCase())).length === 0 &&
                 topicParticipants.filter(p => p.participant_type === 'agent' && (p.name || '').toLowerCase().includes(atSelectorQuery.toLowerCase())).length === 0 && (
                   <div className="px-3 py-2 text-xs text-gray-500 dark:text-[#b0b0b0] text-center">
                     未找到匹配的组件或智能体
@@ -6885,9 +6640,6 @@ const Workflow: React.FC<WorkflowProps> = ({
                 )}
             </div>
           )}
-            </div>
-          </div>
-        </div>
           
           {/* 人设编辑弹窗 */}
           <SystemPromptEditDialog
@@ -6932,7 +6684,6 @@ const Workflow: React.FC<WorkflowProps> = ({
             open={showSessionTypeDialog}
             onClose={() => setShowSessionTypeDialog(false)}
             onSelectTemporary={handleSwitchToTemporarySession}
-            onSelectMemory={handleCreateMemorySession}
           />
 
           {/* 升级为智能体对话框 */}
@@ -6978,7 +6729,13 @@ const Workflow: React.FC<WorkflowProps> = ({
           />
 
           {/* 模型选择对话框 */}
-          <Dialog open={showModelSelectDialog} onOpenChange={setShowModelSelectDialog}>
+          <Dialog open={showModelSelectDialog} onOpenChange={(open) => {
+            setShowModelSelectDialog(open);
+            if (!open) {
+              // 关闭对话框时重置 Tab 选择
+              setSelectedProviderTab(null);
+            }
+          }}>
             <DialogContent className="max-w-md">
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
@@ -6989,17 +6746,140 @@ const Workflow: React.FC<WorkflowProps> = ({
                   选择一个 LLM 模型用于对话
                 </DialogDescription>
               </DialogHeader>
-              {/* 动态高度：根据模型数量自适应，最大 60vh 后变为滚动 */}
-              <div 
-                className="overflow-y-auto pr-2"
+              {/* Tab 页签和模型列表 */}
+              {(() => {
+                // 按供应商分组
+                const groupedByProvider = new Map<string, LLMConfigFromDB[]>();
+                llmConfigs.forEach(config => {
+                  const provider = config.provider || 'other';
+                  if (!groupedByProvider.has(provider)) {
+                    groupedByProvider.set(provider, []);
+                  }
+                  groupedByProvider.get(provider)!.push(config);
+                });
+                
+                const providerEntries = Array.from(groupedByProvider.entries());
+                
+                // 如果没有选中的 Tab，默认选中第一个
+                const currentTab = selectedProviderTab || (providerEntries.length > 0 ? providerEntries[0][0] : null);
+                
+                // 获取供应商信息
+                const getProviderName = (provider: string): string => {
+                  const providerObj = providers.find(p => p.provider_type === provider || p.provider_id === provider);
+                  if (providerObj) return providerObj.name;
+                  // 默认供应商名称映射
+                  const providerNames: Record<string, string> = {
+                    openai: 'OpenAI',
+                    anthropic: 'Anthropic',
+                    gemini: 'Google Gemini',
+                    deepseek: 'DeepSeek',
+                    ollama: 'Ollama',
+                    local: 'Local',
+                    custom: 'Custom',
+                  };
+                  return providerNames[provider] || provider;
+                };
+                
+                // 获取供应商图标
+                const getProviderIconElement = (provider: string, configs: LLMConfigFromDB[]): React.ReactNode => {
+                  const providerInfo = providers.find(p => p.provider_type === provider || p.provider_id === provider);
+                  if (!providerInfo) return null;
+                  
+                  const iconInfo = getProviderIcon(configs[0], providers);
+                  if (iconInfo.logoLight || iconInfo.logoDark) {
+                    return (
+                      <>
+                        {iconInfo.logoLight && (
+                          <img 
+                            src={iconInfo.logoLight} 
+                            alt={getProviderName(provider)} 
+                            className="w-4 h-4 object-cover rounded dark:hidden"
+                          />
+                        )}
+                        {iconInfo.logoDark && (
+                          <img 
+                            src={iconInfo.logoDark} 
+                            alt={getProviderName(provider)} 
+                            className="w-4 h-4 object-cover rounded hidden dark:block"
+                          />
+                        )}
+                        {iconInfo.logoLight && !iconInfo.logoDark && (
+                          <img 
+                            src={iconInfo.logoLight} 
+                            alt={getProviderName(provider)} 
+                            className="w-4 h-4 object-cover rounded hidden dark:block"
+                          />
+                        )}
+                        {!iconInfo.logoLight && iconInfo.logoDark && (
+                          <img 
+                            src={iconInfo.logoDark} 
+                            alt={getProviderName(provider)} 
+                            className="w-4 h-4 object-cover rounded dark:hidden"
+                          />
+                        )}
+                      </>
+                    );
+                  } else {
+                    return (
+                      <span className="text-sm" style={{ filter: 'saturate(1.2)' }}>
+                        {iconInfo.icon}
+                      </span>
+                    );
+                  }
+                };
+                
+                return (
+                  <div className="flex flex-col h-full">
+                    {/* Tab 页签 */}
+                    <div className="flex border-b border-gray-200 dark:border-[#404040] overflow-x-auto no-scrollbar">
+                      {providerEntries.map(([provider, configs]) => {
+                        const providerName = getProviderName(provider);
+                        const isActive = currentTab === provider;
+                        const providerIcon = getProviderIconElement(provider, configs);
+                        
+                        return (
+                          <button
+                            key={provider}
+                            onClick={() => setSelectedProviderTab(provider)}
+                            className={`
+                              flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors whitespace-nowrap
+                              border-b-2
+                              ${isActive
+                                ? 'border-primary-600 dark:border-primary-400 text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20'
+                                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
+                              }
+                            `}
+                          >
+                            {providerIcon && (
+                              <div className="w-4 h-4 flex items-center justify-center flex-shrink-0">
+                                {providerIcon}
+                              </div>
+                            )}
+                            <span>{providerName}</span>
+                            <span className={`
+                              text-xs px-1.5 py-0.5 rounded-full
+                              ${isActive
+                                ? 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300'
+                                : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+                              }
+                            `}>
+                              {configs.length}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    
+                    {/* 当前 Tab 的模型列表 */}
+                    <div 
+                      className="flex-1 overflow-y-auto pr-2"
                 style={{ 
-                  maxHeight: '60vh',
-                  height: llmConfigs.length <= 5 ? 'auto' : undefined,
+                        maxHeight: '50vh',
                 }}
               >
+                      {currentTab && groupedByProvider.has(currentTab) && (
                 <div className="space-y-1 py-2">
-                  {/* 模型列表 - 使用供应商 logo 或自定义 logo */}
-                  {llmConfigs.map((config) => {
+                          {groupedByProvider.get(currentTab)!.map((config) => {
                     const isSelected = selectedLLMConfigId === config.config_id;
                     const providerInfo = getProviderIcon(config, providers);
                     
@@ -7087,7 +6967,11 @@ const Workflow: React.FC<WorkflowProps> = ({
                     );
                   })}
                 </div>
+                      )}
               </div>
+                  </div>
+                );
+              })()}
             </DialogContent>
           </Dialog>
 
@@ -7206,7 +7090,6 @@ const Workflow: React.FC<WorkflowProps> = ({
               </DialogFooter>
             </DialogContent>
           </Dialog>
-          </div>
         </div>
       </div>
     </div>
@@ -7347,7 +7230,7 @@ const Workflow: React.FC<WorkflowProps> = ({
           
           // 刷新会话列表
           const allSessions = await getSessions();
-          setSessions(allSessions);
+          setSessions(filterVisibleSessions(allSessions));
           emitSessionsChanged();
           
           setShowHeaderConfigDialog(false);
@@ -7393,7 +7276,7 @@ const Workflow: React.FC<WorkflowProps> = ({
           await updateSessionType(currentSessionId, newSessionType);
           // 刷新会话列表和当前会话
           const allSessions = await getSessions();
-          setSessions(allSessions);
+          setSessions(filterVisibleSessions(allSessions));
           const updatedSession = await getSession(currentSessionId);
           setCurrentSessionMeta(updatedSession);
           emitSessionsChanged();
@@ -7440,7 +7323,7 @@ const Workflow: React.FC<WorkflowProps> = ({
           
           // 刷新会话列表
           const allSessions = await getSessions();
-          setSessions(allSessions);
+          setSessions(filterVisibleSessions(allSessions));
           emitSessionsChanged();
           
           setShowTopicConfigDialog(false);
@@ -7502,37 +7385,6 @@ const Workflow: React.FC<WorkflowProps> = ({
       />
     )}
 
-    <ConfirmDialog
-      open={deleteRoundTableTarget !== null}
-      onOpenChange={(open) => {
-        if (!open) setDeleteRoundTableTarget(null);
-      }}
-      title="删除会议"
-      description={`确定要删除会议「${deleteRoundTableTarget?.name}」吗？此操作不可恢复。`}
-      variant="destructive"
-      onConfirm={async () => {
-        if (!deleteRoundTableTarget) return;
-        const id = deleteRoundTableTarget.id;
-        setDeleteRoundTableTarget(null);
-        await performDeleteRoundTable(id);
-      }}
-    />
-
-    <ConfirmDialog
-      open={deleteResearchTarget !== null}
-      onOpenChange={(open) => {
-        if (!open) setDeleteResearchTarget(null);
-      }}
-      title="删除Research会话"
-      description={`确定要删除Research会话「${deleteResearchTarget?.name}」吗？此操作不可恢复。`}
-      variant="destructive"
-      onConfirm={async () => {
-        if (!deleteResearchTarget) return;
-        const id = deleteResearchTarget.id;
-        setDeleteResearchTarget(null);
-        await performDeleteResearch(id);
-      }}
-    />
 
     {/* 角色生成器（从"人设Tag展开区"进入） */}
     <RoleGeneratorDialog
@@ -7555,39 +7407,13 @@ const Workflow: React.FC<WorkflowProps> = ({
       setPersonaSearch={setPersonaSearch}
       isLoadingPersonaList={isLoadingPersonaList}
       personaAgents={personaAgents}
-      personaMeetings={personaMeetings}
-      personaResearchSessions={personaResearchSessions}
       personaTopics={personaTopics}
       isTemporarySession={isTemporarySession}
       currentSessionId={currentSessionId}
       temporarySessionId={temporarySessionId}
       onSwitchSession={switchSessionFromPersona}
-      onOpenMeeting={openMeetingFromPersona}
-      onOpenResearch={openResearchFromPersona}
       onDeleteAgent={(id, name) => setDeleteSessionTarget({ id, name })}
-      onDeleteMeeting={(id, name) => setDeleteRoundTableTarget({ id, name })}
-      onDeleteResearch={(id, name) => setDeleteResearchTarget({ id, name })}
       onShowRoleGenerator={() => setShowRoleGenerator(true)}
-    />
-
-    {/* 新建 Meeting 对话框 */}
-    <NewMeetingDialog
-      open={showNewMeetingDialog}
-      onOpenChange={setShowNewMeetingDialog}
-      meetingName={newMeetingName}
-      setMeetingName={setNewMeetingName}
-      isCreating={isCreatingMeeting}
-      onCreate={handleCreateNewMeeting}
-    />
-
-    {/* 新建 Research 对话框 */}
-    <NewResearchDialog
-      open={showNewResearchDialog}
-      onOpenChange={setShowNewResearchDialog}
-      researchName={newResearchName}
-      setResearchName={setNewResearchName}
-      isCreating={isCreatingResearch}
-      onCreate={handleCreateNewResearch}
     />
 
     {/* MCP 详情遮罩层 */}
@@ -7619,7 +7445,7 @@ const Workflow: React.FC<WorkflowProps> = ({
             console.error('[Workflow] Failed to refresh session:', error);
           }
           // 如果是 topic，刷新参与者信息
-          if (currentSessionType === 'topic_general' || currentSessionType === 'memory') {
+          if (currentSessionType === 'topic_general') {
             try {
               const participants = await getParticipants(currentSessionId);
               setTopicParticipants(participants);
@@ -7633,17 +7459,6 @@ const Workflow: React.FC<WorkflowProps> = ({
       }}
     />
 
-    {/* 首次访问昵称输入对话框 */}
-    <NicknameDialog
-      open={showNicknameDialog}
-      onOpenChange={setShowNicknameDialog}
-      nicknameInput={nicknameInput}
-      setNicknameInput={setNicknameInput}
-      isSubmitting={isSubmittingNickname}
-      userAccess={userAccess}
-      onSubmit={handleSubmitNickname}
-    />
-    
     {/* 会话内：媒体预览（弹窗样式） */}
     <MediaPreviewDialog
       open={mediaPreviewOpen}
@@ -7654,6 +7469,9 @@ const Workflow: React.FC<WorkflowProps> = ({
       item={mediaPreviewItem}
       title="图片/媒体预览"
     />
+      </div>
+        </div>
+      </div>
     </>
   );
 };

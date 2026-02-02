@@ -24,14 +24,27 @@ export interface MCPMediaExtractionResult {
 function isValidBase64Image(data: string): boolean {
   if (!data || typeof data !== 'string') return false;
   
-  // 检查长度（至少 100 字符才可能是图片）
-  if (data.length < 100) return false;
+  // 检查长度（至少 50 字符才可能是图片，二维码可能较小）
+  if (data.length < 50) return false;
   
   // 检查是否是有效的 base64 字符
   const base64Regex = /^[A-Za-z0-9+/=]+$/;
   // 取前 1000 个字符检查，避免检查整个大字符串
   const sample = data.substring(0, Math.min(data.length, 1000));
   if (!base64Regex.test(sample)) return false;
+  
+  // 检查是否以常见的图片 base64 开头（即使数据被截断，开头也应该正确）
+  if (sample.startsWith('iVBORw') || // PNG
+      sample.startsWith('/9j/') ||   // JPEG
+      sample.startsWith('R0lGOD') ||  // GIF
+      sample.startsWith('UklGR')) {  // WebP
+    return true;
+  }
+  
+  // 如果数据很长（>1000字符），很可能是完整的 base64 图片
+  if (data.length > 1000) {
+    return true;
+  }
   
   return true;
 }
@@ -67,6 +80,12 @@ export function extractMCPMedia(mcpResult: any): MCPMediaExtractionResult {
     
     if (Array.isArray(contentArray)) {
       console.log('[MCPMediaExtractor] 发现 content 数组，长度:', contentArray.length);
+      console.log('[MCPMediaExtractor] content 数组预览:', JSON.stringify(contentArray.slice(0, 3).map(item => ({
+        type: item?.type,
+        mimeType: item?.mimeType || item?.mime_type,
+        dataLength: item?.data?.length || 0,
+        dataPreview: item?.data ? item.data.substring(0, 50) + '...' : 'no data',
+      })), null, 2));
       
       for (let i = 0; i < contentArray.length; i++) {
         const item = contentArray[i];
@@ -76,16 +95,27 @@ export function extractMCPMedia(mcpResult: any): MCPMediaExtractionResult {
           const mimeType = item.mimeType || item.mime_type || 'image/png';
           const data = item.data;
           
-          if (data && isValidBase64Image(data)) {
-            console.log('[MCPMediaExtractor] 提取图片:', { mimeType, dataLength: data.length });
+          // 放宽检查：只要 data 存在且长度 >= 50，就尝试提取（二维码可能较小）
+          if (data && typeof data === 'string' && data.length >= 50) {
+            console.log('[MCPMediaExtractor] 提取图片:', { mimeType, dataLength: data.length, preview: data.substring(0, 50) });
+            media.push({
+              type: 'image',
+              mimeType,
+              data, // 直接使用原始 data，即使可能被截断，也尝试显示
+            });
+            
+            // 替换为占位符
+            const placeholder = `[图片已提取: ${mimeType}, ${Math.round(data.length / 1024)}KB]`;
+            replaceInCleanedContent(cleanedContent, i, { type: 'image', placeholder });
+          } else if (data && typeof data === 'string' && data.length > 0) {
+            // 即使数据很短，也尝试提取（可能是被截断的，但至少尝试显示）
+            console.warn('[MCPMediaExtractor] 图片数据较短，可能不完整:', { mimeType, dataLength: data.length });
             media.push({
               type: 'image',
               mimeType,
               data,
             });
-            
-            // 替换为占位符
-            const placeholder = `[图片已提取: ${mimeType}, ${Math.round(data.length / 1024)}KB]`;
+            const placeholder = `[图片已提取: ${mimeType}, ${data.length} 字符（可能不完整）]`;
             replaceInCleanedContent(cleanedContent, i, { type: 'image', placeholder });
           }
         }

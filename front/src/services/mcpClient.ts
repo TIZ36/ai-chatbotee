@@ -325,12 +325,6 @@ export class MCPClient {
     return this.transport ? (this.transport as any).sessionId : undefined;
   }
 
-  /**
-   * 检测是否在 Electron 环境中
-   */
-  private isElectron(): boolean {
-    return typeof window !== 'undefined' && (window as any).electronAPI !== undefined;
-  }
 
   /**
    * 获取后端 API 地址

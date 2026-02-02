@@ -321,7 +321,7 @@ export const SessionListItem: React.FC<SessionListItemProps> = ({
       if (isAssigned) {
         await unassignSkillPack(skillPackId, session.session_id);
       } else {
-        const targetType = session.session_type === 'agent' ? 'agent' : 'memory';
+        const targetType = session.session_type === 'agent' ? 'agent' : undefined;
         await assignSkillPack(skillPackId, session.session_id, targetType);
       }
       await loadSkillPacks();
@@ -453,7 +453,7 @@ export const SessionListItem: React.FC<SessionListItemProps> = ({
                 ) : (
                   <>
                     <div className="text-sm text-gray-600 dark:text-[#b0b0b0] mb-2">
-                      为{session.session_type === 'agent' ? '智能体' : '记忆体'}分配技能包
+                      为{session.session_type === 'agent' ? '智能体' : '会话'}分配技能包
                     </div>
                     {allSkillPacks.length === 0 ? (
                       <div className="text-center py-8 text-gray-500 dark:text-[#b0b0b0]">
@@ -896,7 +896,7 @@ export const SessionListItem: React.FC<SessionListItemProps> = ({
                   ) : (
                     <>
                       <div className="text-sm text-gray-600 dark:text-[#b0b0b0] mb-2">
-                        为{session.session_type === 'agent' ? '智能体' : '记忆体'}分配技能包
+                        为{session.session_type === 'agent' ? '智能体' : '会话'}分配技能包
                       </div>
                       {allSkillPacks.length === 0 ? (
                         <div className="text-center py-8 text-gray-500 dark:text-[#b0b0b0]">

@@ -4,9 +4,11 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Edit2, Save, X, Server, AlertCircle, CheckCircle, Wrench, ExternalLink, Plug, RefreshCcw } from 'lucide-react';
+import { Plus, Trash2, Edit2, Save, X, Server, AlertCircle, CheckCircle, Wrench, ExternalLink, Plug, RefreshCcw, Smartphone } from 'lucide-react';
+import QRCode from 'qrcode';
 import PageLayout, { Card, Section, Alert, EmptyState } from './ui/PageLayout';
 import { Button } from './ui/Button';
+import { Label } from './ui/Label';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { InputField, TextareaField, FormFieldGroup } from './ui/FormField';
 import { toast } from './ui/use-toast';
@@ -141,6 +143,12 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
   const [selectedServerForDetail, setSelectedServerForDetail] = useState<MCPServerConfig | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showToolsInDetail, setShowToolsInDetail] = useState(false);
+
+  // MCP OAuth 二维码弹窗：授权 URL 生成后展示二维码，用户可扫码或在浏览器中打开
+  const [oauthQrDialogOpen, setOauthQrDialogOpen] = useState(false);
+  const [oauthQrDataUrl, setOauthQrDataUrl] = useState<string | null>(null);
+  const [oauthAuthorizationUrl, setOauthAuthorizationUrl] = useState<string | null>(null);
+  const [oauthAuthorizeResult, setOauthAuthorizeResult] = useState<{ authorization_url: string; client_id: string; state: string } | null>(null);
 
   // 清理连接的辅助函数
   const cleanupConnection = (serverId: string) => {
@@ -289,10 +297,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
     }
   };
 
-  // 检测是否在Electron环境中
-  const isElectron = () => {
-    return typeof window !== 'undefined' && (window as any).electronAPI !== undefined;
-  };
+  // Electron 已移除，stdio MCP 暂不支持
 
   // 加载 Notion 注册列表
   const loadNotionRegistrations = async (): Promise<NotionRegistration[]> => {
@@ -499,47 +504,29 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
       console.log('[Notion OAuth] Client ID:', authorizeResult.client_id);
       console.log('[Notion OAuth] State:', authorizeResult.state);
       console.log('[Notion OAuth] OAuth config saved to Redis by backend');
-      console.log('[Notion OAuth] Callback will be handled by backend');
       console.log('[Notion OAuth] Callback URL:', `${getBackendUrl()}/mcp/oauth/callback`);
-      
-      // 3. 打开系统外部浏览器进行认证
-      // 回调地址已设置为后端：/mcp/oauth/callback（固定地址，client_id从config.yaml读取）
-      // 后端会自动处理 token 交换并保存到 Redis
+
+      // 3. 生成二维码并在前端弹窗中展示，用户可扫码或在浏览器中打开
       try {
-        if (isElectron()) {
-          console.log('[Notion OAuth] Opening external browser via Electron');
-          const electronAPI = (window as any).electronAPI;
-          await electronAPI.mcpOAuthOpenExternal({
-            authorizationUrl: authorizeResult.authorization_url,
-          });
-          console.log('[Notion OAuth] ✅ External browser opened');
-        } else {
-          console.log('[Notion OAuth] Opening external browser via window.open');
-          // 在浏览器环境中，使用 window.open 打开新窗口
-          const authWindow = window.open(
-            authorizeResult.authorization_url,
-            'Notion Authorization',
-            'width=600,height=700,scrollbars=yes,resizable=yes'
-          );
-          
-          if (!authWindow) {
-            throw new Error('无法打开新窗口，请检查浏览器弹窗设置');
-          }
-          
-          console.log('[Notion OAuth] ✅ External browser window opened');
-        }
-        
-        // 提示用户完成认证
-        alert('请在浏览器中完成 Notion 授权。授权完成后，系统将自动保存配置。\n\n提示：授权完成后，您可以关闭浏览器窗口。');
-        
-        // 轮询检查后端是否已完成 token 交换
-        // 由于回调会直接到后端，我们需要轮询检查 token 是否已保存
+        const qrDataUrl = await QRCode.toDataURL(authorizeResult.authorization_url, { width: 260, margin: 2 });
+        setOauthQrDataUrl(qrDataUrl);
+        setOauthAuthorizationUrl(authorizeResult.authorization_url);
+        setOauthAuthorizeResult(authorizeResult);
+        setOauthQrDialogOpen(true);
+      } catch (qrErr) {
+        console.warn('[Notion OAuth] QR code generation failed, falling back to browser only:', qrErr);
+        setOauthAuthorizationUrl(authorizeResult.authorization_url);
+        setOauthAuthorizeResult(authorizeResult);
+        setOauthQrDialogOpen(true);
+      }
+
+      // 轮询检查后端是否已完成 token 交换
+      try {
         console.log('[Notion OAuth] Polling for token completion...');
         const maxAttempts = 60; // 最多等待60秒
         const pollInterval = 1000; // 每秒检查一次
-        
         let tokenExchangeCompleted = false;
-        
+
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
           await new Promise(resolve => setTimeout(resolve, pollInterval));
           
@@ -585,8 +572,11 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
               await createNotionServerFromRedis(mcpUrl, authorizeResult.client_id);
               console.log('[Notion OAuth] ✅ Server config created');
             }
-            
             tokenExchangeCompleted = true;
+            setOauthQrDialogOpen(false);
+            setOauthQrDataUrl(null);
+            setOauthAuthorizationUrl(null);
+            setOauthAuthorizeResult(null);
             setNotionAuthState('authenticated');
             setShowWorkspaceSelection(false);
             setShowRegistrationForm(false);
@@ -621,7 +611,10 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
       } catch (error) {
         console.error('[Notion OAuth] Authorization failed:', error);
         setNotionAuthState('idle');
-        
+        setOauthQrDialogOpen(false);
+        setOauthQrDataUrl(null);
+        setOauthAuthorizationUrl(null);
+        setOauthAuthorizeResult(null);
         if (error instanceof Error && error.message === 'Authorization cancelled by user') {
           alert('授权已取消');
         } else {
@@ -633,7 +626,10 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
     } catch (error) {
       console.error('[Notion OAuth] Error:', error);
       setNotionAuthState('idle');
-      
+      setOauthQrDialogOpen(false);
+      setOauthQrDataUrl(null);
+      setOauthAuthorizationUrl(null);
+      setOauthAuthorizeResult(null);
       if (error instanceof Error && error.message === 'Authorization cancelled by user') {
         alert('授权已取消');
       } else {
@@ -797,35 +793,9 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
       console.log(`[MCP Config] Testing connection to ${server.name} (${server.url})`);
       console.log(`[MCP Config] Server metadata:`, JSON.stringify(server.metadata, null, 2));
 
-      // stdio：通过 Electron main 的 MCP runner 测试
+      // stdio MCP 不支持（需要后端实现）
       if (server.type === 'stdio') {
-        if (!isElectron() || !(window as any).electronAPI?.mcpRunnerStart) {
-          throw new Error('stdio MCP 仅支持在 Electron 环境运行');
-        }
-        const stdioCfg = server.ext?.stdio || {};
-        const command = (stdioCfg as any).command || 'npx';
-        const args = (stdioCfg as any).args || [];
-        const env = (stdioCfg as any).env || {};
-        const cwd = (stdioCfg as any).cwd;
-
-        const startRes = await (window as any).electronAPI.mcpRunnerStart({
-          serverId: server.id,
-          command,
-          args,
-          env,
-          cwd,
-        });
-        if (!startRes?.success) {
-          throw new Error(startRes?.error || 'Failed to start stdio runner');
-        }
-
-        setTestResults(prev => new Map(prev).set(server.id, {
-          success: true,
-          message: `stdio runner 启动成功`,
-          connected: true,
-        }));
-
-        return;
+        throw new Error('stdio MCP 暂不支持，请使用 HTTP 方式的 MCP 服务器');
       }
       
       // 检查metadata中的headers
@@ -1211,7 +1181,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
             </div>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1">类型</label>
+                <Label className="block text-sm font-medium mb-1">类型</Label>
                 <Select
                   value={newServer.type || 'http-stream'}
                   onValueChange={(v) => setNewServer(prev => ({ ...prev, type: v as any }))}
@@ -1630,6 +1600,61 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
               </div>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* MCP OAuth 二维码弹窗：展示授权二维码，用户可扫码或在浏览器中打开 */}
+      <Dialog
+        open={oauthQrDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setOauthQrDialogOpen(false);
+            setOauthQrDataUrl(null);
+            setOauthAuthorizationUrl(null);
+            setOauthAuthorizeResult(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Smartphone className="w-5 h-5" />
+              MCP 授权
+            </DialogTitle>
+            <DialogDescription>
+              使用手机扫描下方二维码完成授权，或点击「在浏览器中打开」在电脑上完成。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col items-center gap-4 py-2">
+            {oauthQrDataUrl ? (
+              <div className="rounded-lg border border-gray-200 dark:border-[#404040] p-2 bg-white dark:bg-[#262626]">
+                <img src={oauthQrDataUrl} alt="扫码授权" className="w-[260px] h-[260px]" />
+              </div>
+            ) : (
+              <div className="w-[260px] h-[260px] rounded-lg border border-gray-200 dark:border-[#404040] flex items-center justify-center bg-gray-50 dark:bg-[#262626] text-sm text-gray-500">
+                加载中…
+              </div>
+            )}
+            {oauthAuthorizationUrl && (
+              <Button
+                variant="primary"
+                className="w-full"
+                onClick={() => {
+                  if (typeof window === 'undefined') return;
+                  const url = oauthAuthorizationUrl;
+                  window.open(url, 'MCP Authorization', 'width=600,height=700,scrollbars=yes,resizable=yes');
+                }}
+              >
+                <ExternalLink className="w-4 h-4 mr-2" />
+                在浏览器中打开
+              </Button>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setOauthQrDialogOpen(false)}>
+              关闭
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

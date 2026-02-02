@@ -21,9 +21,7 @@ import {
 } from '../services/sessionApi';
 import { emitSessionsChanged } from '../utils/sessionEvents';
 import { Button } from './ui/Button';
-import { Input } from './ui/Input';
-import { Textarea } from './ui/Textarea';
-import { Label } from './ui/Label';
+import { InputField, TextareaField } from './ui/FormField';
 import { Card } from './ui/PageLayout';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/Select';
 import { toast } from './ui/use-toast';
@@ -335,25 +333,25 @@ const RoleGeneratorPage: React.FC<RoleGeneratorPageProps> = ({ isEmbedded = fals
                 <div className="space-y-6">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-4">
-                      <div className="space-y-2">
-                        <Label>角色名称</Label>
-                        <Input 
-                          placeholder="给你的 AI 起个名字" 
-                          value={name}
-                          onChange={(e) => setName(e.target.value)}
-                        />
-                </div>
+                      <InputField
+                        label="角色名称"
+                        inputProps={{
+                          placeholder: "给你的 AI 起个名字",
+                          value: name,
+                          onChange: (e) => setName(e.target.value),
+                        }}
+                      />
                       {renderConfigSelector()}
                     </div>
-                  <div className="space-y-2">
-                      <Label>人设指令 (System Prompt)</Label>
-                      <Textarea 
-                        placeholder="定义角色的性格、说话方式、知识背景等..."
-                        className="min-h-[140px] resize-none"
-                        value={systemPrompt}
-                        onChange={(e) => setSystemPrompt(e.target.value)}
-                      />
-                    </div>
+                  <TextareaField
+                    label="人设指令 (System Prompt)"
+                    textareaProps={{
+                      placeholder: "定义角色的性格、说话方式、知识背景等...",
+                      className: "min-h-[140px] resize-none",
+                      value: systemPrompt,
+                      onChange: (e) => setSystemPrompt(e.target.value),
+                    }}
+                  />
                   </div>
 
                   <div className="flex justify-end pt-4 border-t border-gray-100 dark:border-[#404040]">

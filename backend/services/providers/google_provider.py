@@ -31,11 +31,54 @@ class GoogleProvider(BaseLLMProvider):
         try:
             from google import genai
             from google.genai import types
+            import os
             
-            self._client = genai.Client(api_key=self.api_key)
+            # 构建 http_options
+            http_options = {'api_version': 'v1beta'}
+            
+            # 1. 检查是否配置了自定义 API URL（反向代理）
+            if self.api_url:
+                base_url = self.api_url.rstrip('/')
+                # 如果 URL 包含 /v1beta 或 /v1，去掉它（SDK 会自己加）
+                if '/v1beta' in base_url:
+                    base_url = base_url.split('/v1beta')[0]
+                elif '/v1' in base_url:
+                    base_url = base_url.split('/v1')[0]
+                
+                http_options['base_url'] = base_url
+                self._log(f"✅ Using custom API URL (reverse proxy): {base_url}")
+                print(f"[GEMINIProvider] ✅ SDK 使用反向代理: {base_url}")
+            
+            # 2. 检查系统代理环境变量（HTTP_PROXY / HTTPS_PROXY）
+            http_proxy = os.environ.get('HTTPS_PROXY') or os.environ.get('HTTP_PROXY') or \
+                         os.environ.get('https_proxy') or os.environ.get('http_proxy')
+            
+            if http_proxy:
+                # 配置 httpx 客户端使用代理
+                http_options['client_args'] = {
+                    'proxy': http_proxy,
+                    'timeout': 120.0,
+                }
+                self._log(f"✅ Using system proxy: {http_proxy}")
+                print(f"[GEMINIProvider] ✅ SDK 使用系统代理: {http_proxy}")
+            
+            # 3. 创建 Client
+            if http_options.get('base_url') or http_options.get('client_args'):
+                self._client = genai.Client(
+                    api_key=self.api_key,
+                    http_options=http_options
+                )
+                self._log("SDK initialized with custom http_options")
+            else:
+                # 无代理配置，直接使用官方 API
+                self._log("⚠️ No proxy configured, using official API directly")
+                print("[GEMINIProvider] ⚠️ 未检测到代理配置，直接使用官方 API")
+                print("[GEMINIProvider] 💡 提示：如遇地区限制，请设置环境变量 HTTPS_PROXY 或在 LLM 配置中设置 api_url")
+                self._client = genai.Client(api_key=self.api_key)
+            
             self._types = types
             self.sdk_available = True
-            self._log("SDK initialized")
+            self._log(f"SDK initialized successfully")
         except ImportError:
             self._log("google-genai SDK not installed, using REST API")
             self.sdk_available = False

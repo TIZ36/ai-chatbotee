@@ -86,45 +86,9 @@ export class MCPClient {
     logger.info('Connecting to MCP server', { id: this.serverId, name: this.serverName });
 
     try {
-      // stdio：在 Electron main 拉起本地进程并通过 IPC 调用
+      // stdio MCP 不支持（需要后端实现）
       if (this.server.type === 'stdio') {
-        if (typeof window === 'undefined' || !(window as any).electronAPI?.mcpRunnerStart) {
-          throw new Error('Stdio MCP 仅支持在 Electron 环境运行');
-        }
-
-        const stdioCfg = (this.server.ext as any)?.stdio || (this.server.ext as any)?.local_stdio || {};
-        const command = stdioCfg.command || 'npx';
-        const args = stdioCfg.args || [];
-        const env = stdioCfg.env || {};
-        const cwd = stdioCfg.cwd;
-
-        const startRes = await (window as any).electronAPI.mcpRunnerStart({
-          serverId: this.serverId,
-          command,
-          args,
-          env,
-          cwd,
-        });
-
-        if (!startRes?.success) {
-          throw new Error(startRes?.error || 'Failed to start stdio runner');
-        }
-
-        this.status = 'connected';
-        this.consecutiveErrors = 0;
-        this.reconnectAttempts = 0;
-        this._isHealthy = true;
-
-        // 预加载工具列表
-        await this.listTools();
-
-        eventBus.emit('mcp:connect', {
-          serverId: this.serverId,
-          serverName: this.serverName,
-        });
-
-        logger.info('Connected to stdio MCP server', { id: this.serverId, toolCount: this.cachedTools?.length });
-        return;
+        throw new Error('stdio MCP 暂不支持，请使用 HTTP 方式的 MCP 服务器');
       }
 
       // 动态导入 MCP SDK
@@ -209,9 +173,7 @@ export class MCPClient {
 
     try {
       if (this.server.type === 'stdio') {
-        if (typeof window !== 'undefined' && (window as any).electronAPI?.mcpRunnerStop) {
-          await (window as any).electronAPI.mcpRunnerStop({ serverId: this.serverId });
-        }
+        // stdio MCP 暂不支持
         return;
       }
       if (this.client) {
@@ -264,19 +226,7 @@ export class MCPClient {
 
     try {
       if (this.server.type === 'stdio') {
-        const api = typeof window !== 'undefined' ? (window as any).electronAPI : null;
-        if (!api?.mcpRunnerListTools) {
-          throw new Error('Stdio MCP runner API not available');
-        }
-        const result = await api.mcpRunnerListTools({ serverId: this.serverId, forceRefresh });
-        this.cachedTools = (result?.tools || []).map((tool: any) => ({
-          name: tool.name,
-          description: tool.description || '',
-          inputSchema: tool.inputSchema || { type: 'object' },
-        }));
-        this.toolsCacheTime = Date.now();
-        this.recordSuccess();
-        return this.cachedTools;
+        throw new Error('stdio MCP 暂不支持，请使用 HTTP 方式的 MCP 服务器');
       }
 
       const result = await this.client.listTools();
@@ -328,34 +278,7 @@ export class MCPClient {
 
     try {
       if (this.server.type === 'stdio') {
-        const api = typeof window !== 'undefined' ? (window as any).electronAPI : null;
-        if (!api?.mcpRunnerCallTool) {
-          throw new Error('Stdio MCP runner API not available');
-        }
-        const timeoutMs = timeout || this.options.requestTimeout || 60000;
-        const startRes = await api.mcpRunnerCallTool({
-          serverId: this.serverId,
-          toolName,
-          args,
-          timeoutMs,
-        });
-        const duration = Date.now() - startTime;
-        this.recordSuccess();
-
-        const parsedContent = startRes?.result;
-        eventBus.emit('mcp:tool_result', {
-          serverId: this.serverId,
-          toolName,
-          result: parsedContent,
-          duration,
-        });
-
-        return {
-          success: !startRes?.isError,
-          content: parsedContent,
-          isError: startRes?.isError,
-          duration,
-        };
+        throw new Error('stdio MCP 暂不支持，请使用 HTTP 方式的 MCP 服务器');
       }
 
       // 带超时的调用

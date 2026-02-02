@@ -1,23 +1,21 @@
 /**
  * 会话类型选择对话框
- * 用于选择创建临时会话还是记忆体会话
+ * 用于选择创建临时会话
  */
 
 import React from 'react';
-import { X, MessageCircle, Database } from 'lucide-react';
+import { X, MessageCircle } from 'lucide-react';
 
 export interface SessionTypeDialogProps {
   open: boolean;
   onClose: () => void;
   onSelectTemporary: () => void;
-  onSelectMemory: () => void;
 }
 
 export const SessionTypeDialog: React.FC<SessionTypeDialogProps> = ({
   open,
   onClose,
   onSelectTemporary,
-  onSelectMemory,
 }) => {
   if (!open) return null;
 
@@ -51,22 +49,6 @@ export const SessionTypeDialog: React.FC<SessionTypeDialogProps> = ({
                 <h4 className="font-semibold text-gray-900 dark:text-white mb-1">临时会话</h4>
                 <p className="text-sm text-gray-600 dark:text-[#b0b0b0]">
                   不保存历史记录，不发送历史消息，不进行总结。适合快速询问各种无关联的问题。
-                </p>
-              </div>
-            </div>
-          </button>
-
-          {/* 记忆体选项 */}
-          <button
-            onClick={onSelectMemory}
-            className="w-full text-left p-4 border-2 border-gray-200 dark:border-[#404040] rounded-lg hover:border-primary-400 dark:hover:border-primary-600 transition-colors"
-          >
-            <div className="flex items-start space-x-3">
-              <Database className="w-6 h-6 text-primary-500 flex-shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <h4 className="font-semibold text-gray-900 dark:text-white mb-1">记忆体</h4>
-                <p className="text-sm text-gray-600 dark:text-[#b0b0b0]">
-                  保存所有消息记录，支持历史消息和总结功能。可以升级为智能体。
                 </p>
               </div>
             </div>

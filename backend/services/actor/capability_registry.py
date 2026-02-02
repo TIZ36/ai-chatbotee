@@ -68,10 +68,46 @@ class SkillCapability:
     required_mcps: List[str] = field(default_factory=list)
     required_tools: List[str] = field(default_factory=list)
     
-    def to_description(self) -> str:
+    def to_description(self, include_steps: bool = False) -> str:
         """转换为描述文本"""
         keywords = ", ".join(self.trigger_keywords[:5]) if self.trigger_keywords else "无"
-        return f"{self.name}: {self.description or '无描述'} [触发词: {keywords}]"
+        base = f"{self.name}: {self.description or '无描述'} [触发词: {keywords}]"
+        
+        if include_steps and self.steps:
+            # 包含详细执行步骤
+            steps_text = "\n  执行步骤："
+            for i, step in enumerate(self.steps, 1):
+                step_name = step.get('name', step.get('title', f'步骤{i}'))
+                step_desc = step.get('description', step.get('content', ''))
+                if step_desc:
+                    steps_text += f"\n    {i}. {step_name}: {step_desc}"
+                else:
+                    steps_text += f"\n    {i}. {step_name}"
+            base += steps_text
+        
+        return base
+    
+    def to_sop_text(self) -> str:
+        """转换为 SOP 文本格式（用于系统提示词）"""
+        lines = [f"【技能包: {self.name}】"]
+        if self.description:
+            lines.append(f"说明: {self.description}")
+        
+        if self.steps:
+            lines.append("\n执行流程:")
+            for i, step in enumerate(self.steps, 1):
+                step_name = step.get('name', step.get('title', f'步骤{i}'))
+                step_desc = step.get('description', step.get('content', ''))
+                step_tool = step.get('tool', step.get('mcp_server', ''))
+                
+                step_line = f"  {i}. {step_name}"
+                if step_desc:
+                    step_line += f"\n     描述: {step_desc}"
+                if step_tool:
+                    step_line += f"\n     工具: {step_tool}"
+                lines.append(step_line)
+        
+        return "\n".join(lines)
 
 
 @dataclass
@@ -345,13 +381,15 @@ class CapabilityRegistry:
                 lines.append(f"- {mcp.to_description()}")
             lines.append("")
         
-        # Skills
+        # Skills（包含详细步骤，用于指导 LLM 按流程执行）
         skills = self.get_available_skills()
         if skills:
-            lines.append("## 可用的技能包")
-            for skill in skills:
-                lines.append(f"- {skill.to_description()}")
+            lines.append("## 可用的技能包（SOP）")
+            lines.append("请严格按照技能包中定义的执行流程处理相关任务：")
             lines.append("")
+            for skill in skills:
+                lines.append(skill.to_sop_text())
+                lines.append("")
         
         # Tools
         tools = self.get_available_tools()

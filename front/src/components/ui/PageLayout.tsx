@@ -271,7 +271,7 @@ export const Badge: React.FC<BadgeProps> = ({
   }[variant];
 
   return (
-    <span className={`gnome-badge ${variantClass} ${className}`}>
+    <span className={`gnome-badge ${variantClass} badge-${variant} ${className}`}>
       {children}
     </span>
   );

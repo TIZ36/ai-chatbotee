@@ -297,11 +297,16 @@ class TopicService:
                 sender_name = auto_name
             if sender_avatar is None:
                 sender_avatar = auto_avatar
+
+        # 不要在每条消息里携带 base64(data URI) 头像：会导致 Redis/SSE/前端渲染负担巨大
+        if isinstance(sender_avatar, str) and sender_avatar.startswith('data:image/'):
+            sender_avatar = None
         
         # 将 sender 信息添加到 ext 中存储
         if ext is None:
             ext = {}
         ext['sender_name'] = sender_name
+        # 同步避免把 data-uri/超大字段写进 ext（DB & 事件 payload）
         ext['sender_avatar'] = sender_avatar
 
         # 确保持久化：ext 可能包含 bytes/复杂对象（例如 LLM raw），这里做序列化兜底
@@ -368,22 +373,6 @@ class TopicService:
             cursor.close()
             conn.close()
             
-            # 媒体库缓存增量更新：
-            # - app.py 的 /api/sessions/<id>/messages 路由会做一次，但 AgentActor 直接调用 TopicService 时不会经过路由
-            # - 这里做“后处理”，确保 Gemini/Google 生成图片写入 ext.media 后，媒体库能即时可见
-            try:
-                from services.media_library_service import get_media_library_service
-                get_media_library_service().upsert_message_media(
-                    session_id=topic_id,
-                    message_id=msg_id,
-                    role=role,
-                    content=content,
-                    ext=ext,
-                    created_ts=time.time(),
-                )
-            except Exception as e:
-                print(f"[TopicService] Warning: Failed to update media cache incrementally: {e}")
-
             # 2. 发布到 Redis 频道
             # Topic 频道：topic:{topic_id}
             message_data = {

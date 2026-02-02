@@ -15,7 +15,12 @@ _mcp_sessions: Dict[str, requests.Session] = {}
 # 响应缓存：短期缓存 tools/list 和 initialize 响应
 _response_cache: Dict[str, Dict[str, Any]] = {}
 _cache_timestamps: Dict[str, float] = {}
-CACHE_TTL = 30  # 缓存30秒
+CACHE_TTL = 60  # 缓存60秒（性能优化：工具列表不常变化）
+
+# MCP 服务器配置缓存（减少每次请求的 DB 访问）
+_server_config_cache: Dict[str, Dict[str, Any]] = {}
+_server_config_cache_timestamps: Dict[str, float] = {}
+SERVER_CONFIG_CACHE_TTL = 60  # 缓存60秒，确保配置变更能及时生效
 
 # 记录每个 MCP URL 最近一次协商得到的 mcp-session-id
 _mcp_session_ids: Dict[str, str] = {}
@@ -261,6 +266,80 @@ def set_cached_response(cache_key: str, response: Dict[str, Any]):
     print(f"[MCP Common] ✅ Cached response for {cache_key[:50]}...")
 
 
+def _get_cached_server_config(cache_key: str) -> Optional[Dict[str, Any]]:
+    if cache_key not in _server_config_cache:
+        return None
+    timestamp = _server_config_cache_timestamps.get(cache_key, 0)
+    if time.time() - timestamp > SERVER_CONFIG_CACHE_TTL:
+        del _server_config_cache[cache_key]
+        del _server_config_cache_timestamps[cache_key]
+        return None
+    return _server_config_cache[cache_key]
+
+
+def _set_cached_server_config(cache_key: str, config: Dict[str, Any]):
+    _server_config_cache[cache_key] = config
+    _server_config_cache_timestamps[cache_key] = time.time()
+
+
+def get_mcp_server_config(target_url: str) -> Optional[Dict[str, Any]]:
+    """
+    获取 MCP 服务器配置（带短期缓存）
+
+    Returns:
+        dict: { "metadata": dict|None, "ext": dict|None, "found": bool }
+    """
+    normalized_target_url = target_url.rstrip('/')
+    cache_key = f"server_config:{normalized_target_url}"
+    cached = _get_cached_server_config(cache_key)
+    if cached is not None:
+        return cached
+
+    # 从数据库查找 MCP 服务器配置
+    try:
+        conn = get_mysql_connection()
+        if conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT metadata, ext FROM mcp_servers WHERE url = %s AND enabled = 1 LIMIT 1",
+                (target_url,)
+            )
+            server_row = cursor.fetchone()
+            # 如果使用原始 URL 未命中且存在末尾斜杠差异，尝试规范化 URL
+            if not server_row and target_url != normalized_target_url:
+                cursor.execute(
+                    "SELECT metadata, ext FROM mcp_servers WHERE url = %s AND enabled = 1 LIMIT 1",
+                    (normalized_target_url,)
+                )
+                server_row = cursor.fetchone()
+
+            cursor.close()
+            conn.close()
+
+            if server_row:
+                metadata = server_row[0]
+                ext = server_row[1]
+                if isinstance(metadata, str):
+                    metadata = json.loads(metadata)
+                if isinstance(ext, str):
+                    ext = json.loads(ext)
+
+                config = {
+                    "metadata": metadata,
+                    "ext": ext,
+                    "found": True,
+                }
+                _set_cached_server_config(cache_key, config)
+                return config
+
+            config = {"metadata": None, "ext": None, "found": False}
+            _set_cached_server_config(cache_key, config)
+            return config
+    except Exception as db_error:
+        print(f"[MCP Common] Warning: Failed to load server config from DB: {db_error}")
+        return None
+
+
 def prepare_mcp_headers(target_url: str, request_headers: Dict[str, str], base_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     """
     准备 MCP 请求头，包括 OAuth token 和服务器配置的 headers
@@ -297,67 +376,43 @@ def prepare_mcp_headers(target_url: str, request_headers: Dict[str, str], base_h
     except Exception:
         pass
     
-    # 从数据库查找 MCP 服务器配置
-    try:
-        conn = get_mysql_connection()
-        if conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT metadata, ext FROM mcp_servers WHERE url = %s AND enabled = 1 LIMIT 1",
-                (target_url,)
-            )
-            server_row = cursor.fetchone()
-            
-            if server_row:
-                metadata = server_row[0]
-                ext = server_row[1]
-                
-                if metadata:
-                    if isinstance(metadata, str):
-                        metadata = json.loads(metadata)
-                    
-                    # 检查是否需要 OAuth token
-                    normalized_target_url = target_url.rstrip('/')
-                    
-                    if ext:
-                        if isinstance(ext, str):
-                            ext = json.loads(ext)
-                        
-                        server_type = ext.get('server_type')
-                        if server_type in ['notion']:  # 可以扩展其他需要 OAuth 的服务器
-                            print(f"[MCP Common] Checking OAuth token for {server_type} server...")
-                            
-                            # 获取 OAuth token
-                            token_info = get_oauth_token_for_server(normalized_target_url, target_url)
-                            
-                            if token_info:
-                                access_token = token_info.get('access_token')
-                                if access_token:
-                                    headers['Authorization'] = f"Bearer {access_token}"
-                                    print(f"[MCP Common] Using OAuth token: {access_token[:20]}...")
-                    
-                    # 从 metadata.headers 中获取配置的请求头
-                    if isinstance(metadata, dict) and 'headers' in metadata:
-                        config_headers = metadata['headers']
-                        if isinstance(config_headers, dict):
-                            print(f"[MCP Common] Applying headers from server config")
-                            for header_name, header_value in config_headers.items():
-                                # Authorization header 优先使用 OAuth token（如果存在）
-                                if header_name == 'Authorization' and 'Authorization' in headers:
-                                    print(f"[MCP Common] Skipping DB Authorization header, using OAuth token")
-                                    continue
-                                
-                                # 如果客户端没有发送该 header，使用数据库中的配置
-                                if header_name not in request_headers or not request_headers.get(header_name):
-                                    headers[header_name] = header_value
-                                    print(f"[MCP Common] Added header from DB config: {header_name}")
-                                else:
-                                    print(f"[MCP Common] Client already sent {header_name}, using client value")
-            
-            cursor.close()
-            conn.close()
-    except Exception as db_error:
-        print(f"[MCP Common] Warning: Failed to load server config from DB: {db_error}")
+    server_config = get_mcp_server_config(target_url)
+    if server_config and server_config.get("found"):
+        metadata = server_config.get("metadata")
+        ext = server_config.get("ext") or {}
+
+        # 检查是否需要 OAuth token
+        normalized_target_url = target_url.rstrip('/')
+        server_type = ext.get('server_type')
+        if server_type in ['notion']:  # 可以扩展其他需要 OAuth 的服务器
+            print(f"[MCP Common] Checking OAuth token for {server_type} server...")
+
+            # 获取 OAuth token
+            token_info = get_oauth_token_for_server(normalized_target_url, target_url)
+
+            if token_info:
+                access_token = token_info.get('access_token')
+                if access_token:
+                    headers['Authorization'] = f"Bearer {access_token}"
+                    print(f"[MCP Common] Using OAuth token: {access_token[:20]}...")
+
+        # 从 metadata.headers 中获取配置的请求头
+        if isinstance(metadata, dict) and 'headers' in metadata:
+            config_headers = metadata['headers']
+            if isinstance(config_headers, dict):
+                print(f"[MCP Common] Applying headers from server config")
+                for header_name, header_value in config_headers.items():
+                    # Authorization header 优先使用 OAuth token（如果存在）
+                    if header_name == 'Authorization' and 'Authorization' in headers:
+                        print(f"[MCP Common] Skipping DB Authorization header, using OAuth token")
+                        continue
+
+                    # 如果客户端没有发送该 header，使用数据库中的配置
+                    if header_name not in request_headers or not request_headers.get(header_name):
+                        headers[header_name] = header_value
+                        print(f"[MCP Common] Added header from DB config: {header_name}")
+                    else:
+                        print(f"[MCP Common] Client already sent {header_name}, using client value")
     
     # 转发客户端的 Authorization header（客户端优先）
     if 'Authorization' in request_headers:

@@ -2,40 +2,6 @@
  * Workflow 组件相关的类型定义
  */
 
-import type { WorkflowNode, WorkflowConnection } from '../../services/workflowApi';
-
-/** 单个过程步骤（用于记录多轮思考和MCP调用） */
-export interface ProcessStep {
-  /** 步骤类型 */
-  type: 'thinking' | 'mcp_call' | 'workflow';
-  /** 时间戳 */
-  timestamp?: number;
-  /** 思考内容（当 type === 'thinking' 时） */
-  thinking?: string;
-  /** MCP 服务器名称（当 type === 'mcp_call' 时） */
-  mcpServer?: string;
-  /** 工具名称（当 type === 'mcp_call' 时） */
-  toolName?: string;
-  /** 调用参数 */
-  arguments?: any;
-  /** 调用结果 */
-  result?: any;
-  /** 执行状态 */
-  status?: 'pending' | 'running' | 'completed' | 'error';
-  /** 执行时长（毫秒） */
-  duration?: number;
-  /** 工作流信息（当 type === 'workflow' 时） */
-  workflowInfo?: {
-    id?: string;
-    name?: string;
-    status?: 'pending' | 'running' | 'completed' | 'error';
-    result?: string;
-    config?: {
-      nodes: WorkflowNode[];
-      connections: WorkflowConnection[];
-    };
-  };
-}
 
 /** 多模态附件 */
 export interface MultimodalAttachment {
@@ -51,7 +17,7 @@ export interface MultimodalAttachment {
 /** 可执行组件 */
 export interface ExecutableComponent {
   id: string;
-  type: 'plugin' | 'workflow' | 'batch' | 'mcp_call';
+  type: 'plugin' | 'batch' | 'mcp_call';
   name: string;
   config: any;
   status?: 'idle' | 'running' | 'completed' | 'error';
@@ -68,14 +34,47 @@ export interface MCPDetail {
   duration?: number;
 }
 
-/** 扩展的消息类型 */
+/** 扩展的消息类型 - 统一的工作流消息类型定义 */
 export interface Message {
   id: string;
-  role: 'user' | 'assistant' | 'system' | 'error';
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'error';
   content: string;
-  timestamp: Date;
+  // Topic/多Agent消息元信息（可选）
+  sender_id?: string;
+  sender_avatar?: string;  // Agent 头像 URL
+  sender_name?: string;    // Agent 名称
+  sender_type?: 'user' | 'agent' | 'system';
+  thinking?: string;
+  toolCalls?: Array<{ name: string; arguments: any; result?: any }> | {
+    isSystemPrompt?: boolean;
+    batchName?: string;
+    item?: any;
+    canRetry?: boolean;
+    errorType?: 'network' | 'timeout' | 'api' | 'unknown';
+    [key: string]: any;
+  };
   isStreaming?: boolean;
   isThinking?: boolean;
+  currentStep?: string;
+  toolType?: 'mcp';
+  isSummary?: boolean;
+  media?: Array<{
+    type: 'image' | 'video' | 'audio';
+    mimeType: string;
+    data: string;
+    url?: string;
+  }>;
+  thoughtSignature?: string;
+  toolCallSignatures?: Record<string, string>;
+  mcpdetail?: any;
+  processMessages?: any[]; // ProcessMessage[] - 从 ../../types/processMessage 导入（避免循环依赖）
+  executionLogs?: Array<{ id: string; timestamp: number; type: string; message: string; detail?: string; duration?: number }>;
+  avatarUrl?: string; // Add avatarUrl for assistant messages
+  agentName?: string; // Add agentName for assistant messages
+  ext?: any; // 扩展字段（用于 reaction/引用等装饰）
+  
+  // 兼容旧字段（可选）
+  timestamp?: Date;
   thinkingContent?: string;
   components?: ExecutableComponent[];
   isEditing?: boolean;
@@ -84,12 +83,15 @@ export interface Message {
   quotedMessage?: { id: string; content: string };
   status?: 'sending' | 'sent' | 'error';
   errorMessage?: string;
-  /** 多模态附件 */
+  /** 多模态附件（兼容旧字段） */
   multimodal?: MultimodalAttachment[];
-  /** MCP 工具调用详情 */
+  /** MCP 工具调用详情（兼容旧字段） */
   mcpDetails?: MCPDetail[];
-  /** 多轮过程步骤（保存完整的思考和MCP调用历史） */
-  processSteps?: ProcessStep[];
+  
+  // 工作流相关字段
+  workflowId?: string;
+  workflowName?: string;
+  workflowStatus?: 'pending' | 'running' | 'completed' | 'error';
 }
 
 /** Workflow 组件的 Props */

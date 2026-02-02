@@ -1,3 +1,5 @@
+import type { ProcessMessage } from '../types/processMessage';
+
 export type UnifiedRole = 'user' | 'assistant' | 'system' | 'tool';
 
 export type UnifiedMediaType = 'image' | 'video' | 'audio' | 'file';
@@ -21,22 +23,12 @@ export interface UnifiedMessage {
   /** ISO string */
   createdAt: string;
   media?: UnifiedMedia[];
-  /** 兼容现有 Workflow/RoundTable/Research 的常用字段（避免大面积改动） */
+  /** 兼容现有 Workflow/Research 的常用字段（避免大面积改动） */
   thinking?: string;
   toolCalls?: any;
   tokenCount?: number;
-  /** 过程步骤（思考 + MCP 调用历史），从 ext.processSteps 提取 */
-  processSteps?: Array<{
-    type: 'thinking' | 'mcp_call' | 'workflow';
-    timestamp?: number;
-    thinking?: string;
-    mcpServer?: string;
-    toolName?: string;
-    arguments?: any;
-    result?: any;
-    status?: 'pending' | 'running' | 'completed' | 'error';
-    duration?: number;
-  }>;
+  /** 过程消息（新协议） */
+  processMessages?: ProcessMessage[];
   /** 思维签名（Gemini 模型使用） */
   thoughtSignature?: string;
   /** MCP 执行详情 */
@@ -69,7 +61,7 @@ export interface SendMessagePayload {
 }
 
 export interface ConversationAdapter {
-  /** 用于缓存的唯一 key，例如 `session:${id}` / `roundTable:${id}` */
+  /** 用于缓存的唯一 key，例如 `session:${id}` */
   key: string;
 
   listMessages: (params: ListMessagesParams) => Promise<ListMessagesResult>;

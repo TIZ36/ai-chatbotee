@@ -42,8 +42,12 @@ export function parseMCPContentBlocks(content: any): MCPContentBlock[] {
           if (item?.type === 'image' || item?.type === 'video' || item?.type === 'audio') {
             const mimeType = item.mimeType || item.mime_type;
             const data = item.data;
+            // 放宽检查：只要 data 存在且是字符串，就尝试显示（即使可能不完整）
             if (typeof mimeType === 'string' && typeof data === 'string' && data.length > 0) {
+              console.log(`[MCP Render] 发现媒体: type=${item.type}, mimeType=${mimeType}, dataLength=${data.length}, dataPreview=${data.substring(0, 50)}...`);
               blocks.push({ kind: item.type, mimeType, data });
+            } else {
+              console.warn(`[MCP Render] 媒体数据无效: type=${item.type}, mimeType=${typeof mimeType}, dataType=${typeof data}, dataLength=${data?.length || 0}, item=`, item);
             }
             continue;
           }

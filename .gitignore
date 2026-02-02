@@ -17,6 +17,22 @@ __pycache__/
 *.so
 .Python
 
+# Python 类型检查缓存
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+
+# Python 代码质量工具缓存
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+.ruff_cache/
+
 # Python 分发/打包
 *.egg
 *.egg-info/
@@ -71,9 +87,12 @@ build/
 out/
 *.tsbuildinfo
 
-# Next.js 构建产物
-.next/
-**/.next/
+# 前端构建产物（明确指定）
+front/dist/
+front/build/
+front/out/
+
+# Electron 构建产物（已在下面单独列出，这里保持）
 
 # Electron 构建产物
 electron/dist/
@@ -235,3 +254,30 @@ coverage/
 # yarn.lock
 # pnpm-lock.yaml
 
+# ====================
+# Cursor / AI 工具
+# ====================
+.cursor/
+.cursorrules
+
+# ====================
+# 测试文件（可选，根据项目需要决定）
+# ====================
+# 如果不想提交测试文件，取消下面的注释
+# backend/test_*.py
+# front/src/**/*.test.ts
+# front/src/**/*.test.tsx
+# front/src/**/*.spec.ts
+# front/src/**/*.spec.tsx
+
+# ====================
+# 本地开发文件
+# ====================
+# 本地启动脚本（如果包含个人配置）
+start-*.sh
+*.local.sh
+
+# 本地数据库文件
+*.db-journal
+*.db-wal
+*.db-shm

@@ -7,7 +7,7 @@
 import React from 'react';
 import { estimate_messages_tokens, get_model_max_tokens } from '../../services/tokenCounter';
 import { LLMConfigFromDB } from '../../services/llmApi';
-import { Message } from './MessageContent';
+import type { Message } from './types';
 
 export interface TokenCounterProps {
   selectedLLMConfig: LLMConfigFromDB | null;
@@ -41,6 +41,12 @@ export const TokenCounter: React.FC<TokenCounterProps> = ({
   const currentTokens = estimate_messages_tokens(conversationMessages, model);
   const maxTokens = selectedLLMConfig?.max_tokens || get_model_max_tokens(model);
   const ratio = maxTokens > 0 ? currentTokens / maxTokens : 0;
+  const formatTokens = (value: number) => {
+    if (value < 1000) return value.toString();
+    const scaled = value / 1000;
+    const decimals = scaled < 10 ? 1 : 0;
+    return `${scaled.toFixed(decimals).replace(/\.0$/, '')}k`;
+  };
   const colorClass =
     ratio >= 0.9
       ? 'text-red-500 dark:text-red-400'
@@ -50,10 +56,10 @@ export const TokenCounter: React.FC<TokenCounterProps> = ({
 
   return (
     <span
-      className={`text-[10px] truncate ${colorClass}`}
+      className={`text-[9px] truncate ${colorClass}`}
       title={`${currentTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens`}
     >
-      {currentTokens.toLocaleString()} / {maxTokens.toLocaleString()}
+      {formatTokens(currentTokens)} / {formatTokens(maxTokens)}
     </span>
   );
 };

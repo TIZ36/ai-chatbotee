@@ -212,7 +212,7 @@ export type SessionType =
   | 'topic_brainstorm'   // 脑暴话题
   | 'temporary'          // 临时会话
   | 'memory'             // 记忆片段 (旧)
-  | 'single' | 'multi' | 'roundtable'; // 兼容旧版
+  | 'single' | 'multi'; // 兼容旧版
 
 /**
  * 会话状态

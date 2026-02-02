@@ -6,13 +6,6 @@ import type { Session } from '../../../services/sessionApi';
 import type { LLMConfigFromDB } from '../../../services/llmApi';
 import { applyProfessionToNameOrPrompt } from '../profession';
 
-declare global {
-  interface Window {
-    electron?: {
-      selectDirectory: () => Promise<string | null>;
-    };
-  }
-}
 
 export interface HeaderConfigDialogProps {
   open: boolean;
@@ -302,23 +295,6 @@ export const HeaderConfigDialog: React.FC<HeaderConfigDialogProps> = ({
                 className="flex-1 px-3 py-2 border border-gray-300 dark:border-[#404040] rounded-lg bg-white dark:bg-[#363636] text-gray-900 dark:text-[#ffffff] focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-600"
                 placeholder="输入保存路径..."
               />
-              {window.electron && (
-                <button
-                  onClick={async () => {
-                    try {
-                      const result = await window.electron!.selectDirectory();
-                      if (result) {
-                        setEditMediaOutputPath(result);
-                      }
-                    } catch (error) {
-                      console.error('Failed to select directory:', error);
-                    }
-                  }}
-                  className="px-3 py-2 text-sm font-medium text-gray-700 dark:text-[#ffffff] bg-gray-100 dark:bg-[#363636] hover:bg-gray-200 dark:hover:bg-[#4a4a4a] rounded-lg transition-colors border border-gray-300 dark:border-[#404040]"
-                >
-                  浏览...
-                </button>
-              )}
             </div>
             <p className="text-xs text-gray-500 dark:text-[#b0b0b0] mt-1">
               设置后，生成的图片、视频等多媒体内容将保存到此目录

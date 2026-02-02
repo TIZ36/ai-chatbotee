@@ -1224,3 +1224,87 @@ def delete_provider(provider_id):
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+
+@llm_bp.route('/providers/supported', methods=['GET', 'OPTIONS'])
+def get_supported_providers():
+    """
+    获取系统支持的主流供应商列表
+    返回所有系统支持的供应商类型及其默认配置
+    """
+    if request.method == 'OPTIONS':
+        response = Response(status=200)
+        response.headers.update(get_cors_headers())
+        return response
+    
+    try:
+        from services.providers.factory import PROVIDER_REGISTRY
+        
+        # 定义系统支持的供应商及其默认信息
+        supported_providers = [
+            {
+                'provider_type': 'openai',
+                'name': 'OpenAI',
+                'description': 'OpenAI GPT 系列模型（GPT-4, GPT-3.5等）',
+                'default_api_url': 'https://api.openai.com/v1/chat/completions',
+                'requires_api_key': True,
+                'icon': '🤖',
+                'color': '#10A37F',
+            },
+            {
+                'provider_type': 'deepseek',
+                'name': 'DeepSeek',
+                'description': 'DeepSeek 大语言模型',
+                'default_api_url': 'https://api.deepseek.com/v1/chat/completions',
+                'requires_api_key': True,
+                'icon': '🔮',
+                'color': '#5B68DF',
+            },
+            {
+                'provider_type': 'anthropic',
+                'name': 'Anthropic (Claude)',
+                'description': 'Anthropic Claude 系列模型',
+                'default_api_url': 'https://api.anthropic.com/v1/messages',
+                'requires_api_key': True,
+                'icon': '🧠',
+                'color': '#D4A574',
+            },
+            {
+                'provider_type': 'gemini',
+                'name': 'Google Gemini',
+                'description': 'Google Gemini 系列模型',
+                'default_api_url': 'https://generativelanguage.googleapis.com/v1beta',
+                'requires_api_key': True,
+                'icon': '✨',
+                'color': '#4285F4',
+            },
+            {
+                'provider_type': 'ollama',
+                'name': 'Ollama',
+                'description': '本地 Ollama 模型服务',
+                'default_api_url': 'http://localhost:11434',
+                'requires_api_key': False,
+                'icon': '🦙',
+                'color': '#1D4ED8',
+            },
+        ]
+        
+        # 过滤出实际支持的供应商（在PROVIDER_REGISTRY中存在的）
+        available_providers = []
+        for provider in supported_providers:
+            provider_type = provider['provider_type']
+            if provider_type in PROVIDER_REGISTRY or any(
+                alias in PROVIDER_REGISTRY for alias in [provider_type, provider_type.lower()]
+            ):
+                available_providers.append(provider)
+        
+        return jsonify({
+            'providers': available_providers,
+            'total': len(available_providers)
+        })
+        
+    except Exception as e:
+        print(f"[Get Supported Providers] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500

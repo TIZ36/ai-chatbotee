@@ -2,6 +2,8 @@
  * 会话和消息管理 API 服务
  */
 
+import type { ProcessMessage } from '../types/processMessage';
+
 export interface Session {
   session_id: string;
   title?: string;
@@ -57,38 +59,6 @@ export interface MCPDetail {
   executed_at?: string;
 }
 
-// 过程步骤（用于存储思考和MCP调用的完整历史）
-export interface ProcessStep {
-  /** 步骤类型 */
-  type: 'thinking' | 'mcp_call' | 'workflow';
-  /** 时间戳 */
-  timestamp?: number;
-  /** 思考内容（当 type === 'thinking' 时） */
-  thinking?: string;
-  /** MCP 服务器名称（当 type === 'mcp_call' 时） */
-  mcpServer?: string;
-  /** 工具名称（当 type === 'mcp_call' 时） */
-  toolName?: string;
-  /** 调用参数 */
-  arguments?: any;
-  /** 调用结果 */
-  result?: any;
-  /** 执行状态 */
-  status?: 'pending' | 'running' | 'completed' | 'error';
-  /** 执行时长（毫秒） */
-  duration?: number;
-  /** 错误信息 */
-  error?: string;
-  /** 工作流信息（当 type === 'workflow' 时） */
-  workflowInfo?: {
-    id?: string;
-    name?: string;
-    status?: 'pending' | 'running' | 'completed' | 'error';
-    result?: string;
-    config?: any;
-  };
-}
-
 // 消息扩展数据（用于存储 Gemini 等模型的特殊数据）
 export interface MessageExt {
   // Gemini 相关
@@ -104,8 +74,8 @@ export interface MessageExt {
     mimeType: string;
     data: string;
   }>;
-  // 过程步骤（思考和MCP调用的完整历史）
-  processSteps?: ProcessStep[];
+  // 过程消息（新协议）
+  processMessages?: ProcessMessage[];
 }
 
 export interface Summary {

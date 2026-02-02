@@ -242,6 +242,17 @@ export const MediaGallery: React.FC<MediaGalleryProps> = ({
             loading="lazy"
             decoding="async"
             draggable={false}
+            onError={(e) => {
+              console.error(`[MediaGallery] 图片加载失败 (index=${index}):`, {
+                type: item.type,
+                mimeType: item.mimeType,
+                dataLength: item.data?.length || 0,
+                urlLength: item.url?.length || 0,
+                src: (e.target as HTMLImageElement).src.substring(0, 100),
+              });
+              // 即使加载失败，也尝试显示占位符
+              (e.target as HTMLImageElement).style.display = 'none';
+            }}
           />
           <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
             <ZoomIn className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />

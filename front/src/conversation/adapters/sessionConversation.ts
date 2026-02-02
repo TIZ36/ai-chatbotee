@@ -63,8 +63,17 @@ function mapSessionMessage(msg: Message): UnifiedMessage {
   // Extract ext data
   const ext: any = (msg as any).ext;
   
-  // Extract processSteps from ext (if saved there)
-  const processSteps = ext?.processSteps;
+  // Extract processMessages from ext (new protocol)
+  const processMessages = ext?.processMessages || (Array.isArray(ext?.processSteps)
+    ? ext.processSteps.map((step: any) => ({
+        type: step?.type || 'unknown',
+        contentType: 'text',
+        timestamp: step?.timestamp || Date.now(),
+        title: step?.toolName || step?.workflowInfo?.name || step?.action || step?.type || '步骤',
+        content: step?.thinking || step?.error || '',
+        meta: step,
+      }))
+    : undefined);
   
   // Extract thoughtSignature from ext
   const thoughtSignature = ext?.thoughtSignature;
@@ -73,12 +82,12 @@ function mapSessionMessage(msg: Message): UnifiedMessage {
   const mcpdetail = (msg as any).mcpdetail;
   
   // Debug: Log processSteps mapping for assistant messages with MCP calls
-  if (msg.role === 'assistant' && (processSteps || mcpdetail)) {
+  if (msg.role === 'assistant' && (processMessages || mcpdetail)) {
     console.log(`[sessionConversation] 映射消息 ${msg.message_id}:`, {
       hasExt: !!ext,
-      hasProcessSteps: !!processSteps,
-      processStepsCount: processSteps?.length,
-      processStepTypes: processSteps?.map((s: any) => ({ type: s.type, hasResult: s.result !== undefined })),
+      hasProcessMessages: !!processMessages,
+      processMessagesCount: processMessages?.length,
+      processMessageTypes: processMessages?.map((s: any) => ({ type: s.type, hasContent: !!s.content })),
       hasMcpdetail: !!mcpdetail,
     });
   }
@@ -92,8 +101,9 @@ function mapSessionMessage(msg: Message): UnifiedMessage {
     thinking: msg.thinking,
     toolCalls: msg.tool_calls,
     tokenCount: (msg as any).token_count,
-    // Expose processSteps at top level for UI rendering
-    processSteps,
+    // Expose processMessages at top level for UI rendering
+    processMessages,
+    processMessages,
     // Expose thoughtSignature at top level
     thoughtSignature,
     // Expose mcpdetail at top level
@@ -109,7 +119,7 @@ function mapSessionMessage(msg: Message): UnifiedMessage {
       tool_type: (msg as any).tool_type,
       isSummary,
       isSystemPrompt,
-      processSteps,
+      processMessages,
       thoughtSignature,
     },
     ...(isSummary ? ({ isSummary: true } as any) : null),

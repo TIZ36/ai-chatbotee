@@ -16,13 +16,20 @@ export function inferImageMimeFromBase64Payload(payload: string): string | null 
   return null;
 }
 
-export function looksLikeBase64Payload(value: string, minLen: number = 256): boolean {
+export function looksLikeBase64Payload(value: string, minLen: number = 50): boolean {
   if (!value) return false;
   const trimmed = value.trim();
   if (trimmed.startsWith('data:')) return true;
-  // 太短的字符串不处理，避免误判普通路径/短 token
+  // 降低最小长度要求（二维码可能较小），但至少 50 字符
   const normalized = trimmed.replace(/\s+/g, '');
   if (normalized.length < minLen) return false;
+  // 检查是否以常见的图片 base64 开头（即使数据被截断，开头也应该正确）
+  if (normalized.startsWith('iVBORw') || // PNG
+      normalized.startsWith('/9j/') ||   // JPEG
+      normalized.startsWith('R0lGOD') ||  // GIF
+      normalized.startsWith('UklGR')) {  // WebP
+    return true;
+  }
   return BASE64_RE.test(normalized);
 }
 

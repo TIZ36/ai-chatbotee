@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
-import { Brain, Plug, Workflow as WorkflowIcon, Settings, Code, MessageCircle, Globe, Sparkles, Bot, Users, BookOpen, Shield, Activity, Plus, FolderOpen, Image as ImageIcon } from 'lucide-react';
+import { Brain, Plug, Settings, MessageCircle, Globe, Sparkles, Bot, Users, BookOpen, Plus, FolderOpen, Image as ImageIcon, Palette, Check, Type } from 'lucide-react';
 import appLogoDark from '../assets/app_logo_dark.png';
 import appLogoLight from '../assets/app_logo_light.png';
 import { Button } from './components/ui/Button';
@@ -18,19 +18,20 @@ import {
 import SettingsPanel from './components/SettingsPanel';
 import LLMConfigPanel from './components/LLMConfig';
 import MCPConfig from './components/MCPConfig';
-import WorkflowEditor from './components/WorkflowEditor';
 import Workflow from './components/Workflow';
 import CrawlerConfigPage from './components/CrawlerConfigPage';
-import UserAccessPage from './components/UserAccessPage';
 import AgentsPage from './components/AgentsPage';
 // 新架构组件
-import SystemStatusPanel from './components/SystemStatusPanel';
 import StatusBar from './components/StatusBar';
-import { getAgents, getMemories, getSessions, createSession, deleteSession, type Session } from './services/sessionApi';
-import { getRoundTables, type RoundTable } from './services/roundTableApi';
+import { getAgents, getSessions, createSession, deleteSession, type Session } from './services/sessionApi';
 import { toast } from './components/ui/use-toast';
 import { ConfirmDialog } from './components/ui/ConfirmDialog';
-import MediaLibraryPage from './components/MediaLibraryPage';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from './components/ui/DropdownMenu';
 
 // 导航项组件 - 带动画和tooltip
 interface NavItemProps {
@@ -75,11 +76,18 @@ const NavItem: React.FC<NavItemProps> = ({ to, icon, title, isActive }) => {
   );
 };
 
+export type SkinId = 'default' | 'niho';
+
+export type FontId = 'default' | 'pixel' | 'terminal' | 'rounded' | 'dotgothic' | 'silkscreen';
+
 interface Settings {
   theme: 'light' | 'dark' | 'system';
+  skin: SkinId;
+  font: FontId;
   autoRefresh: boolean;
   refreshInterval: number;
   videoColumns: number;
+  enableToolCalling: boolean;
 }
 
 const App: React.FC = () => {
@@ -96,51 +104,21 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('settings');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        return { theme: 'system', skin: 'default', font: 'default', autoRefresh: false, refreshInterval: 60, videoColumns: 4, enableToolCalling: true, ...parsed };
       } catch {
-        return { theme: 'system', autoRefresh: false, refreshInterval: 60, videoColumns: 4 };
+        return { theme: 'system', skin: 'default', font: 'default', autoRefresh: false, refreshInterval: 60, videoColumns: 4, enableToolCalling: true };
       }
     }
-    return { theme: 'system', autoRefresh: false, refreshInterval: 60, videoColumns: 4 };
+    return { theme: 'system', skin: 'default', font: 'default', autoRefresh: false, refreshInterval: 60, videoColumns: 4, enableToolCalling: true };
   });
-  const [isAdmin, setIsAdmin] = useState(false);
 
   // 保存设置
   useEffect(() => {
     localStorage.setItem('settings', JSON.stringify(settings));
   }, [settings]);
 
-  // 检查用户权限（是否是管理员）
-  useEffect(() => {
-    const checkAdmin = async () => {
-      try {
-        const { getUserAccess } = await import('./services/userAccessApi');
-        const user = await getUserAccess();
-        setIsAdmin(user.is_owner || user.is_admin || false);
-      } catch (error) {
-        console.error('[App] Failed to check admin status:', error);
-        setIsAdmin(false);
-      }
-    };
-    checkAdmin();
-  }, []);
 
-  // Electron 环境：加载后端地址配置
-  useEffect(() => {
-    const loadBackendUrl = async () => {
-      if (window.electronAPI?.getBackendUrl) {
-        try {
-          const backendUrl = await window.electronAPI.getBackendUrl();
-          // 缓存到 window 对象，供 getBackendUrl 使用
-          (window as any).__cachedBackendUrl = backendUrl;
-          console.log('[App] Loaded backend URL from Electron config:', backendUrl);
-        } catch (error) {
-          console.error('[App] Failed to load backend URL from Electron:', error);
-        }
-      }
-    };
-    loadBackendUrl();
-  }, []);
 
   // 保存选中的会话ID（用于重启后恢复）
   useEffect(() => {
@@ -159,18 +137,62 @@ const App: React.FC = () => {
     return root.classList.contains('dark');
   });
 
+  // 应用主题（light/dark/niho）
   useEffect(() => {
     const root = window.document.documentElement;
-    const isDark = settings.theme === 'dark' || 
-      (settings.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    const mobile = window.matchMedia('(max-width: 767px)').matches;
     
+    // 获取当前主题（兼容旧的 theme + skin 组合）
+    const currentTheme = settings.theme === 'niho' || settings.skin === 'niho' 
+      ? 'niho' 
+      : settings.theme === 'dark' 
+      ? 'dark' 
+      : 'light';
+    
+    // 移动端强制使用霓虹主题
+    const effectiveTheme = mobile ? 'niho' : currentTheme;
+    
+    root.setAttribute('data-skin', effectiveTheme === 'niho' ? 'niho' : 'default');
+    root.setAttribute('data-mobile', mobile ? 'true' : 'false');
+
+    const isNiho = effectiveTheme === 'niho';
+    const isDark = isNiho || effectiveTheme === 'dark';
+
     setIsDarkMode(isDark);
     if (isDark) {
       root.classList.add('dark');
     } else {
       root.classList.remove('dark');
     }
-  }, [settings.theme]);
+  }, [settings.theme, settings.skin]);
+
+  // 同步 data-mobile 与移动端强制 niho（resize 时）
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const sync = () => {
+      const root = document.documentElement;
+      const mobile = mq.matches;
+      root.setAttribute('data-mobile', mobile ? 'true' : 'false');
+      
+      // 获取当前主题
+      const currentTheme = settings.theme === 'niho' || settings.skin === 'niho' 
+        ? 'niho' 
+        : settings.theme === 'dark' 
+        ? 'dark' 
+        : 'light';
+      const effectiveTheme = mobile ? 'niho' : currentTheme;
+      
+      root.setAttribute('data-skin', effectiveTheme === 'niho' ? 'niho' : 'default');
+    };
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, [settings.theme, settings.skin]);
+
+  // 应用字体
+  useEffect(() => {
+    document.documentElement.setAttribute('data-font', settings.font);
+  }, [settings.font]);
 
   const updateSettings = (newSettings: Partial<Settings>) => {
     setSettings(prev => ({ ...prev, ...newSettings }));
@@ -200,14 +222,14 @@ const App: React.FC = () => {
   const [isCreatingTopic, setIsCreatingTopic] = useState(false);
   const [deleteSessionTarget, setDeleteSessionTarget] = useState<Session | null>(null);
 
-  // 媒体库已升级为主页面（/media-library），不再使用弹窗
 
   const loadSwitcherData = async () => {
     try {
       setIsLoadingSwitcher(true);
-      const [agents, topics] = await Promise.all([getAgents(), getMemories()]);
+      const [agents, sessions] = await Promise.all([getAgents(), getSessions()]);
       setSwitcherAgents(agents || []);
-      setSwitcherTopics(topics || []);
+      const topics = (sessions || []).filter(s => s.session_type === 'topic_general');
+      setSwitcherTopics(topics);
     } catch (e) {
       setSwitcherAgents([]);
       setSwitcherTopics([]);
@@ -261,7 +283,7 @@ const App: React.FC = () => {
   const handleCreateTopic = async () => {
     try {
       setIsCreatingTopic(true);
-      const newSession = await createSession(undefined, undefined, 'memory');
+      const newSession = await createSession(undefined, undefined, 'topic_general');
       setShowConversationSwitcher(false);
       handleSelectSession(newSession.session_id);
       toast({
@@ -281,27 +303,43 @@ const App: React.FC = () => {
     }
   };
 
-  // 左侧边栏显示状态
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  // 左侧边栏显示状态（移动端默认收起）
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
+  );
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
+  );
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const onChange = () => {
+      setIsMobile(mq.matches);
+      if (mq.matches) setIsSidebarCollapsed(true);
+    };
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
 
   return (
-    <div className="h-screen bg-gradient-to-br from-gray-100 via-gray-50 to-gray-100 dark:from-[#0f0f0f] dark:via-[#141414] dark:to-[#0f0f0f] flex flex-col transition-colors duration-200 overflow-hidden" style={{ paddingBottom: '28px' }}>
+    <div className={`app-root-bg h-screen bg-gradient-to-br from-gray-100 via-gray-50 to-gray-100 dark:from-[#0f0f0f] dark:via-[#141414] dark:to-[#0f0f0f] flex flex-col transition-colors duration-200 overflow-hidden ${isMobile ? 'mobile-no-status-bar' : ''}`}>
       {/* macOS 专用小标题栏 - 仅用于红黄绿按钮拖拽区域 */}
-      {isMac && (
+      
+      <div className="flex flex-1 min-h-0 overflow-hidden relative">
+      {/* 移动端侧栏遮罩 */}
+      {isMobile && !isSidebarCollapsed && (
         <div
-          className="w-full h-7 flex-shrink-0 app-drag glass-header"
-          onDoubleClick={() => {
-            window.electronAPI?.toggleMaximize?.();
-          }}
+          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          aria-hidden
+          onClick={() => setIsSidebarCollapsed(true)}
         />
       )}
-      
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-      {/* 左侧导航栏 - 毛玻璃效果 */}
+      {/* 左侧导航栏 - 毛玻璃效果；移动端为浮层 */}
         <nav 
           className={`glass-sidebar flex flex-col items-center flex-shrink-0 z-50 pt-2 transition-all duration-300 ease-in-out overflow-hidden ${
             isSidebarCollapsed ? 'w-0 border-r-0' : 'w-[48px]'
-          }`}
+          } ${isMobile && !isSidebarCollapsed ? 'fixed left-0 top-0 bottom-0 shadow-xl' : ''}`}
+          style={isMobile && !isSidebarCollapsed ? { paddingTop: 'calc(0.5rem + var(--safe-area-inset-top))' } : undefined}
         >
 
         {/* 上方导航：聊天、MCP、Workflow */}
@@ -313,12 +351,6 @@ const App: React.FC = () => {
             isActive={location.pathname === '/'}
           />
 
-          <NavItem
-            to="/media-library"
-            icon={<ImageIcon className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-            title="媒体库"
-            isActive={location.pathname === '/media-library'}
-          />
 
           <NavItem
             to="/mcp-config"
@@ -327,12 +359,6 @@ const App: React.FC = () => {
             isActive={location.pathname === '/mcp-config'}
           />
 
-          <NavItem
-            to="/workflow-editor"
-            icon={<WorkflowIcon className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-            title="工作流编辑器"
-            isActive={location.pathname === '/workflow-editor'}
-          />
 
           <NavItem
             to="/agents"
@@ -371,45 +397,6 @@ const App: React.FC = () => {
             isActive={location.pathname === '/crawler-config'}
           />
 
-          {/* 用户访问管理 - 仅管理员可见 */}
-          {isAdmin && (
-            <NavItem
-              to="/user-access"
-              icon={<Shield className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-              title="用户访问管理"
-              isActive={location.pathname === '/user-access'}
-            />
-          )}
-
-          <NavItem
-            to="/system-status"
-            icon={<Activity className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-            title="系统状态"
-            isActive={location.pathname === '/system-status'}
-          />
-
-          {/* DevTools 按钮 */}
-          <div className="relative group">
-            <button
-              onClick={async () => {
-                if (window.electronAPI) {
-                  try {
-                    await window.electronAPI.toggleDevTools();
-                  } catch (error) {
-                    console.error('Failed to toggle dev tools:', error);
-                  }
-                } else {
-                  alert('在浏览器环境中，请使用以下快捷键打开开发者工具：\n\nWindows/Linux: F12 或 Ctrl+Shift+I\nMac: Cmd+Option+I');
-                }
-              }}
-              className="w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-200 ease-out text-gray-500 dark:text-[#a0a0a0] hover:bg-white/50 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white"
-              title="开发者工具 (F12)"
-            >
-              <div className="transition-transform duration-200 group-hover:scale-105">
-                <Code className="w-4 h-4" strokeWidth={1.5} />
-              </div>
-            </button>
-          </div>
         </div>
       </nav>
 
@@ -417,12 +404,13 @@ const App: React.FC = () => {
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
         {/* Header - Logo + 模式切换（仅聊天页显示切换按钮）- 毛玻璃效果 */}
         <header 
-          className="h-10 flex-shrink-0 glass-header flex items-center justify-between px-3"
+          className="h-10 flex-shrink-0 glass-header flex items-center justify-between px-3 min-h-[44px] md:min-h-0"
+          style={isMobile ? { paddingTop: 'max(0.25rem, var(--safe-area-inset-top))', paddingLeft: 'calc(0.75rem + var(--safe-area-inset-left))', paddingRight: 'calc(0.75rem + var(--safe-area-inset-right))' } : undefined}
         >
-          {/* 左侧 Logo */}
+          {/* 左侧 Logo - 移动端满足 44px 触摸目标 */}
           <div className="flex items-center gap-2">
             <div
-              className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity"
+              className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity touch-target min-h-[44px] min-w-[44px] -m-2 p-2 md:min-h-0 md:min-w-0 md:m-0 md:p-0"
               onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
               title="点击隐藏/显示侧边栏"
             >
@@ -435,8 +423,91 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          {/* 右侧切换对话按钮 */}
+          {/* 右侧：字体 + 皮肤（仅桌面端）+ 切换对话按钮 */}
           <div className="flex items-center gap-2">
+            {!isMobile && (
+              <>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs glass-toolbar gap-1.5"
+                      title="切换字体"
+                    >
+                      <Type className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline max-w-[4rem] truncate">
+                        {settings.font === 'default' ? '默认' : settings.font === 'pixel' ? '像素' : settings.font === 'terminal' ? '终端' : settings.font === 'rounded' ? '圆体' : settings.font === 'dotgothic' ? '点阵' : '像素屏'}
+                      </span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="min-w-[160px] max-h-[70vh] overflow-y-auto">
+                    <DropdownMenuItem onClick={() => updateSettings({ font: 'default' })} className="flex items-center justify-between">
+                      <span>默认 (Inter)</span>
+                      {settings.font === 'default' && <Check className="w-4 h-4" />}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => updateSettings({ font: 'pixel' })} className="flex items-center justify-between">
+                      <span>像素 (Press Start 2P)</span>
+                      {settings.font === 'pixel' && <Check className="w-4 h-4" />}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => updateSettings({ font: 'terminal' })} className="flex items-center justify-between">
+                      <span>终端 (VT323)</span>
+                      {settings.font === 'terminal' && <Check className="w-4 h-4" />}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => updateSettings({ font: 'rounded' })} className="flex items-center justify-between">
+                      <span>圆体 (Comfortaa)</span>
+                      {settings.font === 'rounded' && <Check className="w-4 h-4" />}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => updateSettings({ font: 'dotgothic' })} className="flex items-center justify-between">
+                      <span>点阵 (DotGothic16)</span>
+                      {settings.font === 'dotgothic' && <Check className="w-4 h-4" />}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => updateSettings({ font: 'silkscreen' })} className="flex items-center justify-between">
+                      <span>像素屏 (Silkscreen)</span>
+                      {settings.font === 'silkscreen' && <Check className="w-4 h-4" />}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs glass-toolbar gap-1.5"
+                      title="切换主题"
+                    >
+                      <Palette className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">
+                        {settings.theme === 'niho' || settings.skin === 'niho' ? '霓虹' : settings.theme === 'dark' ? '深色' : '浅色'}
+                      </span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="min-w-[140px]">
+                    <DropdownMenuItem
+                      onClick={() => updateSettings({ theme: 'light' as any, skin: undefined })}
+                      className="flex items-center justify-between"
+                    >
+                      <span>浅色</span>
+                      {(settings.theme === 'light' || (!settings.theme && !settings.skin)) && <Check className="w-4 h-4" />}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => updateSettings({ theme: 'dark' as any, skin: undefined })}
+                      className="flex items-center justify-between"
+                    >
+                      <span>深色</span>
+                      {settings.theme === 'dark' && <Check className="w-4 h-4" />}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => updateSettings({ theme: 'niho' as any, skin: undefined })}
+                      className="flex items-center justify-between"
+                    >
+                      <span>霓虹</span>
+                      {(settings.theme === 'niho' || settings.skin === 'niho') && <Check className="w-4 h-4" />}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </>
+            )}
             {isChatPage && (
               <Button
                 variant="ghost"
@@ -589,7 +660,7 @@ const App: React.FC = () => {
                   </div>
                 </div>
 
-                {/* 话题（记忆体） */}
+                {/* 话题 */}
                 <div className="w-full">
                   <div className="text-xs font-semibold text-gray-700 dark:text-gray-200 px-1 mb-1 flex items-center gap-1.5">
                     <FolderOpen className="w-3.5 h-3.5" />
@@ -655,6 +726,8 @@ const App: React.FC = () => {
                   <Workflow
                     sessionId={selectedSessionId}
                     onSelectSession={handleSelectSession}
+                    enableToolCalling={settings.enableToolCalling}
+                    onToggleToolCalling={(enabled) => updateSettings({ enableToolCalling: enabled })}
                   />
               </div>
             </div>
@@ -673,12 +746,12 @@ const App: React.FC = () => {
                         <Workflow
                           sessionId={selectedSessionId}
                           onSelectSession={handleSelectSession}
+                          enableToolCalling={settings.enableToolCalling}
+                          onToggleToolCalling={(enabled) => updateSettings({ enableToolCalling: enabled })}
                         />
                       }
                     />
 
-                    {/* 工作流编辑器 */}
-                    <Route path="/workflow-editor" element={<WorkflowEditor />} />
 
 
                     {/* LLM配置页面 */}
@@ -690,9 +763,6 @@ const App: React.FC = () => {
                     {/* 爬虫配置页面 */}
                     <Route path="/crawler-config" element={<CrawlerConfigPage />} />
 
-                    {/* 系统状态页面 */}
-                    <Route path="/system-status" element={<SystemStatusPanel />} />
-
                     {/* 设置页面 */}
                     <Route path="/settings" element={
                       <SettingsPanel
@@ -701,14 +771,10 @@ const App: React.FC = () => {
                       />
                     } />
 
-                    {/* 用户访问管理页面 */}
-                    <Route path="/user-access" element={<UserAccessPage />} />
 
                     {/* 智能体管理页面 */}
                     <Route path="/agents" element={<AgentsPage />} />
 
-                    {/* 媒体库 */}
-                    <Route path="/media-library" element={<MediaLibraryPage />} />
                   </Routes>
                 </div>
               </div>
@@ -731,8 +797,8 @@ const App: React.FC = () => {
         onConfirm={performDeleteSession}
       />
 
-      {/* 底部状态栏 */}
-      <StatusBar />
+      {/* 底部状态栏 - 移动端不显示 */}
+      {!isMobile && <StatusBar />}
     </div>
   );
 };

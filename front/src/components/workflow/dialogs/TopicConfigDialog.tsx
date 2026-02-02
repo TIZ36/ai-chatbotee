@@ -5,13 +5,13 @@
 
 import React, { useRef, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Bot, MessageCircle, Lightbulb, Search, Plus, Trash2, Users } from 'lucide-react';
+import { X, Bot, MessageCircle, Lightbulb, Plus, Trash2, Users } from 'lucide-react';
 import { Button } from '../../ui/Button';
 import { Switch } from '../../ui/Switch';
 import type { Session } from '../../../services/sessionApi';
 import { getAgents } from '../../../services/sessionApi';
 
-export type TopicDisplayType = 'chat' | 'brainstorm' | 'research';
+export type TopicDisplayType = 'chat' | 'brainstorm';
 
 export interface TopicConfigDialogProps {
   open: boolean;
@@ -21,7 +21,7 @@ export interface TopicConfigDialogProps {
   topicName: string;
   topicAvatar: string | null;
   topicDisplayType: TopicDisplayType;
-  sessionType?: string; // session_type: 'topic_general' | 'agent' | 'memory' 等
+  sessionType?: string; // session_type: 'topic_general' | 'agent' 等
   participants: Array<{
     participant_id: string;
     participant_type: 'user' | 'agent';
@@ -54,12 +54,6 @@ const DISPLAY_TYPE_OPTIONS: Array<{ value: TopicDisplayType; label: string; icon
     label: '头脑风暴', 
     icon: <Lightbulb className="w-5 h-5" />,
     description: '多人协作模式，适合创意讨论'
-  },
-  { 
-    value: 'research', 
-    label: '研究', 
-    icon: <Search className="w-5 h-5" />,
-    description: '深度分析模式，适合研究探索'
   },
 ];
 

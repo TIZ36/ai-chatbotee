@@ -5,7 +5,6 @@
 
 from flask import request
 from typing import Optional
-import pymysql
 
 
 def get_client_ip() -> str:
@@ -34,7 +33,7 @@ def get_client_ip() -> str:
 
 def is_owner_ip(ip: str, config: dict = None, get_mysql_connection=None) -> bool:
     """
-    检查IP是否为软件拥有者（包括配置的拥有者IP和管理员）
+    检查IP是否为软件拥有者（仅配置IP/本机）
     
     Args:
         ip: 要检查的 IP 地址
@@ -55,23 +54,6 @@ def is_owner_ip(ip: str, config: dict = None, get_mysql_connection=None) -> bool
     # 2. 检查本机访问（127.0.0.1, ::1, localhost）
     if ip in ['127.0.0.1', '::1', 'localhost']:
         return True
-    
-    # 3. 检查数据库中是否为管理员
-    if get_mysql_connection:
-        try:
-            conn = get_mysql_connection()
-            if conn:
-                cursor = conn.cursor(pymysql.cursors.DictCursor)
-                cursor.execute("""
-                    SELECT is_admin FROM user_access WHERE ip_address = %s
-                """, (ip,))
-                user = cursor.fetchone()
-                cursor.close()
-                conn.close()
-                if user and user.get('is_admin'):
-                    return True
-        except Exception as e:
-            print(f"[Owner Check] Error checking admin status: {e}")
     
     return False
 

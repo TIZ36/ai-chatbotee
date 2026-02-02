@@ -14,7 +14,6 @@
 
 - React + TypeScript
 - Vite
-- Electron
 - Flask (后端)
 - MySQL (数据库)
 - MCP SDK

@@ -140,3 +140,8 @@ export interface Message {
   toolCalls?: Array<{ name: string; arguments: any; result?: any }>;
 }
 
+// Agent Response 类型（新的四大分类）
+export * from './agentResponse';
+export * from './processMessage';
+export * from './processSteps';
+

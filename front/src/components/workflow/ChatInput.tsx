@@ -17,6 +17,9 @@ import {
   FileImage,
   Loader2,
 } from 'lucide-react';
+import { Textarea } from '../ui/Textarea';
+import { Label } from '../ui/Label';
+import { Button } from '../ui/Button';
 import { calculateCursorPosition } from './utils';
 
 export interface MediaAttachment {
@@ -230,22 +233,26 @@ const ChatInputInner: React.FC<ChatInputProps> = ({
         {/* Media buttons */}
         {onAddMedia && (
           <div className="flex items-center gap-1 pb-2">
-            <label className="p-1.5 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 cursor-pointer rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+            <Label
+              htmlFor="chat-media-input"
+              className="p-1.5 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 cursor-pointer rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            >
               <FileImage className="w-4 h-4" />
               <input
+                id="chat-media-input"
                 type="file"
                 accept="image/*"
                 multiple
                 className="hidden"
                 onChange={(e) => handleMediaInputChange(e, 'image')}
               />
-            </label>
+            </Label>
           </div>
         )}
         
         {/* Textarea */}
         <div className="flex-1 relative">
-          <textarea
+          <Textarea
             ref={inputRef}
             value={value}
             onChange={handleChange}
@@ -258,7 +265,7 @@ const ChatInputInner: React.FC<ChatInputProps> = ({
             }}
             placeholder={placeholder}
             disabled={disabled}
-            className="w-full resize-none rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full resize-none text-sm"
             style={{ minHeight: '40px', maxHeight: '200px' }}
             rows={1}
           />
@@ -267,22 +274,26 @@ const ChatInputInner: React.FC<ChatInputProps> = ({
         {/* Send/Stop button */}
         <div className="pb-2">
           {isLoading ? (
-            <button
+            <Button
               onClick={onStop}
-              className="p-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors flex items-center justify-center"
+              variant="destructive"
+              size="icon"
+              className="p-2"
               title="停止生成"
             >
               <StopCircle className="w-4 h-4" />
-            </button>
+            </Button>
           ) : (
-            <button
+            <Button
               onClick={onSend}
+              variant="primary"
+              size="icon"
               disabled={disabled || (!value.trim() && attachedMedia.length === 0)}
-              className="p-2 bg-primary-500 hover:bg-primary-600 disabled:bg-gray-300 dark:disabled:bg-gray-700 text-white rounded-lg transition-colors flex items-center justify-center disabled:cursor-not-allowed"
+              className="p-2"
               title="发送消息"
             >
               <Send className="w-4 h-4" />
-            </button>
+            </Button>
           )}
         </div>
       </div>
