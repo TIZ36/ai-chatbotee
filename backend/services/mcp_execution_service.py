@@ -789,24 +789,32 @@ def execute_mcp_with_llm(
         """返回当前时间戳字符串"""
         return datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
     
-    # 发送执行日志到前端
+    # 结构化执行日志列表（用于返回给调用方持久化）
+    structured_logs: List[Dict[str, Any]] = []
+    
+    # 发送执行日志到前端（同时添加到 structured_logs 用于持久化）
     def _send_log(message: str, log_type: str = 'info', detail: str = None, duration: int = None):
-        """发送执行日志到前端"""
+        """发送执行日志到前端，同时记录到 structured_logs"""
+        import time
+        log_data = {
+            'id': f"mcp-log-{int(time.time() * 1000)}-{id(message)}",
+            'timestamp': int(time.time() * 1000),
+            'log_type': log_type,
+            'message': message,
+        }
+        if detail:
+            log_data['detail'] = detail
+        if duration is not None:
+            log_data['duration'] = duration
+        
+        # 添加到结构化日志列表（用于持久化）
+        structured_logs.append(log_data)
+        
+        # 实时发送到前端
         if not topic_id:
             return
         try:
             from services.topic_service import get_topic_service
-            import time
-            log_data = {
-                'id': f"mcp-log-{int(time.time() * 1000)}-{id(message)}",
-                'timestamp': int(time.time() * 1000),
-                'log_type': log_type,
-                'message': message,
-            }
-            if detail:
-                log_data['detail'] = detail
-            if duration is not None:
-                log_data['duration'] = duration
             get_topic_service()._publish_event(topic_id, 'execution_log', log_data)
         except Exception as e:
             print(f"{YELLOW}[MCP EXEC] 发送执行日志失败: {e}{RESET}")
@@ -1205,7 +1213,16 @@ def execute_mcp_with_llm(
 
 你是一个工具选择助手。根据用户需求，从可用工具中选择最合适的工具。
 
-### ⚠️ 重要：返回格式要求
+### ⚠️⚠️⚠️ 最重要规则：只执行【当前请求】
+
+**【对话历史】仅供参考背景，绝对不要执行历史中的请求！**
+**你只需要为【当前请求】选择合适的工具。**
+
+例如：
+- 如果历史中有"发布笔记"，但当前请求是"检查登录状态"，你应该选择检查登录的工具，而不是发布工具
+- 如果当前请求是简单查询，即使历史中有复杂任务，也只执行当前的简单查询
+
+### ⚠️ 返回格式要求
 
 **你只需要选择工具名称，不要生成参数。参数会由系统自动生成。**
 
@@ -1226,12 +1243,13 @@ def execute_mcp_with_llm(
 ```
 
 **规则：**
-1. 只返回工具名称列表，不要包含参数
-2. 工具名称必须完全匹配可用工具列表中的名称
-3. 最多选择 3 个工具
-4. 按执行顺序排列
-5. intent 字段简短描述用户意图（10字以内）
-6. 不要添加任何解释文字或markdown代码块""")
+1. 🔴 只为【当前请求】选择工具，忽略【对话历史】中的任务
+2. 只返回工具名称列表，不要包含参数
+3. 工具名称必须完全匹配可用工具列表中的名称
+4. 最多选择 3 个工具
+5. 按执行顺序排列
+6. intent 字段简短描述【当前请求】的意图（10字以内）
+7. 不要添加任何解释文字或markdown代码块""")
             
             system_prompt = "\n".join(system_prompt_parts)
             
@@ -1247,7 +1265,9 @@ def execute_mcp_with_llm(
             # 添加完整的工具列表
             user_message_parts.append(f"\n\n## 可用工具列表（共 {len(tools)} 个）\n")
             user_message_parts.append(tools_description)
-            user_message_parts.append("\n\n请根据上述请求选择最合适的工具并返回 JSON。")
+            
+            # 强调只执行当前请求
+            user_message_parts.append("\n\n---\n⚠️ 重要提醒：请只为【当前请求】选择工具，【对话历史】仅供参考，不要执行历史中的任务。\n请返回 JSON。")
             
             user_input_for_llm = "".join(user_message_parts)
             
@@ -1363,18 +1383,19 @@ def execute_mcp_with_llm(
                 
                 # 构建消息（简化版，不需要复杂的 JSON 指令）
                 native_messages = []
+                tool_calling_prompt = "\n\n你可以使用工具来帮助完成用户的请求。重要：只执行用户当前的请求，不要执行之前对话中提到的任务。"
                 if agent_system_prompt:
                     native_messages.append({
                         "role": "system",
-                        "content": agent_system_prompt + "\n\n你可以使用工具来帮助完成用户的请求。"
+                        "content": agent_system_prompt + tool_calling_prompt
                     })
                 else:
                     native_messages.append({
                         "role": "system", 
-                        "content": "你是一个智能助手，可以使用工具来帮助完成用户的请求。"
+                        "content": "你是一个智能助手。" + tool_calling_prompt
                     })
                 
-                # 从 effective_input 提取用户请求
+                # 从 effective_input 提取用户的【当前请求】（忽略历史）
                 actual_request = extract_user_request_from_input(effective_input)
                 if not actual_request:
                     actual_request = effective_input
@@ -1415,6 +1436,19 @@ def execute_mcp_with_llm(
                         MCPToolCall(tool_name=name, arguments=args)
                         for name, args in parsed_calls
                     ]
+                    
+                    # 📋 打印每个工具的参数列表，方便调试
+                    for name, args in parsed_calls:
+                        args_preview = json.dumps(args, ensure_ascii=False, indent=2)
+                        if len(args_preview) > 800:
+                            args_preview = args_preview[:800] + "\n... (参数过长，已截断)"
+                        print(f"{CYAN}[MCP EXEC] 工具 {name} 参数:\n{args_preview}{RESET}")
+                        
+                        # 发送到前端执行日志
+                        args_summary = ", ".join([f"{k}={repr(v)[:50]}" for k, v in list(args.items())[:5]])
+                        if len(args) > 5:
+                            args_summary += f", ... (+{len(args)-5} more)"
+                        _send_log(f"调用工具: {name}", log_type='tool', detail=f"参数: {args_summary}" if args_summary else "无参数")
                     
                     def _call_mcp_wrapper(tool_name: str, tool_args: Dict[str, Any]) -> Dict[str, Any]:
                         """MCP 调用包装器"""
@@ -1940,7 +1974,19 @@ def execute_mcp_with_llm(
                     try:
                         # 使用 mcp_common_logic 直接调用工具（不传递 log 以减少输出）
                         print(f"{BLUE}[MCP EXEC] [{_ts()}] MCP 工具调用开始: {tool_name_str}{RESET}")
-                        _send_log(f"正在调用工具: {tool_name_str}...", log_type='tool')
+                        
+                        # 📋 打印完整参数列表，方便调试
+                        args_preview = json.dumps(tool_args, ensure_ascii=False, indent=2)
+                        if len(args_preview) > 1000:
+                            args_preview = args_preview[:1000] + "\n... (参数过长，已截断)"
+                        print(f"{BLUE}[MCP EXEC] 工具参数:\n{args_preview}{RESET}")
+                        
+                        # 发送到前端执行日志（包含参数摘要）
+                        args_summary = ", ".join([f"{k}={repr(v)[:50]}" for k, v in list(tool_args.items())[:5]])
+                        if len(tool_args) > 5:
+                            args_summary += f", ... (+{len(tool_args)-5} more)"
+                        _send_log(f"调用工具: {tool_name_str}", log_type='tool', detail=f"参数: {args_summary}" if args_summary else "无参数")
+                        
                         mcp_call_start = datetime.datetime.now()
                         tool_result = call_mcp_tool(server_url, headers, tool_name_str, tool_args, None)
                         mcp_call_duration = int((datetime.datetime.now() - mcp_call_start).total_seconds() * 1000)
@@ -2207,6 +2253,7 @@ def execute_mcp_with_llm(
                 "raw_result": raw_result,
                 "raw_result_compact": _truncate_deep(raw_result),
                 "logs": logs,
+                "structured_logs": structured_logs,  # 结构化日志（含参数详情，用于持久化）
                 "media": all_extracted_media if all_extracted_media else None,  # 提取的所有媒体数据
             }
 
@@ -2216,5 +2263,5 @@ def execute_mcp_with_llm(
             conn.close()
 
     except Exception as e:
-        return {"error": str(e), "logs": logs}
+        return {"error": str(e), "logs": logs, "structured_logs": structured_logs}
 

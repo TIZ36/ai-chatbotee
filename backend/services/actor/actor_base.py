@@ -724,16 +724,27 @@ class ActorBase(ABC):
     
     def _get_action_description(self, action: 'Action') -> str:
         """获取行动的描述文本"""
-        if action.type == ActionType.MCP or action.type == 'mcp':
-            return f"MCP {action.server_id}:{action.mcp_tool_name}"
-        elif action.type == ActionType.LLM or action.type == 'llm':
+        # 兼容 ActionStep (action_type) 和旧 Action (type)
+        action_type = getattr(action, 'action_type', None) or getattr(action, 'type', None)
+        
+        # 如果是枚举类型，获取其值
+        if hasattr(action_type, 'value'):
+            action_type = action_type.value
+        
+        if action_type in ('ag_use_mcp', 'mcp', ActionType.MCP if hasattr(ActionType, 'MCP') else None):
+            server_id = getattr(action, 'mcp_server_id', None) or getattr(action, 'server_id', '')
+            tool_name = getattr(action, 'mcp_tool_name', '')
+            return f"MCP {server_id}:{tool_name}"
+        elif action_type in ('ag_self_gen', 'llm', ActionType.LLM if hasattr(ActionType, 'LLM') else None):
             return "调用 LLM"
-        elif action.type == 'reply':
+        elif action_type == 'reply':
             return "生成回复"
         elif hasattr(action, 'delegate_to') and action.delegate_to:
             return f"委托给 {action.delegate_to}"
+        elif hasattr(action, 'target_agent_id') and action.target_agent_id:
+            return f"委托给 {action.target_agent_id}"
         else:
-            return str(action.type)
+            return str(action_type or 'unknown')
     
     def process_message_v2(
         self,
@@ -3134,7 +3145,7 @@ class ActorBase(ABC):
             ctx,
             f"开始调用 MCP 服务: {mcp_server_name}",
             log_type='tool',
-            detail=f"工具: {action.mcp_tool_name or 'auto'}",
+            detail=f"工具: {step.mcp_tool_name or 'auto'}",
         )
         
         print(f"{GREEN}[MCP DEBUG] 开始 MCP 调用{RESET}")
@@ -3255,8 +3266,8 @@ class ActorBase(ABC):
                 llm_config_id=final_llm_config_id,
                 agent_system_prompt=agent_persona,  # 传递 Agent 人设
                 original_message=ctx.original_message,  # 传递原始消息（用于提取图片等上下文）
-                forced_tool_name=action.mcp_tool_name if action.mcp_tool_name and action.mcp_tool_name != 'auto' else None,
-                forced_tool_args=action.params if isinstance(action.params, dict) else {},
+                forced_tool_name=step.mcp_tool_name if step.mcp_tool_name and step.mcp_tool_name != 'auto' else None,
+                forced_tool_args=step.params if isinstance(step.params, dict) else {},
                 enable_tool_calling=enable_tool_calling,
                 topic_id=ctx.topic_id or self.topic_id,  # 传递 topic_id 以发送执行日志到前端
             )
@@ -3331,7 +3342,7 @@ class ActorBase(ABC):
                     action_type='mcp',
                     error=detailed_error,
                     duration_ms=duration_ms,
-                    action=action,
+                    step=step,
                 )
             
             # 提取结果文本
@@ -3396,13 +3407,25 @@ class ActorBase(ABC):
             if tool_text:
                 ctx.append_tool_result(f"MCP:{server_id}", tool_text)
             
+            # 合并 MCP 执行的结构化日志到 ctx.execution_logs（用于持久化）
+            mcp_structured_logs = result.get('structured_logs', [])
+            if mcp_structured_logs:
+                for log_entry in mcp_structured_logs:
+                    ctx.add_execution_log(
+                        message=log_entry.get('message', ''),
+                        log_type=log_entry.get('log_type', 'info'),
+                        detail=log_entry.get('detail'),
+                        duration=log_entry.get('duration'),
+                    )
+                print(f"{CYAN}[MCP DEBUG] 合并了 {len(mcp_structured_logs)} 条结构化日志到 ctx.execution_logs{RESET}")
+            
             print(f"{GREEN}{BOLD}[MCP DEBUG] ========== MCP 调用成功 =========={RESET}")
             return ActionResult.success_result(
                 action_type='mcp',
                 data=result,
                 text_result=tool_text,
                 duration_ms=duration_ms,
-                action=action,
+                step=step,
             )
             
         except Exception as e:
@@ -3417,7 +3440,7 @@ class ActorBase(ABC):
                 action_type='mcp',
                 error=str(e),
                 duration_ms=duration_ms,
-                action=action,
+                step=step,
             )
     
     def _get_mcp_tools_description(self, server_id: str) -> str:
@@ -3577,7 +3600,7 @@ class ActorBase(ABC):
                 action_type='skill',
                 data=result_data,
                 duration_ms=duration_ms,
-                action=action,
+                step=action,
             )
             
         except Exception as e:
@@ -3587,7 +3610,7 @@ class ActorBase(ABC):
                 action_type='skill',
                 error=str(e),
                 duration_ms=duration_ms,
-                action=action,
+                step=action,
             )
     
     def _execute_skill_steps(
@@ -3653,7 +3676,7 @@ class ActorBase(ABC):
                 data=result_data,
                 text_result=text_result,
                 duration_ms=duration_ms,
-                action=action,
+                step=action,
             )
             
         except Exception as e:
@@ -3663,7 +3686,7 @@ class ActorBase(ABC):
                 action_type='tool',
                 error=str(e),
                 duration_ms=duration_ms,
-                action=action,
+                step=action,
             )
     
     def _call_llm(self, action: Action, ctx: IterationContext) -> ActionResult:
@@ -3682,7 +3705,7 @@ class ActorBase(ABC):
         return ActionResult.success_result(
             action_type='llm',
             data={'pending': True},
-            action=action,
+            step=action,
         )
 
     # ========== 步骤变更处理 ==========
@@ -3852,6 +3875,20 @@ class ActorBase(ABC):
         
         get_topic_service()._publish_event(topic_id, 'execution_log', log_data)
     
+    def _is_image_generation_model(self, model: str) -> bool:
+        """
+        检查是否是图片生成模型
+        
+        图片生成模型不携带历史消息，只携带：
+        1. 系统提示词（人设）
+        2. 当前用户消息
+        3. 上一张图片的 thoughtSignature（如果有）
+        """
+        if not model:
+            return False
+        m = model.lower()
+        return 'image' in m or 'image-preview' in m or 'image-generation' in m
+
     def _generate_final_response(self, ctx: IterationContext):
         """
         生成最终回复
@@ -3865,24 +3902,16 @@ class ActorBase(ABC):
         message_id = ctx.reply_message_id
         in_reply_to = ctx.original_message.get('message_id')
         
-        # 构建 system prompt
-        system_prompt = self._build_system_prompt(ctx)
-        
-        # 构建消息列表
-        messages = self._build_llm_messages(ctx, system_prompt)
-        
-        logger.info(f"[ActorBase:{self.agent_id}] Final messages count: {len(messages)}, "
-                    f"roles: {[m.get('role') for m in messages]}")
-        
-        # 确定使用的 LLM 配置（优先用户选择，其次 session 默认）
-        session_llm_config_id = self._config.get('llm_config_id')
-        
         # 优先使用用户选择的配置
         YELLOW = '\033[93m'
         GREEN = '\033[92m'
         CYAN = '\033[96m'
         RED = '\033[91m'
         RESET = '\033[0m'
+        
+        # ========== 先确定 LLM 配置，再构建消息 ==========
+        # 确定使用的 LLM 配置（优先用户选择，其次 session 默认）
+        session_llm_config_id = self._config.get('llm_config_id')
         
         # 如果 user_selected_llm_config_id 与 session_llm_config_id 相同，说明用户没有主动选择，使用默认配置
         if ctx.user_selected_llm_config_id and ctx.user_selected_llm_config_id != session_llm_config_id:
@@ -3925,6 +3954,21 @@ class ActorBase(ABC):
         
         provider = config_obj.provider or 'unknown'
         model = config_obj.model or 'unknown'
+        
+        # 判断是否是图片生成模型
+        is_image_gen_model = self._is_image_generation_model(model)
+        if is_image_gen_model:
+            print(f"{CYAN}[ActorBase:{self.agent_id}] 🖼️ 检测到图片生成模型: {model}，将跳过历史消息{RESET}")
+        
+        # ========== 构建消息列表（传递是否是图片生成模型） ==========
+        # 构建 system prompt
+        system_prompt = self._build_system_prompt(ctx)
+        
+        # 构建消息列表
+        messages = self._build_llm_messages(ctx, system_prompt, is_image_generation_model=is_image_gen_model)
+        
+        logger.info(f"[ActorBase:{self.agent_id}] Final messages count: {len(messages)}, "
+                    f"roles: {[m.get('role') for m in messages]}, is_image_gen={is_image_gen_model}")
         
         # 判断是否是思考模型（会输出思考过程的模型）
         is_thinking_model = self._check_is_thinking_model(provider, model)
@@ -4140,10 +4184,69 @@ class ActorBase(ABC):
         self,
         ctx: IterationContext,
         system_prompt: str,
+        is_image_generation_model: bool = False,
     ) -> List[Dict[str, Any]]:
-        """构建 LLM 消息列表"""
+        """
+        构建 LLM 消息列表
+        
+        Args:
+            ctx: 迭代上下文
+            system_prompt: 系统提示词
+            is_image_generation_model: 是否是图片生成模型
+                - 图片生成模型不携带历史消息，只携带系统提示词、当前消息和上一张图的 thoughtSignature
+        """
         messages = [{"role": "system", "content": system_prompt}]
         
+        # 获取 thoughtSignature 开关配置
+        orig_ext = (ctx.original_message or {}).get('ext', {}) or {}
+        use_thoughtsig = True
+        try:
+            use_thoughtsig = bool(((orig_ext.get('imageGen') or {}).get('useThoughtSignature', True)))
+        except Exception:
+            use_thoughtsig = True
+        
+        # ========== 图片生成模型：不携带历史消息 ==========
+        if is_image_generation_model:
+            logger.info(f"[ActorBase:{self.agent_id}] 🖼️ 图片生成模型：跳过历史消息，只携带系统提示词和当前消息")
+            
+            # 添加当前消息
+            user_content = ctx.original_message.get('content', '')
+            user_msg = {"role": "user", "content": user_content}
+            
+            # 处理媒体
+            ext = ctx.original_message.get('ext', {}) or {}
+            user_media = ext.get('media')  # 用户上传的图片
+            
+            if use_thoughtsig:
+                # 签名开关开启：需要携带上一张图片的 thoughtSignature（用于连续编辑/图生图）
+                last_media = self.state.get_last_media()
+                
+                if user_media and last_media:
+                    # 用户上传了新图片 + 有上一张图片：合并（上一张图带 ts + 用户新图）
+                    user_msg['media'] = last_media + user_media
+                    logger.info(f"[ActorBase:{self.agent_id}] 🖼️ 签名:开 - 合并上一张图片({len(last_media)}个,含ts) + 用户上传图片({len(user_media)}个)")
+                elif user_media:
+                    # 只有用户上传的图片（第一次生图，没有历史）
+                    user_msg['media'] = user_media
+                    logger.info(f"[ActorBase:{self.agent_id}] 🖼️ 签名:开 - 使用用户上传图片: {len(user_media)} 个（无历史图片）")
+                elif last_media:
+                    # 只有上一张图片（纯文本指令，基于上图继续编辑）
+                    user_msg['media'] = last_media
+                    logger.info(f"[ActorBase:{self.agent_id}] 🖼️ 签名:开 - 附加上一张图片用于图生图: {len(last_media)} 个")
+                else:
+                    logger.info(f"[ActorBase:{self.agent_id}] 🖼️ 签名:开 - 无媒体，全新生图")
+            else:
+                # 签名开关关闭：只使用用户上传的图片，不带历史 ts
+                if user_media:
+                    user_msg['media'] = user_media
+                    logger.info(f"[ActorBase:{self.agent_id}] 🖼️ 签名:关 - 使用用户上传图片: {len(user_media)} 个")
+                else:
+                    logger.info(f"[ActorBase:{self.agent_id}] 🖼️ 签名:关 - 无媒体，全新生图")
+            
+            messages.append(user_msg)
+            return messages
+        
+        # ========== 普通模型：携带历史消息 ==========
         # 添加摘要
         if self.state.summary:
             messages.append({
@@ -4164,16 +4267,8 @@ class ActorBase(ABC):
         logger.info(f"[ActorBase:{self.agent_id}] get_recent_history returned {len(history_msgs)} messages")
         
         # 处理历史消息中的媒体占位符（按需获取最近 N 条有媒体的消息）
-        # 生图开关：用户可在前端选择是否“回灌历史生成图片（含 thoughtSignature）”
-        # - 开启：用于图生图/基于上次修改继续（默认）
-        # - 关闭：更适合“全新生图”，避免历史媒体干扰/触发 thoughtSignature 约束
-        orig_ext = (ctx.original_message or {}).get('ext', {}) or {}
-        use_thoughtsig = True
-        try:
-          use_thoughtsig = bool(((orig_ext.get('imageGen') or {}).get('useThoughtSignature', True)))
-        except Exception:
-          use_thoughtsig = True
-
+        # - useThoughtSignature 开启：用于图生图/基于上次修改继续（默认）
+        # - 关闭：更适合"全新生图"，避免历史媒体干扰/触发 thoughtSignature 约束
         media_load_limit = 3 if use_thoughtsig else 0  # 最多为最近 3 条消息加载实际媒体；关闭则不加载
         media_loaded = 0
         if media_load_limit > 0:

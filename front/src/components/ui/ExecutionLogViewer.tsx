@@ -139,7 +139,14 @@ export const ExecutionLogViewer: React.FC<ExecutionLogViewerProps> = ({
                       ({formatDuration(log.duration)})
                     </span>
                   )}
-                  {log.detail && log.type !== 'thinking' && (
+                  {/* MCP 工具调用时显示参数详情（独立一行） */}
+                  {log.detail && log.type === 'tool' && (
+                    <div className="mt-0.5 ml-2 text-[10px] opacity-75 text-blue-500/80 dark:text-blue-400/80 whitespace-pre-wrap break-all">
+                      {log.detail}
+                    </div>
+                  )}
+                  {/* 其他类型的 detail 显示 */}
+                  {log.detail && log.type !== 'thinking' && log.type !== 'tool' && (
                     <span className="ml-1 opacity-60 text-[10px]">
                       {log.detail}
                     </span>

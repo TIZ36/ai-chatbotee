@@ -36,7 +36,7 @@ class GoogleProvider(BaseLLMProvider):
             # 构建 http_options
             http_options = {'api_version': 'v1beta'}
             
-            # 1. 检查是否配置了自定义 API URL（反向代理）
+            # 1. 检查是否配置了自定义 API URL
             if self.api_url:
                 base_url = self.api_url.rstrip('/')
                 # 如果 URL 包含 /v1beta 或 /v1，去掉它（SDK 会自己加）
@@ -45,9 +45,16 @@ class GoogleProvider(BaseLLMProvider):
                 elif '/v1' in base_url:
                     base_url = base_url.split('/v1')[0]
                 
+                # 检测是否是官方地址
+                is_official = 'generativelanguage.googleapis.com' in base_url
+                
                 http_options['base_url'] = base_url
-                self._log(f"✅ Using custom API URL (reverse proxy): {base_url}")
-                print(f"[GEMINIProvider] ✅ SDK 使用反向代理: {base_url}")
+                if is_official:
+                    self._log(f"✅ Using official API URL: {base_url}")
+                    print(f"[GEMINIProvider] ✅ SDK 使用官方 API: {base_url}")
+                else:
+                    self._log(f"✅ Using custom API URL (proxy): {base_url}")
+                    print(f"[GEMINIProvider] ✅ SDK 使用代理: {base_url}")
             
             # 2. 检查系统代理环境变量（HTTP_PROXY / HTTPS_PROXY）
             http_proxy = os.environ.get('HTTPS_PROXY') or os.environ.get('HTTP_PROXY') or \

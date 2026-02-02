@@ -29,7 +29,7 @@ function formatLogMessage(log: ExecutionLogEntry): string {
     return `💭 ${shortText}`;
   }
   
-  // MCP调用 - 提取工具名称和关键信息
+  // MCP调用 - 提取工具名称和参数信息
   if (log.type === 'tool') {
     let toolName = '';
     let toolInfo = '';
@@ -42,34 +42,42 @@ function formatLogMessage(log: ExecutionLogEntry): string {
       toolName = log.message;
     }
     
-    // 从 detail 中提取关键信息（如工具参数、响应摘要）
+    // 从 detail 中提取参数信息
     if (log.detail) {
       const detail = typeof log.detail === 'string' ? log.detail : JSON.stringify(log.detail);
-      try {
-        const detailObj = typeof log.detail === 'object' ? log.detail : JSON.parse(detail);
-        // 提取工具名称
-        if (detailObj.tool_name || detailObj.name) {
-          toolName = detailObj.tool_name || detailObj.name;
+      
+      // 如果 detail 以 "参数:" 开头，直接使用
+      if (detail.startsWith('参数:') || detail.startsWith('参数：')) {
+        // 截取参数部分，显示更长一些（80字符）
+        const paramsText = detail.replace(/^参数[：:]?\s*/, '');
+        toolInfo = paramsText.length > 80 ? paramsText.substring(0, 80) + '...' : paramsText;
+      } else {
+        try {
+          const detailObj = typeof log.detail === 'object' ? log.detail : JSON.parse(detail);
+          // 提取工具名称
+          if (detailObj.tool_name || detailObj.name) {
+            toolName = detailObj.tool_name || detailObj.name;
+          }
+          // 提取参数摘要
+          if (detailObj.arguments || detailObj.params) {
+            const args = detailObj.arguments || detailObj.params;
+            const argsStr = typeof args === 'string' ? args : JSON.stringify(args);
+            toolInfo = argsStr.length > 60 ? argsStr.substring(0, 60) + '...' : argsStr;
+          }
+          // 提取响应摘要
+          if (detailObj.result || detailObj.response) {
+            const result = detailObj.result || detailObj.response;
+            const resultStr = typeof result === 'string' ? result : JSON.stringify(result);
+            toolInfo = resultStr.length > 60 ? resultStr.substring(0, 60) + '...' : resultStr;
+          }
+        } catch (e) {
+          // 如果解析失败，直接使用字符串（显示更长）
+          toolInfo = detail.length > 80 ? detail.substring(0, 80) + '...' : detail;
         }
-        // 提取参数摘要
-        if (detailObj.arguments || detailObj.params) {
-          const args = detailObj.arguments || detailObj.params;
-          const argsStr = typeof args === 'string' ? args : JSON.stringify(args);
-          toolInfo = argsStr.length > 20 ? argsStr.substring(0, 20) + '...' : argsStr;
-        }
-        // 提取响应摘要
-        if (detailObj.result || detailObj.response) {
-          const result = detailObj.result || detailObj.response;
-          const resultStr = typeof result === 'string' ? result : JSON.stringify(result);
-          toolInfo = resultStr.length > 20 ? resultStr.substring(0, 20) + '...' : resultStr;
-        }
-      } catch (e) {
-        // 如果解析失败，直接使用字符串
-        toolInfo = detail.length > 20 ? detail.substring(0, 20) + '...' : detail;
       }
     }
     
-    return `🔧 ${toolName}${toolInfo ? `: ${toolInfo}` : ''}`;
+    return `🔧 ${toolName}${toolInfo ? `\n   ${toolInfo}` : ''}`;
   }
   
   // 重要决策 - 包括是否使用MCP、使用什么MCP、是否自迭代
@@ -184,7 +192,7 @@ export const ExecutionLogScroller: React.FC<ExecutionLogScrollerProps> = ({
       {importantLogs.map((log, index) => (
         <div
           key={log.id || index}
-          className={`${getLogStyle(log.type)} text-[10px] font-medium truncate pr-1`}
+          className={`${getLogStyle(log.type)} text-[10px] font-medium pr-1 ${log.type === 'tool' ? 'whitespace-pre-wrap' : 'truncate'}`}
           title={log.detail ? (typeof log.detail === 'string' ? log.detail : JSON.stringify(log.detail)) : log.message}
         >
           {log.formattedMessage}

@@ -818,7 +818,17 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
                             <div className="mt-1 text-sm text-foreground">
                               {log.message}
                             </div>
-                            {detailStr && (
+                            {/* MCP 工具参数详情（独立框显示） */}
+                            {detailStr && logType === 'tool' && (
+                              <div className="mt-1.5 rounded border border-cyan-500/30 bg-cyan-500/5 p-2">
+                                <div className="text-[10px] text-cyan-600 dark:text-cyan-400 font-medium mb-1">📦 工具参数</div>
+                                <pre className="text-[11px] text-foreground/80 whitespace-pre-wrap break-words max-h-48 overflow-auto font-mono">
+                                  {detailStr}
+                                </pre>
+                              </div>
+                            )}
+                            {/* 其他类型的详情 */}
+                            {detailStr && logType !== 'tool' && (
                               <div className="mt-1 text-[11px] text-muted-foreground whitespace-pre-wrap break-words max-h-32 overflow-auto bg-muted/30 rounded p-1.5">
                                 {detailStr}
                               </div>

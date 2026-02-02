@@ -497,6 +497,15 @@ def initialize_mcp_session(target_url: str, headers: Dict[str, str], auto_reconn
     max_attempts = MAX_RETRY_COUNT if auto_reconnect else 1
     last_error = None
     
+    # 🔑 初始化时清理旧的 session-id，因为我们要建立新的 session
+    # 这避免了使用缓存的失效 session-id 导致 404 错误
+    if 'mcp-session-id' in headers:
+        print(f"[MCP Common] 🗑️ Clearing old mcp-session-id before initialize")
+        del headers['mcp-session-id']
+    if normalized_url in _mcp_session_ids:
+        del _mcp_session_ids[normalized_url]
+        print(f"[MCP Common] 🗑️ Cleared cached session-id for {normalized_url[:50]}...")
+    
     for attempt in range(max_attempts):
         try:
             if attempt > 0:
