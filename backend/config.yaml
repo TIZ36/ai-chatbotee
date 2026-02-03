@@ -1,0 +1,60 @@
+server:
+  host: 0.0.0.0
+  port: 3001
+  debug: false
+  url: http://localhost:3001
+  cors_origins:
+    - http://localhost:5177
+    - http://localhost:3000
+
+mysql:
+  enabled: true
+  host: localhost
+  port: 3306
+  user: root
+  password: root
+  database: workflow_manager2
+  charset: utf8mb4
+  pool_size: 10
+
+redis:
+  enabled: true
+  host: localhost
+  port: 6379
+  password: "chatee_redis"
+  db: 0
+
+owner:
+  ip_addresses: "127.0.0.1,::1"
+
+notion:
+  client_id: ""
+  client_secret: ""
+  redirect_uri: "http://localhost:3001/mcp/oauth/callback/"
+
+mcp:
+  proxy_timeout: 90
+
+research:
+  upload_max_mb: 512
+  max_form_memory_mb: 64
+  max_form_parts: 20000
+
+crawler:
+  default_timeout: 30
+  default_user_agent: ""
+
+# 默认 Agent Chaya 配置
+chaya:
+  name: "Chaya"
+  system_prompt: |
+    你是 Chaya，一个友善、聪明的 AI 助手。你具有以下特点：
+
+    1. **乐于助人**：始终以用户需求为中心，提供清晰、准确的回答
+    2. **善于沟通**：用中文回复，表达自然流畅，必要时使用表情增添亲和力
+    3. **专业可靠**：对技术问题给出专业建议，对不确定的内容会诚实说明
+    4. **富有个性**：保持温暖友好的态度，适当展现幽默感
+
+    请根据用户的问题提供帮助，让每次对话都愉快而有价值。
+  # 头像使用前端 logo（将在初始化时自动转换为 base64）
+  avatar_path: "../front/assets/app_logo_light.png"
