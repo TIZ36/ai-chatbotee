@@ -27,6 +27,89 @@ PROVIDER_LOBEHUB_SLUG = {
 }
 
 
+def infer_model_capabilities(model_id: str, provider: str = None) -> dict:
+    """
+    推断模型能力（识图/生图/生视频）
+    
+    Args:
+        model_id: 模型 ID
+        provider: Provider 类型（可选，用于更精确的推断）
+    
+    Returns:
+        {
+            'vision': bool,      # 是否支持识图
+            'image_gen': bool,   # 是否支持生图
+            'video_gen': bool,  # 是否支持生视频
+        }
+    """
+    model_lower = model_id.lower()
+    
+    # 默认能力（基于已知模型）
+    capabilities = {
+        'vision': False,
+        'image_gen': False,
+        'video_gen': False,
+    }
+    
+    # 基于模型名推断
+    # 识图能力：包含 vision, multimodal, image, gpt-4o, gpt-4-turbo, claude-3, gemini-1.5, gemini-2.0
+    vision_keywords = ['vision', 'multimodal', 'image', 'gpt-4o', 'gpt-4-turbo', 'gpt-4-vision', 
+                       'claude-3', 'claude-3.5', 'gemini-1.5', 'gemini-2.0', 'gemini-pro', 
+                       'gemini-flash', 'o1', 'o1-mini', 'o3', 'o3-mini']
+    if any(kw in model_lower for kw in vision_keywords):
+        capabilities['vision'] = True
+    
+    # 生图能力：包含 image, image-generation, dalle, midjourney, stable-diffusion, flux
+    image_gen_keywords = ['image-generation', 'dalle', 'midjourney', 'stable-diffusion', 
+                         'flux', 'imagen', 'gemini-2.0-flash-image', 'gemini-2.5-flash-image',
+                         'gemini-3-pro-image', 'image-gen', 'text-to-image']
+    if any(kw in model_lower for kw in image_gen_keywords):
+        capabilities['image_gen'] = True
+    
+    # 生视频能力：包含 video, video-generation, runway, pika, sora, veo
+    video_gen_keywords = ['video-generation', 'runway', 'pika', 'sora', 'veo', 
+                         'video-gen', 'text-to-video', 'gemini-2.0-flash-video']
+    if any(kw in model_lower for kw in video_gen_keywords):
+        capabilities['video_gen'] = True
+    
+    # Provider 特定的默认能力
+    if provider:
+        provider_lower = provider.lower()
+        if provider_lower in ['gemini', 'google']:
+            # Gemini 模型默认支持识图
+            if 'gemini' in model_lower:
+                capabilities['vision'] = True
+        elif provider_lower in ['openai']:
+            # OpenAI GPT-4o 系列默认支持识图
+            if 'gpt-4o' in model_lower or 'gpt-4-turbo' in model_lower:
+                capabilities['vision'] = True
+        elif provider_lower in ['anthropic']:
+            # Claude 3+ 系列默认支持识图
+            if 'claude-3' in model_lower or 'claude-3.5' in model_lower:
+                capabilities['vision'] = True
+    
+    return capabilities
+
+
+def safe_infer_model_capabilities(model_id: str, provider: str = None):
+    """
+    安全获取模型能力。失败时记录日志并返回 None，避免影响主流程。
+    """
+    try:
+        return infer_model_capabilities(model_id, provider)
+    except Exception as e:
+        print(f"[LLM Models] Failed to infer capabilities for {model_id}: {e}")
+        return None
+
+
+def build_model_with_capabilities(model_id: str, provider: str = None) -> dict:
+    item = {'id': model_id}
+    capabilities = safe_infer_model_capabilities(model_id, provider)
+    if capabilities is not None:
+        item['capabilities'] = capabilities
+    return item
+
+
 @llm_bp.route('/configs', methods=['GET'])
 def get_configs():
     """获取所有 LLM 配置"""
@@ -66,9 +149,22 @@ def create_config():
             'message': 'Config created successfully'
         }), 201
     except ValueError as e:
-        return jsonify({'error': {'message': str(e)}}), 400
+        error_msg = str(e)
+        print(f"[LLM API] Validation error: {error_msg}")
+        return jsonify({'error': {'message': error_msg}}), 400
     except Exception as e:
-        return jsonify({'error': {'message': str(e)}}), 500
+        import traceback
+        error_msg = str(e)
+        error_trace = traceback.format_exc()
+        print(f"[LLM API] Failed to create LLM config: {error_msg}")
+        print(f"[LLM API] Traceback:\n{error_trace}")
+        # 返回更详细的错误信息
+        return jsonify({
+            'error': {
+                'message': f'Failed to create LLM config: {error_msg}',
+                'type': type(e).__name__
+            }
+        }), 500
 
 
 @llm_bp.route('/configs/<config_id>', methods=['PUT'])
@@ -234,6 +330,7 @@ def get_models():
         - api_url: API 基础 URL（如 https://integrate.api.nvidia.com/v1 或 http://localhost:11434）
         - api_key: API Key（可选，某些 API 需要）
         - provider: Provider 类型（可选，用于区分不同 API）
+        - include_capabilities: 是否包含模型能力信息（可选，默认 false）
     """
     if request.method == 'OPTIONS':
         response = Response(status=200)
@@ -247,6 +344,7 @@ def get_models():
         api_url = request.args.get('api_url')
         api_key = request.args.get('api_key')
         provider = request.args.get('provider', '').lower()
+        include_capabilities = request.args.get('include_capabilities', 'false').lower() == 'true'
         
         if not api_url:
             return jsonify({'error': 'api_url is required'}), 400
@@ -255,7 +353,18 @@ def get_models():
         normalized_url = api_url.rstrip('/')
         
         # 优先使用 Provider 的 models() 方法
-        if api_key and provider and provider not in ['ollama', 'local']:
+        # 注意：只有当 provider 明确指定且不是 'openai'（避免使用默认 OpenAI URL）时才使用
+        # 如果 provider 是 'openai' 但 api_url 不是 OpenAI 默认 URL，则直接使用 REST API
+        # 注意：subprovider 参数用于标识真正的供应商（如 nvidia），但不影响 SDK 路由选择
+        use_provider_sdk = (
+            api_key and 
+            provider and 
+            provider not in ['ollama', 'local'] and
+            # 如果 provider 是 'openai' 但 URL 不是 OpenAI 默认 URL，则使用传入的 URL（通过 REST API）
+            not (provider == 'openai' and normalized_url and 'api.openai.com' not in normalized_url)
+        )
+        
+        if use_provider_sdk:
             try:
                 # 尝试创建 provider 并调用 models() 方法
                 provider_instance = create_provider(
@@ -269,11 +378,26 @@ def get_models():
                     try:
                         model_list = provider_instance.models()
                         if model_list:
+                            # 过滤无效模型
+                            model_list = [m for m in model_list if m and isinstance(m, str) and m.strip()]
                             print(f"[LLM Models] Successfully fetched {len(model_list)} models via provider.models()")
-                            return jsonify({
-                                'models': model_list,
-                                'total': len(model_list)
-                            })
+                            
+                            if include_capabilities:
+                                # 返回包含能力的对象数组
+                                models_with_caps = [
+                                    build_model_with_capabilities(model_id, provider)
+                                    for model_id in model_list
+                                ]
+                                return jsonify({
+                                    'models': models_with_caps,
+                                    'total': len(models_with_caps)
+                                })
+                            else:
+                                # 返回字符串数组（向后兼容）
+                                return jsonify({
+                                    'models': model_list,
+                                    'total': len(model_list)
+                                })
                     except Exception as e:
                         print(f"[LLM Models] provider.models() failed: {e}, falling back to REST API")
             except Exception as e:
@@ -301,18 +425,32 @@ def get_models():
                 print(f"[LLM Models] Ollama request failed: {response.status_code} - {error_msg}")
                 if response.status_code == 404:
                     return jsonify({'error': f'无法连接到 Ollama 服务器: {normalized_url}。请检查服务器地址是否正确。'}), 404
-                return jsonify({'error': f'获取模型列表失败: {response.status_code} {response.status_text}'}), response.status_code
+                return jsonify({'error': f'获取模型列表失败: {response.status_code} {response.reason}'}), response.status_code
             
             data = response.json()
             
             # Ollama 格式：{ models: [{ name: "...", ... }] }
             if isinstance(data, dict) and 'models' in data and isinstance(data['models'], list):
                 model_names = [model.get('name') for model in data['models'] if model.get('name')]
+                # 过滤无效模型
+                model_names = [name for name in model_names if name and isinstance(name, str) and name.strip()]
                 print(f"[LLM Models] Successfully fetched {len(model_names)} Ollama models")
-                return jsonify({
-                    'models': model_names,
-                    'total': len(model_names)
-                })
+                
+                if include_capabilities:
+                    # 返回包含能力的对象数组
+                    models_with_caps = [
+                        build_model_with_capabilities(model_id, provider)
+                        for model_id in model_names
+                    ]
+                    return jsonify({
+                        'models': models_with_caps,
+                        'total': len(models_with_caps)
+                    })
+                else:
+                    return jsonify({
+                        'models': model_names,
+                        'total': len(model_names)
+                    })
             
             return jsonify({'error': 'Ollama 服务器返回的数据格式不正确'}), 500
         
@@ -337,7 +475,7 @@ def get_models():
                     return jsonify({'error': 'API Key 无效或未授权'}), 401
                 if response.status_code == 404:
                     return jsonify({'error': f'无法找到模型列表端点: {models_url}。请检查 URL 是否正确。'}), 404
-                return jsonify({'error': f'获取模型列表失败: {response.status_code} {response.status_text}'}), response.status_code
+                return jsonify({'error': f'获取模型列表失败: {response.status_code} {response.reason}'}), response.status_code
             
             data = response.json()
             # Gemini 格式：{ models: [{ name: "models/gemini-2.0-flash-exp", ... }] }
@@ -346,15 +484,30 @@ def get_models():
                 # 提取模型 ID
                 model_ids = []
                 for name in model_names:
-                    if '/' in name:
-                        model_ids.append(name.split('/')[-1])
-                    else:
-                        model_ids.append(name)
+                    if name and isinstance(name, str) and name.strip():
+                        if '/' in name:
+                            model_ids.append(name.split('/')[-1])
+                        else:
+                            model_ids.append(name)
+                # 过滤无效模型
+                model_ids = [mid for mid in model_ids if mid and isinstance(mid, str) and mid.strip()]
                 print(f"[LLM Models] Successfully fetched {len(model_ids)} Gemini models")
-                return jsonify({
-                    'models': model_ids,
-                    'total': len(model_ids)
-                })
+                
+                if include_capabilities:
+                    # 返回包含能力的对象数组
+                    models_with_caps = [
+                        build_model_with_capabilities(model_id, provider)
+                        for model_id in model_ids
+                    ]
+                    return jsonify({
+                        'models': models_with_caps,
+                        'total': len(models_with_caps)
+                    })
+                else:
+                    return jsonify({
+                        'models': model_ids,
+                        'total': len(model_ids)
+                    })
             
             return jsonify({'error': 'Gemini 服务器返回的数据格式不正确'}), 500
         
@@ -382,17 +535,31 @@ def get_models():
                     return jsonify({'error': 'API Key 无效或未授权'}), 401
                 if response.status_code == 404:
                     return jsonify({'error': f'无法找到模型列表端点: {models_url}。请检查 URL 是否正确。'}), 404
-                return jsonify({'error': f'获取模型列表失败: {response.status_code} {response.status_text}'}), response.status_code
+                return jsonify({'error': f'获取模型列表失败: {response.status_code} {response.reason}'}), response.status_code
             
             data = response.json()
             # Anthropic 格式：{ data: [{ id: "...", ... }] }
             if isinstance(data, dict) and isinstance(data.get('data'), list):
                 model_ids = [model.get('id') for model in data['data'] if model.get('id')]
+                # 过滤无效模型
+                model_ids = [mid for mid in model_ids if mid and isinstance(mid, str) and mid.strip()]
                 print(f"[LLM Models] Successfully fetched {len(model_ids)} Anthropic models")
-                return jsonify({
-                    'models': model_ids,
-                    'total': len(model_ids)
-                })
+                
+                if include_capabilities:
+                    # 返回包含能力的对象数组
+                    models_with_caps = [
+                        build_model_with_capabilities(model_id, provider)
+                        for model_id in model_ids
+                    ]
+                    return jsonify({
+                        'models': models_with_caps,
+                        'total': len(models_with_caps)
+                    })
+                else:
+                    return jsonify({
+                        'models': model_ids,
+                        'total': len(model_ids)
+                    })
             
             return jsonify({'error': 'Anthropic 服务器返回的数据格式不正确'}), 500
         
@@ -436,27 +603,55 @@ def get_models():
                     return jsonify({'error': 'API Key 无效或未授权'}), 401
                 if response.status_code == 404:
                     return jsonify({'error': f'无法找到模型列表端点: {models_url}。请检查 URL 是否正确。'}), 404
-                return jsonify({'error': f'获取模型列表失败: {response.status_code} {response.status_text}'}), response.status_code
+                return jsonify({'error': f'获取模型列表失败: {response.status_code} {response.reason}'}), response.status_code
             
             data = response.json()
             
             # OpenAI 兼容格式：{ object: "list", data: [{ id: "...", ... }] }
             if isinstance(data, dict) and data.get('object') == 'list' and isinstance(data.get('data'), list):
                 model_ids = [model.get('id') for model in data['data'] if model.get('id')]
-                print(f"[LLM Models] Successfully fetched {len(model_ids)} models")
-                return jsonify({
-                    'models': model_ids,
-                    'total': len(model_ids)
-                })
+                # 过滤无效模型（空字符串、None、只包含空白字符的）
+                model_ids = [mid for mid in model_ids if mid and isinstance(mid, str) and mid.strip()]
+                print(f"[LLM Models] Successfully fetched {len(model_ids)} models (filtered from {len(data['data'])} total)")
+                
+                if include_capabilities:
+                    # 返回包含能力的对象数组
+                    models_with_caps = [
+                        build_model_with_capabilities(model_id, provider)
+                        for model_id in model_ids
+                    ]
+                    return jsonify({
+                        'models': models_with_caps,
+                        'total': len(models_with_caps)
+                    })
+                else:
+                    return jsonify({
+                        'models': model_ids,
+                        'total': len(model_ids)
+                    })
             
             # 兼容其他格式：直接是数组
             if isinstance(data, list):
                 model_ids = [item.get('id') if isinstance(item, dict) else item for item in data if item]
-                print(f"[LLM Models] Successfully fetched {len(model_ids)} models (array format)")
-                return jsonify({
-                    'models': model_ids,
-                    'total': len(model_ids)
-                })
+                # 过滤无效模型
+                model_ids = [mid for mid in model_ids if mid and isinstance(mid, str) and mid.strip()]
+                print(f"[LLM Models] Successfully fetched {len(model_ids)} models (array format, filtered from {len(data)} total)")
+                
+                if include_capabilities:
+                    # 返回包含能力的对象数组
+                    models_with_caps = [
+                        build_model_with_capabilities(model_id, provider)
+                        for model_id in model_ids
+                    ]
+                    return jsonify({
+                        'models': models_with_caps,
+                        'total': len(models_with_caps)
+                    })
+                else:
+                    return jsonify({
+                        'models': model_ids,
+                        'total': len(model_ids)
+                    })
             
             return jsonify({'error': '服务器返回的数据格式不正确'}), 500
         
@@ -484,14 +679,14 @@ def llm_proxy():
         "body": {...}
     }
     """
+    from flask import stream_with_context
+    
     if request.method == 'OPTIONS':
-        response = Response(status=200)
-        response.headers.update(get_cors_headers())
-        return response
+        resp = Response(status=200)
+        resp.headers.update(get_cors_headers())
+        return resp
     
     try:
-        import requests
-        from flask import Response, stream_with_context
         
         data = request.get_json()
         if not data:
@@ -528,7 +723,7 @@ def llm_proxy():
         # 发送请求
         if stream:
             # 流式响应
-            response = requests.post(
+            resp = requests.post(
                 api_url,
                 json=body,
                 headers=filtered_headers,
@@ -538,7 +733,7 @@ def llm_proxy():
             
             def generate():
                 try:
-                    for chunk in response.iter_content(chunk_size=8192):
+                    for chunk in resp.iter_content(chunk_size=8192):
                         if chunk:
                             yield chunk
                 except Exception as e:
@@ -556,7 +751,7 @@ def llm_proxy():
             )
         else:
             # 非流式响应
-            response = requests.post(
+            resp = requests.post(
                 api_url,
                 json=body,
                 headers=filtered_headers,
@@ -565,11 +760,11 @@ def llm_proxy():
             
             # 返回响应
             proxy_response = Response(
-                response.content,
-                status=response.status_code,
+                resp.content,
+                status=resp.status_code,
                 headers={
                     **get_cors_headers(),
-                    'Content-Type': response.headers.get('Content-Type', 'application/json'),
+                    'Content-Type': resp.headers.get('Content-Type', 'application/json'),
                 }
             )
             
@@ -977,10 +1172,9 @@ def create_provider():
         if not provider_type:
             return jsonify({'error': 'provider_type is required'}), 400
         
-        # 生成 provider_id（基于名称，转换为小写并替换空格为下划线）
-        import re
-        provider_id = re.sub(r'[^a-z0-9_]', '_', name.lower().strip())
-        provider_id = re.sub(r'_+', '_', provider_id).strip('_')
+        # provider_id 直接使用供应商名称（作为 supplier）
+        # 供应商名称 = supplier，兼容类型 = provider
+        provider_id = name.strip()
         
         # 确保唯一性
         conn = get_mysql_connection()
@@ -992,15 +1186,7 @@ def create_provider():
         # 检查是否已存在
         cursor.execute("SELECT COUNT(*) FROM llm_providers WHERE provider_id = %s", (provider_id,))
         if cursor.fetchone()[0] > 0:
-            # 如果已存在，添加数字后缀
-            counter = 1
-            original_id = provider_id
-            while True:
-                provider_id = f"{original_id}_{counter}"
-                cursor.execute("SELECT COUNT(*) FROM llm_providers WHERE provider_id = %s", (provider_id,))
-                if cursor.fetchone()[0] == 0:
-                    break
-                counter += 1
+            return jsonify({'error': f'供应商名称 "{name}" 已存在，请使用其他名称'}), 400
         
         # 插入新供应商
         cursor.execute("""

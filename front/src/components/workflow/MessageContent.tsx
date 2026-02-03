@@ -68,6 +68,22 @@ const parseMCPContent = (content: any): {
 } => {
   const texts: string[] = [];
   const media: Array<{ type: 'image' | 'video' | 'audio'; mimeType: string; data: string }> = [];
+
+  const inferMimeTypeFromUrl = (url: string, fallback: string) => {
+    const match = url.match(/\.([a-zA-Z0-9]+)(?:\?|#|$)/);
+    if (!match) return fallback;
+    const ext = match[1].toLowerCase();
+    if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+    if (ext === 'png') return 'image/png';
+    if (ext === 'gif') return 'image/gif';
+    if (ext === 'webp') return 'image/webp';
+    if (ext === 'svg') return 'image/svg+xml';
+    if (ext === 'mp4') return 'video/mp4';
+    if (ext === 'webm') return 'video/webm';
+    if (ext === 'mp3') return 'audio/mpeg';
+    if (ext === 'wav') return 'audio/wav';
+    return fallback;
+  };
   
   try {
     let contentObj = content;
@@ -85,22 +101,26 @@ const parseMCPContent = (content: any): {
       for (const item of contentArray) {
         if (item.type === 'text' && item.text) {
           texts.push(item.text);
-        } else if (item.type === 'image') {
-          const mimeType = item.mimeType || item.mime_type;
-          const data = item.data;
-          if (!mimeType || !data) {
-            console.warn('[MCP Debug] parseMCPContent image missing mimeType or data, skipping');
+        } else if (item.type === 'image' || item.type === 'video' || item.type === 'audio') {
+          const rawMimeType = item.mimeType || item.mime_type;
+          const rawData = item.data || item.url || item.image_url || item.imageUrl;
+          const fallback = item.type === 'image'
+            ? 'image/png'
+            : item.type === 'video'
+              ? 'video/mp4'
+              : 'audio/mpeg';
+          const mimeType =
+            typeof rawMimeType === 'string' && rawMimeType.length > 0
+              ? rawMimeType
+              : typeof rawData === 'string'
+                ? inferMimeTypeFromUrl(rawData, fallback)
+                : fallback;
+          const data = typeof rawData === 'string' ? rawData : '';
+          if (!data) {
+            console.warn('[MCP Debug] parseMCPContent media missing data, skipping');
             continue;
           }
-          media.push({ type: 'image', mimeType, data });
-        } else if (item.type === 'video') {
-          const mimeType = item.mimeType || item.mime_type;
-          const data = item.data;
-          if (!mimeType || !data) {
-            console.warn('[MCP Debug] parseMCPContent video missing mimeType or data, skipping');
-            continue;
-          }
-          media.push({ type: 'video', mimeType, data });
+          media.push({ type: item.type, mimeType, data });
         }
       }
     } else if (contentObj && typeof contentObj === 'object') {

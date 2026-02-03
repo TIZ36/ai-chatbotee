@@ -294,26 +294,46 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   --input: 0 0% 12%;
   --ring: 150 100% 50%;
 
-  /* --- 核心色卡 --- */
+  /* --- 核心色卡系统 (Core Color Palette) --- */
   
-  /* 荧光绿 (主强调 / 成功) */
+  /* 荧光绿 (Neon Green) - 主强调色 / 成功状态 */
   --color-accent: #00ff88;
   --color-accent-hover: #39ff14;
   --color-accent-light: #00d4aa;
   --color-accent-bg: rgba(0, 255, 136, 0.1);
   --color-accent-bg-hover: rgba(0, 255, 136, 0.18);
 
-  /* 霓虹粉 (次强调 / 错误) */
+  /* 雾粉 (Mist Pink) - 次强调色 / 错误状态 / 功能特色 */
   --color-secondary: #ff6b9d;
   --color-secondary-hover: #ff1493;
   --color-secondary-bg: rgba(255, 107, 157, 0.1);
-  
-  /* 淡金色 (高亮 / 警告) */
+  --niho-mist-pink: #ff9fc4;        /* 雾粉 - 柔和变体，用于悬停和过渡 */
+  --niho-mist-pink-bg: rgba(255, 159, 196, 0.08); /* 雾粉背景 */
+
+  /* 暗紫 (Deep Purple) - 背景氛围 / 容器层次 */
+  --niho-deep-purple: rgba(79, 70, 229, 0.15);      /* 暗紫 - 优化透明度用于背景 */
+  --niho-deep-purple-solid: #4f46e5;                /* 暗紫 - 实体色用于边框 */
+  --niho-deep-purple-bg: rgba(79, 70, 229, 0.12);   /* 暗紫背景 */
+
+  /* 黑金 (Black Gold) - 高亮强调 / 重要标签 / 数值显示 */
   --color-highlight: #ffd700;
   --color-highlight-hover: #ffea00;
-  --color-highlight-bg: rgba(255, 215, 0, 0.1);
+  --color-highlight-bg: rgba(255, 215, 0, 0.15);
+  --niho-black-gold: rgba(255, 215, 0, 0.15);      /* 黑金 - 用于标签背景 */
+  --niho-black-gold-text: #ffd700;                 /* 黑金文字 */
+  --niho-black-gold-border: rgba(255, 215, 0, 0.25); /* 黑金边框 */
+
+  /* 灰调天蓝 (Sky Blue Gray) - 辅助文本 / 提示信息 / 解释性内容 */
+  --niho-skyblue-gray: #a0c4b8;     /* 灰调天蓝 - 优化对比度 */
+  --niho-skyblue-gray-light: #b8d4c8; /* 灰调天蓝 - 浅色变体 */
+  --niho-skyblue-gray-dark: #8fb7c9; /* 灰调天蓝 - 深色变体 */
+  --niho-skyblue-gray-bg: rgba(160, 196, 184, 0.08); /* 灰调天蓝背景 */
+
+  /* 纯黑 (Pure Black) - 基础背景 / 容器基底 */
+  --niho-pure-black: #000000;
+  --niho-pure-black-elevated: #0a0a0a; /* 纯黑 - 轻微提升（用于卡片） */
   
-  /* 霓虹青 (信息) */
+  /* 霓虹青 (Neon Cyan) - 信息状态 */
   --color-info: #00e5ff;
   --color-info-hover: #00ffff;
   --color-info-bg: rgba(0, 229, 255, 0.1);
@@ -343,7 +363,7 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   --surface-secondary: #0a0a0a;
   --surface-tertiary: #111111;
   --text-primary: #e8f5f0;
-  --text-secondary: #a0c4b8;
+  --text-secondary: var(--niho-skyblue-gray); /* 使用灰调天蓝作为次要文本 */
   --text-muted: #6b8a82;
   --border-default: #1a1a1a;
   --border-subtle: #111111;
@@ -353,27 +373,42 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   --niho-text-border-strong: rgba(255, 255, 255, 0.14);
   --niho-text-bg: rgba(255, 255, 255, 0.04);
 
-  /* --- 饱和度扩展系统 --- */
+  /* --- 饱和度扩展系统 (Opacity Gradient System) --- */
   
-  /* 荧光绿饱和度梯度 */
+  /* 荧光绿 (Neon Green) 透明度梯度 */
   --neon-green-50: rgba(0, 255, 136, 0.05);
   --neon-green-100: rgba(0, 255, 136, 0.1);
   --neon-green-200: rgba(0, 255, 136, 0.2);
+  --neon-green-300: rgba(0, 255, 136, 0.3);
   --neon-green-500: #00ff88;
   --neon-green-600: #00d4aa;
   --neon-green-700: #00b894;
+  --neon-green-800: #009970;
 
-  /* 霓虹粉饱和度梯度 */
+  /* 霓虹粉 (Neon Pink) 透明度梯度 */
   --neon-pink-50: rgba(255, 107, 157, 0.05);
   --neon-pink-100: rgba(255, 107, 157, 0.1);
+  --neon-pink-200: rgba(255, 107, 157, 0.2);
+  --neon-pink-300: rgba(255, 107, 157, 0.3);
   --neon-pink-500: #ff6b9d;
   --neon-pink-600: #ff1493;
+  --neon-pink-700: #e0115f;
 
-  /* 淡金色饱和度梯度 */
+  /* 淡金色 (Neon Gold) 透明度梯度 */
   --neon-gold-50: rgba(255, 215, 0, 0.05);
   --neon-gold-100: rgba(255, 215, 0, 0.1);
+  --neon-gold-200: rgba(255, 215, 0, 0.15);
+  --neon-gold-300: rgba(255, 215, 0, 0.25);
   --neon-gold-500: #ffd700;
   --neon-gold-600: #f0b90b;
+  --neon-gold-700: #d4af37;
+
+  /* 霓虹青 (Neon Cyan) 透明度梯度 */
+  --neon-cyan-50: rgba(0, 229, 255, 0.05);
+  --neon-cyan-100: rgba(0, 229, 255, 0.1);
+  --neon-cyan-200: rgba(0, 229, 255, 0.2);
+  --neon-cyan-500: #00e5ff;
+  --neon-cyan-600: #00b8d4;
 }
 
 /* Niho 皮肤下全局背景与根容器 - 聊天界面纯黑 */
@@ -384,6 +419,40 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 
 [data-skin="niho"] .app-root-bg {
   background: #000 !important;
+}
+
+/* Niho 下智能体展示页面纯黑底色 */
+[data-skin="niho"] .agents-page,
+[data-skin="niho"] .agents-page-list {
+  background: #000 !important;
+}
+
+[data-skin="niho"] .agents-page-header,
+[data-skin="niho"] .agents-page-title {
+  background: #000 !important;
+}
+
+[data-skin="niho"] .agents-page-card {
+  background: #000 !important;
+  border: 1px solid var(--niho-text-border) !important;
+  box-shadow: none !important;
+}
+
+[data-skin="niho"] .agents-page-card:hover {
+  border-color: rgba(0, 255, 136, 0.22) !important;
+  box-shadow: 0 0 6px rgba(0, 255, 136, 0.08) !important;
+}
+
+[data-skin="niho"] .agents-page-action--settings {
+  background: rgba(0, 255, 136, 0.12) !important;
+  border: 1px solid rgba(0, 255, 136, 0.22) !important;
+  color: #00ff88 !important;
+}
+
+[data-skin="niho"] .agents-page-action--settings:hover {
+  background: rgba(0, 255, 136, 0.18) !important;
+  border-color: rgba(0, 255, 136, 0.35) !important;
+  box-shadow: 0 0 8px rgba(0, 255, 136, 0.12) !important;
 }
 
 /* Niho 下聊天界面区域纯黑 */
@@ -417,25 +486,31 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   background: #000 !important;
 }
 
-/* 毛玻璃 + 霓虹绿描边与内光 */
+/* 毛玻璃 + 霓虹绿描边与内光 - 强制纯黑背景 */
 [data-skin="niho"] .glass-header,
 [data-skin="niho"] .glass-sidebar,
 [data-skin="niho"] .glass-panel,
-[data-skin="niho"] .glass-card {
+[data-skin="niho"] .glass-card,
+[data-skin="niho"] .glass-section {
   background-color: #000 !important;
-  border: 1px solid rgba(0, 255, 136, 0.18);
+  background: #000 !important;
+  backdrop-filter: none !important;
+  border: 1px solid rgba(0, 255, 136, 0.18) !important;
   box-shadow:
     0 0 20px rgba(0, 255, 136, 0.04),
-    inset 0 1px 0 rgba(0, 255, 136, 0.06);
+    inset 0 1px 0 rgba(0, 255, 136, 0.06) !important;
 }
 
 [data-skin="niho"] .glass-header {
   position: relative;
-  border-color: transparent;
+  background-color: #000 !important;
+  background: #000 !important;
+  backdrop-filter: none !important;
+  border-color: rgba(0, 255, 136, 0.18) !important;
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.08),
     0 4px 24px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
 }
 
 [data-skin="niho"] .glass-sidebar {
@@ -444,10 +519,13 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 }
 
 [data-skin="niho"] .glass-toolbar {
-  background-color: rgba(18, 18, 26, 0.92);
-  border: 1px solid rgba(0, 255, 136, 0.22);
-  box-shadow: 0 0 12px rgba(0, 255, 136, 0.06);
+  background-color: #000 !important;
+  background: #000 !important;
+  backdrop-filter: none !important;
+  border: 1px solid rgba(0, 255, 136, 0.22) !important;
+  box-shadow: 0 0 12px rgba(0, 255, 136, 0.06) !important;
 }
+
 
 [data-skin="niho"] .glass-toolbar:hover {
   border-color: rgba(0, 255, 136, 0.35);
@@ -460,7 +538,6 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 }
 
 /* 主按钮 / 强调按钮 - 发光 */
-[data-skin="niho"] .gnome-btn-primary,
 [data-skin="niho"] button.bg-primaryToken,
 [data-skin="niho"] button[class*="color-accent"] {
   box-shadow:
@@ -469,7 +546,6 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
     inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
-[data-skin="niho"] .gnome-btn-primary:hover,
 [data-skin="niho"] button.bg-primaryToken:hover {
   box-shadow:
     0 0 24px rgba(0, 255, 136, 0.4),
@@ -478,28 +554,15 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 }
 
 /* 次要按钮 - 霓虹粉 */
-[data-skin="niho"] .gnome-btn-secondary,
 [data-skin="niho"] button.bg-secondaryToken {
   border-color: rgba(255, 107, 157, 0.3);
   color: #ff6b9d;
 }
 
-[data-skin="niho"] .gnome-btn-secondary:hover,
 [data-skin="niho"] button.bg-secondaryToken:hover {
   background-color: rgba(255, 107, 157, 0.1);
   border-color: #ff6b9d;
   box-shadow: 0 0 15px rgba(255, 107, 157, 0.2);
-}
-
-/* 危险操作 - 霓虹粉背景 */
-[data-skin="niho"] .gnome-btn-danger {
-  background-color: #ff6b9d;
-  box-shadow: 0 0 20px rgba(255, 107, 157, 0.3);
-}
-
-[data-skin="niho"] .gnome-btn-danger:hover {
-  background-color: #ff1493;
-  box-shadow: 0 0 25px rgba(255, 107, 157, 0.5);
 }
 
 /* 链接与可点击文字 - 霓虹绿 + 微光 */
@@ -774,7 +837,6 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 }
 
 /* 卡片悬停 - 绿边光 */
-[data-skin="niho"] .gnome-card:hover,
 [data-skin="niho"] .glass-card:hover {
   border-color: rgba(0, 255, 136, 0.35);
   box-shadow:
@@ -1020,12 +1082,10 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   border-style: solid;
 }
 
-[data-font="pixel"] .gnome-card,
 [data-font="pixel"] .glass-card {
   box-shadow: 4px 4px 0 0 rgba(0, 0, 0, 0.25);
 }
 
-[data-font="dotgothic"] .gnome-card,
 [data-font="dotgothic"] .glass-card {
   box-shadow: 3px 3px 0 0 rgba(0, 0, 0, 0.2);
 }
@@ -1072,400 +1132,6 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 }
 
 @layer components {
-  /* ========================================
-     GNOME 风格统一设计系统 - 3D 立体阴影效果
-     ======================================== */
-  
-  /* 页面容器 - 背景层 */
-  .gnome-page-container {
-    @apply bg-gray-100 dark:bg-[#1a1a1a];
-  }
-  
-  /* 主面板 - 统一的立体效果 */
-  .gnome-main-panel {
-    @apply bg-white dark:bg-[#2d2d2d];
-    @apply rounded-none;
-    @apply border-0;
-    /* 3D 立体阴影效果 - 内嵌于父容器 */
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  }
-  
-  /* 面板头部 - 带底部阴影分隔 */
-  .gnome-panel-header {
-    @apply flex-shrink-0 px-5 py-4;
-    @apply bg-gray-50/80 dark:bg-[#363636]/80;
-    @apply backdrop-blur-sm;
-    /* 立体阴影分隔 */
-    box-shadow: 
-      0 1px 0 0 rgba(0, 0, 0, 0.05),
-      0 2px 4px -1px rgba(0, 0, 0, 0.06);
-    position: relative;
-    z-index: 10;
-  }
-  
-  .dark .gnome-panel-header {
-    box-shadow: 
-      0 1px 0 0 rgba(0, 0, 0, 0.2),
-      0 2px 6px -1px rgba(0, 0, 0, 0.25);
-  }
-  
-  /* 图标盒子 */
-  .gnome-icon-box {
-    @apply w-9 h-9 rounded-lg flex items-center justify-center;
-    @apply bg-primary-50 dark:bg-primary-900/20;
-    /* 微妙的立体效果 */
-    box-shadow: 
-      inset 0 1px 0 rgba(255, 255, 255, 0.1),
-      0 1px 2px rgba(0, 0, 0, 0.05);
-  }
-  
-  .dark .gnome-icon-box {
-    box-shadow: 
-      inset 0 1px 0 rgba(255, 255, 255, 0.05),
-      0 1px 3px rgba(0, 0, 0, 0.2);
-  }
-  
-  /* 卡片组件 - 3D 立体阴影 */
-  .gnome-card {
-    @apply bg-white dark:bg-[#363636];
-    @apply rounded-xl;
-    @apply border border-gray-200/80 dark:border-[#404040]/80;
-    @apply overflow-hidden;
-    /* 多层阴影创建立体效果 */
-    box-shadow: 
-      0 1px 2px rgba(0, 0, 0, 0.04),
-      0 2px 4px rgba(0, 0, 0, 0.04),
-      0 4px 8px rgba(0, 0, 0, 0.04);
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-  
-  .dark .gnome-card {
-    box-shadow: 
-      0 1px 2px rgba(0, 0, 0, 0.1),
-      0 2px 6px rgba(0, 0, 0, 0.15),
-      0 4px 12px rgba(0, 0, 0, 0.2);
-  }
-  
-  .gnome-card:hover {
-    box-shadow: 
-      0 2px 4px rgba(0, 0, 0, 0.06),
-      0 4px 8px rgba(0, 0, 0, 0.06),
-      0 8px 16px rgba(0, 0, 0, 0.06);
-    transform: translateY(-1px);
-  }
-  
-  .dark .gnome-card:hover {
-    box-shadow: 
-      0 2px 4px rgba(0, 0, 0, 0.15),
-      0 4px 12px rgba(0, 0, 0, 0.2),
-      0 8px 24px rgba(0, 0, 0, 0.25);
-  }
-  
-  .gnome-card-header {
-    @apply flex items-center justify-between px-4 py-3;
-    @apply border-b border-gray-200/80 dark:border-[#404040]/80;
-    @apply bg-gray-50/50 dark:bg-[#3a3a3a]/50;
-  }
-  
-  /* 区块组件 */
-  .gnome-section {
-    @apply mb-6;
-  }
-  
-  .gnome-section-header {
-    @apply flex items-center justify-between mb-3;
-  }
-  
-  .gnome-section-content {
-    @apply space-y-3;
-  }
-  
-  /* 列表项 - 带立体分隔 */
-  .gnome-list-item {
-    @apply px-4 py-3 rounded-lg;
-    @apply transition-all duration-150;
-    @apply border border-transparent;
-    /* 微妙的立体效果 */
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
-  }
-  
-  .gnome-list-item:hover {
-    @apply bg-gray-100/80 dark:bg-[#404040]/80;
-    box-shadow: 
-      0 1px 2px rgba(0, 0, 0, 0.04),
-      0 2px 4px rgba(0, 0, 0, 0.04);
-  }
-  
-  .gnome-list-item:active {
-    @apply bg-gray-200/80 dark:bg-[#4a4a4a]/80;
-    transform: translateY(0.5px);
-  }
-  
-  .gnome-list-item-active {
-    @apply bg-primary-50 dark:bg-primary-900/20;
-    @apply border-primary-200 dark:border-primary-800;
-    @apply text-primary-700 dark:text-primary-300;
-    box-shadow: inset 0 0 0 1px hsl(var(--primary) / 0.12);
-  }
-  
-  /* 按钮组件 - 3D 立体效果 */
-  .gnome-btn {
-    @apply px-3 py-1.5 text-sm font-medium rounded-lg;
-    @apply transition-all duration-150;
-    @apply flex items-center justify-center space-x-1.5;
-    @apply relative;
-  }
-  
-  .gnome-btn-primary {
-    background-color: var(--color-accent);
-    color: #fff;
-    box-shadow: 
-      inset 0 1px 0 rgba(255, 255, 255, 0.15),
-      0 1px 2px hsl(var(--primary) / 0.2),
-      0 2px 4px hsl(var(--primary) / 0.15);
-  }
-  
-  .gnome-btn-primary:hover {
-    background-color: var(--color-accent-hover);
-    box-shadow: 
-      inset 0 1px 0 rgba(255, 255, 255, 0.15),
-      0 2px 4px hsl(var(--primary) / 0.25),
-      0 4px 8px hsl(var(--primary) / 0.2);
-    transform: translateY(-1px);
-  }
-  
-  .gnome-btn-primary:active {
-    background-color: hsl(var(--primary) / 0.85);
-    box-shadow: 
-      inset 0 1px 3px rgba(0, 0, 0, 0.2),
-      0 1px 2px hsl(var(--primary) / 0.1);
-    transform: translateY(0);
-  }
-  
-  .gnome-btn-secondary {
-    @apply bg-white dark:bg-[#404040];
-    @apply text-gray-700 dark:text-[#e0e0e0];
-    @apply border border-gray-300 dark:border-[#505050];
-    box-shadow: 
-      inset 0 1px 0 rgba(255, 255, 255, 0.8),
-      0 1px 2px rgba(0, 0, 0, 0.05);
-  }
-  
-  .dark .gnome-btn-secondary {
-    box-shadow: 
-      inset 0 1px 0 rgba(255, 255, 255, 0.05),
-      0 1px 3px rgba(0, 0, 0, 0.2);
-  }
-  
-  .gnome-btn-secondary:hover {
-    @apply bg-gray-100 dark:bg-[#4a4a4a];
-    box-shadow: 
-      inset 0 1px 0 rgba(255, 255, 255, 0.8),
-      0 2px 4px rgba(0, 0, 0, 0.08);
-    transform: translateY(-1px);
-  }
-  
-  .gnome-btn-secondary:active {
-    @apply bg-gray-200 dark:bg-[#505050];
-    box-shadow: 
-      inset 0 1px 2px rgba(0, 0, 0, 0.1);
-    transform: translateY(0);
-  }
-  
-  .gnome-btn-danger {
-    @apply bg-red-500 text-white;
-    box-shadow: 
-      inset 0 1px 0 rgba(255, 255, 255, 0.15),
-      0 1px 2px rgba(239, 68, 68, 0.2),
-      0 2px 4px rgba(239, 68, 68, 0.15);
-  }
-  
-  .gnome-btn-danger:hover {
-    @apply bg-red-600;
-    box-shadow: 
-      inset 0 1px 0 rgba(255, 255, 255, 0.15),
-      0 2px 4px rgba(239, 68, 68, 0.25),
-      0 4px 8px rgba(239, 68, 68, 0.2);
-    transform: translateY(-1px);
-  }
-  
-  .gnome-btn-danger:active {
-    @apply bg-red-700;
-    box-shadow: 
-      inset 0 1px 3px rgba(0, 0, 0, 0.2);
-    transform: translateY(0);
-  }
-  
-  .gnome-btn-ghost {
-    @apply text-gray-600 dark:text-[#b0b0b0];
-    @apply bg-transparent;
-  }
-  
-  .gnome-btn-ghost:hover {
-    @apply bg-gray-100 dark:bg-[#404040];
-    @apply text-gray-900 dark:text-white;
-  }
-  
-  .gnome-btn-ghost:active {
-    @apply bg-gray-200 dark:bg-[#4a4a4a];
-  }
-  
-  .gnome-btn-icon {
-    @apply p-2 rounded-lg;
-    @apply text-gray-500 dark:text-[#b0b0b0];
-    @apply transition-all duration-150;
-  }
-  
-  .gnome-btn-icon:hover {
-    @apply bg-gray-100 dark:bg-[#404040];
-    @apply text-gray-700 dark:text-white;
-  }
-  
-  .gnome-btn-icon:active {
-    @apply bg-gray-200 dark:bg-[#4a4a4a];
-  }
-  
-  /* 输入框 - 内凹效果 */
-  .gnome-input {
-    @apply w-full px-3 py-2 text-sm rounded-lg;
-    @apply bg-white dark:bg-[#2d2d2d];
-    @apply border border-gray-300 dark:border-[#505050];
-    @apply text-gray-900 dark:text-white;
-    @apply placeholder-gray-400 dark:placeholder-[#808080];
-    @apply transition-all duration-150;
-    /* 内凹阴影 */
-    box-shadow: 
-      inset 0 1px 2px rgba(0, 0, 0, 0.06),
-      0 1px 0 rgba(255, 255, 255, 0.8);
-  }
-  
-  .dark .gnome-input {
-    box-shadow: 
-      inset 0 1px 3px rgba(0, 0, 0, 0.2),
-      0 1px 0 rgba(255, 255, 255, 0.03);
-  }
-  
-  .gnome-input:focus {
-    @apply outline-none border-[#7c3aed];
-    box-shadow: 
-      inset 0 1px 2px rgba(0, 0, 0, 0.06),
-      0 0 0 3px rgba(124, 58, 237, 0.15);
-  }
-  
-  .dark .gnome-input:focus {
-    box-shadow: 
-      inset 0 1px 3px rgba(0, 0, 0, 0.2),
-      0 0 0 3px rgba(124, 58, 237, 0.25);
-  }
-  
-  .gnome-select {
-    @apply gnome-input cursor-pointer;
-    @apply appearance-none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%236b7280'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
-    background-position: right 0.5rem center;
-    background-repeat: no-repeat;
-    background-size: 1.25rem;
-    padding-right: 2.5rem;
-  }
-  
-  /* 徽章 */
-  .gnome-badge {
-    @apply inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium;
-    box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.05);
-  }
-  
-  /* 空状态 */
-  .gnome-empty-state {
-    @apply flex flex-col items-center justify-center py-12 text-center;
-  }
-  
-  .gnome-empty-state-icon {
-    @apply text-gray-300 dark:text-gray-600 mb-4;
-  }
-  
-  .gnome-empty-state-title {
-    @apply text-lg font-semibold text-gray-700 dark:text-gray-300 mb-2;
-  }
-  
-  .gnome-empty-state-description {
-    @apply text-sm text-gray-500 dark:text-gray-400 mb-4 max-w-md;
-  }
-  
-  .gnome-empty-state-action {
-    @apply mt-2;
-  }
-  
-  /* 提示框 - 立体效果 */
-  .gnome-alert {
-    @apply rounded-xl p-4;
-    @apply border;
-    box-shadow: 
-      inset 0 1px 0 rgba(255, 255, 255, 0.1),
-      0 1px 3px rgba(0, 0, 0, 0.05);
-  }
-  
-  .gnome-alert-title {
-    @apply font-semibold mb-1;
-  }
-  
-  .gnome-alert-content {
-    @apply text-sm;
-  }
-  
-  .gnome-alert-info {
-    @apply bg-primary-50 border-primary-200 text-primary-800;
-    @apply dark:bg-primary-900/10 dark:border-primary-800/40 dark:text-primary-300;
-  }
-  
-  .gnome-alert-success {
-    @apply bg-green-50 border-green-200 text-green-800;
-    @apply dark:bg-green-900/20 dark:border-green-800/50 dark:text-green-300;
-  }
-  
-  .gnome-alert-warning {
-    @apply bg-yellow-50 border-yellow-200 text-yellow-800;
-    @apply dark:bg-yellow-900/20 dark:border-yellow-800/50 dark:text-yellow-300;
-  }
-  
-  .gnome-alert-error {
-    @apply bg-red-50 border-red-200 text-red-800;
-    @apply dark:bg-red-900/20 dark:border-red-800/50 dark:text-red-300;
-  }
-  
-  /* 分隔线 - 带阴影 */
-  .gnome-divider {
-    @apply h-px bg-gray-200 dark:bg-[#404040];
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
-  }
-  
-  .dark .gnome-divider {
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03);
-  }
-  
-  /* 表格样式 */
-  .gnome-table {
-    @apply w-full;
-  }
-  
-  .gnome-table th {
-    @apply text-left py-2.5 px-4 text-sm font-semibold text-gray-700 dark:text-gray-300;
-    @apply bg-gray-50/80 dark:bg-[#363636]/80;
-    @apply border-b border-gray-200 dark:border-[#404040];
-  }
-  
-  .gnome-table td {
-    @apply py-3 px-4;
-    @apply border-b border-gray-100 dark:border-[#404040]/50;
-  }
-  
-  .gnome-table tr:hover td {
-    @apply bg-gray-50/50 dark:bg-[#363636]/30;
-  }
-  
-  .gnome-table tr:last-child td {
-    @apply border-b-0;
-  }
-  
   /* ========================================
      传统样式兼容 (保留向后兼容)
      ======================================== */
@@ -1672,41 +1338,70 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
       inset 0 1px 0 rgba(255, 255, 255, 0.03);
   }
   
-  /* 传统按钮样式 - 使用GNOME系统 */
+  /* 传统按钮样式 */
   .btn-primary {
-    @apply gnome-btn gnome-btn-primary;
+    @apply px-3 py-1.5 text-sm font-medium rounded-lg transition-all duration-150;
+    background-color: var(--color-accent);
+    color: #fff;
   }
   
   .btn-secondary {
-    @apply gnome-btn gnome-btn-secondary;
+    @apply px-3 py-1.5 text-sm font-medium rounded-lg transition-all duration-150;
+    @apply bg-white dark:bg-[#404040] text-gray-700 dark:text-[#e0e0e0] border border-gray-300 dark:border-[#505050];
   }
   
   .btn-ghost {
-    @apply gnome-btn gnome-btn-ghost;
+    @apply px-3 py-1.5 text-sm font-medium rounded-lg transition-all duration-150;
+    @apply text-gray-600 dark:text-[#b0b0b0] bg-transparent;
   }
   
   /* 传统卡片样式 */
   .card {
-    @apply gnome-card p-4;
+    @apply bg-white dark:bg-[#363636] rounded-xl border border-gray-200/80 dark:border-[#404040]/80 overflow-hidden p-4;
+    box-shadow: 
+      0 1px 2px rgba(0, 0, 0, 0.04),
+      0 2px 4px rgba(0, 0, 0, 0.04),
+      0 4px 8px rgba(0, 0, 0, 0.04);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
   
   .card-hover {
-    @apply gnome-card;
+    @apply bg-white dark:bg-[#363636] rounded-xl border border-gray-200/80 dark:border-[#404040]/80 overflow-hidden;
+    box-shadow: 
+      0 1px 2px rgba(0, 0, 0, 0.04),
+      0 2px 4px rgba(0, 0, 0, 0.04),
+      0 4px 8px rgba(0, 0, 0, 0.04);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
   
-  /* GNOME 风格面板容器 (兼容) */
+  /* 面板容器 (兼容) */
   .gnome-panel {
-    @apply gnome-card;
+    @apply bg-white dark:bg-[#363636] rounded-xl border border-gray-200/80 dark:border-[#404040]/80 overflow-hidden;
+    box-shadow: 
+      0 1px 2px rgba(0, 0, 0, 0.04),
+      0 2px 4px rgba(0, 0, 0, 0.04),
+      0 4px 8px rgba(0, 0, 0, 0.04);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
   
   /* 传统输入框样式 */
   .input-field {
-    @apply gnome-input;
+    @apply w-full px-3 py-2 text-sm rounded-lg bg-white dark:bg-[#2d2d2d] border border-gray-300 dark:border-[#505050] text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-[#808080] transition-all duration-150;
+    box-shadow: 
+      inset 0 1px 2px rgba(0, 0, 0, 0.06),
+      0 1px 0 rgba(255, 255, 255, 0.8);
+  }
+  
+  .dark .input-field {
+    box-shadow: 
+      inset 0 1px 3px rgba(0, 0, 0, 0.2),
+      0 1px 0 rgba(255, 255, 255, 0.03);
   }
   
   /* 状态指示器 */
   .status-badge {
-    @apply gnome-badge;
+    @apply inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium;
+    box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.05);
   }
   
   .status-success {
@@ -1835,7 +1530,11 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 
   /* 卡片悬停动画增强 */
   .card-hover-enhanced {
-    @apply gnome-card;
+    @apply bg-white dark:bg-[#363636] rounded-xl border border-gray-200/80 dark:border-[#404040]/80 overflow-hidden;
+    box-shadow: 
+      0 1px 2px rgba(0, 0, 0, 0.04),
+      0 2px 4px rgba(0, 0, 0, 0.04),
+      0 4px 8px rgba(0, 0, 0, 0.04);
     @apply transition-all duration-300 ease-out;
     will-change: transform, box-shadow;
   }
@@ -2103,6 +1802,448 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 
   .mcp-call-block:hover {
     box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.3);
+  }
+
+  /* ========================================
+     MCP 管理界面专用样式 - Niho 主题
+     ======================================== */
+  
+  /* MCP 主容器 */
+  [data-skin="niho"] .mcp-config-container {
+    background: #000 !important;
+    color: #e8f5f0 !important;
+  }
+  
+  /* MCP 头部 */
+  [data-skin="niho"] .mcp-header {
+    background: #000 !important;
+    border-bottom: 1px solid rgba(0, 255, 136, 0.18) !important;
+  }
+  
+  [data-skin="niho"] .mcp-header h1 {
+    color: #e8f5f0 !important;
+  }
+  
+  [data-skin="niho"] .mcp-header-icon {
+    color: #00ff88 !important;
+  }
+  
+  /* Notion 集成卡片 */
+  [data-skin="niho"] .mcp-notion-card {
+    background: #000 !important;
+    border: 1px solid rgba(0, 255, 136, 0.18) !important;
+  }
+  
+  [data-skin="niho"] .mcp-notion-card:hover {
+    border-color: rgba(0, 255, 136, 0.35) !important;
+    box-shadow: 0 0 16px rgba(0, 255, 136, 0.1) !important;
+  }
+  
+  [data-skin="niho"] .mcp-notion-card-title {
+    color: #e8f5f0 !important;
+  }
+  
+  [data-skin="niho"] .mcp-notion-card-desc {
+    color: var(--niho-skyblue-gray) !important;
+  }
+  
+  [data-skin="niho"] .mcp-notion-card-action {
+    color: #00ff88 !important;
+  }
+  
+  /* 服务器列表表格 */
+  [data-skin="niho"] .mcp-server-table {
+    background: #000 !important;
+    border: 1px solid rgba(0, 255, 136, 0.18) !important;
+  }
+  
+  [data-skin="niho"] .mcp-server-table thead {
+    background: #0a0a0a !important;
+    border-bottom: 1px solid rgba(0, 255, 136, 0.15) !important;
+  }
+  
+  [data-skin="niho"] .mcp-server-table th {
+    color: var(--niho-skyblue-gray) !important;
+  }
+  
+  [data-skin="niho"] .mcp-server-table tbody tr {
+    border-bottom: 1px solid rgba(0, 255, 136, 0.08) !important;
+  }
+  
+  [data-skin="niho"] .mcp-server-table tbody tr:hover {
+    background: rgba(0, 255, 136, 0.06) !important;
+  }
+  
+  [data-skin="niho"] .mcp-server-name {
+    color: #e8f5f0 !important;
+  }
+  
+  [data-skin="niho"] .mcp-server-url {
+    color: var(--niho-skyblue-gray) !important;
+  }
+  
+  [data-skin="niho"] .mcp-server-type-badge {
+    background: #000 !important;
+    border: 1px solid var(--niho-text-border) !important;
+    color: var(--niho-skyblue-gray) !important;
+  }
+  
+  [data-skin="niho"] .mcp-server-status-enabled {
+    color: #00ff88 !important;
+  }
+  
+  [data-skin="niho"] .mcp-server-status-disabled {
+    color: rgba(160, 196, 184, 0.4) !important;
+  }
+  
+  [data-skin="niho"] .mcp-server-actions button {
+    color: rgba(160, 196, 184, 0.6) !important;
+  }
+  
+  [data-skin="niho"] .mcp-server-actions button:hover {
+    color: var(--niho-mist-pink) !important;
+    background: rgba(255, 159, 196, 0.08) !important;
+  }
+  
+  /* 空状态 */
+  [data-skin="niho"] .mcp-empty-state {
+    background: #000 !important;
+    border: 2px dashed rgba(0, 255, 136, 0.18) !important;
+  }
+  
+  [data-skin="niho"] .mcp-empty-state-icon {
+    color: #00ff88 !important;
+  }
+  
+  [data-skin="niho"] .mcp-empty-state-text {
+    color: var(--niho-skyblue-gray) !important;
+  }
+  
+  /* 加载状态 */
+  [data-skin="niho"] .mcp-loading-spinner {
+    border-color: #00ff88 !important;
+    border-top-color: transparent !important;
+  }
+  
+  [data-skin="niho"] .mcp-loading-text {
+    color: var(--niho-skyblue-gray) !important;
+  }
+  
+  /* 对话框 */
+  [data-skin="niho"] .mcp-dialog {
+    background: #000 !important;
+    border: 1px solid var(--niho-text-border) !important;
+  }
+  
+  [data-skin="niho"] .mcp-dialog-header {
+    border-bottom: 1px solid var(--niho-text-border) !important;
+  }
+  
+  [data-skin="niho"] .mcp-dialog-title {
+    color: #e8f5f0 !important;
+  }
+  
+  [data-skin="niho"] .mcp-dialog-description {
+    color: var(--niho-skyblue-gray) !important;
+  }
+  
+  /* 服务器详情对话框 */
+  [data-skin="niho"] .mcp-detail-dialog {
+    background: #000 !important;
+    border: 1px solid var(--niho-text-border) !important;
+  }
+  
+  [data-skin="niho"] .mcp-detail-left {
+    border-right: 1px solid var(--niho-text-border) !important;
+  }
+  
+  [data-skin="niho"] .mcp-detail-right {
+    background: #000 !important;
+    border-left: 1px solid var(--niho-text-border) !important;
+  }
+  
+  [data-skin="niho"] .mcp-detail-title {
+    color: #e8f5f0 !important;
+  }
+  
+  [data-skin="niho"] .mcp-detail-type-badge {
+    background: #000 !important;
+    border: 1px solid rgba(0, 255, 136, 0.18) !important;
+    color: #00ff88 !important;
+  }
+  
+  [data-skin="niho"] .mcp-detail-status-badge {
+    background: #000 !important;
+    border: 1px solid var(--niho-text-border) !important;
+  }
+  
+  [data-skin="niho"] .mcp-detail-status-active {
+    color: #00ff88 !important;
+  }
+  
+  [data-skin="niho"] .mcp-detail-status-disabled {
+    color: var(--niho-skyblue-gray) !important;
+  }
+  
+  [data-skin="niho"] .mcp-detail-url-box {
+    background: #000 !important;
+    border: 1px solid var(--niho-text-border) !important;
+    color: var(--niho-skyblue-gray) !important;
+  }
+  
+  [data-skin="niho"] .mcp-detail-description {
+    color: var(--niho-skyblue-gray) !important;
+  }
+  
+  [data-skin="niho"] .mcp-detail-section-title {
+    color: rgba(160, 196, 184, 0.6) !important;
+  }
+  
+  /* 工具列表 */
+  [data-skin="niho"] .mcp-tools-header {
+    background: #000 !important;
+    border-bottom: 1px solid var(--niho-text-border) !important;
+  }
+  
+  [data-skin="niho"] .mcp-tools-header-title {
+    color: #e8f5f0 !important;
+  }
+  
+  [data-skin="niho"] .mcp-tools-header-icon {
+    color: #00ff88 !important;
+  }
+  
+  [data-skin="niho"] .mcp-tools-count {
+    background: #000 !important;
+    border: 1px solid var(--niho-text-border) !important;
+    color: var(--niho-skyblue-gray) !important;
+  }
+  
+  [data-skin="niho"] .mcp-tool-card {
+    background: #000 !important;
+    border: 1px solid var(--niho-text-border) !important;
+  }
+  
+  [data-skin="niho"] .mcp-tool-card:hover {
+    border-color: rgba(0, 255, 136, 0.25) !important;
+    box-shadow: 0 0 12px rgba(0, 255, 136, 0.08) !important;
+  }
+  
+  [data-skin="niho"] .mcp-tool-name {
+    color: #e8f5f0 !important;
+  }
+  
+  [data-skin="niho"] .mcp-tool-description {
+    color: var(--niho-skyblue-gray) !important;
+  }
+  
+  [data-skin="niho"] .mcp-tool-param-badge {
+    background: #000 !important;
+    border: 1px solid var(--niho-text-border) !important;
+  }
+  
+  [data-skin="niho"] .mcp-tool-param-name {
+    color: var(--niho-skyblue-gray) !important;
+  }
+  
+  [data-skin="niho"] .mcp-tool-param-type {
+    color: rgba(160, 196, 184, 0.5) !important;
+  }
+  
+  /* 市场对话框 */
+  [data-skin="niho"] .mcp-market-dialog {
+    background: #000 !important;
+    border: 1px solid var(--niho-text-border) !important;
+  }
+  
+  [data-skin="niho"] .mcp-market-header {
+    border-bottom: 1px solid var(--niho-text-border) !important;
+  }
+  
+  [data-skin="niho"] .mcp-market-title {
+    color: #e8f5f0 !important;
+  }
+  
+  [data-skin="niho"] .mcp-market-icon-box {
+    background: rgba(42, 15, 63, 0.65) !important;
+    border: 1px solid rgba(0, 255, 136, 0.22) !important;
+  }
+  
+  [data-skin="niho"] .mcp-market-subtitle {
+    color: var(--niho-skyblue-gray) !important;
+  }
+  
+  [data-skin="niho"] .mcp-market-search-input {
+    background: #000 !important;
+    border: 1px solid var(--niho-text-border) !important;
+    color: #e8f5f0 !important;
+  }
+  
+  [data-skin="niho"] .mcp-market-search-input::placeholder {
+    color: var(--niho-skyblue-gray) !important;
+  }
+  
+  [data-skin="niho"] .mcp-market-search-input:focus {
+    border-color: rgba(0, 255, 136, 0.35) !important;
+    box-shadow: 0 0 0 3px rgba(0, 255, 136, 0.1) !important;
+  }
+  
+  [data-skin="niho"] .mcp-market-item-card {
+    background: #000 !important;
+    border: 1px solid var(--niho-text-border) !important;
+  }
+  
+  [data-skin="niho"] .mcp-market-item-card:hover {
+    border-color: rgba(0, 255, 136, 0.35) !important;
+    box-shadow: 0 0 20px rgba(0, 255, 136, 0.08) !important;
+  }
+  
+  [data-skin="niho"] .mcp-market-item-icon-box {
+    background: #000 !important;
+    border: 1px solid var(--niho-text-border) !important;
+  }
+  
+  [data-skin="niho"] .mcp-market-item-icon-box:hover {
+    background: rgba(42, 15, 63, 0.35) !important;
+  }
+  
+  [data-skin="niho"] .mcp-market-item-icon {
+    color: var(--niho-skyblue-gray) !important;
+  }
+  
+  [data-skin="niho"] .mcp-market-item-icon:hover {
+    color: var(--niho-mist-pink) !important;
+  }
+  
+  [data-skin="niho"] .mcp-market-item-name {
+    color: #e8f5f0 !important;
+  }
+  
+  [data-skin="niho"] .mcp-market-item-desc {
+    color: var(--niho-skyblue-gray) !important;
+  }
+  
+  [data-skin="niho"] .mcp-market-item-type-badge {
+    background: #000 !important;
+    border: 1px solid rgba(255, 215, 0, 0.18) !important;
+    color: var(--color-highlight) !important;
+  }
+  
+  [data-skin="niho"] .mcp-market-item-add-icon {
+    color: rgba(0, 255, 136, 0.55) !important;
+  }
+  
+  [data-skin="niho"] .mcp-market-item-add-icon:hover {
+    color: #00ff88 !important;
+  }
+  
+  [data-skin="niho"] .mcp-market-footer {
+    background: #000 !important;
+    border-top: 1px solid var(--niho-text-border) !important;
+  }
+  
+  [data-skin="niho"] .mcp-market-footer-text {
+    color: rgba(160, 196, 184, 0.6) !important;
+  }
+  
+  /* 服务器图标 */
+  [data-skin="niho"] .mcp-server-icon {
+    background: #000 !important;
+    border: 1px solid rgba(0, 255, 136, 0.18) !important;
+    color: #00ff88 !important;
+  }
+  
+  [data-skin="niho"] .mcp-server-icon-lg {
+    background: #000 !important;
+    border: 1px solid rgba(0, 255, 136, 0.22) !important;
+    color: #00ff88 !important;
+    box-shadow: 0 0 20px rgba(0, 255, 136, 0.08) !important;
+  }
+  
+  /* 表单输入框 */
+  [data-skin="niho"] .mcp-form-input {
+    background: #000 !important;
+    border: 1px solid var(--niho-text-border) !important;
+    color: #e8f5f0 !important;
+  }
+  
+  [data-skin="niho"] .mcp-form-input::placeholder {
+    color: var(--niho-skyblue-gray) !important;
+  }
+  
+  [data-skin="niho"] .mcp-form-input:focus {
+    border-color: rgba(0, 255, 136, 0.35) !important;
+    box-shadow: 0 0 0 3px rgba(0, 255, 136, 0.1) !important;
+  }
+  
+  [data-skin="niho"] .mcp-form-label {
+    color: var(--niho-skyblue-gray) !important;
+  }
+  
+  /* 工作区选择对话框 */
+  [data-skin="niho"] .mcp-workspace-card {
+    background: #000 !important;
+    border: 1px solid var(--niho-text-border) !important;
+  }
+  
+  [data-skin="niho"] .mcp-workspace-card:hover {
+    background: rgba(0, 255, 136, 0.06) !important;
+  }
+  
+  /* 通用文本颜色 */
+  [data-skin="niho"] .mcp-text-primary {
+    color: #e8f5f0 !important;
+  }
+  
+  [data-skin="niho"] .mcp-text-secondary {
+    color: var(--niho-skyblue-gray) !important;
+  }
+  
+  [data-skin="niho"] .mcp-text-muted {
+    color: rgba(160, 196, 184, 0.5) !important;
+  }
+  
+  [data-skin="niho"] .mcp-text-accent {
+    color: #00ff88 !important;
+  }
+  
+  [data-skin="niho"] .mcp-text-highlight {
+    color: var(--color-highlight) !important;
+  }
+  
+  /* 通用边框 */
+  [data-skin="niho"] .mcp-border {
+    border-color: var(--niho-text-border) !important;
+  }
+  
+  [data-skin="niho"] .mcp-border-accent {
+    border-color: rgba(0, 255, 136, 0.18) !important;
+  }
+  
+  [data-skin="niho"] .mcp-border-strong {
+    border-color: var(--niho-text-border-strong) !important;
+  }
+  
+  /* 通用背景 */
+  [data-skin="niho"] .mcp-bg {
+    background: #000 !important;
+  }
+  
+  [data-skin="niho"] .mcp-bg-elevated {
+    background: #0a0a0a !important;
+  }
+  
+  [data-skin="niho"] .mcp-bg-hover {
+    background: rgba(0, 255, 136, 0.06) !important;
+  }
+  
+  /* 通用阴影 */
+  [data-skin="niho"] .mcp-shadow-accent {
+    box-shadow: 0 0 16px rgba(0, 255, 136, 0.1) !important;
+  }
+  
+  [data-skin="niho"] .mcp-shadow-accent-hover {
+    box-shadow: 0 0 20px rgba(0, 255, 136, 0.08) !important;
   }
 
   /* MCP 调用块展开动画 */

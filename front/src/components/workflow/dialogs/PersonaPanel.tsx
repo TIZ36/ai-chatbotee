@@ -22,9 +22,7 @@ export interface PersonaPanelProps {
   isLoadingPersonaList: boolean;
   personaAgents: Session[];
   personaTopics: Session[];
-  isTemporarySession: boolean;
   currentSessionId: string | null;
-  temporarySessionId: string;
   onSwitchSession: (sessionId: string) => void;
   onDeleteAgent: (id: string, name: string) => void;
   onShowRoleGenerator: () => void;
@@ -38,9 +36,7 @@ export const PersonaPanel: React.FC<PersonaPanelProps> = ({
   isLoadingPersonaList,
   personaAgents,
   personaTopics,
-  isTemporarySession,
   currentSessionId,
-  temporarySessionId,
   onSwitchSession,
   onDeleteAgent,
   onShowRoleGenerator,
@@ -84,16 +80,6 @@ export const PersonaPanel: React.FC<PersonaPanelProps> = ({
             <div className="w-full">
               <div className="text-xs font-semibold text-gray-700 dark:text-gray-200 px-1 mb-1">所有会话</div>
               <div className="space-y-1 w-full">
-                {('临时会话'.includes(personaSearch.trim()) || !personaSearch.trim()) && (
-                  <DataListItem
-                    id="temporary-session"
-                    title="临时会话"
-                    description="不保存历史"
-                    icon={MessageCircle}
-                    isSelected={isTemporarySession}
-                    onClick={() => onSwitchSession(temporarySessionId)}
-                  />
-                )}
                 {isLoadingPersonaList ? (
                   <div className="text-xs text-gray-500 dark:text-[#808080] px-1 py-2">加载中...</div>
                 ) : (
@@ -114,7 +100,7 @@ export const PersonaPanel: React.FC<PersonaPanelProps> = ({
                           title={a.name || a.title || `Agent ${a.session_id.slice(0, 8)}`}
                           description={a.system_prompt ? a.system_prompt.split('\n')[0]?.slice(0, 80) + (a.system_prompt.length > 80 ? '...' : '') : `${a.message_count || 0} 条消息 · ${a.last_message_at ? new Date(a.last_message_at).toLocaleDateString() : '无记录'}`}
                           avatar={a.avatar || undefined}
-                          isSelected={!isTemporarySession && currentSessionId === a.session_id}
+                          isSelected={currentSessionId === a.session_id}
                           onClick={() => onSwitchSession(a.session_id)}
                           onDelete={(e) => {
                             e.stopPropagation();
@@ -137,7 +123,7 @@ export const PersonaPanel: React.FC<PersonaPanelProps> = ({
                           title={t.name || t.title || t.preview_text || `话题 ${t.session_id.slice(0, 8)}`}
                           description={`话题 · ${t.message_count || 0} 条消息`}
                           icon={BookOpen}
-                          isSelected={!isTemporarySession && currentSessionId === t.session_id}
+                          isSelected={currentSessionId === t.session_id}
                           onClick={() => onSwitchSession(t.session_id)}
                           onDelete={(e) => {
                             e.stopPropagation();

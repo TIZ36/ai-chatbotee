@@ -7,7 +7,6 @@ import { workflowPool } from '../../services/workflowPool';
 
 export interface MessageSendingProps {
   sessionId: string | null;
-  isTemporarySession: boolean;
   input: string;
   setInput: (value: string) => void;
   attachedMedia: any[];
@@ -26,10 +25,8 @@ export interface MessageSendingProps {
   setIsLoading: (loading: boolean) => void;
   setCollapsedThinking: React.Dispatch<React.SetStateAction<Set<string>>>;
   lastRequestRef: React.MutableRefObject<any>;
-  temporarySessionId: string;
   currentSessionMeta: Session | null;
   setCurrentSessionId: (id: string | null) => void;
-  setIsTemporarySession: (isTemp: boolean) => void;
   loadSessions: () => Promise<void>;
   onSelectSession?: (sessionId: string) => void;
   streamEnabled: boolean;
@@ -38,7 +35,6 @@ export interface MessageSendingProps {
 
 export const useMessageSending = ({
   sessionId,
-  isTemporarySession,
   input,
   setInput,
   attachedMedia,
@@ -57,10 +53,8 @@ export const useMessageSending = ({
   setIsLoading,
   setCollapsedThinking,
   lastRequestRef,
-  temporarySessionId,
   currentSessionMeta,
   setCurrentSessionId,
-  setIsTemporarySession,
   loadSessions,
   onSelectSession,
   streamEnabled,

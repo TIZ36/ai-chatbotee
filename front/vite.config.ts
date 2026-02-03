@@ -25,11 +25,24 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // 将 @lobehub/icons 单独打包，实现按需加载
+          'lobe-icons': ['@lobehub/icons'],
+          // 将 antd 单独打包
+          'antd': ['antd'],
+        },
+      },
+    },
   },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
+  },
+  optimizeDeps: {
+    include: ['@lobehub/icons', 'antd', '@lobehub/ui', '@lobehub/fluent-emoji'],
   },
 });
 

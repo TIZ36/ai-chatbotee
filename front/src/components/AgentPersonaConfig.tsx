@@ -162,11 +162,11 @@ const VoiceConfigPanel: React.FC<VoiceConfigPanelProps> = ({ config, onChange })
   const voices = currentProvider?.voices || [];
 
   return (
-    <div className="border border-[var(--color-border)] rounded-lg overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-2 bg-[var(--color-bg-secondary)]">
+    <div className="border border-[var(--color-border)] rounded-lg overflow-hidden [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-[var(--niho-pure-black-elevated)]">
+      <div className="flex items-center justify-between px-3 py-2 bg-[var(--color-bg-secondary)] [data-skin='niho']:bg-[var(--niho-text-bg)] [data-skin='niho']:border-b [data-skin='niho']:border-[var(--niho-text-border)]">
         <div className="flex items-center gap-2">
-          <Volume2 className="w-4 h-4 text-blue-500" />
-          <span className="text-sm font-medium">语音配置</span>
+          <Volume2 className="w-4 h-4 text-blue-500 [data-skin='niho']:text-[var(--color-info)]" />
+          <span className="text-sm font-medium [data-skin='niho']:text-[var(--text-primary)]">语音配置</span>
         </div>
         <Switch
           checked={config.enabled}
@@ -174,11 +174,11 @@ const VoiceConfigPanel: React.FC<VoiceConfigPanelProps> = ({ config, onChange })
         />
       </div>
       {config.enabled && (
-        <div className="space-y-4 p-3">
+        <div className="space-y-4 p-3 [data-skin='niho']:bg-[#000000]">
           {/* TTS 提供者 */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <Label>TTS 提供者</Label>
+              <Label className="[data-skin='niho']:text-[var(--text-primary)]">TTS 提供者</Label>
               <Select
                 value={config.provider}
                 onValueChange={(provider: any) => {
@@ -192,18 +192,24 @@ const VoiceConfigPanel: React.FC<VoiceConfigPanelProps> = ({ config, onChange })
                   });
                 }}
               >
-                <SelectTrigger>
+                <SelectTrigger className="[data-skin='niho']:bg-[var(--niho-pure-black-elevated)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:focus:border-[var(--color-accent-bg)]">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="[data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
                   {VOICE_PROVIDERS.map(p => (
-                    <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
+                    <SelectItem 
+                      key={p.value} 
+                      value={p.value}
+                      className="[data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:focus:bg-[var(--color-accent-bg)]"
+                    >
+                      {p.label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <Label>语音角色</Label>
+              <Label className="[data-skin='niho']:text-[var(--text-primary)]">语音角色</Label>
               <Select
                 value={config.voiceId}
                 onValueChange={(voiceId) => {
@@ -215,12 +221,18 @@ const VoiceConfigPanel: React.FC<VoiceConfigPanelProps> = ({ config, onChange })
                   });
                 }}
               >
-                <SelectTrigger>
+                <SelectTrigger className="[data-skin='niho']:bg-[var(--niho-pure-black-elevated)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:focus:border-[var(--color-accent-bg)]">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="[data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
                   {voices.map(v => (
-                    <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
+                    <SelectItem 
+                      key={v.id} 
+                      value={v.id}
+                      className="[data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:focus:bg-[var(--color-accent-bg)]"
+                    >
+                      {v.name}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -230,23 +242,29 @@ const VoiceConfigPanel: React.FC<VoiceConfigPanelProps> = ({ config, onChange })
           {/* 语言和速度 */}
           <div className="grid grid-cols-3 gap-4">
             <div>
-              <Label>语言</Label>
+              <Label className="[data-skin='niho']:text-[var(--text-primary)]">语言</Label>
               <Select
                 value={config.language}
                 onValueChange={(language) => onChange({ ...config, language })}
               >
-                <SelectTrigger>
+                <SelectTrigger className="[data-skin='niho']:bg-[var(--niho-pure-black-elevated)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:focus:border-[var(--color-accent-bg)]">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="[data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
                   {LANGUAGES.map(l => (
-                    <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>
+                    <SelectItem 
+                      key={l.value} 
+                      value={l.value}
+                      className="[data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:focus:bg-[var(--color-accent-bg)]"
+                    >
+                      {l.label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <Label>语速 ({config.speed?.toFixed(1)}x)</Label>
+              <Label className="[data-skin='niho']:text-[var(--text-primary)]">语速 ({config.speed?.toFixed(1)}x)</Label>
               <input
                 type="range"
                 min="0.5"
@@ -254,11 +272,11 @@ const VoiceConfigPanel: React.FC<VoiceConfigPanelProps> = ({ config, onChange })
                 step="0.1"
                 value={config.speed || 1.0}
                 onChange={(e) => onChange({ ...config, speed: parseFloat(e.target.value) })}
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700 mt-2"
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700 mt-2 [data-skin='niho']:bg-[var(--niho-text-bg)] [data-skin='niho']:accent-[var(--color-accent)]"
               />
             </div>
             <div>
-              <Label>音调 ({config.pitch?.toFixed(1)}x)</Label>
+              <Label className="[data-skin='niho']:text-[var(--text-primary)]">音调 ({config.pitch?.toFixed(1)}x)</Label>
               <input
                 type="range"
                 min="0.5"
@@ -266,7 +284,7 @@ const VoiceConfigPanel: React.FC<VoiceConfigPanelProps> = ({ config, onChange })
                 step="0.1"
                 value={config.pitch || 1.0}
                 onChange={(e) => onChange({ ...config, pitch: parseFloat(e.target.value) })}
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700 mt-2"
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700 mt-2 [data-skin='niho']:bg-[var(--niho-text-bg)] [data-skin='niho']:accent-[var(--color-accent)]"
               />
             </div>
           </div>
@@ -309,11 +327,11 @@ const ThinkingConfigPanel: React.FC<ThinkingConfigPanelProps> = ({ config, onCha
   };
 
   return (
-    <div className="border border-[var(--color-border)] rounded-lg overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-2 bg-[var(--color-bg-secondary)]">
+    <div className="border border-[var(--color-border)] rounded-lg overflow-hidden [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-[var(--niho-pure-black-elevated)]">
+      <div className="flex items-center justify-between px-3 py-2 bg-[var(--color-bg-secondary)] [data-skin='niho']:bg-[var(--niho-text-bg)] [data-skin='niho']:border-b [data-skin='niho']:border-[var(--niho-text-border)]">
         <div className="flex items-center gap-2">
-          <Brain className="w-4 h-4 text-purple-500" />
-          <span className="text-sm font-medium">自驱思考</span>
+          <Brain className="w-4 h-4 text-purple-500 [data-skin='niho']:text-[var(--color-secondary)]" />
+          <span className="text-sm font-medium [data-skin='niho']:text-[var(--text-primary)]">自驱思考</span>
         </div>
         <Switch
           checked={config.enabled}
@@ -321,24 +339,30 @@ const ThinkingConfigPanel: React.FC<ThinkingConfigPanelProps> = ({ config, onCha
         />
       </div>
       {config.enabled && (
-        <div className="space-y-4 p-3">
+        <div className="space-y-4 p-3 [data-skin='niho']:bg-[#000000]">
           {/* 思考间隔 */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <Label className="flex items-center gap-1">
-                <Clock className="w-3 h-3" />
+              <Label className="flex items-center gap-1 [data-skin='niho']:text-[var(--text-primary)]">
+                <Clock className="w-3 h-3 [data-skin='niho']:text-[var(--color-accent)]" />
                 思考间隔
               </Label>
               <Select
                 value={config.interval.toString()}
                 onValueChange={(v) => onChange({ ...config, interval: parseInt(v) })}
               >
-                <SelectTrigger>
+                <SelectTrigger className="[data-skin='niho']:bg-[var(--niho-pure-black-elevated)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:focus:border-[var(--color-accent-bg)]">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="[data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
                   {THINKING_INTERVALS.map(i => (
-                    <SelectItem key={i.value} value={i.value.toString()}>{i.label}</SelectItem>
+                    <SelectItem 
+                      key={i.value} 
+                      value={i.value.toString()}
+                      className="[data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:focus:bg-[var(--color-accent-bg)]"
+                    >
+                      {i.label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -349,15 +373,15 @@ const ThinkingConfigPanel: React.FC<ThinkingConfigPanelProps> = ({ config, onCha
                   checked={config.memoryTriggered}
                   onCheckedChange={(memoryTriggered) => onChange({ ...config, memoryTriggered })}
                 />
-                <Label className="text-sm">记忆触发思考</Label>
+                <Label className="text-sm [data-skin='niho']:text-[var(--text-primary)]">记忆触发思考</Label>
               </div>
             </div>
           </div>
 
           {/* 思考主题 */}
           <div>
-            <Label className="flex items-center gap-1 mb-2">
-              <Tag className="w-3 h-3" />
+            <Label className="flex items-center gap-1 mb-2 [data-skin='niho']:text-[var(--text-primary)]">
+              <Tag className="w-3 h-3 [data-skin='niho']:text-[var(--color-accent)]" />
               思考主题
             </Label>
             <div className="flex gap-2 mb-2">
@@ -366,23 +390,35 @@ const ThinkingConfigPanel: React.FC<ThinkingConfigPanelProps> = ({ config, onCha
                 value={newTopic}
                 onChange={(e) => setNewTopic(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && addTopic()}
-                className="flex-1"
+                className="flex-1 [data-skin='niho']:bg-[var(--niho-pure-black-elevated)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:placeholder:text-[var(--niho-skyblue-gray)] [data-skin='niho']:focus:border-[var(--color-accent-bg)]"
               />
-              <Button variant="outline" size="sm" onClick={addTopic}>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={addTopic}
+                className="[data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-transparent [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:hover:border-[var(--color-accent-bg)] [data-skin='niho']:hover:text-[var(--color-accent)]"
+              >
                 <Plus className="w-4 h-4" />
               </Button>
             </div>
             <div className="flex flex-wrap gap-2">
               {config.topics.map(topic => (
-                <Badge key={topic} variant="info" className="flex items-center gap-1">
+                <Badge 
+                  key={topic} 
+                  variant="info" 
+                  className="flex items-center gap-1 [data-skin='niho']:bg-[var(--color-accent-bg)] [data-skin='niho']:text-[var(--color-accent)] [data-skin='niho']:border [data-skin='niho']:border-[var(--color-accent-bg)]"
+                >
                   {topic}
-                  <button onClick={() => removeTopic(topic)} className="hover:text-red-500">
+                  <button 
+                    onClick={() => removeTopic(topic)} 
+                    className="hover:text-red-500 [data-skin='niho']:hover:text-[var(--color-secondary)]"
+                  >
                     <Trash2 className="w-3 h-3" />
                   </button>
                 </Badge>
               ))}
               {config.topics.length === 0 && (
-                <span className="text-xs text-[var(--color-text-tertiary)]">
+                <span className="text-xs text-[var(--color-text-tertiary)] [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
                   添加 Agent 会自主思考的话题
                 </span>
               )}
@@ -456,21 +492,26 @@ const MemoryTriggerPanel: React.FC<MemoryTriggerPanelProps> = ({ rules, onChange
   };
 
   return (
-    <div className="border border-[var(--color-border)] rounded-lg overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-2 bg-[var(--color-bg-secondary)]">
+    <div className="border border-[var(--color-border)] rounded-lg overflow-hidden [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-[var(--niho-pure-black-elevated)]">
+      <div className="flex items-center justify-between px-3 py-2 bg-[var(--color-bg-secondary)] [data-skin='niho']:bg-[var(--niho-text-bg)] [data-skin='niho']:border-b [data-skin='niho']:border-[var(--niho-text-border)]">
         <div className="flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-yellow-500" />
-          <span className="text-sm font-medium">记忆触发</span>
+          <Sparkles className="w-4 h-4 text-yellow-500 [data-skin='niho']:text-[var(--color-highlight)]" />
+          <span className="text-sm font-medium [data-skin='niho']:text-[var(--text-primary)]">记忆触发</span>
         </div>
-        <Button variant="ghost" size="sm" onClick={() => setShowAddRule(true)}>
+        <Button 
+          variant="ghost" 
+          size="sm" 
+          onClick={() => setShowAddRule(true)}
+          className="[data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:hover:text-[var(--color-accent)]"
+        >
           <Plus className="w-4 h-4 mr-1" />
           添加规则
         </Button>
       </div>
-      <div className="space-y-2 p-3">
+      <div className="space-y-2 p-3 [data-skin='niho']:bg-[#000000]">
         {rules.length === 0 ? (
-          <div className="text-sm text-[var(--color-text-tertiary)] py-4 text-center">
-            <AlertCircle className="w-5 h-5 mx-auto mb-2 opacity-50" />
+          <div className="text-sm text-[var(--color-text-tertiary)] py-4 text-center [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+            <AlertCircle className="w-5 h-5 mx-auto mb-2 opacity-50 [data-skin='niho']:text-[var(--niho-skyblue-gray)]" />
             暂无触发规则，添加规则让 Agent 根据记忆自动执行动作
           </div>
         ) : (
@@ -479,8 +520,8 @@ const MemoryTriggerPanel: React.FC<MemoryTriggerPanelProps> = ({ rules, onChange
               key={rule.id}
               className={`flex items-center justify-between p-2 rounded-lg border ${
                 rule.enabled 
-                  ? 'bg-[var(--color-bg-secondary)] border-[var(--color-border)]' 
-                  : 'bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 opacity-60'
+                  ? 'bg-[var(--color-bg-secondary)] border-[var(--color-border)] [data-skin="niho"]:bg-[var(--niho-text-bg)] [data-skin="niho"]:border-[var(--niho-text-border)]' 
+                  : 'bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 opacity-60 [data-skin="niho"]:bg-[var(--niho-text-bg)] [data-skin="niho"]:border-[var(--niho-text-border)] [data-skin="niho"]:opacity-40'
               }`}
             >
               <div className="flex items-center gap-2">
@@ -489,16 +530,21 @@ const MemoryTriggerPanel: React.FC<MemoryTriggerPanelProps> = ({ rules, onChange
                   onCheckedChange={() => toggleRule(rule.id)}
                 />
                 <div>
-                  <div className="text-sm font-medium">{rule.name}</div>
-                  <div className="text-xs text-[var(--color-text-tertiary)]">
+                  <div className="text-sm font-medium [data-skin='niho']:text-[var(--text-primary)]">{rule.name}</div>
+                  <div className="text-xs text-[var(--color-text-tertiary)] [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
                     {rule.type === 'keyword' && `关键词: ${rule.keywords?.join(', ')}`}
                     {rule.type === 'importance' && `重要度 ≥ ${rule.threshold}`}
                     {rule.type === 'recent' && `${rule.withinHours}小时内`}
                   </div>
                 </div>
               </div>
-              <Button variant="ghost" size="icon" onClick={() => removeRule(rule.id)}>
-                <Trash2 className="w-4 h-4 text-red-500" />
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                onClick={() => removeRule(rule.id)}
+                className="[data-skin='niho']:text-[var(--color-secondary)] [data-skin='niho']:hover:bg-[var(--color-secondary-bg)] [data-skin='niho']:hover:text-[var(--color-secondary-hover)]"
+              >
+                <Trash2 className="w-4 h-4 text-red-500 [data-skin='niho']:text-[var(--color-secondary)]" />
               </Button>
             </div>
           ))
@@ -506,44 +552,66 @@ const MemoryTriggerPanel: React.FC<MemoryTriggerPanelProps> = ({ rules, onChange
 
         {/* 添加规则表单 */}
         {showAddRule && (
-          <div className="p-3 border border-dashed border-[var(--color-border)] rounded-lg space-y-3">
+          <div className="p-3 border border-dashed border-[var(--color-border)] rounded-lg space-y-3 [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-[var(--niho-pure-black-elevated)]">
             <div>
-              <Label>规则名称</Label>
+              <Label className="[data-skin='niho']:text-[var(--text-primary)]">规则名称</Label>
               <Input
                 placeholder="如：重要消息提醒"
                 value={newRule.name || ''}
                 onChange={(e) => setNewRule({ ...newRule, name: e.target.value })}
+                className="[data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:placeholder:text-[var(--niho-skyblue-gray)] [data-skin='niho']:focus:border-[var(--color-accent-bg)]"
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label>触发类型</Label>
+                <Label className="[data-skin='niho']:text-[var(--text-primary)]">触发类型</Label>
                 <Select
                   value={newRule.type}
                   onValueChange={(type: any) => setNewRule({ ...newRule, type })}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="[data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:focus:border-[var(--color-accent-bg)]">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="keyword">关键词匹配</SelectItem>
-                    <SelectItem value="importance">重要度阈值</SelectItem>
-                    <SelectItem value="recent">近期记忆</SelectItem>
+                  <SelectContent className="[data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
+                    <SelectItem 
+                      value="keyword"
+                      className="[data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)]"
+                    >
+                      关键词匹配
+                    </SelectItem>
+                    <SelectItem 
+                      value="importance"
+                      className="[data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)]"
+                    >
+                      重要度阈值
+                    </SelectItem>
+                    <SelectItem 
+                      value="recent"
+                      className="[data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)]"
+                    >
+                      近期记忆
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div>
-                <Label>冷却时间</Label>
+                <Label className="[data-skin='niho']:text-[var(--text-primary)]">冷却时间</Label>
                 <Select
                   value={newRule.cooldown?.toString()}
                   onValueChange={(v) => setNewRule({ ...newRule, cooldown: parseInt(v) })}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="[data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:focus:border-[var(--color-accent-bg)]">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="[data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
                     {TRIGGER_COOLDOWNS.map(c => (
-                      <SelectItem key={c.value} value={c.value.toString()}>{c.label}</SelectItem>
+                      <SelectItem 
+                        key={c.value} 
+                        value={c.value.toString()}
+                        className="[data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:focus:bg-[var(--color-accent-bg)]"
+                      >
+                        {c.label}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -553,7 +621,7 @@ const MemoryTriggerPanel: React.FC<MemoryTriggerPanelProps> = ({ rules, onChange
             {/* 类型特定配置 */}
             {newRule.type === 'keyword' && (
               <div>
-                <Label>关键词（逗号分隔）</Label>
+                <Label className="[data-skin='niho']:text-[var(--text-primary)]">关键词（逗号分隔）</Label>
                 <Input
                   placeholder="重要, 紧急, 提醒"
                   value={keywordInput}
@@ -564,12 +632,13 @@ const MemoryTriggerPanel: React.FC<MemoryTriggerPanelProps> = ({ rules, onChange
                       keywords: e.target.value.split(',').map(k => k.trim()).filter(Boolean),
                     });
                   }}
+                  className="[data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:placeholder:text-[var(--niho-skyblue-gray)] [data-skin='niho']:focus:border-[var(--color-accent-bg)]"
                 />
               </div>
             )}
             {newRule.type === 'importance' && (
               <div>
-                <Label>重要度阈值 ({newRule.threshold})</Label>
+                <Label className="[data-skin='niho']:text-[var(--text-primary)]">重要度阈值 ({newRule.threshold})</Label>
                 <input
                   type="range"
                   min="0"
@@ -577,28 +646,39 @@ const MemoryTriggerPanel: React.FC<MemoryTriggerPanelProps> = ({ rules, onChange
                   step="0.1"
                   value={newRule.threshold}
                   onChange={(e) => setNewRule({ ...newRule, threshold: parseFloat(e.target.value) })}
-                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700"
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700 [data-skin='niho']:bg-[var(--niho-text-bg)] [data-skin='niho']:accent-[var(--color-accent)]"
                 />
               </div>
             )}
             {newRule.type === 'recent' && (
               <div>
-                <Label>时间范围（小时）</Label>
+                <Label className="[data-skin='niho']:text-[var(--text-primary)]">时间范围（小时）</Label>
                 <Input
                   type="number"
                   min="1"
                   max="24"
                   value={newRule.withinHours}
                   onChange={(e) => setNewRule({ ...newRule, withinHours: parseInt(e.target.value) })}
+                  className="[data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:placeholder:text-[var(--niho-skyblue-gray)] [data-skin='niho']:focus:border-[var(--color-accent-bg)]"
                 />
               </div>
             )}
 
             <div className="flex justify-end gap-2">
-              <Button variant="secondary" size="sm" onClick={() => setShowAddRule(false)}>
+              <Button 
+                variant="secondary" 
+                size="sm" 
+                onClick={() => setShowAddRule(false)}
+                className="[data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-transparent [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--niho-text-bg)]"
+              >
                 取消
               </Button>
-              <Button variant="primary" size="sm" onClick={addRule}>
+              <Button 
+                variant="primary" 
+                size="sm" 
+                onClick={addRule}
+                className="[data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:text-[#000000] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:shadow-[0_0_12px_rgba(0,255,136,0.3)]"
+              >
                 添加
               </Button>
             </div>
@@ -624,10 +704,10 @@ interface ResponseModePanelProps {
 
 const ResponseModePanel: React.FC<ResponseModePanelProps> = ({ responseMode, onChange }) => {
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 [data-skin='niho']:bg-[var(--niho-pure-black-elevated)] [data-skin='niho']:border [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:rounded-lg [data-skin='niho']:p-3">
       <div className="flex items-center gap-2">
-        <MessageSquare className="w-4 h-4 text-gray-500" />
-        <Label className="text-sm font-medium">响应模式</Label>
+        <MessageSquare className="w-4 h-4 text-gray-500 [data-skin='niho']:text-[var(--color-accent)]" />
+        <Label className="text-sm font-medium [data-skin='niho']:text-[var(--text-primary)]">响应模式</Label>
       </div>
       <div className="space-y-2">
         <div className="flex items-center gap-2">
@@ -638,11 +718,11 @@ const ResponseModePanel: React.FC<ResponseModePanelProps> = ({ responseMode, onC
             value="normal"
             checked={responseMode === 'normal'}
             onChange={(e) => onChange(e.target.value as ResponseMode)}
-            className="w-4 h-4 text-primary-600 focus:ring-primary-500"
+            className="w-4 h-4 text-primary-600 focus:ring-primary-500 [data-skin='niho']:accent-[var(--color-accent)] [data-skin='niho']:focus:ring-[var(--color-accent-bg)]"
           />
-          <Label htmlFor="response-mode-normal" className="cursor-pointer font-normal">
+          <Label htmlFor="response-mode-normal" className="cursor-pointer font-normal [data-skin='niho']:text-[var(--text-primary)]">
             <div className="font-medium">普通聊天</div>
-            <div className="text-xs text-gray-500">立刻响应消息并发送回答，就像之前的聊天</div>
+            <div className="text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">立刻响应消息并发送回答，就像之前的聊天</div>
           </Label>
         </div>
         <div className="flex items-center gap-2">
@@ -653,11 +733,11 @@ const ResponseModePanel: React.FC<ResponseModePanelProps> = ({ responseMode, onC
             value="persona"
             checked={responseMode === 'persona'}
             onChange={(e) => onChange(e.target.value as ResponseMode)}
-            className="w-4 h-4 text-primary-600 focus:ring-primary-500"
+            className="w-4 h-4 text-primary-600 focus:ring-primary-500 [data-skin='niho']:accent-[var(--color-accent)] [data-skin='niho']:focus:ring-[var(--color-accent-bg)]"
           />
-          <Label htmlFor="response-mode-persona" className="cursor-pointer font-normal">
+          <Label htmlFor="response-mode-persona" className="cursor-pointer font-normal [data-skin='niho']:text-[var(--text-primary)]">
             <div className="font-medium">人格模式</div>
-            <div className="text-xs text-gray-500">会思考是否要响应，根据角色和能力判断是否参与</div>
+            <div className="text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">会思考是否要响应，根据角色和能力判断是否参与</div>
           </Label>
         </div>
       </div>

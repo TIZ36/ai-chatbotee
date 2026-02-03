@@ -10,14 +10,27 @@ export interface ModelInfo {
   owned_by?: string;
 }
 
+export interface ModelCapabilities {
+  vision: boolean;      // 是否支持识图
+  image_gen: boolean;   // 是否支持生图
+  video_gen: boolean;   // 是否支持生视频
+}
+
+export interface ModelWithCapabilities {
+  id: string;
+  capabilities: ModelCapabilities;
+}
+
 /**
  * 从 OpenAI 兼容的 API 加载模型列表（通过后端代理）
  * 支持端点：/v1/models
  */
 export async function fetchOpenAICompatibleModels(
   baseUrl: string,
-  apiKey?: string
-): Promise<string[]> {
+  apiKey?: string,
+  provider?: string,
+  includeCapabilities: boolean = false
+): Promise<string[] | ModelWithCapabilities[]> {
   if (!baseUrl) {
     throw new Error('API URL 不能为空');
   }
@@ -35,6 +48,24 @@ export async function fetchOpenAICompatibleModels(
     
     if (apiKey) {
       params.append('api_key', apiKey);
+    }
+    
+    // 传递 provider 参数，确保后端使用正确的 API 端点
+    // 如果 provider 是 'openai'，但 baseUrl 不是 OpenAI 的默认 URL，则传递 'custom'
+    if (provider) {
+      // 如果 provider 是 'openai' 但 URL 不是 OpenAI 默认 URL，则使用 'custom' 或 'openai'
+      // 这样后端会使用传入的 api_url 而不是默认的 OpenAI URL
+      if (provider === 'openai' && !baseUrl.includes('api.openai.com')) {
+        // 对于自定义的 OpenAI 兼容 API（如 NVIDIA），仍然传递 'openai'，让后端使用传入的 URL
+        params.append('provider', 'openai');
+      } else {
+        params.append('provider', provider);
+      }
+    }
+    
+    // 如果需要能力信息
+    if (includeCapabilities) {
+      params.append('include_capabilities', 'true');
     }
     
     const fullUrl = `${proxyUrl}?${params.toString()}`;
@@ -72,7 +103,11 @@ export async function fetchOpenAICompatibleModels(
     // 后端返回格式：{ models: [...], total: ... }
     if (data.models && Array.isArray(data.models)) {
       console.log(`[ModelList] 成功获取 ${data.models.length} 个模型:`, data.models);
-      return data.models;
+      // 如果包含能力信息，返回 ModelWithCapabilities[]，否则返回 string[]
+      if (includeCapabilities && data.models.length > 0 && typeof data.models[0] === 'object' && 'id' in data.models[0]) {
+        return data.models as ModelWithCapabilities[];
+      }
+      return data.models as string[];
     }
 
     throw new Error('服务器返回的数据格式不正确');
@@ -92,8 +127,9 @@ export async function fetchOpenAICompatibleModels(
  */
 export async function fetchAnthropicModels(
   baseUrl: string,
-  apiKey?: string
-): Promise<string[]> {
+  apiKey?: string,
+  includeCapabilities: boolean = false
+): Promise<string[] | ModelWithCapabilities[]> {
   if (!baseUrl || !apiKey) {
     return [];
   }
@@ -108,6 +144,10 @@ export async function fetchAnthropicModels(
       api_key: apiKey,
       provider: 'anthropic',
     });
+    
+    if (includeCapabilities) {
+      params.append('include_capabilities', 'true');
+    }
     
     const fullUrl = `${proxyUrl}?${params.toString()}`;
     
@@ -136,7 +176,10 @@ export async function fetchAnthropicModels(
     
     if (data.models && Array.isArray(data.models)) {
       console.log(`[ModelList] 成功获取 ${data.models.length} 个 Anthropic 模型:`, data.models);
-      return data.models;
+      if (includeCapabilities && data.models.length > 0 && typeof data.models[0] === 'object' && 'id' in data.models[0]) {
+        return data.models as ModelWithCapabilities[];
+      }
+      return data.models as string[];
     }
 
     throw new Error('服务器返回的数据格式不正确');
@@ -156,8 +199,9 @@ export async function fetchAnthropicModels(
  */
 export async function fetchGeminiModels(
   baseUrl: string,
-  apiKey?: string
-): Promise<string[]> {
+  apiKey?: string,
+  includeCapabilities: boolean = false
+): Promise<string[] | ModelWithCapabilities[]> {
   if (!baseUrl || !apiKey) {
     return [];
   }
@@ -172,6 +216,10 @@ export async function fetchGeminiModels(
       api_key: apiKey,
       provider: 'gemini',
     });
+    
+    if (includeCapabilities) {
+      params.append('include_capabilities', 'true');
+    }
     
     const fullUrl = `${proxyUrl}?${params.toString()}`;
     
@@ -200,7 +248,10 @@ export async function fetchGeminiModels(
     
     if (data.models && Array.isArray(data.models)) {
       console.log(`[ModelList] 成功获取 ${data.models.length} 个 Gemini 模型:`, data.models);
-      return data.models;
+      if (includeCapabilities && data.models.length > 0 && typeof data.models[0] === 'object' && 'id' in data.models[0]) {
+        return data.models as ModelWithCapabilities[];
+      }
+      return data.models as string[];
     }
 
     throw new Error('服务器返回的数据格式不正确');
@@ -221,8 +272,9 @@ export async function fetchGeminiModels(
 export async function fetchModelsForProvider(
   provider: string,
   apiUrl?: string,
-  apiKey?: string
-): Promise<string[]> {
+  apiKey?: string,
+  includeCapabilities: boolean = false
+): Promise<string[] | ModelWithCapabilities[]> {
   if (!apiUrl) {
     return [];
   }
@@ -232,17 +284,18 @@ export async function fetchModelsForProvider(
     case 'deepseek':
     case 'custom':
       // OpenAI 兼容的 API（包括 NVIDIA）
-      return fetchOpenAICompatibleModels(apiUrl, apiKey);
+      // 传递 provider 参数，确保后端使用正确的 API 端点
+      return fetchOpenAICompatibleModels(apiUrl, apiKey, provider, includeCapabilities);
     
     case 'anthropic':
     case 'claude':
       // Anthropic 不提供模型列表 API
-      return fetchAnthropicModels();
+      return fetchAnthropicModels(apiUrl, apiKey, includeCapabilities);
     
     case 'gemini':
     case 'google':
       // Gemini 模型列表
-      return fetchGeminiModels(apiUrl, apiKey);
+      return fetchGeminiModels(apiUrl, apiKey, includeCapabilities);
     
     case 'ollama':
     case 'local':
@@ -253,7 +306,7 @@ export async function fetchModelsForProvider(
     default:
       // 默认尝试 OpenAI 兼容格式
       try {
-        return await fetchOpenAICompatibleModels(apiUrl, apiKey);
+        return await fetchOpenAICompatibleModels(apiUrl, apiKey, provider, includeCapabilities);
       } catch {
         return [];
       }

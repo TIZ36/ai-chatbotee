@@ -1,6 +1,6 @@
 /**
- * 统一的页面布局组件 - GNOME 风格 (增强版)
- * 为所有面板提供一致的外观、3D阴影效果和间距
+ * 统一的页面布局组件
+ * 为所有面板提供一致的外观和间距
  */
 
 import React from 'react';
@@ -175,7 +175,7 @@ export const Section: React.FC<SectionProps> = ({
 };
 
 /**
- * 列表项组件 - GNOME 风格行
+ * 列表项组件
  */
 interface ListItemProps {
   children: React.ReactNode;
@@ -210,43 +210,6 @@ export const ListItem: React.FC<ListItemProps> = ({
   );
 };
 
-/**
- * 按钮样式 - GNOME 风格 (增强版)
- */
-export const buttonStyles = {
-  primary: `
-    gnome-btn gnome-btn-primary
-  `,
-  secondary: `
-    gnome-btn gnome-btn-secondary
-  `,
-  danger: `
-    gnome-btn gnome-btn-danger
-  `,
-  ghost: `
-    gnome-btn gnome-btn-ghost
-  `,
-  icon: `
-    gnome-btn-icon
-  `,
-};
-
-/**
- * 输入框样式 - GNOME 风格
- */
-export const inputStyles = {
-  base: `gnome-input`,
-  select: `gnome-select`,
-  textarea: `gnome-input min-h-[80px] resize-y`,
-};
-
-/**
- * 标签样式 - GNOME 风格
- */
-export const labelStyles = {
-  base: `block text-sm font-medium text-gray-700 dark:text-[#e0e0e0] mb-1.5`,
-  hint: `text-xs text-gray-500 dark:text-[#a0a0a0] mt-1`,
-};
 
 /**
  * 徽章组件 - 状态指示
@@ -271,7 +234,7 @@ export const Badge: React.FC<BadgeProps> = ({
   }[variant];
 
   return (
-    <span className={`gnome-badge ${variantClass} badge-${variant} ${className}`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${variantClass} badge-${variant} ${className}`}>
       {children}
     </span>
   );
@@ -296,18 +259,18 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   className = '',
 }) => {
   return (
-    <div className={`gnome-empty-state ${className}`}>
+    <div className={`flex flex-col items-center justify-center py-12 text-center ${className}`}>
       {Icon && (
-        <div className="gnome-empty-state-icon">
+        <div className="text-gray-300 dark:text-gray-600 mb-4 [data-skin='niho']:text-[var(--neon-green-500)]">
           <Icon className="w-12 h-12" strokeWidth={1} />
         </div>
       )}
-      <h3 className="gnome-empty-state-title">{title}</h3>
+      <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-2 [data-skin='niho']:text-[#e8f5f0]">{title}</h3>
       {description && (
-        <p className="gnome-empty-state-description">{description}</p>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4 max-w-md [data-skin='niho']:text-[var(--niho-skyblue-gray)]">{description}</p>
       )}
       {action && (
-        <div className="gnome-empty-state-action">
+        <div className="mt-2">
           {action}
         </div>
       )}
@@ -332,16 +295,16 @@ export const Alert: React.FC<AlertProps> = ({
   className = '',
 }) => {
   const variantClass = {
-    info: 'gnome-alert-info',
-    success: 'gnome-alert-success',
-    warning: 'gnome-alert-warning',
-    error: 'gnome-alert-error',
+    info: 'bg-primary-50 border-primary-200 text-primary-800 dark:bg-primary-900/10 dark:border-primary-800/40 dark:text-primary-300 [data-skin="niho"]:bg-[#000] [data-skin="niho"]:border-[rgba(0,229,255,0.18)] [data-skin="niho"]:text-[#00e5ff]',
+    success: 'bg-green-50 border-green-200 text-green-800 dark:bg-green-900/20 dark:border-green-800/50 dark:text-green-300 [data-skin="niho"]:bg-[#000] [data-skin="niho"]:border-[rgba(0,255,136,0.18)] [data-skin="niho"]:text-[#00ff88]',
+    warning: 'bg-yellow-50 border-yellow-200 text-yellow-800 dark:bg-yellow-900/20 dark:border-yellow-800/50 dark:text-yellow-300 [data-skin="niho"]:bg-[#000] [data-skin="niho"]:border-[rgba(255,215,0,0.18)] [data-skin="niho"]:text-[#ffd700]',
+    error: 'bg-red-50 border-red-200 text-red-800 dark:bg-red-900/20 dark:border-red-800/50 dark:text-red-300 [data-skin="niho"]:bg-[#000] [data-skin="niho"]:border-[rgba(255,107,157,0.18)] [data-skin="niho"]:text-[#ff6b9d]',
   }[variant];
 
   return (
-    <div className={`gnome-alert ${variantClass} ${className}`}>
-      {title && <div className="gnome-alert-title">{title}</div>}
-      <div className="gnome-alert-content">{children}</div>
+    <div className={`rounded-xl p-4 border ${variantClass} ${className}`}>
+      {title && <div className="font-semibold mb-1">{title}</div>}
+      <div className="text-sm">{children}</div>
     </div>
   );
 };

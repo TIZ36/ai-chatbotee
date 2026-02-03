@@ -93,12 +93,18 @@ interface Settings {
 const App: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const DEFAULT_AGENT_ID = 'agent_chaya'; // 默认 Agent ID
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(() => {
     // 从 localStorage 恢复上次选择的会话
     const saved = localStorage.getItem('chatee_last_open_chat');
     // 兼容旧的 key
     const legacy = localStorage.getItem('selected_session_id');
-    return saved || legacy || 'temporary-session';
+    // 如果之前选择的是临时会话，重定向到默认 Agent
+    const lastSession = saved || legacy;
+    if (!lastSession || lastSession === 'temporary-session') {
+      return DEFAULT_AGENT_ID;
+    }
+    return lastSession;
   });
   const [settings, setSettings] = useState<Settings>(() => {
     const saved = localStorage.getItem('settings');
@@ -223,16 +229,36 @@ const App: React.FC = () => {
   const [deleteSessionTarget, setDeleteSessionTarget] = useState<Session | null>(null);
 
 
-  const loadSwitcherData = async () => {
+  const loadSwitcherData = async (validateSelection: boolean = false) => {
     try {
       setIsLoadingSwitcher(true);
       const [agents, sessions] = await Promise.all([getAgents(), getSessions()]);
       setSwitcherAgents(agents || []);
       const topics = (sessions || []).filter(s => s.session_type === 'topic_general');
       setSwitcherTopics(topics);
+      
+      // 验证当前选择的会话是否存在（仅在需要时验证，避免无限循环）
+      if (validateSelection) {
+        const currentId = selectedSessionId;
+        if (currentId) {
+          const allSessions = [...(agents || []), ...(sessions || [])];
+          const sessionExists = allSessions.some(s => s.session_id === currentId);
+          if (!sessionExists && currentId !== DEFAULT_AGENT_ID) {
+            // 当前选择的会话不存在，切换到默认 Agent
+            handleSelectSession(DEFAULT_AGENT_ID);
+          }
+        } else {
+          // 如果没有选择任何会话，默认选择 chaya
+          handleSelectSession(DEFAULT_AGENT_ID);
+        }
+      }
     } catch (e) {
       setSwitcherAgents([]);
       setSwitcherTopics([]);
+      // 如果加载失败且需要验证选择，且没有选择会话，默认选择 chaya
+      if (validateSelection && !selectedSessionId) {
+        handleSelectSession(DEFAULT_AGENT_ID);
+      }
     } finally {
       setIsLoadingSwitcher(false);
     }
@@ -240,8 +266,13 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!showConversationSwitcher) return;
-    loadSwitcherData();
+    loadSwitcherData(false); // 切换器打开时不需要验证选择
   }, [showConversationSwitcher]);
+
+  // 应用启动时加载会话列表并验证默认选择
+  useEffect(() => {
+    loadSwitcherData(true); // 启动时验证选择
+  }, []); // 只在组件挂载时执行一次
 
   // 处理删除会话
   const handleDeleteSessionConfirm = async (session: Session, e: React.MouseEvent) => {
@@ -260,9 +291,9 @@ const App: React.FC = () => {
         variant: 'success',
       });
       
-      // 如果删除的是当前选中的会话，切换到临时会话
+      // 如果删除的是当前选中的会话，切换到默认 Agent
       if (selectedSessionId === session_id) {
-        handleSelectSession('temporary-session');
+        handleSelectSession(DEFAULT_AGENT_ID);
       }
       
       // 刷新列表
@@ -342,62 +373,58 @@ const App: React.FC = () => {
           style={isMobile && !isSidebarCollapsed ? { paddingTop: 'calc(0.5rem + var(--safe-area-inset-top))' } : undefined}
         >
 
-        {/* 上方导航：聊天、MCP、Workflow */}
-        <div className="flex flex-col items-center space-y-1 w-full px-1 app-no-drag">
+        {/* 导航栏：按顺序排列所有功能 */}
+        <div className="flex flex-col items-center space-y-1 w-full px-1 app-no-drag flex-shrink-0">
+          {/* 1. 对话机器人 */}
           <NavItem
             to="/"
             icon={<Bot className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-            title="聊天"
+            title="对话机器人"
             isActive={location.pathname === '/'}
           />
 
-
-          <NavItem
-            to="/mcp-config"
-            icon={<Plug className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-            title="MCP配置"
-            isActive={location.pathname === '/mcp-config'}
-          />
-
-
+          {/* 2. 模型展示和管理（agent管理） */}
           <NavItem
             to="/agents"
             icon={<Users className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-            title="智能体管理"
+            title="模型展示和管理"
             isActive={location.pathname === '/agents'}
           />
 
-        </div>
-        
-        <div className="flex-1 app-drag" />
-        
-        {/* 分隔线 */}
-        <div className="w-5 h-px bg-gray-300/50 dark:bg-white/10 my-1 app-no-drag" />
-        
-        {/* 下方导航：设置、模型录入及其他功能 */}
-        <div className="flex flex-col items-center space-y-1 w-full px-1 app-no-drag flex-shrink-0 mb-1.5">
+          {/* 3. 大模型录入 */}
+          <NavItem
+            to="/llm-config"
+            icon={<Brain className="w-[18px] h-[18px]" strokeWidth={1.5} />}
+            title="大模型录入"
+            isActive={location.pathname === '/llm-config'}
+          />
+
+          {/* 4. mcp录入 */}
+          <NavItem
+            to="/mcp-config"
+            icon={<Plug className="w-[18px] h-[18px]" strokeWidth={1.5} />}
+            title="mcp录入"
+            isActive={location.pathname === '/mcp-config'}
+          />
+
+          {/* 5. 爬虫 */}
+          <NavItem
+            to="/crawler-config"
+            icon={<Globe className="w-[18px] h-[18px]" strokeWidth={1.5} />}
+            title="爬虫"
+            isActive={location.pathname === '/crawler-config'}
+          />
+
+          {/* 6. 设置 */}
           <NavItem
             to="/settings"
             icon={<Settings className="w-[18px] h-[18px]" strokeWidth={1.5} />}
             title="设置"
             isActive={location.pathname === '/settings'}
           />
-
-          <NavItem
-            to="/llm-config"
-            icon={<Brain className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-            title="LLM配置"
-            isActive={location.pathname === '/llm-config'}
-          />
-
-          <NavItem
-            to="/crawler-config"
-            icon={<Globe className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-            title="爬虫配置"
-            isActive={location.pathname === '/crawler-config'}
-          />
-
         </div>
+        
+        <div className="flex-1 app-drag" />
       </nav>
 
       {/* 主要内容区域 - 包含 header 和页面内容 */}
@@ -578,29 +605,6 @@ const App: React.FC = () => {
 
             <ScrollArea className="h-[60vh] pr-2 w-full">
               <div className="space-y-4 py-2 w-full min-w-0">
-                {/* 临时会话 */}
-                {(!switcherSearch.trim() || '临时会话'.includes(switcherSearch.trim())) && (
-                  <div className="w-full">
-                    <div className="text-xs font-semibold text-gray-700 dark:text-gray-200 px-1 mb-1 flex items-center gap-1.5">
-                      <MessageCircle className="w-3.5 h-3.5" />
-                      快速开始
-                    </div>
-                    <div className="space-y-1 w-full">
-                      <DataListItem
-                        id="temporary-session"
-                        title="临时会话"
-                        description="不保存历史记录，适合快速提问"
-                        icon={MessageCircle}
-                        isSelected={selectedSessionId === 'temporary-session'}
-                        onClick={() => {
-                          setShowConversationSwitcher(false);
-                          handleSelectSession('temporary-session');
-                        }}
-                      />
-                    </div>
-                  </div>
-                )}
-
                 {/* 智能体 */}
                 <div className="w-full">
                   <div className="text-xs font-semibold text-gray-700 dark:text-gray-200 px-1 mb-1 flex items-center justify-between">

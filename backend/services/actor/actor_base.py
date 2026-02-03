@@ -1595,6 +1595,36 @@ class ActorBase(ABC):
             llm_config = config_obj.to_dict(include_api_key=True)
             ctx.set_llm_config(llm_config, final_llm_config_id)
             
+            # 记录模型信息到执行日志
+            model = llm_config.get('model', 'unknown')
+            provider = llm_config.get('provider', 'unknown')  # 兼容路由（SDK/REST 调用方式）
+            supplier = llm_config.get('supplier') or provider  # 计费/Token 归属（supplier）
+            # 前端优先关心 supplier（token/计费归属），provider 仅作为“兼容调用方式”补充展示
+            model_info = f"{model} (供应商: {supplier})"
+            if supplier != provider:
+                model_info += f" (兼容: {provider})"
+            ctx.add_execution_log(
+                f'使用模型: {model_info}',
+                log_type='llm',
+                detail={
+                    'llm_config_id': final_llm_config_id,
+                    'provider': provider,
+                    'supplier': supplier,
+                    'model': model,
+                }
+            )
+            self._send_execution_log(
+                ctx,
+                f'使用模型: {model_info}',
+                log_type='llm',
+                detail={
+                    'llm_config_id': final_llm_config_id,
+                    'provider': provider,
+                    'supplier': supplier,
+                    'model': model,
+                }
+            )
+            
             # 2. 加载 MCP 工具列表
             mcp_server_ids = []
             mcp_tools = []
@@ -2212,11 +2242,44 @@ class ActorBase(ABC):
             print(f"{CYAN}[Actor Mode] 调用 Provider SDK 进行消息处理决策...{RESET}")
             
             # 添加决策步骤通知前端
+            model = config_obj.model or 'unknown'
+            provider_route = config_obj.provider or 'unknown'  # 兼容路由（SDK/REST 调用方式）
+            supplier = (config_obj.supplier or provider_route)  # 计费/Token 归属
+            model_info = f"{model} (供应商: {supplier})"
+            if supplier != provider_route:
+                model_info += f" (兼容: {provider_route})"
             ctx.add_step(
                 'llm_decision',
-                thinking=f'正在分析并决策... (模型: {config_obj.model})',
-                llm_provider=config_obj.provider,
+                thinking=f'正在分析并决策... (模型: {model_info})',
+                llm_provider=provider_route,
+                llm_supplier=supplier,
                 llm_model=config_obj.model,
+                llm_config_id=llm_config_id,
+            )
+            
+            # 记录LLM调用到执行日志
+            ctx.add_execution_log(
+                f'调用LLM进行决策 (模型: {model_info})',
+                log_type='llm',
+                detail={
+                    'llm_config_id': llm_config_id,
+                    'provider': provider_route,
+                    'supplier': supplier,
+                    'model': config_obj.model,
+                    'action': 'decision',
+                }
+            )
+            self._send_execution_log(
+                ctx,
+                f'调用LLM进行决策 (模型: {model_info})',
+                log_type='llm',
+                detail={
+                    'llm_config_id': llm_config_id,
+                    'provider': provider_route,
+                    'supplier': supplier,
+                    'model': config_obj.model,
+                    'action': 'decision',
+                }
             )
             
             response = provider.chat(llm_messages)
@@ -3973,13 +4036,47 @@ class ActorBase(ABC):
         # 判断是否是思考模型（会输出思考过程的模型）
         is_thinking_model = self._check_is_thinking_model(provider, model)
         
+        # supplier=计费/Token 归属，provider=兼容路由（SDK/REST 调用方式）
+        supplier = getattr(config_obj, 'supplier', None) or provider
+        model_info = f"{model} (供应商: {supplier})"
+        if supplier != provider:
+            model_info += f" (兼容: {provider})"
         ctx.add_step(
             'llm_generating',
-            thinking=f'使用 {provider}/{model} {"思考中..." if is_thinking_model else "生成中..."}',
+            thinking=f'使用 {model_info} {"思考中..." if is_thinking_model else "生成中..."}',
             llm_provider=provider,
+            llm_supplier=supplier,
             llm_model=model,
+            llm_config_id=final_llm_config_id,
             is_thinking_model=is_thinking_model,
             iteration=ctx.iteration,
+        )
+        
+        # 记录LLM调用到执行日志
+        ctx.add_execution_log(
+            f'调用LLM生成回复 (模型: {model_info})',
+            log_type='llm',
+            detail={
+                'llm_config_id': final_llm_config_id,
+                'provider': provider,
+                'supplier': supplier,
+                'model': model,
+                'action': 'generate',
+                'is_thinking_model': is_thinking_model,
+            }
+        )
+        self._send_execution_log(
+            ctx,
+            f'调用LLM生成回复 (模型: {model_info})',
+            log_type='llm',
+            detail={
+                'llm_config_id': final_llm_config_id,
+                'provider': provider,
+                'supplier': supplier,
+                'model': model,
+                'action': 'generate',
+                'is_thinking_model': is_thinking_model,
+            }
         )
         
         # 流式生成

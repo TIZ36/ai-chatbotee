@@ -14,7 +14,8 @@ class LLMConfig:
     
     config_id: str
     name: str
-    provider: str  # openai, deepseek, anthropic, gemini, ollama, local, custom
+    provider: str  # 兼容路由/调用方式：openai, deepseek, anthropic, gemini, ollama, local, custom
+    supplier: Optional[str] = None  # Token/计费归属供应商（如 nvidia, openai）
     api_key: Optional[str] = None
     api_url: Optional[str] = None
     model: Optional[str] = None
@@ -40,6 +41,8 @@ class LLMConfig:
             config_id=row['config_id'],
             name=row['name'],
             provider=row['provider'],
+            # supplier 从 provider_id 读取（计费/Token 归属），兼容旧字段 subprovider
+            supplier=row.get('provider_id') or row.get('subprovider') or row.get('supplier'),
             api_key=row.get('api_key'),
             api_url=row.get('api_url'),
             model=row.get('model'),
@@ -62,6 +65,7 @@ class LLMConfig:
             'config_id': self.config_id,
             'name': self.name,
             'provider': self.provider,
+            'supplier': self.supplier,
             'api_url': self.api_url,
             'model': self.model,
             'tags': self.tags or [],
@@ -86,6 +90,9 @@ class LLMConfig:
             'config_id': self.config_id,
             'name': self.name,
             'provider': self.provider,
+            # supplier 写入 provider_id（计费/Token 归属），同时兼容写入 subprovider（用于迁移期）
+            'provider_id': self.supplier,
+            'subprovider': self.supplier,  # 保持兼容，迁移完成后可移除
             'api_key': self.api_key,
             'api_url': self.api_url,
             'model': self.model,
@@ -165,14 +172,25 @@ class LLMConfigRepository:
             cursor = conn.cursor()
             params = config.to_db_params()
             
+            # 检查字段长度限制（提供友好的错误提示）
+            # model 字段现在是 TEXT 类型，但为了数据合理性，仍然检查过长的值（如超过 1000 字符）
+            if params.get('model') and len(params['model']) > 1000:
+                raise ValueError(f"模型名称过长 ({len(params['model'])} 字符)，建议不超过 1000 字符: {params['model'][:100]}...")
+            if params.get('name') and len(params['name']) > 255:
+                raise ValueError(f"配置名称过长 ({len(params['name'])} 字符)，超过 255 字符限制: {params['name'][:100]}...")
+            if params.get('provider') and len(params['provider']) > 50:
+                raise ValueError(f"提供商名称过长 ({len(params['provider'])} 字符)，超过 50 字符限制: {params['provider']}")
+            
             sql = """
             INSERT INTO llm_configs 
-            (config_id, name, provider, api_key, api_url, model, tags, enabled, description, metadata)
-            VALUES (%(config_id)s, %(name)s, %(provider)s, %(api_key)s, %(api_url)s, 
+            (config_id, name, provider, provider_id, subprovider, api_key, api_url, model, tags, enabled, description, metadata)
+            VALUES (%(config_id)s, %(name)s, %(provider)s, %(provider_id)s, %(subprovider)s, %(api_key)s, %(api_url)s, 
                     %(model)s, %(tags)s, %(enabled)s, %(description)s, %(metadata)s)
             ON DUPLICATE KEY UPDATE
                 name = VALUES(name),
                 provider = VALUES(provider),
+                provider_id = VALUES(provider_id),
+                subprovider = VALUES(subprovider),
                 api_key = VALUES(api_key),
                 api_url = VALUES(api_url),
                 model = VALUES(model),
@@ -182,16 +200,33 @@ class LLMConfigRepository:
                 metadata = VALUES(metadata),
                 updated_at = CURRENT_TIMESTAMP
             """
+            # 调试日志
+            print(f"[LLMConfigRepository] 保存配置到数据库:")
+            print(f"  - config_id: {params.get('config_id')}")
+            print(f"  - name: {params.get('name')}")
+            print(f"  - provider: {params.get('provider')}")
+            print(f"  - provider_id (supplier): {params.get('provider_id')}")
+            print(f"  - subprovider: {params.get('subprovider')}")
             cursor.execute(sql, params)
+            print(f"[LLMConfigRepository] ✅ 配置已保存，影响行数: {cursor.rowcount}")
             conn.commit()
             cursor.close()
             conn.close()
             return True
         except Exception as e:
-            print(f"[LLMConfigRepository] Error saving: {e}")
+            import traceback
+            error_msg = str(e)
+            error_trace = traceback.format_exc()
+            print(f"[LLMConfigRepository] Error saving config: {error_msg}")
+            print(f"[LLMConfigRepository] Traceback:\n{error_trace}")
+            # 打印参数信息（不包含敏感信息）
+            safe_params = {k: (v[:100] + '...' if isinstance(v, str) and len(v) > 100 else v) 
+                          for k, v in params.items() if k != 'api_key'}
+            print(f"[LLMConfigRepository] Config params: {safe_params}")
             if conn:
                 conn.close()
-            return False
+            # 重新抛出异常，让上层能够获取详细错误信息
+            raise
     
     def delete(self, config_id: str) -> bool:
         """删除配置"""

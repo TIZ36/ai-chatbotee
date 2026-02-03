@@ -190,6 +190,45 @@ def create_tables():
             'shortname',
         )
         
+        # 迁移：扩展 model 字段长度（从 VARCHAR(255) 改为 TEXT，支持更长的模型名称）
+        try:
+            cursor.execute("""
+                SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'llm_configs'
+                  AND COLUMN_NAME = 'model'
+            """)
+            result = cursor.fetchone()
+            if result:
+                data_type = result[0]
+                max_length = result[1]
+                # 如果是 VARCHAR 且长度小于等于 255，则扩展为 TEXT
+                if data_type == 'varchar' and (max_length is None or max_length <= 255):
+                    print("  → Extending 'model' column from VARCHAR(255) to TEXT for longer model names...")
+                    cursor.execute("""
+                        ALTER TABLE `llm_configs`
+                        MODIFY COLUMN `model` TEXT DEFAULT NULL COMMENT '模型名称'
+                    """)
+                    conn.commit()
+                    print("  ✓ Column 'model' extended to TEXT")
+                else:
+                    print(f"  ✓ Column 'model' is already {data_type}" + (f"({max_length})" if max_length else ""))
+        except Exception as e:
+            print(f"  ⚠️ Warning: Failed to extend 'model' column: {e}")
+        
+        # 迁移：添加 subprovider 字段（用于标识真正的供应商，provider 用于 SDK 兼容路由）
+        _ensure_column(
+            'llm_configs',
+            'subprovider',
+            """
+                ALTER TABLE `llm_configs`
+                ADD COLUMN `subprovider` VARCHAR(50) DEFAULT NULL COMMENT '子供应商名称（如 nvidia, openai），用于区分真正的供应商；provider 用于 SDK 兼容路由'
+                AFTER `provider`
+            """,
+            'subprovider',
+        )
+        
         # LLM供应商表（支持自定义供应商）
         create_llm_providers_table = """
         CREATE TABLE IF NOT EXISTS `llm_providers` (
@@ -245,6 +284,30 @@ def create_tables():
                 print("  ✓ Added index 'idx_provider_id' to 'llm_configs' table")
         except Exception as e:
             print(f"  ⚠️ Warning: Failed to add index 'idx_provider_id': {e}")
+        
+        # 迁移：回填 provider_id（supplier 字段）
+        # 如果 provider_id 为空，从 subprovider 或 provider 回填
+        try:
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM llm_configs 
+                WHERE provider_id IS NULL OR provider_id = ''
+            """)
+            null_count = cursor.fetchone()[0]
+            if null_count > 0:
+                print(f"  → Migrating {null_count} configs: backfilling provider_id from subprovider/provider...")
+                # 优先使用 subprovider，如果没有则使用 provider（系统供应商）
+                cursor.execute("""
+                    UPDATE llm_configs 
+                    SET provider_id = COALESCE(NULLIF(subprovider, ''), provider)
+                    WHERE provider_id IS NULL OR provider_id = ''
+                """)
+                conn.commit()
+                print(f"  ✓ Backfilled provider_id for {cursor.rowcount} configs")
+            else:
+                print("  ✓ All configs already have provider_id")
+        except Exception as e:
+            print(f"  ⚠️ Warning: Failed to backfill provider_id: {e}")
         
         # MCP服务器配置表
         create_mcp_servers_table = """

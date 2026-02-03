@@ -51,7 +51,7 @@ import { MediaPreviewDialog } from './ui/MediaPreviewDialog';
 import { ensureDataUrlFromMaybeBase64, normalizeBase64ForInlineData } from '../utils/dataUrl';
 import { useConversation } from '../conversation/useConversation';
 import { createSessionConversationAdapter } from '../conversation/adapters/sessionConversation';
-import { MessageAvatar, MessageBubbleContainer, MessageStatusIndicator } from './ui/MessageBubble';
+import { MessageAvatar, MessageBubbleContainer, MessageStatusIndicator, type MessageRole as UIMessageRole } from './ui/MessageBubble';
 import { messageApi } from '../services/api';
 import {
   applyProfessionToNameOrPrompt,
@@ -111,11 +111,16 @@ const getProviderIcon = (config: LLMConfigFromDB | null, providers: LLMProvider[
 } => {
   if (!config) return { icon: '🤖', color: '#6B7280' };
   
-  // 1. 优先使用供应商的 logo（根据 provider_type 匹配）
+  // 确定用于匹配的供应商标识（优先使用 supplier，其次使用 provider）
+  const providerIdentifier = config.supplier || config.provider;
+  
+  // 1. 优先使用供应商的 logo（根据 supplier 或 provider_type 匹配）
   const provider = providers.find(p => 
-    p.provider_type === config.provider || 
-    p.provider_id === config.provider ||
-    (config as any).provider_id === p.provider_id
+    p.provider_type === providerIdentifier || 
+    p.provider_id === providerIdentifier ||
+    (config as any).provider_id === p.provider_id ||
+    // 也支持通过 supplier 匹配
+    (config.supplier && (p.provider_id === config.supplier || p.name?.toLowerCase() === config.supplier.toLowerCase()))
   );
   
   if (provider && (provider.logo_light || provider.logo_dark)) {
@@ -148,8 +153,12 @@ const getProviderIcon = (config: LLMConfigFromDB | null, providers: LLMProvider[
   if (apiUrl.includes('deepseek')) return PROVIDER_ICONS.deepseek;
   if (apiUrl.includes('anthropic')) return PROVIDER_ICONS.anthropic;
   if (apiUrl.includes('googleapis') || apiUrl.includes('gemini')) return PROVIDER_ICONS.gemini;
+  if (apiUrl.includes('nvidia') || config.supplier?.toLowerCase() === 'nvidia') {
+    // NVIDIA 使用 OpenAI 兼容 API，但显示 NVIDIA 图标（如果有的话）
+    return PROVIDER_ICONS.openai; // 暂时使用 OpenAI 图标，后续可以添加 NVIDIA 专用图标
+  }
   
-  // 然后检查 provider 字段
+  // 然后检查 provider 字段（用于 SDK 兼容路由）
   const providerType = config.provider?.toLowerCase() || 'openai';
   return PROVIDER_ICONS[providerType] || PROVIDER_ICONS.openai;
 };
@@ -168,6 +177,10 @@ const Workflow: React.FC<WorkflowProps> = ({
   enableToolCalling,
   onToggleToolCalling,
 }) => {
+  // 将工作流消息的 'error' role 规范化为 UI 组件可识别的 role（避免类型不匹配）
+  const toUIRole = useCallback((role: 'user' | 'assistant' | 'system' | 'tool' | 'error'): UIMessageRole => {
+    return role === 'error' ? 'assistant' : role;
+  }, []);
   const toolCallingEnabled = enableToolCalling !== undefined ? enableToolCalling : false;
   // Gemini inlineData.data 只接受“标准 base64”；这里统一归一化，并对明显不合法的内容返回 null（避免整包请求 400）
   const toInlineBase64 = useCallback((maybeDataUrlOrBase64: string): string | null => {
@@ -177,21 +190,11 @@ const Workflow: React.FC<WorkflowProps> = ({
   // 当总数未知时，建议使用一个足够大的基准值，然后每次 prepend 时递减。
   const VIRTUOSO_BASE_INDEX = 100000;
 
-  const temporarySessionId = 'temporary-session'; // 临时会话ID（固定）
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(externalSessionId || temporarySessionId);
-  const [isTemporarySession, setIsTemporarySession] = useState(!externalSessionId || externalSessionId === temporarySessionId); // 当前是否为临时会话
-
-  const [tempMessages, setTempMessages] = useState<Message[]>([
-    {
-      id: '1',
-      role: 'system',
-      content: '你好！我是你的 AI 工作流助手。这是临时会话，不会保存历史记录。',
-    },
-  ]);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(externalSessionId || null);
 
   const sessionAdapter = useMemo(
-    () => (currentSessionId && !isTemporarySession ? createSessionConversationAdapter(currentSessionId) : null),
-    [currentSessionId, isTemporarySession]
+    () => (currentSessionId ? createSessionConversationAdapter(currentSessionId) : null),
+    [currentSessionId]
   );
   const {
     messages: persistedMessages,
@@ -202,13 +205,9 @@ const Workflow: React.FC<WorkflowProps> = ({
     loadInitial: loadPersistedInitial,
   } = useConversation(sessionAdapter, { pageSize: 10 });
 
-  // 兼容现有代码：统一通过 messages/setMessages 操作当前“显示中的会话”
-  const messages: Message[] = (isTemporarySession
-    ? tempMessages
-    : (persistedMessages as unknown as Message[]));
-  const setMessages: React.Dispatch<React.SetStateAction<Message[]>> = (isTemporarySession
-    ? setTempMessages
-    : (setPersistedMessages as unknown as React.Dispatch<React.SetStateAction<Message[]>>));
+  // 统一通过 messages/setMessages 操作当前会话
+  const messages: Message[] = persistedMessages as unknown as Message[];
+  const setMessages: React.Dispatch<React.SetStateAction<Message[]>> = setPersistedMessages as unknown as React.Dispatch<React.SetStateAction<Message[]>>;
 
   const avatarCacheRef = useRef(new Map<string, string | null>());
   const avatarLoadingRef = useRef(new Set<string>());
@@ -298,12 +297,11 @@ const Workflow: React.FC<WorkflowProps> = ({
   
   // 当前会话类型 (派生状态)
   const currentSessionType = useMemo(() => {
-    if (isTemporarySession) return 'temporary';
     const session = sessions.find(s => s.session_id === currentSessionId) || currentSessionMeta;
     const type = session?.session_type;
     if (type === 'memory' || type === 'research') return 'temporary';
-    return type || 'temporary';
-  }, [currentSessionId, sessions, currentSessionMeta, isTemporarySession]);
+    return type || 'agent'; // 默认为 agent 类型
+  }, [currentSessionId, sessions, currentSessionMeta]);
 
   const [currentSessionAvatar, setCurrentSessionAvatar] = useState<string | null>(null); // 当前会话的头像
   const [currentSystemPrompt, setCurrentSystemPrompt] = useState<string | null>(null); // 当前会话的系统提示词（人设）
@@ -385,10 +383,9 @@ const Workflow: React.FC<WorkflowProps> = ({
 
   // useConversation 的加载状态/是否可继续向上翻页，同步到旧状态字段（避免大面积改 UI）
   useEffect(() => {
-    if (isTemporarySession) return;
     setIsLoadingMessages(isLoadingPersistedMessages);
     setHasMoreMessages(hasMorePersistedMessages);
-  }, [hasMorePersistedMessages, isLoadingPersistedMessages, isTemporarySession]);
+  }, [hasMorePersistedMessages, isLoadingPersistedMessages]);
   
   // 首次访问弹窗相关状态（已移除用户登录/访问模块）
   
@@ -634,7 +631,7 @@ const Workflow: React.FC<WorkflowProps> = ({
       historyTopStayTimerRef.current = null;
     }
     setVirtuosoFirstItemIndex(VIRTUOSO_BASE_INDEX);
-  }, [currentSessionId, isTemporarySession]);
+  }, [currentSessionId]);
 
   useEffect(() => {
     // 如果需要保持滚动位置（加载更多历史消息），不滚动
@@ -752,13 +749,8 @@ const Workflow: React.FC<WorkflowProps> = ({
   useEffect(() => {
     if (externalSessionId && externalSessionId !== currentSessionId) {
       handleSelectSession(externalSessionId);
-    } else if (externalSessionId === null || externalSessionId === 'temporary-session' || !externalSessionId) {
-      // 如果外部sessionId为null、undefined或者是临时会话，切换到临时会话
-      // 修复bug：确保默认访问临时会话，清除之前可能残留的agent消息
-      if (currentSessionId !== temporarySessionId) {
-      handleSelectSession(temporarySessionId);
-      }
     }
+    // 不再处理切换到临时会话的逻辑，默认 Agent 由 App.tsx 控制
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalSessionId, sessions.length]);
 
@@ -1570,28 +1562,8 @@ const Workflow: React.FC<WorkflowProps> = ({
   // 当选择会话时，加载历史消息、头像和人设
   useEffect(() => {
     if (currentSessionId) {
-      if (isTemporarySession) {
-        // 临时会话：不加载历史消息和总结
-        // 修复bug：确保临时会话的消息被重置，清除之前可能残留的agent消息
-        setMessages([
-          {
-            id: '1',
-            role: 'system',
-            content: '你好！我是你的 AI 工作流助手。这是临时会话，不会保存历史记录。',
-          },
-        ]);
-        setSummaries([]);
-        setCurrentSessionMeta(null);
-        setCurrentSessionAvatar(null);
-        setCurrentSystemPrompt(null);
-        // 清除消息缓存中的临时会话相关数据（如果有）
-        if (messageCacheRef.current.has(temporarySessionId)) {
-          messageCacheRef.current.delete(temporarySessionId);
-        }
-      } else {
-        // 临时会话或智能体：正常加载
-        // 先获取会话信息，判断是否是agent会话
-        const session = sessions.find(s => s.session_id === currentSessionId);
+      // 正常加载会话
+      const session = sessions.find(s => s.session_id === currentSessionId);
         // NOTE: 旧逻辑里区分 agent/temporary 的分支已不再依赖该布尔值
         
         // 统一使用分页加载（懒加载），避免消息过多时性能问题
@@ -1640,6 +1612,13 @@ const Workflow: React.FC<WorkflowProps> = ({
               }
             } catch (error) {
               console.warn('[Workflow] Failed to fetch session detail in effect:', currentSessionId, error);
+              // 如果会话不存在且不是默认 agent，通知父组件切换到默认 agent
+              if (error && (error as any).status === 404 && currentSessionId !== 'agent_chaya') {
+                console.log('[Workflow] Session not found, switching to default agent');
+                if (onSelectSession) {
+                  onSelectSession('agent_chaya');
+                }
+              }
             }
           })();
           return () => {
@@ -1673,9 +1652,8 @@ const Workflow: React.FC<WorkflowProps> = ({
             console.error('[Workflow] Failed to load current SOP:', err);
             setCurrentSopSkillPack(null);
           });
-        } else {
-          setCurrentSopSkillPack(null);
-        }
+      } else {
+        setCurrentSopSkillPack(null);
       }
     } else {
       // 新会话，清空消息（保留系统消息）
@@ -1692,7 +1670,7 @@ const Workflow: React.FC<WorkflowProps> = ({
       setSelectedBatchItem(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSessionId, sessions, isTemporarySession]);
+  }, [currentSessionId, sessions]);
   
   // 当弹框显示时：只滚动到底部（位置由 useChatInput 计算的 bottom/left 决定）
   // NOTE: 之前这里会直接写 selector.style.top，与渲染层使用 bottom/left 存在冲突，
@@ -1765,8 +1743,8 @@ const Workflow: React.FC<WorkflowProps> = ({
   
   // 加载会话消息
   const loadSessionMessages = async (session_id: string, page: number = 1) => {
-    // 统一走 useConversation（仅非临时会话）
-    if (!session_id || session_id === temporarySessionId || isTemporarySession) {
+    // 统一走 useConversation
+    if (!session_id) {
       return;
     }
 
@@ -1806,7 +1784,7 @@ const Workflow: React.FC<WorkflowProps> = ({
 
   const triggerLoadMoreHistory = useCallback(
     async (source: 'manual' | 'auto') => {
-      if (!currentSessionId || isTemporarySession) return;
+      if (!currentSessionId) return;
       if (!hasMoreMessages) return;
       if (isLoadingMessages) return;
       if (isLoadingMoreRef.current) return;
@@ -1843,7 +1821,7 @@ const Workflow: React.FC<WorkflowProps> = ({
         historyCooldownUntilRef.current = Date.now() + 900;
       }
     },
-    [currentSessionId, hasMoreMessages, isLoadingMessages, isTemporarySession, loadMorePersistedMessages]
+    [currentSessionId, hasMoreMessages, isLoadingMessages, loadMorePersistedMessages]
   );
 
   // 顶部停留触发（hybrid）：接近顶部后停留一段时间，只自动触发一次
@@ -1879,27 +1857,10 @@ const Workflow: React.FC<WorkflowProps> = ({
     }
   };
 
-  // 切换到临时会话
-  const handleSwitchToTemporarySession = () => {
-    setCurrentSessionId(temporarySessionId);
-    setIsTemporarySession(true);
-    setShowSessionTypeDialog(false);
-    // 清空消息（临时会话不保存历史）
-    setMessages([
-      {
-        id: '1',
-        role: 'system',
-        content: '你好！我是你的 AI 工作流助手。这是临时会话，不会保存历史记录。',
-      },
-    ]);
-    setMessagePage(1);
-    setSummaries([]);
-  };
-  
   // 选择会话
   const handleSelectSession = async (session_id: string) => {
     // 如果已经是当前选中的会话且元数据已存在，则跳过（避免闪烁）
-    if (session_id === currentSessionId && !isTemporarySession && currentSessionMeta) {
+    if (session_id === currentSessionId && currentSessionMeta) {
       return;
     }
 
@@ -1918,62 +1879,38 @@ const Workflow: React.FC<WorkflowProps> = ({
     // 切换会话时，清除 Agent 决策状态（避免在非 topic 会话中显示）
     setAgentDecidingStates(new Map());
     
-    if (session_id === temporarySessionId) {
-      // 切换到临时会话
-      setIsTemporarySession(true);
-      setCurrentSessionId(temporarySessionId);
-      setCurrentSessionMeta(null);
-      // 修复bug：确保临时会话的消息被重置，清除之前可能残留的agent消息
-      setMessages([
-        {
-          id: '1',
-          role: 'system',
-          content: '你好！我是你的 AI 工作流助手。这是临时会话，不会保存历史记录。',
-        },
-      ]);
-      setMessagePage(1);
-      setSummaries([]);
-      setCurrentSystemPrompt(null);
-      setCurrentSessionAvatar(null);
-      // 清除消息缓存中的临时会话相关数据（如果有）
-      if (messageCacheRef.current.has(temporarySessionId)) {
-        messageCacheRef.current.delete(temporarySessionId);
+    // 选择会话
+    setCurrentSessionId(session_id);
+    setMessagePage(1);
+    // 加载会话信息
+    let session = sessions.find(s => s.session_id === session_id);
+    if (!session) {
+      try {
+        session = await getSession(session_id);
+        await loadSessions();
+      } catch (error) {
+        console.warn('[Workflow] Failed to fetch session detail:', session_id, error);
       }
-    } else {
-      // 选择临时会话或智能体
-      setIsTemporarySession(false);
-      setCurrentSessionId(session_id);
-      setMessagePage(1);
-      // 加载会话信息
-      let session = sessions.find(s => s.session_id === session_id);
-      if (!session) {
-        try {
-          session = await getSession(session_id);
-          await loadSessions();
-        } catch (error) {
-          console.warn('[Workflow] Failed to fetch session detail:', session_id, error);
-        }
-      }
-      if (session) {
-        setCurrentSessionMeta(session);
-        setCurrentSessionAvatar(session.avatar || null);
-        setCurrentSystemPrompt(session.system_prompt || null);
+    }
+    if (session) {
+      setCurrentSessionMeta(session);
+      setCurrentSessionAvatar(session.avatar || null);
+      setCurrentSystemPrompt(session.system_prompt || null);
 
-        // Agent 偏好模型：进入 Agent 会话时自动切换到其 llm_config_id（仅当在可用列表里）
-        if (session.session_type === 'agent' && session.llm_config_id) {
-          const preferredId = session.llm_config_id;
-          const enabledSet = new Set(llmConfigs.filter((c) => Boolean(c.enabled)).map((c) => c.config_id));
-          if (enabledSet.has(preferredId) && selectedLLMConfigId !== preferredId) {
-            // 统一走 handleLLMConfigChange，保证 selectedLLMConfig 与下拉 label 完全一致
-            await handleLLMConfigChange(preferredId);
-          }
+      // Agent 偏好模型：进入 Agent 会话时自动切换到其 llm_config_id（仅当在可用列表里）
+      if (session.session_type === 'agent' && session.llm_config_id) {
+        const preferredId = session.llm_config_id;
+        const enabledSet = new Set(llmConfigs.filter((c) => Boolean(c.enabled)).map((c) => c.config_id));
+        if (enabledSet.has(preferredId) && selectedLLMConfigId !== preferredId) {
+          // 统一走 handleLLMConfigChange，保证 selectedLLMConfig 与下拉 label 完全一致
+          await handleLLMConfigChange(preferredId);
         }
-      } else if (currentSessionId !== session_id) {
-        // 只有在 ID 确实变了且找不到新详情时才重置
-        setCurrentSessionMeta(null);
-        setCurrentSessionAvatar(null);
-        setCurrentSystemPrompt(null);
       }
+    } else if (currentSessionId !== session_id) {
+      // 只有在 ID 确实变了且找不到新详情时才重置
+      setCurrentSessionMeta(null);
+      setCurrentSessionAvatar(null);
+      setCurrentSystemPrompt(null);
     }
   };
   
@@ -2114,10 +2051,6 @@ const Workflow: React.FC<WorkflowProps> = ({
   const handleManualSummarize = async () => {
     if (!currentSessionId || !selectedLLMConfigId || !selectedLLMConfig) {
       alert('请先选择会话和LLM模型');
-      return;
-    }
-    if (isTemporarySession) {
-      alert('临时会话不支持总结功能');
       return;
     }
     
@@ -2366,15 +2299,12 @@ const Workflow: React.FC<WorkflowProps> = ({
     // MCP通过selectedMcpServerIds在正常对话中使用工具
     // 工作流功能已移除
 
-
-    // 临时会话：不需要创建新会话，使用固定的临时会话ID
-    let sessionId = isTemporarySession ? temporarySessionId : currentSessionId;
-    if (!sessionId && !isTemporarySession) {
+    let sessionId = currentSessionId;
+    if (!sessionId) {
       try {
-        const newSession = await createSession(selectedLLMConfigId || undefined, effectiveInput.trim().substring(0, 50), 'temporary');
+        const newSession = await createSession(selectedLLMConfigId || undefined, effectiveInput.trim().substring(0, 50), 'agent');
         sessionId = newSession.session_id;
         setCurrentSessionId(sessionId);
-        setIsTemporarySession(false);
         await loadSessions();
       } catch (error) {
         console.error('[Workflow] Failed to create session:', error);
@@ -2452,8 +2382,8 @@ const Workflow: React.FC<WorkflowProps> = ({
     clearQuotedMessage(); // 清空引用消息
     setIsLoading(true);
     
-    // 保存用户消息到数据库（临时会话不保存）
-    if (sessionId && !isTemporarySession) {
+    // 保存用户消息到数据库
+    if (sessionId) {
       try {
         if (!selectedLLMConfig) {
           toast({ title: '请先选择 LLM 模型', variant: 'destructive' });
@@ -2580,7 +2510,7 @@ const Workflow: React.FC<WorkflowProps> = ({
       }
       
       // 添加历史总结（如果有，临时会话不添加）
-      if (summaries.length > 0 && !isTemporarySession) {
+      if (summaries.length > 0 ) {
         const summaryTexts = summaries.map(s => s.summary_content).join('\n\n');
         systemPrompt += `\n\n以下是之前对话的总结，请参考这些上下文：\n\n${summaryTexts}\n\n`;
       }
@@ -2612,7 +2542,7 @@ const Workflow: React.FC<WorkflowProps> = ({
         ...selectedSkillPacks.filter(sp => !currentSessionSkillPacks.some(csp => csp.skill_pack_id === sp.skill_pack_id))
       ];
       
-      if (allAvailableSkillPacks.length > 0 && !isTemporarySession) {
+      if (allAvailableSkillPacks.length > 0 ) {
         systemPrompt += `\n\n【可用技能包】\n以下是你可以参考使用的技能包。如果决定使用某个技能包，请在响应中明确说明："我将使用技能包：[技能包名称]"。\n\n`;
         allAvailableSkillPacks.forEach((pack, index) => {
           systemPrompt += `技能包 ${index + 1}: ${pack.name}\n${pack.summary}\n\n`;
@@ -2680,12 +2610,8 @@ const Workflow: React.FC<WorkflowProps> = ({
       const currentTokens = estimate_messages_tokens(conversationMessages, model);
       
       // 将消息历史转换为 LLMMessage 格式（用于传递给 LLMClient）
-      // 临时会话也需要“本次会话内”的上下文记忆，只是不落库持久化
       const baseMessagesToSend = lastSummaryIndex >= 0 ? messages.slice(lastSummaryIndex) : messages;
-      const tempSessionHistoryWindow = 24; // 仅用于临时会话，避免上下文无限膨胀
-      const messagesToSend = isTemporarySession
-        ? baseMessagesToSend.slice(-tempSessionHistoryWindow)
-        : baseMessagesToSend;
+      const messagesToSend = baseMessagesToSend;
       
       const messageHistory: LLMMessage[] = [];
       for (const msg of messagesToSend) {
@@ -2787,7 +2713,7 @@ const Workflow: React.FC<WorkflowProps> = ({
       }
       
       // 如果需要 summarize，先执行总结（临时会话不进行总结）
-      if (needsSummarize && sessionId && !isTemporarySession) {
+      if (needsSummarize && sessionId ) {
         try {
           setIsSummarizing(true);
           const messagesToSummarize = conversationMessages.slice(0, -1).map((msg, idx) => ({
@@ -3185,7 +3111,7 @@ const Workflow: React.FC<WorkflowProps> = ({
           }
           
           // 保存助手消息到数据库（流式响应模式，包含思维签名和媒体内容，临时会话不保存）
-          if (sessionId && !isTemporarySession) {
+          if (sessionId ) {
             try {
               const messageData: any = {
                 role: 'assistant',
@@ -3336,7 +3262,7 @@ const Workflow: React.FC<WorkflowProps> = ({
           }
           
           // 保存助手消息到数据库（非流式响应模式，包含思维签名和媒体内容，临时会话不保存）
-          if (sessionId && !isTemporarySession) {
+          if (sessionId ) {
             try {
               const messageData: any = {
                 message_id: assistantMessageId,
@@ -3675,7 +3601,7 @@ const Workflow: React.FC<WorkflowProps> = ({
         }
         
         // 保存到数据库（临时会话不保存）
-        if (request.sessionId && !isTemporarySession) {
+        if (request.sessionId ) {
           try {
             const messageData: any = {
               message_id: messageId,
@@ -4740,7 +4666,7 @@ const Workflow: React.FC<WorkflowProps> = ({
     setMessages(prev => prev.slice(0, targetIndex + 1));
     
     // 从数据库回退（真正删除目标消息之后的所有消息）
-    if (currentSessionId && !isTemporarySession) {
+    if (currentSessionId ) {
       try {
         await messageApi.rollbackToMessage(currentSessionId, targetMessageId);
         // 回退会自动刷新缓存，这里只给一个轻量提示
@@ -4872,7 +4798,7 @@ const Workflow: React.FC<WorkflowProps> = ({
         return (
           <SplitViewMessage
             id={message.id}
-            role={message.role}
+            role={toUIRole(message.role)}
             content={message.content}
             thinking={message.thinking}
             isThinking={message.isThinking}
@@ -4949,7 +4875,7 @@ const Workflow: React.FC<WorkflowProps> = ({
             </div>
           )}
 
-          {(message.role === 'assistant' || message.role === 'tool') ? (
+          {(message.role === 'assistant' || message.role === 'tool' || message.role === 'error') ? (
             <div className="w-full min-w-0">
               {/* 第一行：头像 + 名称 + 状态（不占气泡空间） */}
               <div className="flex flex-row items-center gap-1.5 w-full min-w-0">
@@ -4970,7 +4896,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                   const assistantName = msgSenderName || agentP?.name || '';
                   return (
                     <>
-                      <MessageAvatar role={message.role} avatarUrl={assistantAvatarUrl} toolType={message.toolType} size="sm" />
+                      <MessageAvatar role={toUIRole(message.role)} avatarUrl={assistantAvatarUrl} toolType={message.toolType} size="sm" />
                       {needAgentInfo && message.role === 'assistant' && senderType === 'agent' && assistantName && (
                         <span className="text-xs text-gray-700 dark:text-[#d0d0d0] font-medium truncate max-w-[80px]" title={assistantName}>
                           {assistantName}
@@ -4991,7 +4917,7 @@ const Workflow: React.FC<WorkflowProps> = ({
               </div>
               {/* 第二行：气泡换行顶格贴左（抵消列表 px-3），不空头像位 */}
               <div className="w-full min-w-0 group relative mt-1 -ml-3">
-                <MessageBubbleContainer role={message.role} toolType={message.toolType} className="w-full">
+                <MessageBubbleContainer role={toUIRole(message.role)} toolType={message.toolType} className="w-full">
                   <MessageContent
                     message={message}
                     prevMessageContent={getPrevMessageContent(message.id)}
@@ -5049,10 +4975,10 @@ const Workflow: React.FC<WorkflowProps> = ({
                     />
                   </div>
                 )}
-                <MessageAvatar role={message.role} toolType={message.toolType} size="md" />
+                <MessageAvatar role={toUIRole(message.role)} toolType={message.toolType} size="md" />
               </div>
               <div className="w-full min-w-0 flex justify-end">
-                <MessageBubbleContainer role={message.role} toolType={message.toolType} className="max-w-[85%] w-max">
+                <MessageBubbleContainer role={toUIRole(message.role)} toolType={message.toolType} className="max-w-[85%] w-max">
                   <MessageContent
                     message={message}
                     prevMessageContent={getPrevMessageContent(message.id)}
@@ -5237,7 +5163,7 @@ const Workflow: React.FC<WorkflowProps> = ({
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center space-x-2">
                   <div className="w-7 h-7 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary-400 hover:ring-offset-1 transition-all overflow-hidden" onClick={async () => {
-                  if (currentSessionId && !isTemporarySession) {
+                  if (currentSessionId ) {
                     // 从当前会话获取数据
                     let currentSession =
                       sessions.find(s => s.session_id === currentSessionId) ||
@@ -5287,7 +5213,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                     }
                   }
                 }}
-                title={currentSessionId && !isTemporarySession ? "点击配置会话" : "请先选择或创建会话"}
+                title={currentSessionId  ? "点击配置会话" : "请先选择或创建会话"}
               >
                 {currentSessionAvatar ? (
                   <img src={currentSessionAvatar} alt="Avatar" className="w-full h-full object-cover" />
@@ -5303,7 +5229,6 @@ const Workflow: React.FC<WorkflowProps> = ({
                     const currentSession =
                       sessions.find(s => s.session_id === currentSessionId) ||
                       (currentSessionMeta?.session_id === currentSessionId ? currentSessionMeta : null);
-                    if (isTemporarySession) return '临时会话';
                     if (currentSession?.name) return currentSession.name;
                     if (currentSession?.session_type === 'agent') return 'AI 工作流助手';
                     return 'AI 工作流助手';
@@ -5393,7 +5318,7 @@ const Workflow: React.FC<WorkflowProps> = ({
               )}
               
               {/* 制作技能包按钮 - 在有消息时显示 */}
-              {currentSessionId && !isTemporarySession && messages.filter(m => m.role !== 'system').length > 0 && !skillPackSelectionMode && (
+              {currentSessionId  && messages.filter(m => m.role !== 'system').length > 0 && !skillPackSelectionMode && (
                 <button
                   onClick={() => {
                     if (currentSessionType === 'agent') {
@@ -5933,7 +5858,9 @@ const Workflow: React.FC<WorkflowProps> = ({
                                 data: item.data,
                                 url: item.url,
                                 messageId: quotedMsg.id,
-                                role: quotedMsg.role === 'system' ? 'user' : quotedMsg.role,
+                                role: quotedMsg.role === 'system'
+                                  ? 'user'
+                                  : (quotedMsg.role === 'error' ? 'assistant' : quotedMsg.role),
                               });
                             }}
                           />
@@ -6679,12 +6606,7 @@ const Workflow: React.FC<WorkflowProps> = ({
             }}
           />
           
-          {/* 会话类型选择对话框 */}
-          <SessionTypeDialog
-            open={showSessionTypeDialog}
-            onClose={() => setShowSessionTypeDialog(false)}
-            onSelectTemporary={handleSwitchToTemporarySession}
-          />
+          {/* 会话类型选择对话框 - 已移除临时会话功能 */}
 
           {/* 升级为智能体对话框 */}
           <UpgradeToAgentDialog
@@ -6736,10 +6658,10 @@ const Workflow: React.FC<WorkflowProps> = ({
               setSelectedProviderTab(null);
             }
           }}>
-            <DialogContent className="max-w-md">
+            <DialogContent className="max-w-md [data-skin='niho']:bg-[rgba(0,0,0,0.92)] [data-skin='niho']:border-[var(--niho-text-border)]">
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
-                  <Brain className="w-5 h-5 text-primary-600 dark:text-primary-400" />
+                  <Brain className="w-5 h-5 text-primary-600 dark:text-primary-400 [data-skin='niho']:text-[var(--color-accent)]" />
                   选择模型
                 </DialogTitle>
                 <DialogDescription>
@@ -6748,27 +6670,27 @@ const Workflow: React.FC<WorkflowProps> = ({
               </DialogHeader>
               {/* Tab 页签和模型列表 */}
               {(() => {
-                // 按供应商分组
-                const groupedByProvider = new Map<string, LLMConfigFromDB[]>();
+                // 按 supplier 分组（token/计费归属）。supplier = supplier ?? provider
+                const groupedBySupplier = new Map<string, LLMConfigFromDB[]>();
                 llmConfigs.forEach(config => {
-                  const provider = config.provider || 'other';
-                  if (!groupedByProvider.has(provider)) {
-                    groupedByProvider.set(provider, []);
+                  const supplier = config.supplier || config.provider || 'other';
+                  if (!groupedBySupplier.has(supplier)) {
+                    groupedBySupplier.set(supplier, []);
                   }
-                  groupedByProvider.get(provider)!.push(config);
+                  groupedBySupplier.get(supplier)!.push(config);
                 });
                 
-                const providerEntries = Array.from(groupedByProvider.entries());
+                const supplierEntries = Array.from(groupedBySupplier.entries());
                 
                 // 如果没有选中的 Tab，默认选中第一个
-                const currentTab = selectedProviderTab || (providerEntries.length > 0 ? providerEntries[0][0] : null);
+                const currentTab = selectedProviderTab || (supplierEntries.length > 0 ? supplierEntries[0][0] : null);
                 
-                // 获取供应商信息
-                const getProviderName = (provider: string): string => {
-                  const providerObj = providers.find(p => p.provider_type === provider || p.provider_id === provider);
+                // 获取 supplier 信息（优先用 providers 表的 name）
+                const getSupplierName = (supplier: string): string => {
+                  const providerObj = providers.find(p => p.provider_type === supplier || p.provider_id === supplier);
                   if (providerObj) return providerObj.name;
-                  // 默认供应商名称映射
-                  const providerNames: Record<string, string> = {
+                  // 默认供应商名称映射（系统 supplier）
+                  const supplierNames: Record<string, string> = {
                     openai: 'OpenAI',
                     anthropic: 'Anthropic',
                     gemini: 'Google Gemini',
@@ -6777,12 +6699,12 @@ const Workflow: React.FC<WorkflowProps> = ({
                     local: 'Local',
                     custom: 'Custom',
                   };
-                  return providerNames[provider] || provider;
+                  return supplierNames[supplier] || supplier;
                 };
                 
-                // 获取供应商图标
-                const getProviderIconElement = (provider: string, configs: LLMConfigFromDB[]): React.ReactNode => {
-                  const providerInfo = providers.find(p => p.provider_type === provider || p.provider_id === provider);
+                // 获取 supplier 图标
+                const getSupplierIconElement = (supplier: string, configs: LLMConfigFromDB[]): React.ReactNode => {
+                  const providerInfo = providers.find(p => p.provider_type === supplier || p.provider_id === supplier);
                   if (!providerInfo) return null;
                   
                   const iconInfo = getProviderIcon(configs[0], providers);
@@ -6792,28 +6714,28 @@ const Workflow: React.FC<WorkflowProps> = ({
                         {iconInfo.logoLight && (
                           <img 
                             src={iconInfo.logoLight} 
-                            alt={getProviderName(provider)} 
+                            alt={getSupplierName(supplier)} 
                             className="w-4 h-4 object-cover rounded dark:hidden"
                           />
                         )}
                         {iconInfo.logoDark && (
                           <img 
                             src={iconInfo.logoDark} 
-                            alt={getProviderName(provider)} 
+                            alt={getSupplierName(supplier)} 
                             className="w-4 h-4 object-cover rounded hidden dark:block"
                           />
                         )}
                         {iconInfo.logoLight && !iconInfo.logoDark && (
                           <img 
                             src={iconInfo.logoLight} 
-                            alt={getProviderName(provider)} 
+                            alt={getSupplierName(supplier)} 
                             className="w-4 h-4 object-cover rounded hidden dark:block"
                           />
                         )}
                         {!iconInfo.logoLight && iconInfo.logoDark && (
                           <img 
                             src={iconInfo.logoDark} 
-                            alt={getProviderName(provider)} 
+                            alt={getSupplierName(supplier)} 
                             className="w-4 h-4 object-cover rounded dark:hidden"
                           />
                         )}
@@ -6831,16 +6753,16 @@ const Workflow: React.FC<WorkflowProps> = ({
                 return (
                   <div className="flex flex-col h-full">
                     {/* Tab 页签 */}
-                    <div className="flex border-b border-gray-200 dark:border-[#404040] overflow-x-auto no-scrollbar">
-                      {providerEntries.map(([provider, configs]) => {
-                        const providerName = getProviderName(provider);
-                        const isActive = currentTab === provider;
-                        const providerIcon = getProviderIconElement(provider, configs);
+                    <div className="flex border-b border-gray-200 dark:border-[#404040] overflow-x-auto no-scrollbar [data-skin='niho']:border-[var(--niho-text-border)]">
+                      {supplierEntries.map(([supplier, configs]) => {
+                        const supplierName = getSupplierName(supplier);
+                        const isActive = currentTab === supplier;
+                        const supplierIcon = getSupplierIconElement(supplier, configs);
                         
                         return (
                           <button
-                            key={provider}
-                            onClick={() => setSelectedProviderTab(provider)}
+                            key={supplier}
+                            onClick={() => setSelectedProviderTab(supplier)}
                             className={`
                               flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors whitespace-nowrap
                               border-b-2
@@ -6848,20 +6770,29 @@ const Workflow: React.FC<WorkflowProps> = ({
                                 ? 'border-primary-600 dark:border-primary-400 text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20'
                                 : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'
                               }
+                              [data-skin='niho']:bg-[rgba(0,0,0,0.15)]
+                              [data-skin='niho']:text-[var(--niho-skyblue-gray)]
+                              [data-skin='niho']:hover:text-[var(--niho-mist-pink)]
+                              [data-skin='niho']:hover:border-[rgba(255,159,196,0.35)]
+                              ${isActive ? "[data-skin='niho']:!bg-[rgba(42,15,63,0.35)] [data-skin='niho']:!border-[var(--color-accent)] [data-skin='niho']:!text-[var(--color-accent)] [data-skin='niho']:shadow-[0_0_16px_rgba(0,255,136,0.08)]" : ''}
                             `}
                           >
-                            {providerIcon && (
+                            {supplierIcon && (
                               <div className="w-4 h-4 flex items-center justify-center flex-shrink-0">
-                                {providerIcon}
+                                {supplierIcon}
                               </div>
                             )}
-                            <span>{providerName}</span>
+                            <span>{supplierName}</span>
                             <span className={`
                               text-xs px-1.5 py-0.5 rounded-full
                               ${isActive
                                 ? 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300'
                                 : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
                               }
+                              [data-skin='niho']:border [data-skin='niho']:border-[var(--niho-text-border)]
+                              [data-skin='niho']:bg-[rgba(0,0,0,0.55)]
+                              [data-skin='niho']:text-[var(--niho-skyblue-gray)]
+                              ${isActive ? "[data-skin='niho']:!bg-[var(--niho-black-gold)] [data-skin='niho']:!border-[rgba(255,215,0,0.28)] [data-skin='niho']:!text-[var(--color-highlight)]" : ''}
                             `}>
                               {configs.length}
                             </span>
@@ -6877,9 +6808,9 @@ const Workflow: React.FC<WorkflowProps> = ({
                         maxHeight: '50vh',
                 }}
               >
-                      {currentTab && groupedByProvider.has(currentTab) && (
+                      {currentTab && groupedBySupplier.has(currentTab) && (
                 <div className="space-y-1 py-2">
-                          {groupedByProvider.get(currentTab)!.map((config) => {
+                          {groupedBySupplier.get(currentTab)!.map((config) => {
                     const isSelected = selectedLLMConfigId === config.config_id;
                     const providerInfo = getProviderIcon(config, providers);
                     
@@ -6951,9 +6882,20 @@ const Workflow: React.FC<WorkflowProps> = ({
                         key={config.config_id}
                         id={config.config_id}
                         title={config.shortname || config.name}
-                        description={config.model || config.description || undefined}
+                        description={
+                          config.supplier && config.supplier !== config.provider
+                            ? `${config.model || config.description || ''} · 兼容: ${config.provider}`
+                            : (config.model || config.description || undefined)
+                        }
                         avatar={avatarContent}
                         isSelected={isSelected}
+                        className={`
+                          [data-skin='niho']:border [data-skin='niho']:border-[var(--niho-text-border)]
+                          [data-skin='niho']:bg-[rgba(0,0,0,0.35)]
+                          [data-skin='niho']:hover:bg-[rgba(143,183,201,0.06)]
+                          [data-skin='niho']:hover:border-[rgba(143,183,201,0.25)]
+                          ${isSelected ? "[data-skin='niho']:!bg-[rgba(42,15,63,0.55)] [data-skin='niho']:!border-[rgba(0,255,136,0.35)] [data-skin='niho']:shadow-[0_0_14px_rgba(0,255,136,0.10)]" : ''}
+                        `}
                         onClick={() => {
                           handleLLMConfigChange(config.config_id);
                           setShowModelSelectDialog(false);
@@ -6977,7 +6919,7 @@ const Workflow: React.FC<WorkflowProps> = ({
 
           {/* 头像配置对话框 */}
           <AvatarConfigDialog
-            open={showAvatarConfigDialog && !!currentSessionId && !isTemporarySession}
+            open={showAvatarConfigDialog && !!currentSessionId }
             onClose={() => setShowAvatarConfigDialog(false)}
             avatarDraft={avatarConfigDraft}
             setAvatarDraft={setAvatarConfigDraft}
@@ -7119,7 +7061,6 @@ const Workflow: React.FC<WorkflowProps> = ({
       isLoadingProfessions={isLoadingHeaderProfessions}
       sessions={sessions}
       currentSessionId={currentSessionId}
-      isTemporarySession={isTemporarySession}
       llmConfigs={llmConfigs}
       isSavingAsRole={isSavingHeaderAsRole}
       onShowAddProfessionDialog={() => setShowHeaderAddProfessionDialog(true)}
@@ -7408,9 +7349,7 @@ const Workflow: React.FC<WorkflowProps> = ({
       isLoadingPersonaList={isLoadingPersonaList}
       personaAgents={personaAgents}
       personaTopics={personaTopics}
-      isTemporarySession={isTemporarySession}
       currentSessionId={currentSessionId}
-      temporarySessionId={temporarySessionId}
       onSwitchSession={switchSessionFromPersona}
       onDeleteAgent={(id, name) => setDeleteSessionTarget({ id, name })}
       onShowRoleGenerator={() => setShowRoleGenerator(true)}

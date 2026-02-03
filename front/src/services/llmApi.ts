@@ -58,6 +58,7 @@ export interface LLMConfigFromDB {
   name: string;
   shortname?: string;
   provider: 'openai' | 'deepseek' | 'anthropic' | 'local' | 'custom' | 'ollama' | 'gemini';
+  supplier?: string;  // Token/计费归属供应商（如 nvidia, openai）
   api_url?: string;
   model?: string;
   tags?: string[];
@@ -75,6 +76,7 @@ export interface CreateLLMConfigRequest {
   name: string;
   shortname?: string;
   provider: 'openai' | 'deepseek' | 'anthropic' | 'local' | 'custom' | 'ollama' | 'gemini';
+  supplier?: string;  // Token/计费归属供应商（如 nvidia, openai）
   api_key?: string;
   api_url?: string;
   model?: string;

@@ -33,7 +33,6 @@ export interface HeaderConfigDialogProps {
   // 会话信息
   sessions: Session[];
   currentSessionId: string | null;
-  isTemporarySession: boolean;
   llmConfigs: LLMConfigFromDB[];
   // 保存状态
   isSavingAsRole: boolean;
@@ -67,7 +66,6 @@ export const HeaderConfigDialog: React.FC<HeaderConfigDialogProps> = ({
   isLoadingProfessions,
   sessions,
   currentSessionId,
-  isTemporarySession,
   llmConfigs,
   isSavingAsRole,
   onShowAddProfessionDialog,
@@ -304,7 +302,7 @@ export const HeaderConfigDialog: React.FC<HeaderConfigDialogProps> = ({
         
         {/* 底部按钮 */}
         <div className="px-5 py-4 bg-gray-50 dark:bg-[#1a1a1a] flex items-center justify-end space-x-3 flex-shrink-0">
-          {currentSessionId && currentSession && !isTemporarySession && !isAgent && (
+          {currentSessionId && currentSession && !isAgent && (
             <button
               onClick={onSaveAsRole}
               disabled={isSavingAsRole}

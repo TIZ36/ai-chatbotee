@@ -3846,7 +3846,9 @@ def create_llm_config():
             return jsonify({'error': 'MySQL not available'}), 503
         
         data = request.json
-        config_id = data.get('config_id') or f'llm-{int(time.time())}'
+        # 使用 UUID 生成 config_id，避免批量创建时重复
+        import uuid
+        config_id = data.get('config_id') or f'llm_{uuid.uuid4().hex[:8]}'
         name = data.get('name')
         provider = data.get('provider', 'openai')
         
@@ -3856,13 +3858,14 @@ def create_llm_config():
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO llm_configs 
-            (config_id, name, shortname, provider, api_key, api_url, model, tags, enabled, description, metadata)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (config_id, name, shortname, provider, subprovider, api_key, api_url, model, tags, enabled, description, metadata)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             config_id,
             name,
             data.get('shortname'),
             provider,
+            data.get('subprovider'),  # 子供应商名称（如 nvidia）
             data.get('api_key'),
             data.get('api_url'),
             data.get('model'),
@@ -4298,10 +4301,118 @@ def init_services():
         import traceback
         traceback.print_exc()
     
+    # 初始化默认 Agent "chaya"
+    # 只有在 MySQL 初始化成功时才尝试初始化
+    app._default_agent_initialized = False
+    if mysql_success:
+        try:
+            # 等待一小段时间确保连接池完全初始化
+            import time
+            time.sleep(0.5)
+            _init_default_agent()
+            app._default_agent_initialized = True
+            print("[Services] Default agent initialized")
+        except Exception as e:
+            print(f"[Services] Warning: Failed to initialize default agent: {e}")
+            import traceback
+            traceback.print_exc()
+            # 延迟初始化：在第一次请求时尝试（只执行一次）
+            def ensure_default_agent():
+                if not app._default_agent_initialized:
+                    try:
+                        _init_default_agent()
+                        app._default_agent_initialized = True
+                        print("[Services] Default agent initialized on first request")
+                    except:
+                        pass  # 静默失败，避免每次请求都打印
+            app.before_request(ensure_default_agent)
+    else:
+        print("[Services] Skipping default agent initialization (MySQL not available)")
+    
     print("=" * 60)
     print("Service initialization completed")
     print("=" * 60)
     print()
+
+
+def _init_default_agent():
+    """初始化默认的 Agent chaya（如果不存在）"""
+    from database import get_mysql_connection
+    from services.session_service import SessionService
+    import base64
+    
+    DEFAULT_AGENT_ID = 'agent_chaya'
+    
+    # 从 config.yaml 读取配置
+    chaya_config = config.get('chaya', {})
+    DEFAULT_AGENT_NAME = chaya_config.get('name', 'Chaya')
+    DEFAULT_SYSTEM_PROMPT = chaya_config.get('system_prompt', '''你是 Chaya，一个友善、聪明的 AI 助手。你具有以下特点：
+
+1. **乐于助人**：始终以用户需求为中心，提供清晰、准确的回答
+2. **善于沟通**：用中文回复，表达自然流畅，必要时使用表情增添亲和力
+3. **专业可靠**：对技术问题给出专业建议，对不确定的内容会诚实说明
+4. **富有个性**：保持温暖友好的态度，适当展现幽默感
+
+请根据用户的问题提供帮助，让每次对话都愉快而有价值。''')
+    
+    # 读取头像文件并转换为 base64
+    avatar_base64 = None
+    avatar_path = chaya_config.get('avatar_path')
+    if avatar_path:
+        try:
+            # 头像路径相对于 backend 目录
+            avatar_full_path = Path(__file__).parent / avatar_path
+            if avatar_full_path.exists():
+                with open(avatar_full_path, 'rb') as f:
+                    avatar_data = f.read()
+                    avatar_base64 = f"data:image/png;base64,{base64.b64encode(avatar_data).decode('utf-8')}"
+                    print(f"[DefaultAgent] Loaded avatar from {avatar_path}")
+            else:
+                print(f"[DefaultAgent] Warning: Avatar file not found at {avatar_full_path}")
+        except Exception as e:
+            print(f"[DefaultAgent] Warning: Failed to load avatar: {e}")
+    
+    # 检查数据库连接是否可用
+    conn = get_mysql_connection()
+    if not conn:
+        print("[DefaultAgent] Database connection not available, skipping")
+        return
+    conn.close()  # 立即关闭测试连接
+    
+    try:
+        # SessionService 需要接收 get_connection 函数，而不是连接对象
+        service = SessionService(get_mysql_connection)
+        
+        # 检查是否已存在
+        existing = service.get_session(DEFAULT_AGENT_ID)
+        if existing:
+            print(f"[DefaultAgent] Agent '{DEFAULT_AGENT_NAME}' already exists")
+            # 如果存在但头像为空，更新头像
+            if avatar_base64 and not existing.get('avatar'):
+                try:
+                    service.update_session(DEFAULT_AGENT_ID, {'avatar': avatar_base64})
+                    print(f"[DefaultAgent] Updated avatar for existing agent '{DEFAULT_AGENT_NAME}'")
+                except Exception as e:
+                    print(f"[DefaultAgent] Warning: Failed to update avatar: {e}")
+            return
+        
+        # 创建默认 Agent
+        agent_data = {
+            'session_id': DEFAULT_AGENT_ID,
+            'name': DEFAULT_AGENT_NAME,
+            'session_type': 'agent',
+            'system_prompt': DEFAULT_SYSTEM_PROMPT,
+            'avatar': avatar_base64,
+        }
+        
+        result = service.create_session(agent_data)
+        print(f"[DefaultAgent] Created default agent '{DEFAULT_AGENT_NAME}' with id: {result.get('session_id')}")
+        if avatar_base64:
+            print(f"[DefaultAgent] Avatar set successfully")
+        
+    except Exception as e:
+        print(f"[DefaultAgent] Error creating default agent: {e}")
+        raise
 
 # ==================== 工作流配置管理 API ====================
 

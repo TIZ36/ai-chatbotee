@@ -269,25 +269,25 @@ const CreateAgentDialog: React.FC<CreateAgentDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="w-5 h-5" />
+          <DialogTitle className="flex items-center gap-2 [data-skin='niho']:text-[var(--text-primary)]">
+            <Sparkles className="w-5 h-5 [data-skin='niho']:text-[var(--color-accent)]" />
             创建智能体
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="[data-skin='niho']:text-[var(--niho-skyblue-gray)]">
             创建一个具有独特人设和能力的 AI 智能体
           </DialogDescription>
         </DialogHeader>
 
-        {/* Tab 切换 */}
-        <div className="flex border-b border-gray-200 dark:border-[#404040]">
+        {/* Tab 切换 - Niho 主题 */}
+        <div className="flex border-b border-gray-200 dark:border-[#404040] [data-skin='niho']:border-[var(--niho-text-border)]">
           <button
             onClick={() => setActiveTab('basic')}
             className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               activeTab === 'basic'
-                ? 'border-primary-500 text-primary-600 dark:text-primary-400'
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                ? 'border-primary-500 text-primary-600 dark:text-primary-400 [data-skin="niho"]:border-[var(--color-accent)] [data-skin="niho"]:text-[var(--color-accent)]'
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 [data-skin="niho"]:text-[var(--niho-skyblue-gray)] [data-skin="niho"]:hover:text-[var(--text-primary)]'
             }`}
           >
             <User className="w-4 h-4" />
@@ -297,14 +297,14 @@ const CreateAgentDialog: React.FC<CreateAgentDialogProps> = ({
             onClick={() => setActiveTab('advanced')}
             className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               activeTab === 'advanced'
-                ? 'border-primary-500 text-primary-600 dark:text-primary-400'
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                ? 'border-primary-500 text-primary-600 dark:text-primary-400 [data-skin="niho"]:border-[var(--color-accent)] [data-skin="niho"]:text-[var(--color-accent)]'
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 [data-skin="niho"]:text-[var(--niho-skyblue-gray)] [data-skin="niho"]:hover:text-[var(--text-primary)]'
             }`}
           >
             <Sliders className="w-4 h-4" />
             高级设置
             {enabledFeatures.length > 0 && (
-              <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 rounded">
+              <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 rounded [data-skin='niho']:bg-[var(--color-accent-bg)] [data-skin='niho']:text-[var(--color-accent)] [data-skin='niho']:border [data-skin='niho']:border-[var(--color-accent-bg)]">
                 {enabledFeatures.length}
               </span>
             )}
@@ -317,14 +317,14 @@ const CreateAgentDialog: React.FC<CreateAgentDialogProps> = ({
             <div className="space-y-5 px-1">
               {/* 头像 */}
               <div>
-                <Label className="text-sm font-medium mb-2 block">头像</Label>
+                <Label className="text-sm font-medium mb-2 block [data-skin='niho']:text-[var(--text-primary)]">头像</Label>
                 <div className="flex items-start gap-4">
                   {/* 头像预览 */}
-                  <div className="w-20 h-20 rounded-xl overflow-hidden bg-gray-100 dark:bg-gray-800 border-2 border-gray-200 dark:border-[#404040] flex items-center justify-center flex-shrink-0">
+                  <div className="w-20 h-20 rounded-xl overflow-hidden bg-gray-100 dark:bg-gray-800 border-2 border-gray-200 dark:border-[#404040] flex items-center justify-center flex-shrink-0 [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
                     {avatar ? (
                       <img src={avatar} alt="Avatar" className="w-full h-full object-cover" />
                     ) : (
-                      <Bot className="w-10 h-10 text-gray-400 dark:text-gray-600" />
+                      <Bot className="w-10 h-10 text-gray-400 dark:text-gray-600 [data-skin='niho']:text-[var(--color-accent)]" />
                     )}
                   </div>
 
@@ -335,7 +335,7 @@ const CreateAgentDialog: React.FC<CreateAgentDialogProps> = ({
                         variant="outline"
                         size="sm"
                         onClick={() => fileInputRef.current?.click()}
-                        className="h-8"
+                        className="h-8 [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-transparent [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:hover:border-[var(--color-accent-bg)] [data-skin='niho']:hover:text-[var(--color-accent)]"
                       >
                         <Upload className="w-3.5 h-3.5 mr-1.5" />
                         上传图片
@@ -345,7 +345,7 @@ const CreateAgentDialog: React.FC<CreateAgentDialogProps> = ({
                           variant="ghost"
                           size="sm"
                           onClick={() => setAvatar(null)}
-                          className="h-8 text-red-600 hover:text-red-700 dark:text-red-400"
+                          className="h-8 text-red-600 hover:text-red-700 dark:text-red-400 [data-skin='niho']:text-[var(--color-secondary)] [data-skin='niho']:hover:text-[var(--color-secondary-hover)] [data-skin='niho']:hover:bg-[var(--color-secondary-bg)]"
                         >
                           清除
                         </Button>
@@ -354,17 +354,21 @@ const CreateAgentDialog: React.FC<CreateAgentDialogProps> = ({
 
                     {/* AI 生成头像 */}
                     <div className="space-y-2">
-                      <Label className="text-xs font-medium">生图模型</Label>
+                      <Label className="text-xs font-medium [data-skin='niho']:text-[var(--text-primary)]">生图模型</Label>
                       <Select value={avatarModelId} onValueChange={setAvatarModelId}>
-                        <SelectTrigger className="h-8 text-xs">
+                        <SelectTrigger className="h-8 text-xs [data-skin='niho']:bg-[var(--niho-pure-black-elevated)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:focus:border-[var(--color-accent-bg)]">
                           <SelectValue placeholder="选择生图模型" />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="[data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
                           {llmConfigs.filter(c => c.provider === 'gemini').map(config => (
-                            <SelectItem key={config.config_id} value={config.config_id}>
+                            <SelectItem 
+                              key={config.config_id} 
+                              value={config.config_id}
+                              className="[data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:focus:bg-[var(--color-accent-bg)]"
+                            >
                               <div className="flex items-center gap-2">
                                 <span className="font-medium">{config.name}</span>
-                                <span className="text-[10px] opacity-50 px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded">
+                                <span className="text-[10px] opacity-50 px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded [data-skin='niho']:bg-[var(--niho-text-bg)] [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
                                   {config.provider} · {config.model}
                                 </span>
                               </div>
@@ -378,7 +382,7 @@ const CreateAgentDialog: React.FC<CreateAgentDialogProps> = ({
                           placeholder="描述头像特征（如：年轻女性、科技感、蓝色调）"
                           value={avatarDesc}
                           onChange={(e) => setAvatarDesc(e.target.value)}
-                          className="flex-1 h-8 text-xs"
+                          className="flex-1 h-8 text-xs [data-skin='niho']:bg-[var(--niho-pure-black-elevated)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:placeholder:text-[var(--niho-skyblue-gray)] [data-skin='niho']:focus:border-[var(--color-accent-bg)]"
                           onKeyDown={(e) => {
                             if (e.key === 'Enter' && !isGeneratingAvatar) {
                               e.preventDefault();
@@ -391,7 +395,7 @@ const CreateAgentDialog: React.FC<CreateAgentDialogProps> = ({
                           size="sm"
                           onClick={handleGenerateAvatar}
                           disabled={isGeneratingAvatar || !avatarDesc.trim() || !avatarModelId}
-                          className="h-8"
+                          className="h-8 [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-transparent [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:hover:border-[var(--color-accent-bg)] [data-skin='niho']:hover:text-[var(--color-accent)]"
                         >
                           {isGeneratingAvatar ? (
                             <Loader className="w-3.5 h-3.5 animate-spin" />
@@ -401,7 +405,7 @@ const CreateAgentDialog: React.FC<CreateAgentDialogProps> = ({
                           <span className="ml-1.5">AI 生成</span>
                         </Button>
                       </div>
-                      <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                      <p className="text-[10px] text-gray-500 dark:text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
                         支持上传图片或使用 AI 根据描述生成头像
                       </p>
                     </div>
@@ -419,33 +423,37 @@ const CreateAgentDialog: React.FC<CreateAgentDialogProps> = ({
 
               {/* 昵称 */}
               <div>
-                <Label htmlFor="agent-name" className="text-sm font-medium mb-2 block">
-                  昵称 <span className="text-red-500">*</span>
+                <Label htmlFor="agent-name" className="text-sm font-medium mb-2 block [data-skin='niho']:text-[var(--text-primary)]">
+                  昵称 <span className="text-red-500 [data-skin='niho']:text-[var(--color-secondary)]">*</span>
                 </Label>
                 <Input
                   id="agent-name"
                   placeholder="给智能体起个名字"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full"
+                  className="w-full [data-skin='niho']:bg-[var(--niho-pure-black-elevated)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:placeholder:text-[var(--niho-skyblue-gray)] [data-skin='niho']:focus:border-[var(--color-accent-bg)] [data-skin='niho']:focus:ring-[var(--color-accent-bg)]"
                 />
               </div>
 
               {/* 默认模型 */}
               <div>
-                <Label htmlFor="agent-llm" className="text-sm font-medium mb-2 block">
-                  默认模型 <span className="text-red-500">*</span>
+                <Label htmlFor="agent-llm" className="text-sm font-medium mb-2 block [data-skin='niho']:text-[var(--text-primary)]">
+                  默认模型 <span className="text-red-500 [data-skin='niho']:text-[var(--color-secondary)]">*</span>
                 </Label>
                 <Select value={llmConfigId} onValueChange={setLlmConfigId}>
-                  <SelectTrigger id="agent-llm" className="w-full">
+                  <SelectTrigger id="agent-llm" className="w-full [data-skin='niho']:bg-[var(--niho-pure-black-elevated)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:focus:border-[var(--color-accent-bg)]">
                     <SelectValue placeholder="选择默认模型配置" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="[data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
                     {llmConfigs.map(config => (
-                      <SelectItem key={config.config_id} value={config.config_id}>
+                      <SelectItem 
+                        key={config.config_id} 
+                        value={config.config_id}
+                        className="[data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:focus:bg-[var(--color-accent-bg)]"
+                      >
                         <div className="flex items-center gap-2">
                           <span className="font-medium">{config.name}</span>
-                          <span className="text-[10px] opacity-50 px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded">
+                          <span className="text-[10px] opacity-50 px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded [data-skin='niho']:bg-[var(--niho-text-bg)] [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
                             {config.provider} · {config.model}
                           </span>
                         </div>
@@ -457,7 +465,7 @@ const CreateAgentDialog: React.FC<CreateAgentDialogProps> = ({
 
               {/* 人设（System Prompt） */}
               <div>
-                <Label htmlFor="agent-prompt" className="text-sm font-medium mb-2 block">
+                <Label htmlFor="agent-prompt" className="text-sm font-medium mb-2 block [data-skin='niho']:text-[var(--text-primary)]">
                   人设 / System Prompt
                 </Label>
                 <Textarea
@@ -465,31 +473,35 @@ const CreateAgentDialog: React.FC<CreateAgentDialogProps> = ({
                   placeholder="定义角色的性格、说话方式、知识背景等...&#10;示例：你是一个专业的编程导师，擅长用简洁的语言解释复杂概念，对新手友好且有耐心。"
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
-                  className="min-h-[140px] resize-none w-full"
+                  className="min-h-[140px] resize-none w-full [data-skin='niho']:bg-[var(--niho-pure-black-elevated)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:placeholder:text-[var(--niho-skyblue-gray)] [data-skin='niho']:focus:border-[var(--color-accent-bg)] [data-skin='niho']:focus:ring-[var(--color-accent-bg)]"
                 />
 
                 {/* 人设优化/扩写输入框 */}
-                <div className="mt-3 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-[#404040]">
+                <div className="mt-3 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-[#404040] [data-skin='niho']:bg-[var(--niho-pure-black-elevated)] [data-skin='niho']:border-[var(--niho-text-border)]">
                   <div className="flex items-center gap-2 mb-2">
-                    <Wand2 className="w-3.5 h-3.5 text-primary-500" />
-                    <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                    <Wand2 className="w-3.5 h-3.5 text-primary-500 [data-skin='niho']:text-[var(--color-accent)]" />
+                    <span className="text-xs font-medium text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--text-primary)]">
                       人设优化助手
                     </span>
                   </div>
                   
                   <div className="space-y-2">
                     <div>
-                      <Label className="text-xs font-medium">优化模型</Label>
+                      <Label className="text-xs font-medium [data-skin='niho']:text-[var(--text-primary)]">优化模型</Label>
                       <Select value={refineModelId} onValueChange={setRefineModelId}>
-                        <SelectTrigger className="h-8 text-xs bg-white dark:bg-gray-900">
+                        <SelectTrigger className="h-8 text-xs bg-white dark:bg-gray-900 [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:focus:border-[var(--color-accent-bg)]">
                           <SelectValue placeholder="选择优化模型" />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="[data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
                           {llmConfigs.map(config => (
-                            <SelectItem key={config.config_id} value={config.config_id}>
+                            <SelectItem 
+                              key={config.config_id} 
+                              value={config.config_id}
+                              className="[data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:focus:bg-[var(--color-accent-bg)]"
+                            >
                               <div className="flex items-center gap-2">
                                 <span className="font-medium">{config.name}</span>
-                                <span className="text-[10px] opacity-50 px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded">
+                                <span className="text-[10px] opacity-50 px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded [data-skin='niho']:bg-[var(--niho-text-bg)] [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
                                   {config.provider} · {config.model}
                                 </span>
                               </div>
@@ -504,7 +516,7 @@ const CreateAgentDialog: React.FC<CreateAgentDialogProps> = ({
                         placeholder="输入优化需求，如：让角色更幽默、扩写细节、调整语气为专业..."
                         value={refinePrompt}
                         onChange={(e) => setRefinePrompt(e.target.value)}
-                        className="flex-1 h-9 text-sm bg-white dark:bg-gray-900"
+                        className="flex-1 h-9 text-sm bg-white dark:bg-gray-900 [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:placeholder:text-[var(--niho-skyblue-gray)] [data-skin='niho']:focus:border-[var(--color-accent-bg)]"
                         disabled={isRefining}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' && !isRefining && !e.shiftKey) {
@@ -518,7 +530,7 @@ const CreateAgentDialog: React.FC<CreateAgentDialogProps> = ({
                         size="sm"
                         onClick={handleRefineSystemPrompt}
                         disabled={isRefining || !refinePrompt.trim() || !refineModelId}
-                        className="h-9"
+                        className="h-9 [data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:text-[#000000] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:shadow-[0_0_12px_rgba(0,255,136,0.3)] [data-skin='niho']:disabled:opacity-50"
                       >
                         {isRefining ? (
                           <Loader className="w-4 h-4 animate-spin" />
@@ -529,7 +541,7 @@ const CreateAgentDialog: React.FC<CreateAgentDialogProps> = ({
                     </div>
                   </div>
 
-                  <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-2">
+                  <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-2 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
                     使用选择的模型对上方人设进行扩写、润色或优化
                   </p>
                 </div>
@@ -545,14 +557,19 @@ const CreateAgentDialog: React.FC<CreateAgentDialogProps> = ({
           )}
         </div>
 
-        <DialogFooter className="border-t border-gray-200 dark:border-[#404040] pt-4">
-          <Button variant="secondary" onClick={() => onOpenChange(false)}>
+        <DialogFooter className="border-t border-gray-200 dark:border-[#404040] pt-4 [data-skin='niho']:border-[var(--niho-text-border)]">
+          <Button 
+            variant="secondary" 
+            onClick={() => onOpenChange(false)}
+            className="[data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-transparent [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--niho-text-bg)]"
+          >
             取消
           </Button>
           <Button 
             variant="primary" 
             onClick={handleCreate}
             disabled={isSaving || !name.trim() || !llmConfigId}
+            className="[data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:text-[#000000] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:shadow-[0_0_12px_rgba(0,255,136,0.3)] [data-skin='niho']:disabled:opacity-50"
           >
             {isSaving ? (
               <>

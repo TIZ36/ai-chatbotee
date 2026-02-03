@@ -145,18 +145,18 @@ const AgentsPage: React.FC = () => {
 
   return (
     <>
-    <div className="h-full flex flex-col bg-gray-50 dark:bg-[#1a1a1a]">
-      {/* 头部 */}
-      <div className="flex-shrink-0 px-6 py-4 border-b border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d]">
+    <div className="agents-page h-full flex flex-col bg-gray-50 dark:bg-[#1a1a1a] [data-skin='niho']:bg-[#000000]">
+      {/* 头部 - Niho 主题 */}
+      <div className="agents-page-header flex-shrink-0 px-6 py-4 border-b border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
         <div className="flex items-center justify-between">
           <div>
             <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 rounded-lg bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
-                <Users className="w-5 h-5 text-primary-600 dark:text-primary-400" />
+              <div className="w-8 h-8 rounded-lg bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center [data-skin='niho']:bg-[var(--niho-deep-purple-bg)] [data-skin='niho']:border [data-skin='niho']:border-[var(--color-accent-bg)]">
+                <Users className="w-5 h-5 text-primary-600 dark:text-primary-400 [data-skin='niho']:text-[var(--color-accent)]" />
               </div>
-              <h1 className="text-xl font-bold text-gray-900 dark:text-white">智能体管理</h1>
+              <h1 className="agents-page-title text-xl font-bold text-gray-900 dark:text-white [data-skin='niho']:text-[var(--text-primary)]">智能体管理</h1>
             </div>
-            <p className="mt-1 text-xs text-gray-500 dark:text-[#858585]">
+            <p className="mt-1 text-xs text-gray-500 dark:text-[#858585] [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
               创建、导入和管理您的 AI 智能体
             </p>
           </div>
@@ -167,7 +167,7 @@ const AgentsPage: React.FC = () => {
               variant="outline"
               size="sm"
               onClick={handleImportAgent}
-              className="h-8"
+              className="h-8 [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-transparent [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:hover:border-[var(--color-accent-bg)] [data-skin='niho']:hover:text-[var(--color-accent)]"
             >
               <Upload className="w-3.5 h-3.5 mr-1.5" />
               导入智能体
@@ -177,7 +177,7 @@ const AgentsPage: React.FC = () => {
               variant="primary"
               size="sm"
               onClick={() => setShowCreateAgent(true)}
-              className="h-8"
+              className="h-8 [data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:text-[#000000] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:shadow-[0_0_12px_rgba(0,255,136,0.3)]"
             >
               <Sparkles className="w-3.5 h-3.5 mr-1.5" />
               新建智能体
@@ -186,25 +186,29 @@ const AgentsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* 智能体列表 - 紧凑小卡片样式 */}
-      <div className="flex-1 overflow-y-auto p-6">
+      {/* 智能体列表 - Niho 主题卡片样式 */}
+      <div className="agents-page-list flex-1 overflow-y-auto p-6">
         {isLoadingAgents ? (
           <div className="flex items-center justify-center h-full">
-            <Loader className="w-6 h-6 animate-spin text-primary-500" />
-            <span className="ml-2 text-sm text-gray-500 dark:text-[#858585]">加载中...</span>
+            <Loader className="w-6 h-6 animate-spin text-primary-500 [data-skin='niho']:text-[var(--color-accent)]" />
+            <span className="ml-2 text-sm text-gray-500 dark:text-[#858585] [data-skin='niho']:text-[var(--niho-skyblue-gray)]">加载中...</span>
           </div>
         ) : agents.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center py-12">
-            <div className="w-16 h-16 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center mb-4">
-              <Bot className="w-8 h-8 text-gray-400 dark:text-gray-600" />
+            <div className="w-16 h-16 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center mb-4 [data-skin='niho']:bg-[var(--niho-pure-black-elevated)] [data-skin='niho']:border [data-skin='niho']:border-[var(--color-accent-bg)]">
+              <Bot className="w-8 h-8 text-gray-400 dark:text-gray-600 [data-skin='niho']:text-[var(--color-accent)]" />
             </div>
-            <h3 className="text-base font-medium text-gray-900 dark:text-white mb-1">
+            <h3 className="text-base font-medium text-gray-900 dark:text-white mb-1 [data-skin='niho']:text-[var(--text-primary)]">
               暂无智能体
             </h3>
-            <p className="text-sm text-gray-500 dark:text-[#858585] mb-6 max-w-xs mx-auto">
+            <p className="text-sm text-gray-500 dark:text-[#858585] mb-6 max-w-xs mx-auto [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
               您可以使用角色生成器创建一个智能体，或者从文件导入
             </p>
-            <Button variant="primary" onClick={() => setShowCreateAgent(true)}>
+            <Button 
+              variant="primary" 
+              onClick={() => setShowCreateAgent(true)}
+              className="[data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:text-[#000000] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:shadow-[0_0_12px_rgba(0,255,136,0.3)]"
+            >
               <Sparkles className="w-4 h-4 mr-2" />
               立即创建
             </Button>
@@ -218,13 +222,13 @@ const AgentsPage: React.FC = () => {
               return (
                 <div
                   key={agent.session_id}
-                  className="bg-white dark:bg-[#2d2d2d] rounded-lg border border-gray-200 dark:border-[#404040] p-2.5 hover:shadow-md hover:border-primary-300 dark:hover:border-primary-700 transition-all cursor-pointer group flex flex-col"
+                  className="agents-page-card bg-white dark:bg-[#2d2d2d] rounded-lg border border-gray-200 dark:border-[#404040] p-2.5 hover:shadow-md hover:border-primary-300 dark:hover:border-primary-700 transition-all cursor-pointer group flex flex-col [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:hover:border-[var(--color-accent-bg)]"
                   onClick={() => handleSelectAgent(agent.session_id)}
                 >
                   <div className="flex items-start gap-2.5 mb-1.5">
                     {/* 头像 */}
                     <div 
-                      className="relative w-9 h-9 rounded-lg overflow-hidden border border-gray-100 dark:border-[#404040] flex items-center justify-center bg-gray-50 dark:bg-gray-800 flex-shrink-0"
+                      className="relative w-9 h-9 rounded-lg overflow-hidden border border-gray-100 dark:border-[#404040] flex items-center justify-center bg-gray-50 dark:bg-gray-800 flex-shrink-0 [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:hover:border-[var(--color-accent-bg)]"
                       onClick={(e) => {
                         e.stopPropagation();
                         setPersonaDialogInitialTab('basic');
@@ -234,15 +238,15 @@ const AgentsPage: React.FC = () => {
                       {avatarUrl ? (
                         <img src={avatarUrl} alt={displayName} className="w-full h-full object-cover" />
                       ) : (
-                        <Bot className="w-5 h-5 text-primary-500" />
+                        <Bot className="w-5 h-5 text-primary-500 [data-skin='niho']:text-[var(--color-accent)]" />
                       )}
                     </div>
                     
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white truncate [data-skin='niho']:text-[var(--text-primary)]">
                         {displayName}
                       </h3>
-                      <p className="text-[10px] text-gray-500 dark:text-[#858585] truncate mt-0.5">
+                      <p className="text-[10px] text-gray-500 dark:text-[#858585] truncate mt-0.5 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
                         {getLLMConfigName(agent.llm_config_id)}
                       </p>
                     </div>
@@ -250,14 +254,14 @@ const AgentsPage: React.FC = () => {
 
                   {/* 描述预览 */}
                   <div className="flex-1">
-                    <p className="text-[11px] text-gray-500 dark:text-[#a0a0a0] line-clamp-2 leading-tight h-7 mb-1.5">
+                    <p className="text-[11px] text-gray-500 dark:text-[#a0a0a0] line-clamp-2 leading-tight h-7 mb-1.5 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
                       {agent.system_prompt || '暂无人设描述'}
                     </p>
                   </div>
 
-                  {/* 操作栏 - 仅在悬停时显示或保持半透明 */}
-                  <div className="flex items-center justify-between pt-1.5 border-t border-gray-100 dark:border-[#404040] mt-auto">
-                    <div className="flex items-center gap-1 text-[10px] text-gray-400 dark:text-[#666666]">
+                  {/* 操作栏 - Niho 主题 */}
+                  <div className="flex items-center justify-between pt-1.5 border-t border-gray-100 dark:border-[#404040] mt-auto [data-skin='niho']:border-[var(--niho-text-border)]">
+                    <div className="flex items-center gap-1 text-[10px] text-gray-400 dark:text-[#666666] [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
                       <MessageCircle className="w-2.5 h-2.5" />
                       <span>{agent.message_count || 0}</span>
                     </div>
@@ -267,7 +271,7 @@ const AgentsPage: React.FC = () => {
                         icon={Sliders}
                         size="sm"
                         variant="ghost"
-                        className="h-7 w-7 text-gray-500 hover:text-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/20"
+                        className="agents-page-action agents-page-action--settings h-7 w-7 text-gray-500 hover:text-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/20 [data-skin='niho']:text-[var(--niho-skyblue-gray)] [data-skin='niho']:hover:text-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)]"
                         onClick={(e) => {
                           e.stopPropagation();
                           setPersonaDialogInitialTab('basic');
@@ -279,7 +283,7 @@ const AgentsPage: React.FC = () => {
                         icon={Download}
                         size="sm"
                         variant="ghost"
-                        className="h-7 w-7 text-gray-500 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                        className="h-7 w-7 text-gray-500 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 [data-skin='niho']:text-[var(--niho-skyblue-gray)] [data-skin='niho']:hover:text-[var(--color-info)] [data-skin='niho']:hover:bg-[var(--color-info-bg)]"
                         onClick={(e) => handleExportAgent(agent, e)}
                         label="导出"
                       />
@@ -287,7 +291,7 @@ const AgentsPage: React.FC = () => {
                         icon={Trash2}
                         size="sm"
                         variant="ghost"
-                        className="h-7 w-7 text-gray-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+                        className="h-7 w-7 text-gray-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 [data-skin='niho']:text-[var(--niho-skyblue-gray)] [data-skin='niho']:hover:text-[var(--color-secondary)] [data-skin='niho']:hover:bg-[var(--color-secondary-bg)]"
                         onClick={(e) => handleDeleteAgent(agent.session_id, e)}
                         label="删除"
                       />

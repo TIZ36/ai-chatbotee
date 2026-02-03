@@ -17,6 +17,22 @@ type RenderMCPMediaParams = {
 export function parseMCPContentBlocks(content: any): MCPContentBlock[] {
   const blocks: MCPContentBlock[] = [];
 
+  const inferMimeTypeFromUrl = (url: string, fallback: string) => {
+    const match = url.match(/\.([a-zA-Z0-9]+)(?:\?|#|$)/);
+    if (!match) return fallback;
+    const ext = match[1].toLowerCase();
+    if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+    if (ext === 'png') return 'image/png';
+    if (ext === 'gif') return 'image/gif';
+    if (ext === 'webp') return 'image/webp';
+    if (ext === 'svg') return 'image/svg+xml';
+    if (ext === 'mp4') return 'video/mp4';
+    if (ext === 'webm') return 'video/webm';
+    if (ext === 'mp3') return 'audio/mpeg';
+    if (ext === 'wav') return 'audio/wav';
+    return fallback;
+  };
+
   try {
     let contentObj = content;
     if (typeof content === 'string') {
@@ -40,14 +56,25 @@ export function parseMCPContentBlocks(content: any): MCPContentBlock[] {
             continue;
           }
           if (item?.type === 'image' || item?.type === 'video' || item?.type === 'audio') {
-            const mimeType = item.mimeType || item.mime_type;
-            const data = item.data;
-            // 放宽检查：只要 data 存在且是字符串，就尝试显示（即使可能不完整）
-            if (typeof mimeType === 'string' && typeof data === 'string' && data.length > 0) {
+            const rawMimeType = item.mimeType || item.mime_type;
+            const rawData = item.data || item.url || item.image_url || item.imageUrl;
+            const fallback = item.type === 'image'
+              ? 'image/png'
+              : item.type === 'video'
+                ? 'video/mp4'
+                : 'audio/mpeg';
+            const mimeType =
+              typeof rawMimeType === 'string' && rawMimeType.length > 0
+                ? rawMimeType
+                : typeof rawData === 'string'
+                  ? inferMimeTypeFromUrl(rawData, fallback)
+                  : fallback;
+            const data = typeof rawData === 'string' ? rawData : '';
+            if (data.length > 0) {
               console.log(`[MCP Render] 发现媒体: type=${item.type}, mimeType=${mimeType}, dataLength=${data.length}, dataPreview=${data.substring(0, 50)}...`);
               blocks.push({ kind: item.type, mimeType, data });
             } else {
-              console.warn(`[MCP Render] 媒体数据无效: type=${item.type}, mimeType=${typeof mimeType}, dataType=${typeof data}, dataLength=${data?.length || 0}, item=`, item);
+              console.warn(`[MCP Render] 媒体数据无效: type=${item.type}, mimeType=${typeof rawMimeType}, dataType=${typeof rawData}, dataLength=${rawData?.length || 0}, item=`, item);
             }
             continue;
           }

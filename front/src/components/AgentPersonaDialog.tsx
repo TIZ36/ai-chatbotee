@@ -150,22 +150,22 @@ const AgentPersonaDialog: React.FC<AgentPersonaDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl max-h-[80vh] flex flex-col">
+      <DialogContent className="max-w-xl max-h-[80vh] flex flex-col [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Settings className="w-5 h-5" />
+          <DialogTitle className="flex items-center gap-2 [data-skin='niho']:text-[var(--text-primary)]">
+            <Settings className="w-5 h-5 [data-skin='niho']:text-[var(--color-accent)]" />
             智能体配置
           </DialogTitle>
         </DialogHeader>
 
-        {/* Tab 切换 */}
-        <div className="flex items-center gap-2 border-b border-gray-200/70 dark:border-[#404040]/70">
+        {/* Tab 切换 - Niho 主题 */}
+        <div className="flex items-center gap-2 border-b border-gray-200/70 dark:border-[#404040]/70 [data-skin='niho']:border-[var(--niho-text-border)]">
           <button
             onClick={() => setActiveTab('basic')}
             className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium border-b-2 transition-colors ${
               activeTab === 'basic'
-                ? 'border-primary-500 text-primary-600 dark:text-primary-400'
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                ? 'border-primary-500 text-primary-600 dark:text-primary-400 [data-skin="niho"]:border-[var(--color-accent)] [data-skin="niho"]:text-[var(--color-accent)]'
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 [data-skin="niho"]:text-[var(--niho-skyblue-gray)] [data-skin="niho"]:hover:text-[var(--text-primary)]'
             }`}
           >
             <User className="w-3.5 h-3.5" />
@@ -175,14 +175,14 @@ const AgentPersonaDialog: React.FC<AgentPersonaDialogProps> = ({
             onClick={() => setActiveTab('persona')}
             className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium border-b-2 transition-colors ${
               activeTab === 'persona'
-                ? 'border-primary-500 text-primary-600 dark:text-primary-400'
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                ? 'border-primary-500 text-primary-600 dark:text-primary-400 [data-skin="niho"]:border-[var(--color-accent)] [data-skin="niho"]:text-[var(--color-accent)]'
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 [data-skin="niho"]:text-[var(--niho-skyblue-gray)] [data-skin="niho"]:hover:text-[var(--text-primary)]'
             }`}
           >
             <Sliders className="w-3.5 h-3.5" />
             高级设置
             {enabledFeatures.length > 0 && (
-              <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 rounded">
+              <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 rounded [data-skin='niho']:bg-[var(--color-accent-bg)] [data-skin='niho']:text-[var(--color-accent)] [data-skin='niho']:border [data-skin='niho']:border-[var(--color-accent-bg)]">
                 {enabledFeatures.length}
               </span>
             )}
@@ -195,13 +195,13 @@ const AgentPersonaDialog: React.FC<AgentPersonaDialogProps> = ({
             <div className="space-y-3 px-1">
               {/* 头像 */}
               <div>
-                <Label className="mb-1 block">头像</Label>
+                <Label className="mb-1 block [data-skin='niho']:text-[var(--text-primary)]">头像</Label>
                 <div className="flex items-center gap-3">
-                  <div className="relative w-16 h-16 rounded-full overflow-hidden border border-gray-200 dark:border-[#404040] flex items-center justify-center bg-gray-100 dark:bg-[#363636]">
+                  <div className="relative w-16 h-16 rounded-full overflow-hidden border border-gray-200 dark:border-[#404040] flex items-center justify-center bg-gray-100 dark:bg-[#363636] [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
                     {editAvatar ? (
                       <img src={editAvatar} alt="Avatar" className="w-full h-full object-cover" />
                     ) : (
-                      <Bot className="w-6 h-6 text-gray-400" />
+                      <Bot className="w-6 h-6 text-gray-400 [data-skin='niho']:text-[var(--color-accent)]" />
                     )}
                   </div>
                   <div className="flex flex-col gap-1.5">
@@ -216,6 +216,7 @@ const AgentPersonaDialog: React.FC<AgentPersonaDialogProps> = ({
                       variant="secondary"
                       size="sm"
                       onClick={() => fileInputRef.current?.click()}
+                      className="[data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-transparent [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:hover:border-[var(--color-accent-bg)] [data-skin='niho']:hover:text-[var(--color-accent)]"
                     >
                       <Upload className="w-3.5 h-3.5 mr-1.5" />
                       上传头像
@@ -225,7 +226,7 @@ const AgentPersonaDialog: React.FC<AgentPersonaDialogProps> = ({
                         variant="ghost"
                         size="sm"
                         onClick={() => setEditAvatar(null)}
-                        className="text-red-500 hover:text-red-600"
+                        className="text-red-500 hover:text-red-600 [data-skin='niho']:text-[var(--color-secondary)] [data-skin='niho']:hover:text-[var(--color-secondary-hover)] [data-skin='niho']:hover:bg-[var(--color-secondary-bg)]"
                       >
                         清除头像
                       </Button>
@@ -236,28 +237,33 @@ const AgentPersonaDialog: React.FC<AgentPersonaDialogProps> = ({
 
               {/* 名称 */}
               <div>
-                <Label htmlFor="agent-name" className="mb-1 block">名称</Label>
+                <Label htmlFor="agent-name" className="mb-1 block [data-skin='niho']:text-[var(--text-primary)]">名称</Label>
                 <Input
                   id="agent-name"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
                   placeholder="智能体名称"
+                  className="[data-skin='niho']:bg-[var(--niho-pure-black-elevated)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:placeholder:text-[var(--niho-skyblue-gray)] [data-skin='niho']:focus:border-[var(--color-accent-bg)] [data-skin='niho']:focus:ring-[var(--color-accent-bg)]"
                 />
               </div>
 
               {/* 默认 LLM */}
               <div>
-                <Label className="mb-1 block">默认 LLM</Label>
+                <Label className="mb-1 block [data-skin='niho']:text-[var(--text-primary)]">默认 LLM</Label>
                 <Select
                   value={editLlmConfigId || ''}
                   onValueChange={(v) => setEditLlmConfigId(v || null)}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="[data-skin='niho']:bg-[var(--niho-pure-black-elevated)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:focus:border-[var(--color-accent-bg)]">
                     <SelectValue placeholder="选择 LLM 配置" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="[data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
                     {enabledLlmConfigs.map(c => (
-                      <SelectItem key={c.config_id} value={c.config_id}>
+                      <SelectItem 
+                        key={c.config_id} 
+                        value={c.config_id}
+                        className="[data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:focus:bg-[var(--color-accent-bg)]"
+                      >
                         {c.name} {c.model ? `· ${c.model}` : ''} {c.provider ? `(${c.provider})` : ''}
                       </SelectItem>
                     ))}
@@ -267,13 +273,13 @@ const AgentPersonaDialog: React.FC<AgentPersonaDialogProps> = ({
 
               {/* 人设 / System Prompt */}
               <div>
-                <Label htmlFor="agent-prompt" className="mb-1 block">人设 / System Prompt</Label>
+                <Label htmlFor="agent-prompt" className="mb-1 block [data-skin='niho']:text-[var(--text-primary)]">人设 / System Prompt</Label>
                 <Textarea
                   id="agent-prompt"
                   value={editSystemPrompt}
                   onChange={(e) => setEditSystemPrompt(e.target.value)}
                   placeholder="定义智能体的角色、能力和行为..."
-                  className="min-h-[160px]"
+                  className="min-h-[160px] [data-skin='niho']:bg-[var(--niho-pure-black-elevated)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:placeholder:text-[var(--niho-skyblue-gray)] [data-skin='niho']:focus:border-[var(--color-accent-bg)] [data-skin='niho']:focus:ring-[var(--color-accent-bg)]"
                 />
               </div>
             </div>
@@ -286,8 +292,8 @@ const AgentPersonaDialog: React.FC<AgentPersonaDialogProps> = ({
           )}
         </div>
 
-        <DialogFooter className="flex items-center justify-between border-t pt-3">
-          <div className="text-[11px] text-gray-500">
+        <DialogFooter className="flex items-center justify-between border-t pt-3 [data-skin='niho']:border-[var(--niho-text-border)]">
+          <div className="text-[11px] text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
             {activeTab === 'persona' && enabledFeatures.length > 0 
               ? `已启用: ${enabledFeatures.join('、')}`
               : activeTab === 'persona' 
@@ -296,10 +302,19 @@ const AgentPersonaDialog: React.FC<AgentPersonaDialogProps> = ({
             }
           </div>
           <div className="flex gap-2">
-            <Button variant="secondary" onClick={() => onOpenChange(false)}>
+            <Button 
+              variant="secondary" 
+              onClick={() => onOpenChange(false)}
+              className="[data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-transparent [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--niho-text-bg)]"
+            >
               取消
             </Button>
-            <Button variant="primary" onClick={handleSave} disabled={isSaving}>
+            <Button 
+              variant="primary" 
+              onClick={handleSave} 
+              disabled={isSaving}
+              className="[data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:text-[#000000] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:shadow-[0_0_12px_rgba(0,255,136,0.3)] [data-skin='niho']:disabled:opacity-50"
+            >
               {isSaving ? (
                 <>
                   <Loader className="w-4 h-4 mr-2 animate-spin" />

@@ -31,6 +31,22 @@ if [ ! -d "node_modules" ]; then
     npm install
 fi
 
+# 清理 Vite 缓存
+echo "🧹 清理 Vite 缓存..."
+if [ -d "node_modules/.vite" ]; then
+    rm -rf node_modules/.vite
+    echo "   ✓ 已清理 node_modules/.vite"
+fi
+if [ -d ".vite" ]; then
+    rm -rf .vite
+    echo "   ✓ 已清理 .vite"
+fi
+if [ -d "dist" ]; then
+    rm -rf dist
+    echo "   ✓ 已清理 dist"
+fi
+echo ""
+
 # 启动开发服务器
 echo "🚀 启动前端开发服务器..."
 echo "   访问地址: http://localhost:5177"

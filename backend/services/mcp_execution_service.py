@@ -851,7 +851,26 @@ def execute_mcp_with_llm(
                 return {"error": "LLM config not found or disabled", "logs": logs}
             
             # 简化日志输出
-            log(f"✅ LLM配置: {llm_config.get('provider')}/{llm_config.get('model')}")
+            model = llm_config.get('model', 'unknown')
+            provider = llm_config.get('provider', 'unknown')
+            # supplier=计费/Token 归属，provider=兼容路由（SDK/REST 调用方式）
+            supplier = llm_config.get('supplier') or provider
+            model_info = f"{model} (供应商: {supplier})"
+            if supplier != provider:
+                model_info += f" (兼容: {provider})"
+            log(f"✅ LLM配置: {model_info}")
+            
+            # 发送模型信息到执行日志
+            _send_log(
+                f"使用模型: {model_info}",
+                log_type='llm',
+                detail={
+                    'llm_config_id': llm_config_id,
+                    'provider': provider,
+                    'supplier': supplier,
+                    'model': model,
+                }
+            )
 
             # 验证LLM配置的完整性
             missing_fields = [
@@ -1764,7 +1783,14 @@ def execute_mcp_with_llm(
                         log(f"{round_label}：使用LLM选择工具")
                         log(f"   LLM配置ID: {llm_config_id}")
                         log(f"   LLM配置内容: provider={llm_config.get('provider')}, model={llm_config.get('model')}, has_api_key={bool(llm_config.get('api_key'))}")
-                        _send_log(f"LLM 选择工具中...", log_type='llm', detail=f"{llm_config.get('provider')}/{llm_config.get('model')}")
+                        # 格式化模型信息显示
+                        model = llm_config.get('model', 'unknown')
+                        provider = llm_config.get('provider', 'unknown')
+                        supplier = llm_config.get('supplier') or provider
+                        model_info = f"{model} (供应商: {supplier})"
+                        if supplier != provider:
+                            model_info += f" (兼容: {provider})"
+                        _send_log(f"LLM 选择工具中...", log_type='llm', detail=model_info)
                         llm_call_start = datetime.datetime.now()
                         api_result = call_llm_api(llm_config, system_text, user_text, log)
                         llm_call_duration = int((datetime.datetime.now() - llm_call_start).total_seconds() * 1000)

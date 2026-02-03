@@ -561,6 +561,31 @@ class IterationContext:
         - decision: 决策
         """
         nodes = []
+        
+        # 如果context中有LLM配置信息，在第一个节点前添加模型信息节点
+        if self.llm_config and self.llm_config_id:
+            model = self.llm_config.get('model', 'unknown')
+            provider = self.llm_config.get('provider', 'unknown')
+            # supplier=计费/Token 归属，provider=兼容路由（SDK/REST 调用方式）
+            supplier = self.llm_config.get('supplier') or provider
+            model_info = f"{model} (供应商: {supplier})"
+            if supplier != provider:
+                model_info += f" (兼容: {provider})"
+            nodes.append({
+                'id': f"model-info-{int(time.time() * 1000)}",
+                'type': 'model_info',
+                'timestamp': self.process_steps[0].get('timestamp', int(time.time() * 1000)) if self.process_steps else int(time.time() * 1000),
+                'status': 'completed',
+                'title': '使用的模型',
+                'content': f"本次回答使用的模型: {model_info}",
+                'llm': {
+                    'provider': provider,
+                    'supplier': supplier,
+                    'model': model,
+                    'config_id': self.llm_config_id,
+                },
+            })
+        
         for step in self.process_steps:
             if not isinstance(step, dict):
                 continue
@@ -604,6 +629,31 @@ class IterationContext:
                     'action': step.get('action'),
                     'reason': step.get('thinking'),
                 }
+            
+            # LLM模型信息（如果步骤中包含）
+            if step.get('llm_provider') or step.get('llm_model') or step.get('llm_config_id'):
+                node['llm'] = {
+                    'provider': step.get('llm_provider'),
+                    'supplier': step.get('llm_supplier'),
+                    'model': step.get('llm_model'),
+                    'config_id': step.get('llm_config_id'),
+                }
+                # 如果有模型信息，在title或content中显示
+                if step.get('llm_model'):
+                    model = step.get('llm_model')
+                    provider = step.get('llm_provider', 'unknown')
+                    # supplier=计费/Token 归属，provider=兼容路由
+                    supplier = step.get('llm_supplier') or provider
+                    model_info = f"{model} (供应商: {supplier})"
+                    if supplier != provider:
+                        model_info += f" (兼容: {provider})"
+                    if not node.get('content') or '模型' not in node.get('content', ''):
+                        # 如果content中没有模型信息，添加到content开头
+                        original_content = node.get('content', '')
+                        if original_content:
+                            node['content'] = f"[使用模型: {model_info}]\n{original_content}"
+                        else:
+                            node['content'] = f"使用模型: {model_info}"
             
             # 错误信息
             if step.get('error'):

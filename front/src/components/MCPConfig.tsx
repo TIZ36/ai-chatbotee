@@ -80,13 +80,13 @@ const renderServerIcon = (server: MCPServerConfig, size: 'sm' | 'lg' = 'sm') => 
   // 其他服务器显示首字母
   if (size === 'lg') {
     return (
-      <div className="w-20 h-20 rounded-2xl bg-blue-600 flex items-center justify-center text-white text-4xl font-bold shadow-lg shadow-blue-500/20">
+      <div className="w-20 h-20 rounded-2xl bg-blue-600 flex items-center justify-center text-white text-4xl font-bold shadow-lg shadow-blue-500/20 mcp-server-icon-lg">
         {server.name.charAt(0).toUpperCase()}
       </div>
     );
   }
   return (
-    <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-600 font-bold text-lg border border-blue-100 dark:border-blue-800">
+    <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-600 font-bold text-lg border border-blue-100 dark:border-blue-800 mcp-server-icon">
       {server.name.charAt(0).toUpperCase()}
     </div>
   );
@@ -985,13 +985,13 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
   };
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Admin 风格头部 */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-[#2d2d2d]">
+    <div className="flex flex-col h-full mcp-config-container">
+      {/* 头部 */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-[#2d2d2d] mcp-header">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
-            <Plug className="w-5 h-5 text-blue-600" />
-            <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">MCP 管理</h1>
+            <Plug className="w-5 h-5 text-blue-600 mcp-header-icon" />
+            <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100 mcp-text-primary">MCP 管理</h1>
           </div>
         </div>
 
@@ -1023,7 +1023,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
       <div className="flex-1 overflow-y-auto p-6">
         <div className="space-y-4">
           <div
-            className="p-4 bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-gray-800 rounded-xl hover:border-blue-400 transition-all cursor-pointer flex items-center justify-between shadow-sm"
+            className="p-4 bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-gray-800 rounded-xl hover:border-blue-400 transition-all cursor-pointer flex items-center justify-between shadow-sm mcp-notion-card"
             onClick={() => {
               // 需求：始终可点，点击后先进入工作区注册/选择
               cancelEdit();
@@ -1038,70 +1038,70 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                 </svg>
               </div>
               <div>
-                <div className="font-bold text-gray-900 dark:text-gray-100">Notion</div>
-                <div className="text-xs text-gray-500">官方推荐 · 录入 Notion 工作区</div>
+                <div className="font-bold text-gray-900 dark:text-gray-100 mcp-notion-card-title">Notion</div>
+                <div className="text-xs text-gray-500 mcp-notion-card-desc">官方推荐 · 录入 Notion 工作区</div>
               </div>
             </div>
-            <div className="text-xs font-medium text-blue-600">点击录入</div>
+            <div className="text-xs font-medium text-blue-600 mcp-notion-card-action">点击录入</div>
           </div>
 
           <div className="flex items-center justify-between mb-2">
-            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">服务器 ({servers.length})</h2>
+            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mcp-text-secondary">服务器 ({servers.length})</h2>
           </div>
             
             {loading ? (
               <div className="flex flex-col items-center justify-center py-20">
-                <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mb-4" />
-                <p className="text-gray-500">加载中...</p>
+                <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mb-4 mcp-loading-spinner" />
+                <p className="text-gray-500 mcp-loading-text">加载中...</p>
               </div>
             ) : servers.length === 0 ? (
-              <div className="text-center py-20 bg-gray-50 dark:bg-gray-800/30 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-800">
-                <Server className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                <p className="text-gray-500">暂无服务器</p>
-                <Button variant="link" onClick={() => setShowMarketModal(true)} className="mt-2">去市场看看</Button>
+              <div className="text-center py-20 bg-gray-50 dark:bg-gray-800/30 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-800 mcp-empty-state">
+                <Server className="w-12 h-12 text-gray-300 mx-auto mb-4 mcp-empty-state-icon" />
+                <p className="text-gray-500 mcp-empty-state-text">暂无服务器</p>
+                <Button variant="link" onClick={() => setShowMarketModal(true)} className="mt-2 mcp-text-accent">去市场看看</Button>
               </div>
             ) : (
-              <div className="bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden shadow-sm">
+              <div className="bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden shadow-sm mcp-server-table">
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-800">
-                      <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase">服务器</th>
-                      <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase">类型</th>
-                      <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase">状态</th>
-                      <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase text-right">操作</th>
+                      <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase mcp-text-secondary">服务器</th>
+                      <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase mcp-text-secondary">类型</th>
+                      <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase mcp-text-secondary">状态</th>
+                      <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase text-right mcp-text-secondary">操作</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                     {servers.map((server) => (
                       <tr 
                         key={server.id} 
-                        className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors cursor-pointer group"
+                        className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors cursor-pointer group mcp-bg-hover"
                         onClick={() => handleViewDetail(server)}
                       >
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-3">
                             {renderServerIcon(server, 'sm')}
                             <div>
-                              <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                              <div className="text-sm font-semibold text-gray-900 dark:text-gray-100 mcp-server-name">
                                 {(server as any).display_name || (server as any).client_name || server.name}
                               </div>
-                              <div className="text-xs text-gray-500 truncate max-w-[200px]">{server.url}</div>
+                              <div className="text-xs text-gray-500 truncate max-w-[200px] mcp-server-url">{server.url}</div>
                             </div>
                           </div>
                         </td>
                         <td className="px-6 py-4">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 uppercase">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 uppercase mcp-server-type-badge">
                             {server.type}
                           </span>
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-1.5">
-                            <div className={`w-2 h-2 rounded-full ${server.enabled ? 'bg-green-500' : 'bg-gray-400'}`} />
-                            <span className="text-xs text-gray-600 dark:text-gray-400">{server.enabled ? '已启用' : '已禁用'}</span>
+                            <div className={`w-2 h-2 rounded-full ${server.enabled ? 'bg-green-500 mcp-server-status-enabled' : 'bg-gray-400 mcp-server-status-disabled'}`} />
+                            <span className={`text-xs text-gray-600 dark:text-gray-400 ${server.enabled ? 'mcp-server-status-enabled' : 'mcp-server-status-disabled'}`}>{server.enabled ? '已启用' : '已禁用'}</span>
                           </div>
                         </td>
                         <td className="px-6 py-4 text-right">
-                          <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity mcp-server-actions">
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -1150,7 +1150,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
           if (!open) cancelEdit();
         }}
       >
-        <DialogContent className="max-w-2xl bg-white dark:bg-[#1e1e1e] border-gray-200 dark:border-gray-800">
+        <DialogContent className="max-w-2xl bg-white dark:bg-[#1e1e1e] border-gray-200 dark:border-gray-800 mcp-dialog">
           <DialogHeader>
             <DialogTitle>{editingId ? '编辑服务器' : '新增服务器'}</DialogTitle>
             <DialogDescription>填写 MCP 服务器的名称、地址与类型</DialogDescription>
@@ -1218,11 +1218,11 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
 
       {/* 服务器详情弹窗 (明信片样式) */}
       <Dialog open={showDetailModal} onOpenChange={setShowDetailModal}>
-        <DialogContent className="max-w-4xl p-0 overflow-hidden bg-white dark:bg-[#1e1e1e] border-none shadow-2xl">
+        <DialogContent className="max-w-4xl p-0 overflow-hidden bg-white dark:bg-[#1e1e1e] border-none shadow-2xl mcp-detail-dialog">
           {selectedServerForDetail && (
             <div className="flex h-[600px]">
               {/* 左侧：详情 (明信片正面) */}
-              <div className="flex-1 p-8 flex flex-col border-r border-gray-100 dark:border-gray-800">
+              <div className="flex-1 p-8 flex flex-col border-r border-gray-100 dark:border-gray-800 mcp-detail-left">
                 <div className="flex items-start justify-between mb-8">
                   {renderServerIcon(selectedServerForDetail, 'lg')}
                   <div className="text-right">
@@ -1232,14 +1232,14 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                 </div>
 
                 <div className="flex-1">
-                  <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">
+                  <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2 mcp-detail-title">
                     {(selectedServerForDetail as any).display_name || (selectedServerForDetail as any).client_name || selectedServerForDetail.name}
                   </h2>
                   <div className="flex items-center gap-2 mb-6">
-                    <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-xs font-bold rounded uppercase">
+                    <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-xs font-bold rounded uppercase mcp-detail-type-badge">
                       {selectedServerForDetail.type}
                     </span>
-                    <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium ${selectedServerForDetail.enabled ? 'bg-green-50 text-green-600' : 'bg-gray-50 text-gray-500'}`}>
+                    <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium ${selectedServerForDetail.enabled ? 'bg-green-50 text-green-600 mcp-detail-status-active' : 'bg-gray-50 text-gray-500 mcp-detail-status-disabled'} mcp-detail-status-badge`}>
                       <div className={`w-1.5 h-1.5 rounded-full ${selectedServerForDetail.enabled ? 'bg-green-500' : 'bg-gray-400'}`} />
                       {selectedServerForDetail.enabled ? 'Active' : 'Disabled'}
                     </div>
@@ -1247,15 +1247,15 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
 
                   <div className="space-y-6">
                     <div>
-                      <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Endpoint URL</h4>
-                      <div className="p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-100 dark:border-gray-800 font-mono text-xs break-all text-gray-600 dark:text-gray-400">
+                      <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 mcp-detail-section-title">Endpoint URL</h4>
+                      <div className="p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-100 dark:border-gray-800 font-mono text-xs break-all text-gray-600 dark:text-gray-400 mcp-detail-url-box">
                         {selectedServerForDetail.url}
                       </div>
                     </div>
 
                     <div>
-                      <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Description</h4>
-                      <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
+                      <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 mcp-detail-section-title">Description</h4>
+                      <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed mcp-detail-description">
                         {selectedServerForDetail.description || 'No description provided for this server.'}
                       </p>
                     </div>
@@ -1289,13 +1289,13 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
               </div>
 
               {/* 右侧：工具列表 (明信片背面/详情页) */}
-              <div className={`w-[380px] bg-gray-50 dark:bg-[#1a1a1a] transition-all duration-500 border-l border-gray-100 dark:border-gray-800 flex flex-col ${showToolsInDetail ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'}`}>
-                <div className="p-6 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between bg-white dark:bg-[#1e1e1e]">
-                  <h3 className="font-bold flex items-center gap-2">
-                    <Wrench className="w-4 h-4 text-blue-600" />
+              <div className={`w-[380px] bg-gray-50 dark:bg-[#1a1a1a] transition-all duration-500 border-l border-gray-100 dark:border-gray-800 flex flex-col mcp-detail-right ${showToolsInDetail ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'}`}>
+                <div className="p-6 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between bg-white dark:bg-[#1e1e1e] mcp-tools-header">
+                  <h3 className="font-bold flex items-center gap-2 mcp-tools-header-title">
+                    <Wrench className="w-4 h-4 text-blue-600 mcp-tools-header-icon" />
                     可用工具
                   </h3>
-                  <span className="text-xs bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full text-gray-500">
+                  <span className="text-xs bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full text-gray-500 mcp-tools-count">
                     {testResults.get(selectedServerForDetail.id)?.tools?.length || 0}
                   </span>
                 </div>
@@ -1303,23 +1303,23 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                 <div className="flex-1 overflow-y-auto p-4 space-y-3">
                   {testingServers.has(selectedServerForDetail.id) ? (
                     <div className="flex flex-col items-center justify-center h-full text-gray-400">
-                      <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mb-2" />
-                      <span className="text-xs">正在获取工具...</span>
+                      <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mb-2 mcp-loading-spinner" />
+                      <span className="text-xs mcp-loading-text">正在获取工具...</span>
                     </div>
                   ) : testResults.get(selectedServerForDetail.id)?.tools ? (
                     testResults.get(selectedServerForDetail.id)!.tools!.map((tool, idx) => (
-                      <div key={idx} className="p-4 bg-white dark:bg-[#2d2d2d] rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm hover:shadow-md transition-shadow">
-                        <div className="font-bold text-sm text-gray-900 dark:text-gray-100 mb-1">{tool.name}</div>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3 line-clamp-2">{tool.description}</p>
+                      <div key={idx} className="p-4 bg-white dark:bg-[#2d2d2d] rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm hover:shadow-md transition-shadow mcp-tool-card">
+                        <div className="font-bold text-sm text-gray-900 dark:text-gray-100 mb-1 mcp-tool-name">{tool.name}</div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3 line-clamp-2 mcp-tool-description">{tool.description}</p>
                         
                         {tool.inputSchema?.properties && (
                           <div className="space-y-1.5">
-                            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Parameters</div>
+                            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mcp-detail-section-title">Parameters</div>
                             <div className="flex flex-wrap gap-1.5">
                               {Object.entries(tool.inputSchema.properties).map(([name, schema]: [string, any]) => (
-                                <div key={name} className="flex items-center gap-1 px-1.5 py-0.5 bg-gray-50 dark:bg-gray-800 rounded border border-gray-100 dark:border-gray-700">
-                                  <span className="text-[10px] font-mono text-blue-600 dark:text-blue-400">{name}</span>
-                                  <span className="text-[9px] text-gray-400">({schema.type || 'any'})</span>
+                                <div key={name} className="flex items-center gap-1 px-1.5 py-0.5 bg-gray-50 dark:bg-gray-800 rounded border border-gray-100 dark:border-gray-700 mcp-tool-param-badge">
+                                  <span className="text-[10px] font-mono text-blue-600 dark:text-blue-400 mcp-tool-param-name">{name}</span>
+                                  <span className="text-[9px] text-gray-400 mcp-tool-param-type">({schema.type || 'any'})</span>
                                 </div>
                               ))}
                             </div>
@@ -1330,7 +1330,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                   ) : (
                     <div className="flex flex-col items-center justify-center h-full text-gray-400 text-center px-8">
                       <Wrench className="w-12 h-12 mb-4 opacity-20" />
-                      <p className="text-xs">点击左侧“获取工具列表”按钮来查看此服务器提供的功能</p>
+                      <p className="text-xs mcp-text-secondary">点击左侧"获取工具列表"按钮来查看此服务器提供的功能</p>
                     </div>
                   )}
                 </div>
@@ -1342,18 +1342,18 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
 
       {/* 市场弹窗 (重新设计) */}
       <Dialog open={showMarketModal} onOpenChange={setShowMarketModal}>
-        <DialogContent className="max-w-5xl p-0 overflow-hidden bg-white dark:bg-[#1e1e1e] border-none shadow-2xl">
+        <DialogContent className="max-w-5xl p-0 overflow-hidden bg-white dark:bg-[#1e1e1e] border-none shadow-2xl mcp-market-dialog">
           <div className="flex flex-col h-[700px]">
             {/* 市场头部 */}
-            <div className="px-8 py-6 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+            <div className="px-8 py-6 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between mcp-market-header">
               <div>
-                <h2 className="text-2xl font-bold flex items-center gap-3">
-                  <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white">
+                <h2 className="text-2xl font-bold flex items-center gap-3 mcp-market-title">
+                  <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white mcp-market-icon-box">
                     <Plug className="w-6 h-6" />
                   </div>
                   MCP 市场
                 </h2>
-                <p className="text-sm text-gray-500 mt-1">发现并安装官方及社区提供的 MCP 服务器</p>
+                <p className="text-sm text-gray-500 mt-1 mcp-market-subtitle">发现并安装官方及社区提供的 MCP 服务器</p>
               </div>
               <div className="flex items-center gap-3">
                 <div className="relative">
@@ -1363,7 +1363,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                     onChange={(e) => setMarketQuery(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleMarketSearch()}
                     placeholder="搜索服务器..."
-                    className="w-64 pl-10 pr-4 py-2 bg-gray-100 dark:bg-gray-800 border-none rounded-xl text-sm focus:ring-2 focus:ring-blue-500 transition-all"
+                    className="w-64 pl-10 pr-4 py-2 bg-gray-100 dark:bg-gray-800 border-none rounded-xl text-sm focus:ring-2 focus:ring-blue-500 transition-all mcp-market-search-input"
                   />
                   <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <circle cx="11" cy="11" r="8"></circle>
@@ -1393,19 +1393,19 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                     {marketItems.map((item) => (
                       <div 
                         key={item.item_id} 
-                        className="p-4 bg-white dark:bg-[#2d2d2d] border border-gray-100 dark:border-gray-800 rounded-2xl hover:border-blue-400 hover:shadow-xl hover:shadow-blue-500/5 transition-all group cursor-pointer"
+                        className="p-4 bg-white dark:bg-[#2d2d2d] border border-gray-100 dark:border-gray-800 rounded-2xl hover:border-blue-400 hover:shadow-xl hover:shadow-blue-500/5 transition-all group cursor-pointer mcp-market-item-card"
                         onClick={() => handleMarketInstall(item)}
                       >
-                        <div className="w-12 h-12 bg-gray-50 dark:bg-gray-800 rounded-xl flex items-center justify-center mb-4 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/20 transition-colors">
-                          <div className="text-xl font-bold text-gray-400 group-hover:text-blue-600">
+                        <div className="w-12 h-12 bg-gray-50 dark:bg-gray-800 rounded-xl flex items-center justify-center mb-4 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/20 transition-colors mcp-market-item-icon-box">
+                          <div className="text-xl font-bold text-gray-400 group-hover:text-blue-600 mcp-market-item-icon">
                             {item.name.charAt(0).toUpperCase()}
                           </div>
                         </div>
-                        <div className="font-bold text-sm text-gray-900 dark:text-gray-100 mb-1 truncate">{item.name}</div>
-                        <p className="text-[10px] text-gray-500 line-clamp-2 h-7 mb-4">{item.description || 'No description'}</p>
+                        <div className="font-bold text-sm text-gray-900 dark:text-gray-100 mb-1 truncate mcp-market-item-name">{item.name}</div>
+                        <p className="text-[10px] text-gray-500 line-clamp-2 h-7 mb-4 mcp-market-item-desc">{item.description || 'No description'}</p>
                         <div className="flex items-center justify-between">
-                          <span className="text-[9px] px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-gray-400 uppercase">{item.runtime_type}</span>
-                          <Plus className="w-4 h-4 text-gray-300 group-hover:text-blue-600 transition-colors" />
+                          <span className="text-[9px] px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-gray-400 uppercase mcp-market-item-type-badge">{item.runtime_type}</span>
+                          <Plus className="w-4 h-4 text-gray-300 group-hover:text-blue-600 transition-colors mcp-market-item-add-icon" />
                         </div>
                       </div>
                     ))}
@@ -1418,8 +1418,8 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
               </div>
             </div>
             
-            <div className="px-8 py-4 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gray-50 dark:bg-gray-800/30">
-              <div className="text-xs text-gray-400">
+            <div className="px-8 py-4 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gray-50 dark:bg-gray-800/30 mcp-market-footer">
+              <div className="text-xs text-gray-400 mcp-market-footer-text">
                 数据源: {marketSources.find(s => s.source_id === selectedSourceId)?.display_name || '默认'}
               </div>
               <Button variant="secondary" size="sm" onClick={() => setShowMarketModal(false)}>关闭</Button>
@@ -1438,7 +1438,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
           setShowRegistrationForm(false);
         }}
       >
-        <DialogContent className="max-w-md bg-white dark:bg-[#1e1e1e] border-gray-100 dark:border-gray-800">
+        <DialogContent className="max-w-md bg-white dark:bg-[#1e1e1e] border-gray-100 dark:border-gray-800 mcp-dialog">
           {showWorkspaceSelection ? (
             <>
               <DialogHeader>
@@ -1465,7 +1465,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                 {notionRegistrations.map((registration) => (
                   <div
                     key={registration.id}
-                    className="p-4 border border-gray-100 dark:border-gray-800 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-all cursor-pointer group flex items-center justify-between"
+                    className="p-4 border border-gray-100 dark:border-gray-800 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-all cursor-pointer group flex items-center justify-between mcp-workspace-card"
                     onClick={() => handleUseExistingWorkspace(registration)}
                   >
                     <div className="flex items-center gap-3">
