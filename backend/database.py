@@ -217,18 +217,68 @@ def create_tables():
         except Exception as e:
             print(f"  ⚠️ Warning: Failed to extend 'model' column: {e}")
         
-        # 迁移：添加 subprovider 字段（用于标识真正的供应商，provider 用于 SDK 兼容路由）
+        # 迁移：添加 supplier 字段（Token/计费归属，如 nvidia、openai）；不再使用 subprovider 避免歧义
         _ensure_column(
             'llm_configs',
-            'subprovider',
+            'supplier',
             """
                 ALTER TABLE `llm_configs`
-                ADD COLUMN `subprovider` VARCHAR(50) DEFAULT NULL COMMENT '子供应商名称（如 nvidia, openai），用于区分真正的供应商；provider 用于 SDK 兼容路由'
+                ADD COLUMN `supplier` VARCHAR(100) DEFAULT NULL COMMENT 'Token/计费归属供应商（如 nvidia, openai）'
                 AFTER `provider`
             """,
-            'subprovider',
+            'supplier',
         )
-        
+        try:
+            cursor.execute("""
+                SELECT COUNT(*) FROM information_schema.STATISTICS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'llm_configs' AND INDEX_NAME = 'idx_supplier'
+            """)
+            if cursor.fetchone()[0] == 0:
+                cursor.execute("ALTER TABLE `llm_configs` ADD INDEX `idx_supplier` (`supplier`)")
+                conn.commit()
+                print("  ✓ Added index 'idx_supplier' to 'llm_configs' table")
+        except Exception as e:
+            print(f"  ⚠️ Warning: Failed to add index 'idx_supplier': {e}")
+        # 回填 supplier：有 provider_id/subprovider 列则优先用，否则用 provider
+        try:
+            cursor.execute("""
+                SELECT COUNT(*) FROM llm_configs WHERE supplier IS NULL OR supplier = ''
+            """)
+            null_count = cursor.fetchone()[0]
+            if null_count > 0:
+                cursor.execute("""
+                    SELECT COUNT(*) FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'llm_configs' AND COLUMN_NAME = 'provider_id'
+                """)
+                has_pid = cursor.fetchone()[0] > 0
+                cursor.execute("""
+                    SELECT COUNT(*) FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'llm_configs' AND COLUMN_NAME = 'subprovider'
+                """)
+                has_sub = cursor.fetchone()[0] > 0
+                if has_pid and has_sub:
+                    cursor.execute("""
+                        UPDATE llm_configs
+                        SET supplier = COALESCE(NULLIF(TRIM(IFNULL(provider_id, '')), ''), NULLIF(TRIM(IFNULL(subprovider, '')), ''), provider)
+                        WHERE supplier IS NULL OR supplier = ''
+                    """)
+                elif has_pid:
+                    cursor.execute("""
+                        UPDATE llm_configs
+                        SET supplier = COALESCE(NULLIF(TRIM(IFNULL(provider_id, '')), ''), provider)
+                        WHERE supplier IS NULL OR supplier = ''
+                    """)
+                else:
+                    cursor.execute("""
+                        UPDATE llm_configs SET supplier = provider WHERE supplier IS NULL OR supplier = ''
+                    """)
+                conn.commit()
+                print(f"  ✓ Backfilled supplier for {cursor.rowcount} configs")
+            else:
+                print("  ✓ All configs already have supplier")
+        except Exception as e:
+            print(f"  ⚠️ Warning: Failed to backfill supplier: {e}")
+
         # LLM供应商表（支持自定义供应商）
         create_llm_providers_table = """
         CREATE TABLE IF NOT EXISTS `llm_providers` (
@@ -253,61 +303,6 @@ def create_tables():
         
         cursor.execute(create_llm_providers_table)
         print("✓ Table 'llm_providers' created/verified successfully")
-        
-        # 迁移：为 llm_configs 添加 provider_id 列（如果不存在）
-        _ensure_column(
-            'llm_configs',
-            'provider_id',
-            """
-                ALTER TABLE `llm_configs`
-                ADD COLUMN `provider_id` VARCHAR(100) DEFAULT NULL COMMENT '供应商ID（外键关联llm_providers.provider_id）'
-                AFTER `provider`
-            """,
-            'provider_id',
-        )
-        
-        # 添加外键索引（如果不存在）
-        try:
-            cursor.execute("""
-                SELECT COUNT(*) 
-                FROM information_schema.STATISTICS 
-                WHERE TABLE_SCHEMA = DATABASE() 
-                AND TABLE_NAME = 'llm_configs' 
-                AND INDEX_NAME = 'idx_provider_id'
-            """)
-            index_exists = cursor.fetchone()[0] > 0
-            if not index_exists:
-                cursor.execute("""
-                    ALTER TABLE `llm_configs`
-                    ADD INDEX `idx_provider_id` (`provider_id`)
-                """)
-                print("  ✓ Added index 'idx_provider_id' to 'llm_configs' table")
-        except Exception as e:
-            print(f"  ⚠️ Warning: Failed to add index 'idx_provider_id': {e}")
-        
-        # 迁移：回填 provider_id（supplier 字段）
-        # 如果 provider_id 为空，从 subprovider 或 provider 回填
-        try:
-            cursor.execute("""
-                SELECT COUNT(*) 
-                FROM llm_configs 
-                WHERE provider_id IS NULL OR provider_id = ''
-            """)
-            null_count = cursor.fetchone()[0]
-            if null_count > 0:
-                print(f"  → Migrating {null_count} configs: backfilling provider_id from subprovider/provider...")
-                # 优先使用 subprovider，如果没有则使用 provider（系统供应商）
-                cursor.execute("""
-                    UPDATE llm_configs 
-                    SET provider_id = COALESCE(NULLIF(subprovider, ''), provider)
-                    WHERE provider_id IS NULL OR provider_id = ''
-                """)
-                conn.commit()
-                print(f"  ✓ Backfilled provider_id for {cursor.rowcount} configs")
-            else:
-                print("  ✓ All configs already have provider_id")
-        except Exception as e:
-            print(f"  ⚠️ Warning: Failed to backfill provider_id: {e}")
         
         # MCP服务器配置表
         create_mcp_servers_table = """

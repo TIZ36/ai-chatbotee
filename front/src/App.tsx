@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
-import { Brain, Plug, Settings, MessageCircle, Globe, Sparkles, Bot, Users, BookOpen, Plus, FolderOpen, Image as ImageIcon, Palette, Check, Type } from 'lucide-react';
+import { Brain, Plug, Settings, MessageCircle, Globe, Bot, Users, BookOpen, Plus, FolderOpen, Image as ImageIcon } from 'lucide-react';
 import appLogoDark from '../assets/app_logo_dark.png';
 import appLogoLight from '../assets/app_logo_light.png';
 import { Button } from './components/ui/Button';
@@ -26,12 +26,6 @@ import StatusBar from './components/StatusBar';
 import { getAgents, getSessions, createSession, deleteSession, type Session } from './services/sessionApi';
 import { toast } from './components/ui/use-toast';
 import { ConfirmDialog } from './components/ui/ConfirmDialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from './components/ui/DropdownMenu';
 
 // 导航项组件 - 带动画和tooltip
 interface NavItemProps {
@@ -39,11 +33,17 @@ interface NavItemProps {
   icon: React.ReactNode;
   title: string;
   isActive: boolean;
+  isNiho?: boolean;
+  tooltipPlacement?: 'right' | 'bottom';
 }
 
-const NavItem: React.FC<NavItemProps> = ({ to, icon, title, isActive }) => {
+const NavItem: React.FC<NavItemProps> = ({ to, icon, title, isActive, isNiho, tooltipPlacement = 'right' }) => {
   const [showTooltip, setShowTooltip] = useState(false);
+  const inactiveClass = isNiho
+    ? 'text-[var(--color-highlight)] hover:bg-white/5 hover:opacity-90'
+    : 'text-gray-500 dark:text-[#a0a0a0] hover:bg-white/50 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white';
 
+  const tooltipBottom = tooltipPlacement === 'bottom';
   return (
     <div className="relative group">
       <Link
@@ -51,10 +51,9 @@ const NavItem: React.FC<NavItemProps> = ({ to, icon, title, isActive }) => {
         className={`
           w-8 h-8 flex items-center justify-center rounded-lg 
           transition-all duration-200 ease-out relative
-          flex-shrink-0
           ${isActive 
-            ? 'bg-[var(--color-accent)]/90 text-white shadow-sm backdrop-blur-sm' 
-            : 'text-gray-500 dark:text-[#a0a0a0] hover:bg-white/50 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white'
+            ? `bg-[var(--color-accent)]/90 shadow-sm backdrop-blur-sm ${isNiho ? 'text-[var(--color-highlight)]' : 'text-white'}`
+            : inactiveClass
           }
         `}
         onMouseEnter={() => setShowTooltip(true)}
@@ -65,11 +64,21 @@ const NavItem: React.FC<NavItemProps> = ({ to, icon, title, isActive }) => {
           {icon}
         </div>
       </Link>
-      {/* Tooltip - 毛玻璃效果 */}
+      {/* Tooltip - 毛玻璃效果；顶部导航时显示在下方 */}
       {showTooltip && (
-        <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 px-2 py-1 glass-popup text-gray-800 dark:text-white text-xs z-50 whitespace-nowrap pointer-events-none">
+        <div
+          className={`absolute px-2 py-1 glass-popup text-gray-800 dark:text-white text-xs z-50 whitespace-nowrap pointer-events-none ${
+            tooltipBottom ? 'left-1/2 -translate-x-1/2 top-full mt-2' : 'left-full ml-2 top-1/2 -translate-y-1/2'
+          }`}
+        >
           {title}
-          <div className="absolute right-full top-1/2 -translate-y-1/2 w-0 h-0 border-t-4 border-b-4 border-r-4 border-transparent border-r-white/85 dark:border-r-[#1e1e1e]/90" />
+          <div
+            className={`absolute w-0 h-0 border-transparent ${
+              tooltipBottom
+                ? 'left-1/2 -translate-x-1/2 bottom-full border-b-[6px] border-b-white/85 dark:border-b-[#1e1e1e]/90 border-x-4 border-x-transparent'
+                : 'right-full top-1/2 -translate-y-1/2 border-t-4 border-b-4 border-r-4 border-r-white/85 dark:border-r-[#1e1e1e]/90'
+            }`}
+          />
         </div>
       )}
     </div>
@@ -118,6 +127,15 @@ const App: React.FC = () => {
     }
     return { theme: 'system', skin: 'default', font: 'default', autoRefresh: false, refreshInterval: 60, videoColumns: 4, enableToolCalling: true };
   });
+
+  // Chaya 头像（用于左侧导航第一项）
+  const [chayaAvatar, setChayaAvatar] = useState<string | null>(null);
+  useEffect(() => {
+    getAgents().then((agents) => {
+      const chaya = agents?.find((a) => a.session_id === DEFAULT_AGENT_ID);
+      setChayaAvatar(chaya?.avatar ?? null);
+    }).catch(() => setChayaAvatar(null));
+  }, []);
 
   // 保存设置
   useEffect(() => {
@@ -334,224 +352,88 @@ const App: React.FC = () => {
     }
   };
 
-  // 左侧边栏显示状态（移动端默认收起）
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() =>
-    typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
-  );
   const [isMobile, setIsMobile] = useState(() =>
     typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
   );
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 767px)');
-    const onChange = () => {
-      setIsMobile(mq.matches);
-      if (mq.matches) setIsSidebarCollapsed(true);
-    };
+    const onChange = () => setIsMobile(mq.matches);
     mq.addEventListener('change', onChange);
     return () => mq.removeEventListener('change', onChange);
   }, []);
+
+  const isNiho = isMobile || settings.theme === 'niho' || settings.skin === 'niho';
 
   return (
     <div className={`app-root-bg h-screen bg-gradient-to-br from-gray-100 via-gray-50 to-gray-100 dark:from-[#0f0f0f] dark:via-[#141414] dark:to-[#0f0f0f] flex flex-col transition-colors duration-200 overflow-hidden ${isMobile ? 'mobile-no-status-bar' : ''}`}>
       {/* macOS 专用小标题栏 - 仅用于红黄绿按钮拖拽区域 */}
       
-      <div className="flex flex-1 min-h-0 overflow-hidden relative">
-      {/* 移动端侧栏遮罩 */}
-      {isMobile && !isSidebarCollapsed && (
-        <div
-          className="fixed inset-0 z-40 bg-black/50 md:hidden"
-          aria-hidden
-          onClick={() => setIsSidebarCollapsed(true)}
+      {/* 顶部导航栏 - 居中向两边扩散的图标 */}
+      <nav
+        className="glass-top-nav z-50 flex items-center justify-center gap-2 py-2 px-2 app-no-drag"
+        style={isMobile ? { paddingTop: 'calc(0.5rem + var(--safe-area-inset-top))' } : undefined}
+      >
+        <NavItem
+          to="/"
+          icon={
+            chayaAvatar ? (
+              <img src={chayaAvatar} alt="Chaya" className="w-[18px] h-[18px] rounded-full object-cover" />
+            ) : isDarkMode ? (
+              <img src={appLogoDark} alt="Chaya" className="w-[18px] h-[18px] object-contain" />
+            ) : (
+              <img src={appLogoLight} alt="Chaya" className="w-[18px] h-[18px] object-contain" />
+            )
+          }
+          title="Chaya 对话"
+          isActive={location.pathname === '/'}
+          isNiho={isNiho}
+          tooltipPlacement="bottom"
         />
-      )}
-      {/* 左侧导航栏 - 毛玻璃效果；移动端为浮层 */}
-        <nav 
-          className={`glass-sidebar flex flex-col items-center flex-shrink-0 z-50 pt-2 transition-all duration-300 ease-in-out overflow-hidden ${
-            isSidebarCollapsed ? 'w-0 border-r-0' : 'w-[48px]'
-          } ${isMobile && !isSidebarCollapsed ? 'fixed left-0 top-0 bottom-0 shadow-xl' : ''}`}
-          style={isMobile && !isSidebarCollapsed ? { paddingTop: 'calc(0.5rem + var(--safe-area-inset-top))' } : undefined}
-        >
-
-        {/* 导航栏：按顺序排列所有功能 */}
-        <div className="flex flex-col items-center space-y-1 w-full px-1 app-no-drag flex-shrink-0">
-          {/* 1. 对话机器人 */}
-          <NavItem
-            to="/"
-            icon={<Bot className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-            title="对话机器人"
-            isActive={location.pathname === '/'}
-          />
-
-          {/* 2. 模型展示和管理（agent管理） */}
-          <NavItem
-            to="/agents"
-            icon={<Users className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-            title="模型展示和管理"
-            isActive={location.pathname === '/agents'}
-          />
-
-          {/* 3. 大模型录入 */}
-          <NavItem
-            to="/llm-config"
-            icon={<Brain className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-            title="大模型录入"
-            isActive={location.pathname === '/llm-config'}
-          />
-
-          {/* 4. mcp录入 */}
-          <NavItem
-            to="/mcp-config"
-            icon={<Plug className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-            title="mcp录入"
-            isActive={location.pathname === '/mcp-config'}
-          />
-
-          {/* 5. 爬虫 */}
-          <NavItem
-            to="/crawler-config"
-            icon={<Globe className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-            title="爬虫"
-            isActive={location.pathname === '/crawler-config'}
-          />
-
-          {/* 6. 设置 */}
-          <NavItem
-            to="/settings"
-            icon={<Settings className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-            title="设置"
-            isActive={location.pathname === '/settings'}
-          />
-        </div>
-        
-        <div className="flex-1 app-drag" />
+        <NavItem
+          to="/agents"
+          icon={<Users className="w-[18px] h-[18px]" strokeWidth={1.5} />}
+          title="Persona 管理"
+          isActive={location.pathname === '/agents'}
+          isNiho={isNiho}
+          tooltipPlacement="bottom"
+        />
+        <NavItem
+          to="/llm-config"
+          icon={<Brain className="w-[18px] h-[18px]" strokeWidth={1.5} />}
+          title="大模型录入"
+          isActive={location.pathname === '/llm-config'}
+          isNiho={isNiho}
+          tooltipPlacement="bottom"
+        />
+        <NavItem
+          to="/mcp-config"
+          icon={<Plug className="w-[18px] h-[18px]" strokeWidth={1.5} />}
+          title="mcp录入"
+          isActive={location.pathname === '/mcp-config'}
+          isNiho={isNiho}
+          tooltipPlacement="bottom"
+        />
+        <NavItem
+          to="/crawler-config"
+          icon={<Globe className="w-[18px] h-[18px]" strokeWidth={1.5} />}
+          title="爬虫"
+          isActive={location.pathname === '/crawler-config'}
+          isNiho={isNiho}
+          tooltipPlacement="bottom"
+        />
+        <NavItem
+          to="/settings"
+          icon={<Settings className="w-[18px] h-[18px]" strokeWidth={1.5} />}
+          title="设置"
+          isActive={location.pathname === '/settings'}
+          isNiho={isNiho}
+          tooltipPlacement="bottom"
+        />
       </nav>
 
-      {/* 主要内容区域 - 包含 header 和页面内容 */}
+      {/* 主要内容区域 - 无 header，直接为页面内容 */}
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-        {/* Header - Logo + 模式切换（仅聊天页显示切换按钮）- 毛玻璃效果 */}
-        <header 
-          className="h-10 flex-shrink-0 glass-header flex items-center justify-between px-3 min-h-[44px] md:min-h-0"
-          style={isMobile ? { paddingTop: 'max(0.25rem, var(--safe-area-inset-top))', paddingLeft: 'calc(0.75rem + var(--safe-area-inset-left))', paddingRight: 'calc(0.75rem + var(--safe-area-inset-right))' } : undefined}
-        >
-          {/* 左侧 Logo - 移动端满足 44px 触摸目标 */}
-          <div className="flex items-center gap-2">
-            <div
-              className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity touch-target min-h-[44px] min-w-[44px] -m-2 p-2 md:min-h-0 md:min-w-0 md:m-0 md:p-0"
-              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-              title="点击隐藏/显示侧边栏"
-            >
-              <img
-                src={isDarkMode ? appLogoDark : appLogoLight}
-                alt="chatee"
-                className="h-6 w-6 object-contain"
-              />
-              <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">chatee</span>
-            </div>
-          </div>
-
-          {/* 右侧：字体 + 皮肤（仅桌面端）+ 切换对话按钮 */}
-          <div className="flex items-center gap-2">
-            {!isMobile && (
-              <>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-xs glass-toolbar gap-1.5"
-                      title="切换字体"
-                    >
-                      <Type className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline max-w-[4rem] truncate">
-                        {settings.font === 'default' ? '默认' : settings.font === 'pixel' ? '像素' : settings.font === 'terminal' ? '终端' : settings.font === 'rounded' ? '圆体' : settings.font === 'dotgothic' ? '点阵' : '像素屏'}
-                      </span>
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="min-w-[160px] max-h-[70vh] overflow-y-auto">
-                    <DropdownMenuItem onClick={() => updateSettings({ font: 'default' })} className="flex items-center justify-between">
-                      <span>默认 (Inter)</span>
-                      {settings.font === 'default' && <Check className="w-4 h-4" />}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => updateSettings({ font: 'pixel' })} className="flex items-center justify-between">
-                      <span>像素 (Press Start 2P)</span>
-                      {settings.font === 'pixel' && <Check className="w-4 h-4" />}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => updateSettings({ font: 'terminal' })} className="flex items-center justify-between">
-                      <span>终端 (VT323)</span>
-                      {settings.font === 'terminal' && <Check className="w-4 h-4" />}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => updateSettings({ font: 'rounded' })} className="flex items-center justify-between">
-                      <span>圆体 (Comfortaa)</span>
-                      {settings.font === 'rounded' && <Check className="w-4 h-4" />}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => updateSettings({ font: 'dotgothic' })} className="flex items-center justify-between">
-                      <span>点阵 (DotGothic16)</span>
-                      {settings.font === 'dotgothic' && <Check className="w-4 h-4" />}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => updateSettings({ font: 'silkscreen' })} className="flex items-center justify-between">
-                      <span>像素屏 (Silkscreen)</span>
-                      {settings.font === 'silkscreen' && <Check className="w-4 h-4" />}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-xs glass-toolbar gap-1.5"
-                      title="切换主题"
-                    >
-                      <Palette className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">
-                        {settings.theme === 'niho' || settings.skin === 'niho' ? '霓虹' : settings.theme === 'dark' ? '深色' : '浅色'}
-                      </span>
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="min-w-[140px]">
-                    <DropdownMenuItem
-                      onClick={() => updateSettings({ theme: 'light' as any, skin: undefined })}
-                      className="flex items-center justify-between"
-                    >
-                      <span>浅色</span>
-                      {(settings.theme === 'light' || (!settings.theme && !settings.skin)) && <Check className="w-4 h-4" />}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => updateSettings({ theme: 'dark' as any, skin: undefined })}
-                      className="flex items-center justify-between"
-                    >
-                      <span>深色</span>
-                      {settings.theme === 'dark' && <Check className="w-4 h-4" />}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => updateSettings({ theme: 'niho' as any, skin: undefined })}
-                      className="flex items-center justify-between"
-                    >
-                      <span>霓虹</span>
-                      {(settings.theme === 'niho' || settings.skin === 'niho') && <Check className="w-4 h-4" />}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </>
-            )}
-            {isChatPage && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-xs glass-toolbar"
-                onClick={() => {
-                  setShowConversationSwitcher(true);
-                }}
-                title="切换对话（智能体 / 话题）"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>切换</span>
-              </Button>
-            )}
-          </div>
-        </header>
-
         {/* 全局切换对话弹窗（Agent / Topic） */}
         <Dialog
           open={showConversationSwitcher}
@@ -577,18 +459,6 @@ const App: React.FC = () => {
                   >
                     <Plus className="w-3.5 h-3.5 mr-1.5" />
                     {isCreatingTopic ? '创建中...' : '新建话题'}
-                  </Button>
-                  <Button 
-                    variant="primary" 
-                    size="sm" 
-                    className="h-8"
-                    onClick={() => {
-                      setShowConversationSwitcher(false);
-                      navigate('/agents', { state: { openGenerator: true } });
-                    }}
-                  >
-                    <Sparkles className="w-3.5 h-3.5 mr-1.5" />
-                    新建智能体
                   </Button>
                 </div>
               </div>
@@ -622,7 +492,7 @@ const App: React.FC = () => {
                       }}
                     >
                       <Users className="w-3 h-3 mr-1" />
-                      管理
+                      设置
                     </Button>
                   </div>
                   <div className="space-y-1 w-full">
@@ -630,7 +500,7 @@ const App: React.FC = () => {
                       <div className="text-xs text-gray-500 dark:text-[#808080] px-1 py-2">加载中...</div>
                     ) : switcherAgents.length === 0 ? (
                       <div className="text-xs text-gray-500 dark:text-[#808080] px-1 py-3 text-center">
-                        暂无智能体，点击右上角「新建智能体」创建
+                        Chaya 是系统提供的智能体，可在「Persona 管理」中切换人设与声音
                       </div>
                     ) : (
                       switcherAgents
@@ -787,7 +657,6 @@ const App: React.FC = () => {
           </div>
         )}
         </main>
-      </div>
       </div>
 
       <ConfirmDialog

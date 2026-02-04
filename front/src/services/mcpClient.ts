@@ -54,7 +54,7 @@ export class MCPClient {
   private consecutiveErrors: number = 0; // 连续错误次数
   private readonly MAX_CONSECUTIVE_ERRORS = 3; // 最大连续错误次数，超过则认为连接不健康
   private lastHealthCheckTime: number = 0; // 上次健康检查时间
-  private readonly HEALTH_CHECK_INTERVAL = 30 * 1000; // 健康检查间隔 30 秒
+  private readonly HEALTH_CHECK_INTERVAL = 60 * 1000; // 健康检查间隔 60 秒（与 HealthMonitor 一致，降低请求频率）
 
   constructor(options: MCPClientOptions) {
     this.server = options.server;
@@ -1055,7 +1055,7 @@ export class MCPManager {
   private serverConfigs = new Map<string, MCPServer>(); // 服务器配置缓存（用于重连）
   private readonly MAX_POOL_SIZE = 10; // 每个服务器的最大连接池大小
   private readonly IDLE_TIMEOUT = 5 * 60 * 1000; // 空闲连接超时时间（5分钟）
-  private readonly RECONNECT_DELAY = 1000; // 重连延迟（毫秒）
+  private readonly RECONNECT_DELAY = 5000; // 重连延迟 5 秒，避免连接失败时每秒访问 /mcp
   private readonly MAX_RECONNECT_ATTEMPTS = 3; // 最大重连尝试次数
 
   /**

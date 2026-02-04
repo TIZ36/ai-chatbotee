@@ -206,6 +206,10 @@ class ActorBase(ABC):
             if conn:
                 conn.close()
     
+    def reload_config(self):
+        """从数据库重新加载 Agent 配置（含 system_prompt），人设更新后调用以使运行中 Actor 生效。"""
+        self._load_config()
+    
     def _load_capabilities(self):
         """加载能力（MCP/Skill/Tool）"""
         # 从 Agent 配置加载

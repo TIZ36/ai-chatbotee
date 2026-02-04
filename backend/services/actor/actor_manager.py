@@ -88,6 +88,22 @@ class ActorManager:
                 actor.stop()
                 logger.info(f"[ActorManager] Removed actor: {agent_id}")
     
+    def reload_actor_config(self, agent_id: str) -> bool:
+        """
+        让指定 Agent 从数据库重新加载配置（含 system_prompt）。
+        人设更新后调用，使运行中或池中的 Actor 下次使用新人设。
+        """
+        actor = self.get_actor(agent_id)
+        if actor is None:
+            return False
+        try:
+            actor.reload_config()
+            logger.info(f"[ActorManager] Reloaded config for actor: {agent_id}")
+            return True
+        except Exception as e:
+            logger.warning(f"[ActorManager] Failed to reload config for {agent_id}: {e}")
+            return False
+    
     def subscribe_for_agent(self, actor: 'ActorBase', channel: str):
         """
         为 Agent 订阅频道

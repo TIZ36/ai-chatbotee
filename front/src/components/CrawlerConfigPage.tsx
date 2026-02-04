@@ -185,15 +185,21 @@ const CrawlerConfigPage: React.FC = () => {
     </Button>
   );
 
+  const cardClass = "rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]";
+
   return (
     <PageLayout
       title="爬虫配置"
       description="管理网页爬虫模块和数据批次"
       icon={Globe}
       headerActions={headerActions}
+      variant="persona"
     >
-      {/* 内容区域 */}
-      <div className="space-y-4">
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--text-primary)] flex items-center gap-2">
+          <Package className="w-4 h-4 [data-skin='niho']:text-[var(--color-accent)]" />
+          爬虫模块
+        </h2>
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <div className="w-6 h-6 border-2 border-gray-300 dark:border-gray-600 border-t-[#7c3aed] rounded-full animate-spin" />
@@ -224,7 +230,7 @@ const CrawlerConfigPage: React.FC = () => {
               return (
                 <div
                   key={module.module_id}
-                  className="gnome-card !p-0"
+                  className={`${cardClass} overflow-hidden`}
                 >
                   {/* 模块头部 */}
                   <div className="flex items-center justify-between p-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
@@ -385,7 +391,7 @@ const CrawlerConfigPage: React.FC = () => {
             })}
           </div>
         )}
-      </div>
+      </section>
     </PageLayout>
   );
 };

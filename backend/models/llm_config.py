@@ -41,8 +41,8 @@ class LLMConfig:
             config_id=row['config_id'],
             name=row['name'],
             provider=row['provider'],
-            # supplier 从 provider_id 读取（计费/Token 归属），兼容旧字段 subprovider
-            supplier=row.get('provider_id') or row.get('subprovider') or row.get('supplier'),
+            # supplier 列（Token/计费归属）；兼容旧库的 provider_id、subprovider
+            supplier=row.get('supplier') or row.get('provider_id') or row.get('subprovider'),
             api_key=row.get('api_key'),
             api_url=row.get('api_url'),
             model=row.get('model'),
@@ -90,9 +90,7 @@ class LLMConfig:
             'config_id': self.config_id,
             'name': self.name,
             'provider': self.provider,
-            # supplier 写入 provider_id（计费/Token 归属），同时兼容写入 subprovider（用于迁移期）
-            'provider_id': self.supplier,
-            'subprovider': self.supplier,  # 保持兼容，迁移完成后可移除
+            'supplier': self.supplier,
             'api_key': self.api_key,
             'api_url': self.api_url,
             'model': self.model,
@@ -183,14 +181,13 @@ class LLMConfigRepository:
             
             sql = """
             INSERT INTO llm_configs 
-            (config_id, name, provider, provider_id, subprovider, api_key, api_url, model, tags, enabled, description, metadata)
-            VALUES (%(config_id)s, %(name)s, %(provider)s, %(provider_id)s, %(subprovider)s, %(api_key)s, %(api_url)s, 
+            (config_id, name, provider, supplier, api_key, api_url, model, tags, enabled, description, metadata)
+            VALUES (%(config_id)s, %(name)s, %(provider)s, %(supplier)s, %(api_key)s, %(api_url)s, 
                     %(model)s, %(tags)s, %(enabled)s, %(description)s, %(metadata)s)
             ON DUPLICATE KEY UPDATE
                 name = VALUES(name),
                 provider = VALUES(provider),
-                provider_id = VALUES(provider_id),
-                subprovider = VALUES(subprovider),
+                supplier = VALUES(supplier),
                 api_key = VALUES(api_key),
                 api_url = VALUES(api_url),
                 model = VALUES(model),
@@ -205,8 +202,7 @@ class LLMConfigRepository:
             print(f"  - config_id: {params.get('config_id')}")
             print(f"  - name: {params.get('name')}")
             print(f"  - provider: {params.get('provider')}")
-            print(f"  - provider_id (supplier): {params.get('provider_id')}")
-            print(f"  - subprovider: {params.get('subprovider')}")
+            print(f"  - supplier: {params.get('supplier')}")
             cursor.execute(sql, params)
             print(f"[LLMConfigRepository] ✅ 配置已保存，影响行数: {cursor.rowcount}")
             conn.commit()

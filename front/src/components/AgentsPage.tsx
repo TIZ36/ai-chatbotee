@@ -1,43 +1,46 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { 
-  Sparkles, Bot, MessageCircle, Trash2, Download, Upload, Sliders, X, Users, Loader
+import { useNavigate } from 'react-router-dom';
+import {
+  Bot, Sliders, Users, Loader, Volume2, Plus, Check, Brain, Sparkles, Zap,
+  MessageSquare, Database, Shapes, Pencil
 } from 'lucide-react';
-import { 
-  getAgents, deleteSession, Session, 
-  downloadAgentAsJson, importAgentFromFile, importAgent 
-} from '../services/sessionApi';
-import { getLLMConfigs, LLMConfigFromDB } from '../services/llmApi';
+import { getAgents, Session } from '../services/sessionApi';
+import { listRoleVersions, activateRoleVersion, updateRoleProfile } from '../services/roleApi';
+import type { RoleVersion, PersonaPreset, VoicePreset } from '../services/roleApi';
 import AgentPersonaDialog from './AgentPersonaDialog';
-import CreateAgentDialog from './CreateAgentDialog';
+import PersonaPresetDialog from './PersonaPresetDialog';
+import VoicePresetDialog from './VoicePresetDialog';
 import { Button } from './ui/Button';
-import { IconButton } from './ui/IconButton';
-import { ConfirmDialog } from './ui/ConfirmDialog';
+import { Switch } from './ui/Switch';
 import { toast } from './ui/use-toast';
+import {
+  defaultPersonaConfig,
+  type AgentPersonaFullConfig,
+} from './AgentPersonaConfig';
+
+const CHAYA_ID = 'agent_chaya';
 
 const AgentsPage: React.FC = () => {
   const navigate = useNavigate();
-  const location = useLocation();
-  
-  // 智能体列表状态
+
   const [agents, setAgents] = useState<Session[]>([]);
-  const [llmConfigs, setLlmConfigs] = useState<LLMConfigFromDB[]>([]);
+  const [roleVersions, setRoleVersions] = useState<RoleVersion[]>([]);
   const [isLoadingAgents, setIsLoadingAgents] = useState(true);
-  const [deleteAgentTarget, setDeleteAgentTarget] = useState<Session | null>(null);
+  const [isLoadingVersions, setIsLoadingVersions] = useState(false);
   const [personaEditAgent, setPersonaEditAgent] = useState<Session | null>(null);
   const [personaDialogInitialTab, setPersonaDialogInitialTab] = useState<'basic' | 'persona'>('basic');
-  const [showCreateAgent, setShowCreateAgent] = useState(false);
+  const [personaConfig, setPersonaConfig] = useState<AgentPersonaFullConfig>(defaultPersonaConfig);
+  const [personaSaving, setPersonaSaving] = useState(false);
+  const [personaPresetDialogOpen, setPersonaPresetDialogOpen] = useState(false);
+  const [personaPresetEdit, setPersonaPresetEdit] = useState<PersonaPreset | null>(null);
+  const [voicePresetDialogOpen, setVoicePresetDialogOpen] = useState(false);
+  const [voicePresetEdit, setVoicePresetEdit] = useState<VoicePreset | null>(null);
+  const [presetSaving, setPresetSaving] = useState(false);
 
-  // 处理从外部导航来的新建请求
-  useEffect(() => {
-    if (location.state?.openGenerator) {
-      setShowCreateAgent(true);
-      // 清除 state 避免刷新页面再次打开
-      window.history.replaceState({}, document.title);
-    }
-  }, [location]);
+  const chaya = agents.find((a) => a.session_id === CHAYA_ID) ?? null;
+  const personaPresets: PersonaPreset[] = (chaya?.ext as any)?.personaPresets ?? [];
+  const voicePresets: VoicePreset[] = (chaya?.ext as any)?.voicePresets ?? [];
 
-  // 加载智能体列表
   const loadAgents = useCallback(async () => {
     try {
       setIsLoadingAgents(true);
@@ -50,299 +53,441 @@ const AgentsPage: React.FC = () => {
     }
   }, []);
 
-  // 加载 LLM 配置
-  const loadLLMConfigs = useCallback(async () => {
+  const loadRoleVersions = useCallback(async () => {
     try {
-      const configs = await getLLMConfigs();
-      setLlmConfigs(configs);
+      setIsLoadingVersions(true);
+      const res = await listRoleVersions(CHAYA_ID);
+      setRoleVersions(res);
     } catch (error) {
-      console.error('[AgentsPage] Failed to load LLM configs:', error);
+      console.error('[AgentsPage] Failed to load role versions:', error);
+      setRoleVersions([]);
+    } finally {
+      setIsLoadingVersions(false);
     }
   }, []);
 
   useEffect(() => {
     loadAgents();
-    loadLLMConfigs();
-  }, [loadAgents, loadLLMConfigs]);
+  }, [loadAgents]);
 
-  const performDeleteAgent = async (sessionId: string) => {
+  useEffect(() => {
+    if (chaya) loadRoleVersions();
+  }, [chaya?.session_id, loadRoleVersions]);
+
+  useEffect(() => {
+    if (chaya?.ext?.persona) {
+      const p = chaya.ext.persona as any;
+      setPersonaConfig({
+        voice: p.voice || defaultPersonaConfig.voice,
+        thinking: p.thinking || defaultPersonaConfig.thinking,
+        memoryTriggers: p.memoryTriggers || [],
+        responseMode: p.responseMode || defaultPersonaConfig.responseMode,
+        memoryTriggersEnabled: p.memoryTriggersEnabled !== false,
+        skillTriggerEnabled: p.skillTriggerEnabled !== false,
+      });
+    }
+  }, [chaya?.session_id, chaya?.ext?.persona]);
+
+  const handleActivateVersion = async (versionId: string) => {
     try {
-      await deleteSession(sessionId);
+      await activateRoleVersion(CHAYA_ID, versionId);
       await loadAgents();
-      toast({ title: '智能体已删除', variant: 'success' });
-    } catch (error) {
-      console.error('[AgentsPage] Failed to delete agent:', error);
+      await loadRoleVersions();
+      toast({ title: '已切换为该人设', variant: 'success' });
+    } catch (e) {
       toast({
-        title: '删除智能体失败',
-        description: error instanceof Error ? error.message : String(error),
+        title: '切换失败',
+        description: e instanceof Error ? e.message : String(e),
         variant: 'destructive',
       });
     }
   };
 
-  // 删除智能体（确认）
-  const handleDeleteAgent = (sessionId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const agent = agents.find((a) => a.session_id === sessionId) || null;
-    setDeleteAgentTarget(agent);
-  };
-
-  // 跳转到私聊
-  const handleSelectAgent = (sessionId: string) => {
-    navigate(`/?session=${sessionId}`);
-  };
-
-  // 获取 LLM 配置名称
-  const getLLMConfigName = (llmConfigId?: string) => {
-    if (!llmConfigId) return '未设置';
-    const config = llmConfigs.find(c => c.config_id === llmConfigId);
-    return config?.name || '未知模型';
-  };
-
-  // 导出智能体
-  const handleExportAgent = async (agent: Session, e: React.MouseEvent) => {
-    e.stopPropagation();
-    
+  const handleTogglePersona = async (
+    field: keyof AgentPersonaFullConfig,
+    value: boolean | AgentPersonaFullConfig['responseMode']
+  ) => {
+    const next = { ...personaConfig, [field]: value };
+    setPersonaConfig(next);
+    setPersonaSaving(true);
     try {
-      const displayName = agent.name || agent.title || `智能体_${agent.session_id.substring(0, 8)}`;
-      await downloadAgentAsJson(agent.session_id, displayName);
-    } catch (error: any) {
-      console.error('[AgentsPage] Failed to export agent:', error);
-      alert(`导出失败: ${error.message}`);
-    }
-  };
-
-  // 导入智能体
-  const handleImportAgent = async () => {
-    try {
-      const data = await importAgentFromFile();
-      
-      // 询问LLM配置处理方式
-      let llmMode: 'use_existing' | 'create_new' = 'use_existing';
-      if (data.llm_config) {
-        const existingConfig = llmConfigs.find(c => c.name === data.llm_config?.name);
-        if (existingConfig) {
-          const useExisting = confirm(
-            `检测到同名的模型配置 "${data.llm_config.name}"。\n\n` +
-            `点击"确定"使用已有配置\n` +
-            `点击"取消"创建新配置（将添加后缀）`
-          );
-          llmMode = useExisting ? 'use_existing' : 'create_new';
-        }
-      }
-      
-      const result = await importAgent(data, llmMode);
-      alert(`智能体 "${result.name}" 导入成功！`);
-      
-      // 刷新列表
+      await updateRoleProfile(CHAYA_ID, {
+        persona: next,
+        reason: 'persona_toggle',
+      });
       await loadAgents();
-      await loadLLMConfigs();
-    } catch (error: any) {
-      console.error('[AgentsPage] Failed to import agent:', error);
-      alert(`导入失败: ${error.message}`);
+    } catch (e) {
+      toast({
+        title: '保存失败',
+        description: e instanceof Error ? e.message : String(e),
+        variant: 'destructive',
+      });
+      setPersonaConfig(personaConfig);
+    } finally {
+      setPersonaSaving(false);
     }
+  };
+
+  const openPersonaDialog = (tab: 'basic' | 'persona') => {
+    setPersonaDialogInitialTab(tab);
+    setPersonaEditAgent(chaya ?? null);
+  };
+
+  const savePersonaPresets = async (nextList: PersonaPreset[]) => {
+    if (!chaya) return;
+    setPresetSaving(true);
+    try {
+      const ext = { ...(chaya.ext || {}), personaPresets: nextList };
+      await updateRoleProfile(CHAYA_ID, { ext });
+      await loadAgents();
+      toast({ title: '人设预设已保存', variant: 'success' });
+    } catch (e) {
+      toast({ title: '保存失败', description: e instanceof Error ? e.message : String(e), variant: 'destructive' });
+    } finally {
+      setPresetSaving(false);
+    }
+  };
+
+  const saveVoicePresets = async (nextList: VoicePreset[]) => {
+    if (!chaya) return;
+    setPresetSaving(true);
+    try {
+      const ext = { ...(chaya.ext || {}), voicePresets: nextList };
+      await updateRoleProfile(CHAYA_ID, { ext });
+      await loadAgents();
+      toast({ title: '音色预设已保存', variant: 'success' });
+    } catch (e) {
+      toast({ title: '保存失败', description: e instanceof Error ? e.message : String(e), variant: 'destructive' });
+    } finally {
+      setPresetSaving(false);
+    }
+  };
+
+  const handleSavePersonaPreset = (preset: PersonaPreset) => {
+    const isEdit = personaPresetEdit != null;
+    const next = isEdit
+      ? personaPresets.map((p) => (p.id === preset.id ? preset : p))
+      : [...personaPresets, preset];
+    savePersonaPresets(next);
+    setPersonaPresetEdit(null);
+  };
+
+  const handleSaveVoicePreset = (preset: VoicePreset) => {
+    const isEdit = voicePresetEdit != null;
+    const next = isEdit
+      ? voicePresets.map((v) => (v.id === preset.id ? preset : v))
+      : [...voicePresets, preset];
+    saveVoicePresets(next);
+    setVoicePresetEdit(null);
   };
 
   return (
     <>
-    <div className="agents-page h-full flex flex-col bg-gray-50 dark:bg-[#1a1a1a] [data-skin='niho']:bg-[#000000]">
-      {/* 头部 - Niho 主题 */}
-      <div className="agents-page-header flex-shrink-0 px-6 py-4 border-b border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 rounded-lg bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center [data-skin='niho']:bg-[var(--niho-deep-purple-bg)] [data-skin='niho']:border [data-skin='niho']:border-[var(--color-accent-bg)]">
-                <Users className="w-5 h-5 text-primary-600 dark:text-primary-400 [data-skin='niho']:text-[var(--color-accent)]" />
+      <div className="agents-page h-full flex flex-col bg-gray-50 dark:bg-[#1a1a1a] [data-skin='niho']:bg-[#000000]">
+        <div className="agents-page-header flex-shrink-0 px-6 py-4 border-b border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-center space-x-3">
+                <div className="w-8 h-8 rounded-lg bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center [data-skin='niho']:bg-[var(--niho-deep-purple-bg)] [data-skin='niho']:border [data-skin='niho']:border-[var(--color-accent-bg)]">
+                  <Users className="w-5 h-5 text-primary-600 dark:text-primary-400 [data-skin='niho']:text-[var(--color-accent)]" />
+                </div>
+                <h1 className="agents-page-title text-xl font-bold text-gray-900 dark:text-white [data-skin='niho']:text-[var(--text-primary)]">
+                  Persona 管理
+                </h1>
               </div>
-              <h1 className="agents-page-title text-xl font-bold text-gray-900 dark:text-white [data-skin='niho']:text-[var(--text-primary)]">智能体管理</h1>
+              <p className="mt-1 text-xs text-gray-500 dark:text-[#858585] [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                可添加：人设、音色 · 可开关：人格模式、自驱思考、记忆锚点、技能触发 · 常开：记忆、行为塑造
+              </p>
             </div>
-            <p className="mt-1 text-xs text-gray-500 dark:text-[#858585] [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
-              创建、导入和管理您的 AI 智能体
-            </p>
           </div>
-          
-          {/* 操作按钮 */}
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleImportAgent}
-              className="h-8 [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-transparent [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:hover:border-[var(--color-accent-bg)] [data-skin='niho']:hover:text-[var(--color-accent)]"
-            >
-              <Upload className="w-3.5 h-3.5 mr-1.5" />
-              导入智能体
-            </Button>
-            
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => setShowCreateAgent(true)}
-              className="h-8 [data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:text-[#000000] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:shadow-[0_0_12px_rgba(0,255,136,0.3)]"
-            >
-              <Sparkles className="w-3.5 h-3.5 mr-1.5" />
-              新建智能体
-            </Button>
-          </div>
+        </div>
+
+        <div className="agents-page-list flex-1 overflow-y-auto p-6 no-scrollbar">
+          {isLoadingAgents ? (
+            <div className="flex items-center justify-center min-h-[200px]">
+              <Loader className="w-6 h-6 animate-spin text-primary-500 [data-skin='niho']:text-[var(--color-accent)]" />
+              <span className="ml-2 text-sm text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">加载中...</span>
+            </div>
+          ) : !chaya ? (
+            <div className="flex flex-col items-center justify-center min-h-[200px] text-center py-12">
+              <Bot className="w-12 h-12 text-gray-400 [data-skin='niho']:text-[var(--color-accent)] mb-3" />
+              <p className="text-sm text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                Chaya 未就绪，请刷新或检查后端
+              </p>
+            </div>
+          ) : (
+            <div className="max-w-3xl mx-auto space-y-8">
+              {/* 可添加部分 */}
+              <section className="space-y-3">
+                <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--text-primary)] flex items-center gap-2">
+                  <Plus className="w-4 h-4 [data-skin='niho']:text-[var(--color-accent)]" />
+                  可添加
+                </h2>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {/* 人设管理：预设列表 + 添加/编辑弹窗 */}
+                  <div className="rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] p-4 [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-sm font-medium [data-skin='niho']:text-[var(--text-primary)]">人设管理</span>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => { setPersonaPresetEdit(null); setPersonaPresetDialogOpen(true); }}
+                        className="[data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-transparent [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:hover:border-[var(--color-accent-bg)] [data-skin='niho']:hover:text-[var(--color-accent)]"
+                      >
+                        <Plus className="w-3.5 h-3.5 mr-1.5" />
+                        添加人设
+                      </Button>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-[#858585] mb-3 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                      添加或编辑人设预设（昵称 + 系统提示词），可在与 Chaya 聊天时切换
+                    </p>
+                    {personaPresets.length === 0 ? (
+                      <p className="text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                        暂无预设，点击「添加人设」创建
+                      </p>
+                    ) : (
+                      <ul className="space-y-2 max-h-40 overflow-y-auto no-scrollbar">
+                        {personaPresets.map((p) => (
+                          <li
+                            key={p.id}
+                            className="flex items-center justify-between gap-2 py-1.5 px-2 rounded border border-transparent hover:bg-gray-50 dark:hover:bg-[#363636] [data-skin='niho']:hover:bg-[var(--niho-text-bg)]"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="text-xs font-medium truncate [data-skin='niho']:text-[var(--text-primary)]">
+                                {p.nickname}
+                              </div>
+                              {p.system_prompt && (
+                                <div className="text-[10px] text-gray-500 truncate [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                                  {p.system_prompt.slice(0, 60)}{p.system_prompt.length > 60 ? '...' : ''}
+                                </div>
+                              )}
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0 [data-skin='niho']:text-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)]"
+                              onClick={() => { setPersonaPresetEdit(p); setPersonaPresetDialogOpen(true); }}
+                              title="编辑"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  {/* TTS / 音色管理：预设列表 + 添加/编辑弹窗 */}
+                  <div className="rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] p-4 [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-sm font-medium [data-skin='niho']:text-[var(--text-primary)] flex items-center gap-2">
+                        <Volume2 className="w-4 h-4 [data-skin='niho']:text-[var(--color-info)]" />
+                        TTS / 音色管理
+                      </span>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => { setVoicePresetEdit(null); setVoicePresetDialogOpen(true); }}
+                        className="[data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-transparent [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:hover:border-[var(--color-accent-bg)] [data-skin='niho']:hover:text-[var(--color-accent)]"
+                      >
+                        <Plus className="w-3.5 h-3.5 mr-1.5" />
+                        添加音色
+                      </Button>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-[#858585] mb-3 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                      添加或编辑音色预设（昵称 + 提供方/角色），可在与 Chaya 聊天时切换
+                    </p>
+                    {voicePresets.length === 0 ? (
+                      <p className="text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                        暂无预设，点击「添加音色」创建
+                      </p>
+                    ) : (
+                      <ul className="space-y-2 max-h-40 overflow-y-auto no-scrollbar">
+                        {voicePresets.map((v) => (
+                          <li
+                            key={v.id}
+                            className="flex items-center justify-between gap-2 py-1.5 px-2 rounded border border-transparent hover:bg-gray-50 dark:hover:bg-[#363636] [data-skin='niho']:hover:bg-[var(--niho-text-bg)]"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="text-xs font-medium truncate [data-skin='niho']:text-[var(--text-primary)]">
+                                {v.nickname}
+                              </div>
+                              <div className="text-[10px] text-gray-500 truncate [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                                {v.voiceName}
+                              </div>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0 [data-skin='niho']:text-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)]"
+                              onClick={() => { setVoicePresetEdit(v); setVoicePresetDialogOpen(true); }}
+                              title="编辑"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              </section>
+
+              {/* 可开关部分 */}
+              <section className="space-y-3">
+                <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--text-primary)] flex items-center gap-2">
+                  <Sliders className="w-4 h-4 [data-skin='niho']:text-[var(--color-accent)]" />
+                  可开关
+                </h2>
+                <div className="rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] p-4 [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <MessageSquare className="w-4 h-4 text-gray-500 [data-skin='niho']:text-[var(--color-accent)]" />
+                        <div>
+                          <div className="text-sm font-medium [data-skin='niho']:text-[var(--text-primary)]">人格模式</div>
+                          <div className="text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">思考是否要响应后再参与对话</div>
+                        </div>
+                      </div>
+                      <Switch
+                        checked={personaConfig.responseMode === 'persona'}
+                        onCheckedChange={(v) => handleTogglePersona('responseMode', v ? 'persona' : 'normal')}
+                        disabled={personaSaving}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Brain className="w-4 h-4 text-purple-500 [data-skin='niho']:text-[var(--color-secondary)]" />
+                        <div>
+                          <div className="text-sm font-medium [data-skin='niho']:text-[var(--text-primary)]">自驱思考</div>
+                          <div className="text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">按间隔或记忆自主思考</div>
+                        </div>
+                      </div>
+                      <Switch
+                        checked={personaConfig.thinking.enabled}
+                        onCheckedChange={(v) => handleTogglePersona('thinking', { ...personaConfig.thinking, enabled: v })}
+                        disabled={personaSaving}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-yellow-500 [data-skin='niho']:text-[var(--color-highlight)]" />
+                        <div>
+                          <div className="text-sm font-medium [data-skin='niho']:text-[var(--text-primary)]">记忆锚点</div>
+                          <div className="text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">根据记忆规则自动执行动作</div>
+                        </div>
+                      </div>
+                      <Switch
+                        checked={personaConfig.memoryTriggersEnabled !== false}
+                        onCheckedChange={(v) => handleTogglePersona('memoryTriggersEnabled', v)}
+                        disabled={personaSaving}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Zap className="w-4 h-4 text-amber-500 [data-skin='niho']:text-[var(--color-highlight)]" />
+                        <div>
+                          <div className="text-sm font-medium [data-skin='niho']:text-[var(--text-primary)]">技能触发</div>
+                          <div className="text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">根据上下文与技能包自动触发能力</div>
+                        </div>
+                      </div>
+                      <Switch
+                        checked={personaConfig.skillTriggerEnabled !== false}
+                        onCheckedChange={(v) => handleTogglePersona('skillTriggerEnabled', v)}
+                        disabled={personaSaving}
+                      />
+                    </div>
+                  </div>
+                  <p className="mt-3 text-[11px] text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                    更多细节可在
+                    <button
+                      type="button"
+                      className="mx-1 underline [data-skin='niho']:text-[var(--color-accent)]"
+                      onClick={() => openPersonaDialog('persona')}
+                    >
+                      Chaya 能力
+                    </button>
+                    中配置（如思考间隔、记忆规则等）
+                  </p>
+                </div>
+              </section>
+
+              {/* 不可开关部分 */}
+              <section className="space-y-3">
+                <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--text-primary)] flex items-center gap-2">
+                  <Shapes className="w-4 h-4 [data-skin='niho']:text-[var(--niho-skyblue-gray)]" />
+                  不可开关（常开能力）
+                </h2>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] p-4 [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] opacity-90">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Database className="w-4 h-4 text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)]" />
+                      <span className="text-sm font-medium [data-skin='niho']:text-[var(--text-primary)]">记忆</span>
+                    </div>
+                    <p className="text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                      Chaya 会持续积累与你的对话记忆，用于上下文与长期偏好，无需单独开关。
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] p-4 [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] opacity-90">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Shapes className="w-4 h-4 text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)]" />
+                      <span className="text-sm font-medium [data-skin='niho']:text-[var(--text-primary)]">行为塑造</span>
+                    </div>
+                    <p className="text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                      通过长期聊天积累，Chaya 会对自己的能力和行为形成认知，无需单独开关。
+                    </p>
+                  </div>
+                </div>
+              </section>
+
+              <div className="flex justify-center pt-2">
+                <Button
+                  variant="primary"
+                  onClick={() => handleSelectAgent(CHAYA_ID)}
+                  className="[data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:text-[#000000] [data-skin='niho']:hover:bg-[var(--color-accent-hover)]"
+                >
+                  去和 Chaya 聊天
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* 智能体列表 - Niho 主题卡片样式 */}
-      <div className="agents-page-list flex-1 overflow-y-auto p-6">
-        {isLoadingAgents ? (
-          <div className="flex items-center justify-center h-full">
-            <Loader className="w-6 h-6 animate-spin text-primary-500 [data-skin='niho']:text-[var(--color-accent)]" />
-            <span className="ml-2 text-sm text-gray-500 dark:text-[#858585] [data-skin='niho']:text-[var(--niho-skyblue-gray)]">加载中...</span>
-          </div>
-        ) : agents.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center py-12">
-            <div className="w-16 h-16 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center mb-4 [data-skin='niho']:bg-[var(--niho-pure-black-elevated)] [data-skin='niho']:border [data-skin='niho']:border-[var(--color-accent-bg)]">
-              <Bot className="w-8 h-8 text-gray-400 dark:text-gray-600 [data-skin='niho']:text-[var(--color-accent)]" />
-            </div>
-            <h3 className="text-base font-medium text-gray-900 dark:text-white mb-1 [data-skin='niho']:text-[var(--text-primary)]">
-              暂无智能体
-            </h3>
-            <p className="text-sm text-gray-500 dark:text-[#858585] mb-6 max-w-xs mx-auto [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
-              您可以使用角色生成器创建一个智能体，或者从文件导入
-            </p>
-            <Button 
-              variant="primary" 
-              onClick={() => setShowCreateAgent(true)}
-              className="[data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:text-[#000000] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:shadow-[0_0_12px_rgba(0,255,136,0.3)]"
-            >
-              <Sparkles className="w-4 h-4 mr-2" />
-              立即创建
-            </Button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
-            {agents.map((agent) => {
-              const displayName = agent.name || agent.title || `智能体 ${agent.session_id.substring(0, 8)}`;
-              const avatarUrl = agent.avatar || null;
-              
-              return (
-                <div
-                  key={agent.session_id}
-                  className="agents-page-card bg-white dark:bg-[#2d2d2d] rounded-lg border border-gray-200 dark:border-[#404040] p-2.5 hover:shadow-md hover:border-primary-300 dark:hover:border-primary-700 transition-all cursor-pointer group flex flex-col [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:hover:border-[var(--color-accent-bg)]"
-                  onClick={() => handleSelectAgent(agent.session_id)}
-                >
-                  <div className="flex items-start gap-2.5 mb-1.5">
-                    {/* 头像 */}
-                    <div 
-                      className="relative w-9 h-9 rounded-lg overflow-hidden border border-gray-100 dark:border-[#404040] flex items-center justify-center bg-gray-50 dark:bg-gray-800 flex-shrink-0 [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:hover:border-[var(--color-accent-bg)]"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPersonaDialogInitialTab('basic');
-                        setPersonaEditAgent(agent);
-                      }}
-                    >
-                      {avatarUrl ? (
-                        <img src={avatarUrl} alt={displayName} className="w-full h-full object-cover" />
-                      ) : (
-                        <Bot className="w-5 h-5 text-primary-500 [data-skin='niho']:text-[var(--color-accent)]" />
-                      )}
-                    </div>
-                    
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white truncate [data-skin='niho']:text-[var(--text-primary)]">
-                        {displayName}
-                      </h3>
-                      <p className="text-[10px] text-gray-500 dark:text-[#858585] truncate mt-0.5 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
-                        {getLLMConfigName(agent.llm_config_id)}
-                      </p>
-                    </div>
-                  </div>
+      <AgentPersonaDialog
+        agent={personaEditAgent}
+        open={personaEditAgent !== null}
+        onOpenChange={(open) => {
+          if (!open) setPersonaEditAgent(null);
+        }}
+        onSaved={() => {
+          loadAgents();
+          loadRoleVersions();
+        }}
+        initialTab={personaDialogInitialTab}
+      />
 
-                  {/* 描述预览 */}
-                  <div className="flex-1">
-                    <p className="text-[11px] text-gray-500 dark:text-[#a0a0a0] line-clamp-2 leading-tight h-7 mb-1.5 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
-                      {agent.system_prompt || '暂无人设描述'}
-                    </p>
-                  </div>
-
-                  {/* 操作栏 - Niho 主题 */}
-                  <div className="flex items-center justify-between pt-1.5 border-t border-gray-100 dark:border-[#404040] mt-auto [data-skin='niho']:border-[var(--niho-text-border)]">
-                    <div className="flex items-center gap-1 text-[10px] text-gray-400 dark:text-[#666666] [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
-                      <MessageCircle className="w-2.5 h-2.5" />
-                      <span>{agent.message_count || 0}</span>
-                    </div>
-                    
-                    <div className="flex items-center gap-0.5 opacity-40 group-hover:opacity-100 transition-opacity">
-                      <IconButton
-                        icon={Sliders}
-                        size="sm"
-                        variant="ghost"
-                        className="agents-page-action agents-page-action--settings h-7 w-7 text-gray-500 hover:text-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/20 [data-skin='niho']:text-[var(--niho-skyblue-gray)] [data-skin='niho']:hover:text-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)]"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setPersonaDialogInitialTab('basic');
-                          setPersonaEditAgent(agent);
-                        }}
-                        label="配置"
-                      />
-                      <IconButton
-                        icon={Download}
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 w-7 text-gray-500 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 [data-skin='niho']:text-[var(--niho-skyblue-gray)] [data-skin='niho']:hover:text-[var(--color-info)] [data-skin='niho']:hover:bg-[var(--color-info-bg)]"
-                        onClick={(e) => handleExportAgent(agent, e)}
-                        label="导出"
-                      />
-                      <IconButton
-                        icon={Trash2}
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 w-7 text-gray-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 [data-skin='niho']:text-[var(--niho-skyblue-gray)] [data-skin='niho']:hover:text-[var(--color-secondary)] [data-skin='niho']:hover:bg-[var(--color-secondary-bg)]"
-                        onClick={(e) => handleDeleteAgent(agent.session_id, e)}
-                        label="删除"
-                      />
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-
-    <ConfirmDialog
-      open={deleteAgentTarget !== null}
-      onOpenChange={(open) => {
-        if (!open) setDeleteAgentTarget(null);
-      }}
-      title="删除智能体"
-      description={`确定要删除「${deleteAgentTarget?.name || deleteAgentTarget?.title}」吗？此操作不可恢复。`}
-      variant="destructive"
-      onConfirm={async () => {
-        if (!deleteAgentTarget) return;
-        const id = deleteAgentTarget.session_id;
-        setDeleteAgentTarget(null);
-        await performDeleteAgent(id);
-      }}
-    />
-
-    {/* Persona 编辑对话框 */}
-    <AgentPersonaDialog
-      agent={personaEditAgent}
-      open={personaEditAgent !== null}
-      onOpenChange={(open) => {
-        if (!open) setPersonaEditAgent(null);
-      }}
-      onSaved={() => loadAgents()}
-      initialTab={personaDialogInitialTab}
-    />
-
-    {/* 角色生成器对话框（统一弹框风格） */}
-    <CreateAgentDialog
-      open={showCreateAgent}
-      onOpenChange={setShowCreateAgent}
-      onSaved={() => {
-        setShowCreateAgent(false);
-        loadAgents();
-      }}
-    />
+      <PersonaPresetDialog
+        open={personaPresetDialogOpen}
+        onOpenChange={setPersonaPresetDialogOpen}
+        mode={personaPresetEdit ? 'edit' : 'add'}
+        initial={personaPresetEdit}
+        onSave={handleSavePersonaPreset}
+        saving={presetSaving}
+      />
+      <VoicePresetDialog
+        open={voicePresetDialogOpen}
+        onOpenChange={setVoicePresetDialogOpen}
+        mode={voicePresetEdit ? 'edit' : 'add'}
+        initial={voicePresetEdit}
+        onSave={handleSaveVoicePreset}
+        saving={presetSaving}
+      />
     </>
   );
+
+  function handleSelectAgent(sessionId: string) {
+    navigate(`/?session=${sessionId}`);
+  }
 };
 
 export default AgentsPage;

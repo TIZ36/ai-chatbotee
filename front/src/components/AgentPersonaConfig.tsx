@@ -1,12 +1,13 @@
 /**
- * Agent 人设配置组件
- * 包含语音配置、自驱思考、记忆触发三个子功能
+ * Agent Persona 配置组件
+ * 可切换的 persona：人设、声音。
+ * Chaya 自有能力：人格模式、自驱思考、记忆锚点。
  */
 
 import React, { useState } from 'react';
 import { 
   Volume2, Brain, Sparkles, Plus, Trash2, 
-  Clock, Tag, AlertCircle, MessageSquare
+  Clock, Tag, AlertCircle, MessageSquare, Zap
 } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
@@ -45,7 +46,7 @@ export interface AutonomousThinkingConfig {
   memoryTriggered: boolean;
 }
 
-/** 记忆触发规则 */
+/** 记忆锚点规则（Chaya 能力） */
 export interface MemoryTriggerRule {
   id: string;
   name: string;
@@ -67,12 +68,20 @@ export interface AgentPersonaFullConfig {
   thinking: AutonomousThinkingConfig;
   memoryTriggers: MemoryTriggerRule[];
   responseMode: ResponseMode; // 响应模式：normal=普通聊天（立刻响应），persona=人格模式（思考是否响应）
+  /** 记忆锚点总开关（可开关） */
+  memoryTriggersEnabled?: boolean;
+  /** 技能触发总开关（可开关） */
+  skillTriggerEnabled?: boolean;
 }
 
 interface AgentPersonaConfigProps {
   config: AgentPersonaFullConfig;
   onChange: (config: AgentPersonaFullConfig) => void;
   compact?: boolean;
+  /** 仅渲染可切换的「声音」配置（人设与声音 Tab 用） */
+  voiceOnly?: boolean;
+  /** 仅渲染 Chaya 能力：人格模式、自驱思考、记忆锚点、技能触发 */
+  chayaOnly?: boolean;
 }
 
 // ============================================================================
@@ -97,6 +106,8 @@ export const defaultPersonaConfig: AgentPersonaFullConfig = {
   },
   memoryTriggers: [],
   responseMode: 'normal', // 默认普通聊天模式
+  memoryTriggersEnabled: true,
+  skillTriggerEnabled: true,
 };
 
 // ============================================================================
@@ -431,15 +442,48 @@ const ThinkingConfigPanel: React.FC<ThinkingConfigPanelProps> = ({ config, onCha
 };
 
 // ============================================================================
+// 技能触发配置面板（可开关）
+// ============================================================================
+
+interface SkillTriggerPanelProps {
+  enabled: boolean;
+  onChange: (enabled: boolean) => void;
+}
+
+const SkillTriggerPanel: React.FC<SkillTriggerPanelProps> = ({ enabled, onChange }) => (
+  <div className="border border-[var(--color-border)] rounded-lg overflow-hidden [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-[var(--niho-pure-black-elevated)]">
+    <div className="flex items-center justify-between px-3 py-2 bg-[var(--color-bg-secondary)] [data-skin='niho']:bg-[var(--niho-text-bg)] [data-skin='niho']:border-b [data-skin='niho']:border-[var(--niho-text-border)]">
+      <div className="flex items-center gap-2">
+        <Zap className="w-4 h-4 text-amber-500 [data-skin='niho']:text-[var(--color-highlight)]" />
+        <span className="text-sm font-medium [data-skin='niho']:text-[var(--text-primary)]">技能触发</span>
+      </div>
+      <Switch
+        checked={enabled}
+        onCheckedChange={onChange}
+      />
+    </div>
+    {enabled && (
+      <div className="p-3 text-xs text-[var(--color-text-tertiary)] [data-skin='niho']:bg-[#000000] [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+        根据对话上下文与技能包自动触发并执行相应能力
+      </div>
+    )}
+  </div>
+);
+
+// ============================================================================
 // 记忆触发配置面板
 // ============================================================================
 
 interface MemoryTriggerPanelProps {
   rules: MemoryTriggerRule[];
   onChange: (rules: MemoryTriggerRule[]) => void;
+  /** 总开关：关闭时不展示规则列表与添加 */
+  masterEnabled?: boolean;
+  /** 总开关变更（由父组件传入时在 header 显示 Switch） */
+  onMasterEnabledChange?: (enabled: boolean) => void;
 }
 
-const MemoryTriggerPanel: React.FC<MemoryTriggerPanelProps> = ({ rules, onChange }) => {
+const MemoryTriggerPanel: React.FC<MemoryTriggerPanelProps> = ({ rules, onChange, masterEnabled = true, onMasterEnabledChange }) => {
   const [showAddRule, setShowAddRule] = useState(false);
   const [newRule, setNewRule] = useState<Partial<MemoryTriggerRule>>({
     type: 'keyword',
@@ -496,23 +540,37 @@ const MemoryTriggerPanel: React.FC<MemoryTriggerPanelProps> = ({ rules, onChange
       <div className="flex items-center justify-between px-3 py-2 bg-[var(--color-bg-secondary)] [data-skin='niho']:bg-[var(--niho-text-bg)] [data-skin='niho']:border-b [data-skin='niho']:border-[var(--niho-text-border)]">
         <div className="flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-yellow-500 [data-skin='niho']:text-[var(--color-highlight)]" />
-          <span className="text-sm font-medium [data-skin='niho']:text-[var(--text-primary)]">记忆触发</span>
+          <span className="text-sm font-medium [data-skin='niho']:text-[var(--text-primary)]">记忆锚点</span>
         </div>
-        <Button 
-          variant="ghost" 
-          size="sm" 
-          onClick={() => setShowAddRule(true)}
-          className="[data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:hover:text-[var(--color-accent)]"
-        >
-          <Plus className="w-4 h-4 mr-1" />
-          添加规则
-        </Button>
+        <div className="flex items-center gap-2">
+          {onMasterEnabledChange != null && (
+            <Switch
+              checked={masterEnabled !== false}
+              onCheckedChange={onMasterEnabledChange}
+            />
+          )}
+          {masterEnabled !== false && (
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={() => setShowAddRule(true)}
+              className="[data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:hover:text-[var(--color-accent)]"
+            >
+              <Plus className="w-4 h-4 mr-1" />
+              添加规则
+            </Button>
+          )}
+        </div>
       </div>
       <div className="space-y-2 p-3 [data-skin='niho']:bg-[#000000]">
-        {rules.length === 0 ? (
+        {!masterEnabled ? (
+          <div className="text-sm text-[var(--color-text-tertiary)] py-3 text-center [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+            已关闭记忆锚点，开启后可添加规则
+          </div>
+        ) : rules.length === 0 ? (
           <div className="text-sm text-[var(--color-text-tertiary)] py-4 text-center [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
             <AlertCircle className="w-5 h-5 mx-auto mb-2 opacity-50 [data-skin='niho']:text-[var(--niho-skyblue-gray)]" />
-            暂无触发规则，添加规则让 Agent 根据记忆自动执行动作
+            暂无记忆锚点规则，添加规则让 Chaya 根据记忆自动执行动作
           </div>
         ) : (
           rules.map(rule => (
@@ -753,28 +811,60 @@ const AgentPersonaConfig: React.FC<AgentPersonaConfigProps> = ({
   config,
   onChange,
   compact = false,
+  voiceOnly = false,
+  chayaOnly = false,
 }) => {
+  if (voiceOnly) {
+    return (
+      <div className={`space-y-4 ${compact ? '' : 'p-4'}`}>
+        <div className="text-xs text-gray-500 mb-2 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">可切换的 persona</div>
+        <VoiceConfigPanel
+          config={config.voice}
+          onChange={(voice) => onChange({ ...config, voice })}
+        />
+      </div>
+    );
+  }
+  if (chayaOnly) {
+    const memoryMaster = config.memoryTriggersEnabled !== false;
+    return (
+      <div className={`space-y-4 ${compact ? '' : 'p-4'}`}>
+        <div className="text-xs text-gray-500 mb-2 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">Chaya 能力（可开关）</div>
+        <ResponseModePanel
+          responseMode={config.responseMode}
+          onChange={(responseMode) => onChange({ ...config, responseMode })}
+        />
+        <ThinkingConfigPanel
+          config={config.thinking}
+          onChange={(thinking) => onChange({ ...config, thinking })}
+        />
+        <MemoryTriggerPanel
+          rules={config.memoryTriggers}
+          onChange={(memoryTriggers) => onChange({ ...config, memoryTriggers })}
+          masterEnabled={memoryMaster}
+          onMasterEnabledChange={(v) => onChange({ ...config, memoryTriggersEnabled: v })}
+        />
+        <SkillTriggerPanel
+          enabled={config.skillTriggerEnabled !== false}
+          onChange={(v) => onChange({ ...config, skillTriggerEnabled: v })}
+        />
+      </div>
+    );
+  }
   return (
     <div className={`space-y-4 ${compact ? '' : 'p-4'}`}>
-      {/* 响应模式配置 */}
       <ResponseModePanel
         responseMode={config.responseMode}
         onChange={(responseMode) => onChange({ ...config, responseMode })}
       />
-
-      {/* 语音配置 */}
       <VoiceConfigPanel
         config={config.voice}
         onChange={(voice) => onChange({ ...config, voice })}
       />
-
-      {/* 自驱思考 */}
       <ThinkingConfigPanel
         config={config.thinking}
         onChange={(thinking) => onChange({ ...config, thinking })}
       />
-
-      {/* 记忆触发 */}
       <MemoryTriggerPanel
         rules={config.memoryTriggers}
         onChange={(memoryTriggers) => onChange({ ...config, memoryTriggers })}

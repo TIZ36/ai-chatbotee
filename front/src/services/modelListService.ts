@@ -11,14 +11,18 @@ export interface ModelInfo {
 }
 
 export interface ModelCapabilities {
-  vision: boolean;      // 是否支持识图
-  image_gen: boolean;   // 是否支持生图
-  video_gen: boolean;   // 是否支持生视频
+  vision?: boolean;      // 是否识别图片
+  image_gen?: boolean;   // 是否支持生图
+  video_gen?: boolean;   // 是否支持生视频
+  speech_gen?: boolean;  // 是否支持生语音
+  thinking?: boolean;    // 是否为思考模型
 }
 
 export interface ModelWithCapabilities {
   id: string;
   capabilities: ModelCapabilities;
+  /** 是否支持对话（generateContent），如 Gemini 的 Imagen 等仅生图模型为 false */
+  isCallable?: boolean;
 }
 
 /**
@@ -100,12 +104,15 @@ export async function fetchOpenAICompatibleModels(
 
     const data = await response.json();
     
-    // 后端返回格式：{ models: [...], total: ... }
+    // 后端返回格式：{ models: [...], total: ... }，后端使用 snake_case is_callable
     if (data.models && Array.isArray(data.models)) {
       console.log(`[ModelList] 成功获取 ${data.models.length} 个模型:`, data.models);
-      // 如果包含能力信息，返回 ModelWithCapabilities[]，否则返回 string[]
       if (includeCapabilities && data.models.length > 0 && typeof data.models[0] === 'object' && 'id' in data.models[0]) {
-        return data.models as ModelWithCapabilities[];
+        const list = (data.models as any[]).map((m: any) => ({
+          ...m,
+          isCallable: m.isCallable ?? m.is_callable ?? true,
+        })) as ModelWithCapabilities[];
+        return list;
       }
       return data.models as string[];
     }
@@ -177,7 +184,10 @@ export async function fetchAnthropicModels(
     if (data.models && Array.isArray(data.models)) {
       console.log(`[ModelList] 成功获取 ${data.models.length} 个 Anthropic 模型:`, data.models);
       if (includeCapabilities && data.models.length > 0 && typeof data.models[0] === 'object' && 'id' in data.models[0]) {
-        return data.models as ModelWithCapabilities[];
+        return (data.models as any[]).map((m: any) => ({
+          ...m,
+          isCallable: m.isCallable ?? m.is_callable ?? true,
+        })) as ModelWithCapabilities[];
       }
       return data.models as string[];
     }
@@ -249,7 +259,10 @@ export async function fetchGeminiModels(
     if (data.models && Array.isArray(data.models)) {
       console.log(`[ModelList] 成功获取 ${data.models.length} 个 Gemini 模型:`, data.models);
       if (includeCapabilities && data.models.length > 0 && typeof data.models[0] === 'object' && 'id' in data.models[0]) {
-        return data.models as ModelWithCapabilities[];
+        return (data.models as any[]).map((m: any) => ({
+          ...m,
+          isCallable: m.isCallable ?? m.is_callable ?? true,
+        })) as ModelWithCapabilities[];
       }
       return data.models as string[];
     }

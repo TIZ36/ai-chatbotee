@@ -97,20 +97,13 @@ class LLMService:
         # 生成 ID
         config_id = data.get('config_id') or f"llm_{uuid.uuid4().hex[:8]}"
         
-        # supplier=token/计费归属（兼容旧字段 subprovider）
-        supplier = data.get('supplier') or data.get('subprovider')
-        # 注意：如果 supplier 为空，不应该自动使用 provider，因为这会导致分组错误
-        # 只有在明确没有提供 supplier 且是系统供应商时，才使用 provider
-        # 但为了安全，我们要求前端必须提供 supplier
+        # supplier = Token/计费归属（如 nvidia, openai）
+        supplier = data.get('supplier')
         if not supplier:
-            # 如果没有提供 supplier，使用 provider 作为默认值（仅用于向后兼容）
-            # 但应该在前端确保总是提供 supplier
             supplier = data.get('provider')
             print(f"[LLMService] ⚠️ 警告: 创建配置时未提供 supplier，使用 provider 作为默认值: {supplier}")
         else:
             print(f"[LLMService] ✅ 创建配置: name={data.get('name')}, provider={data.get('provider')}, supplier={supplier}")
-        
-        print(f"[LLMService] 创建配置详情: name={data.get('name')}, provider={data.get('provider')}, supplier={supplier}, data.supplier={data.get('supplier')}, data.subprovider={data.get('subprovider')}")
         
         config = LLMConfig(
             config_id=config_id,
@@ -158,9 +151,8 @@ class LLMService:
             existing.name = data['name']
         if 'provider' in data:
             existing.provider = data['provider']
-        # supplier=token/计费归属（兼容旧字段 subprovider）
-        if 'supplier' in data or 'subprovider' in data:
-            existing.supplier = data.get('supplier') or data.get('subprovider')
+        if 'supplier' in data:
+            existing.supplier = data['supplier']
         if 'api_key' in data:
             existing.api_key = data['api_key']
         if 'api_url' in data:

@@ -440,7 +440,7 @@ export class MCPClient {
     if (this.reconnectTimer) return;
 
     this.reconnectAttempts++;
-    const delay = (this.options.reconnectDelay || 1000) * Math.pow(2, this.reconnectAttempts - 1);
+    const delay = (this.options.reconnectDelay ?? 5000) * Math.pow(2, this.reconnectAttempts - 1);
 
     eventBus.emit('mcp:reconnect', {
       serverId: this.serverId,

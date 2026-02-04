@@ -5,12 +5,17 @@ Google Gemini Provider
 优先使用 google-genai SDK，回退到 REST API
 """
 
-from typing import List, Optional, Dict, Any, Generator
+from typing import List, Optional, Dict, Any, Generator, Tuple
 import json
 import base64
+import time
 import requests
 
 from .base import BaseLLMProvider, LLMMessage, LLMResponse
+
+# 模块级缓存: (api_url, api_key) -> (timestamp, list_models_result)，TTL 5 分钟
+_LIST_MODELS_CACHE: Dict[Tuple[str, str], Tuple[float, List[Dict[str, Any]]]] = {}
+_LIST_MODELS_CACHE_TTL = 300
 
 
 class GoogleProvider(BaseLLMProvider):
@@ -727,3 +732,49 @@ class GoogleProvider(BaseLLMProvider):
         except Exception as e:
             self._log_error(f"Failed to fetch models: {e}", e)
             raise
+
+    def list_models(self) -> List[Dict[str, Any]]:
+        """
+        获取模型列表及可调用性信息（用于聊天 generateContent）。
+        解析 Google API 返回的 supportedGenerationMethods，仅支持 generateContent 的模型视为可对话。
+        结果带简单内存缓存，TTL 5 分钟。
+        """
+        cache_key = (self.api_url or '', self.api_key or '')
+        now = time.time()
+        if cache_key in _LIST_MODELS_CACHE:
+            ts, cached = _LIST_MODELS_CACHE[cache_key]
+            if now - ts < _LIST_MODELS_CACHE_TTL:
+                self._log(f"Using cached list_models ({len(cached)} models)")
+                return cached
+        base_url = self.api_url or 'https://generativelanguage.googleapis.com'
+        if '/v1beta' not in base_url and '/v1' not in base_url:
+            base_url = f"{base_url.rstrip('/')}/v1beta"
+        elif base_url.endswith('/v1'):
+            base_url = base_url.replace('/v1', '/v1beta')
+        models_url = f"{base_url}/models"
+        params = {'key': self.api_key}
+        self._log(f"Fetching list_models via REST: {models_url}")
+        response = requests.get(models_url, params=params, timeout=10)
+        if response.status_code != 200:
+            raise RuntimeError(f"Failed to fetch models: {response.status_code} {response.text}")
+        data = response.json()
+        result = []
+        if not isinstance(data, dict) or not isinstance(data.get('models'), list):
+            raise RuntimeError("Invalid response format from models API")
+        for model in data['models']:
+            name = model.get('name')
+            if not name or not isinstance(name, str):
+                continue
+            model_id = name.split('/')[-1] if '/' in name else name
+            methods = model.get('supportedGenerationMethods') or model.get('supported_generation_methods') or []
+            if isinstance(methods, str):
+                methods = [methods]
+            is_callable = 'generateContent' in methods
+            result.append({
+                'id': model_id,
+                'is_callable': is_callable,
+                'supported_generation_methods': list(methods),
+            })
+        _LIST_MODELS_CACHE[cache_key] = (now, result)
+        self._log(f"list_models: {len(result)} models, {sum(1 for r in result if r['is_callable'])} callable for chat")
+        return result

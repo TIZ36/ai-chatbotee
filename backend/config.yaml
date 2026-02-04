@@ -13,7 +13,7 @@ mysql:
   port: 3306
   user: root
   password: root
-  database: workflow_manager2
+  database: workflow_manager
   charset: utf8mb4
   pool_size: 10
 
@@ -21,7 +21,7 @@ redis:
   enabled: true
   host: localhost
   port: 6379
-  password: "chatee_redis"
+  password: "123456"
   db: 0
 
 owner:

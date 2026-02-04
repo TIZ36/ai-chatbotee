@@ -489,6 +489,7 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 /* 毛玻璃 + 霓虹绿描边与内光 - 强制纯黑背景 */
 [data-skin="niho"] .glass-header,
 [data-skin="niho"] .glass-sidebar,
+[data-skin="niho"] .glass-top-nav,
 [data-skin="niho"] .glass-panel,
 [data-skin="niho"] .glass-card,
 [data-skin="niho"] .glass-section {
@@ -516,6 +517,22 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 [data-skin="niho"] .glass-sidebar {
   border-right-color: rgba(0, 255, 136, 0.2);
   box-shadow: 2px 0 16px rgba(0, 255, 136, 0.05);
+}
+
+[data-skin="niho"] .glass-top-nav {
+  border-right-color: rgba(0, 255, 136, 0.18);
+  border-bottom-color: rgba(0, 255, 136, 0.2);
+  box-shadow: 0 2px 16px rgba(0, 255, 136, 0.05);
+}
+
+[data-skin="niho"] .glass-top-nav a:not([class*="Button"]) {
+  color: var(--color-highlight);
+  text-shadow: 0 0 20px rgba(255, 215, 0, 0.25);
+}
+
+[data-skin="niho"] .glass-top-nav a:not([class*="Button"]):hover {
+  color: var(--color-highlight-hover);
+  text-shadow: 0 0 24px rgba(255, 215, 0, 0.35);
 }
 
 [data-skin="niho"] .glass-toolbar {
@@ -574,6 +591,17 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 [data-skin="niho"] a:not([class*="Button"]):hover {
   color: #39ff14;
   text-shadow: 0 0 24px rgba(0, 255, 136, 0.5);
+}
+
+/* 左侧导航栏 - 黑金色（高亮强调），覆盖上方全局链接绿 */
+[data-skin="niho"] .glass-sidebar a:not([class*="Button"]) {
+  color: var(--color-highlight);
+  text-shadow: 0 0 20px rgba(255, 215, 0, 0.25);
+}
+
+[data-skin="niho"] .glass-sidebar a:not([class*="Button"]):hover {
+  color: var(--color-highlight-hover);
+  text-shadow: 0 0 24px rgba(255, 215, 0, 0.35);
 }
 
 /* 状态指示器 - 淡金色加载 */
@@ -1073,10 +1101,12 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 
 [data-font="pixel"] .glass-header,
 [data-font="pixel"] .glass-sidebar,
+[data-font="pixel"] .glass-top-nav,
 [data-font="pixel"] .glass-panel,
 [data-font="pixel"] .glass-card,
 [data-font="dotgothic"] .glass-header,
-[data-font="dotgothic"] .glass-sidebar {
+[data-font="dotgothic"] .glass-sidebar,
+[data-font="dotgothic"] .glass-top-nav {
   border-radius: 4px;
   border-width: 2px;
   border-style: solid;
@@ -1212,6 +1242,21 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
     box-shadow: 
       1px 0 8px rgba(0, 0, 0, 0.3),
       inset -1px 0 0 rgba(255, 255, 255, 0.02);
+  }
+
+  /* 顶部导航栏毛玻璃 */
+  .glass-top-nav {
+    @apply bg-white/75 backdrop-blur-2xl border-b border-gray-200/50;
+    @apply dark:bg-[#1a1a1a]/85 dark:border-white/5;
+    box-shadow: 
+      0 1px 4px rgba(0, 0, 0, 0.02),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.1);
+  }
+  
+  .dark .glass-top-nav {
+    box-shadow: 
+      0 1px 8px rgba(0, 0, 0, 0.3),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.02);
   }
 
   /* 头部毛玻璃 - 带底部高光 */

@@ -4,10 +4,9 @@
  */
 
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { Plus, Trash2, CheckCircle, XCircle, Edit2, Brain, Save, X, Loader2, Eye, EyeOff, Type, Image as ImageIcon, Video, Music, Download, Upload, ChevronDown, ChevronRight, Camera, Search, Check, RefreshCw } from 'lucide-react';
-import { OpenAI, Anthropic, Google, Gemini, DeepSeek, Ollama } from '@lobehub/icons';
+import { Plus, Trash2, CheckCircle, XCircle, Edit2, Brain, Save, X, Loader2, Eye, EyeOff, Type, Image as ImageIcon, Video, Music, Mic, Download, Upload, ChevronDown, ChevronRight, Camera, Search, Check, RefreshCw } from 'lucide-react';
 import { 
-  getLLMConfigs, createLLMConfig, updateLLMConfig, deleteLLMConfig, getLLMConfigApiKey, 
+  getLLMConfigs, getLLMConfig, createLLMConfig, updateLLMConfig, deleteLLMConfig, getLLMConfigApiKey, 
   LLMConfigFromDB, CreateLLMConfigRequest,
   downloadLLMConfigAsJson, downloadAllLLMConfigsAsJson, importLLMConfigsFromFile, importLLMConfigs,
   getProviders, getProvider, createProvider, updateProvider, deleteProvider,
@@ -21,7 +20,6 @@ import { Button } from './ui/Button';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { InputField, TextareaField, FormFieldGroup } from './ui/FormField';
 import { ModelSelectDialog } from './ui/ModelSelectDialog';
-import { ProviderSelectDialog } from './ui/ProviderSelectDialog';
 import { toast } from './ui/use-toast';
 import { Checkbox } from './ui/Checkbox';
 import { Switch } from './ui/Switch';
@@ -40,6 +38,8 @@ import {
   DialogDescription,
   DialogFooter,
 } from './ui/Dialog';
+import { ProviderIcon } from './ui/ProviderIcon';
+import { CapabilityIcons } from './ui/CapabilityIcons';
 
 // Provider display info
 const PROVIDER_INFO: Record<string, { name: string; color: string; icon: string }> = {
@@ -50,49 +50,21 @@ const PROVIDER_INFO: Record<string, { name: string; color: string; icon: string 
   ollama: { name: 'Ollama', color: '#1D4ED8', icon: '🦙' },
 };
 
-// 供应商图标组件映射（使用 @lobehub/icons）
-const PROVIDER_ICON_COMPONENTS: Record<string, React.ComponentType<any>> = {
-  openai: OpenAI,
-  anthropic: Anthropic,
-  google: Google,
-  gemini: Gemini,
-  deepseek: DeepSeek,
-  ollama: Ollama,
-};
-
-// 获取供应商图标组件
-const getProviderIconComponent = (providerType: string): React.ComponentType<any> | null => {
-  return PROVIDER_ICON_COMPONENTS[providerType.toLowerCase()] || null;
-};
-
-// 渲染供应商图标组件（支持明亮和暗色主题）
-// 注意：@lobehub/icons 组件是轻量的 SVG 组件，性能良好
-// Vite 的 tree-shaking 会确保只打包实际使用的图标
+// 供应商图标：使用 ProviderIcon（simple-icons + 内联 SVG）
 const renderProviderIcon = (
   providerType: string,
   className?: string,
   size?: number
 ): React.ReactNode => {
-  const IconComponent = getProviderIconComponent(providerType);
-  if (IconComponent) {
-    return <IconComponent size={size || 16} className={className} />;
+  const key = providerType.toLowerCase();
+  if (['openai', 'anthropic', 'google', 'gemini', 'deepseek', 'ollama'].includes(key)) {
+    return <ProviderIcon provider={providerType} size={size || 16} className={className} />;
   }
-  // 回退到emoji
   return (
     <span className={className}>
       {PROVIDER_INFO[providerType]?.icon || '📦'}
     </span>
   );
-};
-
-// Provider 到 LobeHub icon slug 的映射
-const PROVIDER_LOBEHUB_SLUG: Record<string, string> = {
-  openai: 'openai',
-  anthropic: 'anthropic',
-  gemini: 'google', // Google Gemini 使用 google slug
-  deepseek: 'deepseek',
-  ollama: 'ollama',
-  // local 和 custom 没有对应的 LobeHub 图标
 };
 
 // Helper to convert file to base64
@@ -225,9 +197,14 @@ const TokenListSimple: React.FC<TokenListSimpleProps> = ({
     );
   }
 
+  // 不展示「未设置 Token」的单独一行（无 apiKey 或加载失败的组不显示在列表中）
+  const visibleGroups = Array.from(tokenGroups.entries()).filter(
+    ([tokenKey, group]) => tokenKey !== 'no-token' && !tokenKey.startsWith('error-') && Boolean(group.apiKey?.trim())
+  );
+
   return (
     <div className="space-y-2">
-      {Array.from(tokenGroups.entries()).map(([tokenKey, group]) => {
+      {visibleGroups.map(([tokenKey, group]) => {
         const enabledCount = group.configs.filter(c => c.enabled).length;
         const totalCount = group.configs.length;
         const showKey = showTokenKeys[tokenKey] || false;
@@ -314,7 +291,6 @@ const LLMConfigPanel: React.FC = () => {
   const [supportedProviders, setSupportedProviders] = useState<SupportedProvider[]>([]);
   const [isLoadingProviders, setIsLoadingProviders] = useState(true);
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
-  const [showProviderSelectDialog, setShowProviderSelectDialog] = useState(false); // 移动端：供应商切换 Dialog
   const [showCreateProviderDialog, setShowCreateProviderDialog] = useState(false);
   const [showEditProviderDialog, setShowEditProviderDialog] = useState(false);
   const [editingProvider, setEditingProvider] = useState<LLMProvider | null>(null);
@@ -374,6 +350,8 @@ const LLMConfigPanel: React.FC = () => {
   const [selectedTokenConfigs, setSelectedTokenConfigs] = useState<LLMConfigFromDB[]>([]);
   const [selectedTokenApiKey, setSelectedTokenApiKey] = useState<string>('');
   const [availableModelsForSelectedToken, setAvailableModelsForSelectedToken] = useState<string[]>([]);
+  /** 管理 Token 模型对话框中「重新获取」得到的带能力信息的模型列表，用于在模型列右侧显示能力 */
+  const [availableModelsWithCapabilitiesForToken, setAvailableModelsWithCapabilitiesForToken] = useState<(string | ModelWithCapabilities)[]>([]);
   const [isLoadingAvailableModels, setIsLoadingAvailableModels] = useState(false);
   const [showAddModelsSection, setShowAddModelsSection] = useState(false);
   const [selectedNewModels, setSelectedNewModels] = useState<Set<string>>(new Set());
@@ -933,6 +911,8 @@ const LLMConfigPanel: React.FC = () => {
         title="LLM 模型配置"
         description="管理您的大语言模型 API 配置"
         icon={Brain}
+        variant="persona"
+        personaConstrainContent={true}
       >
         <div className="flex items-center justify-center py-12">
           <div className="w-6 h-6 border-2 border-gray-300 dark:border-gray-600 border-t-[#7c3aed] rounded-full animate-spin" />
@@ -942,60 +922,132 @@ const LLMConfigPanel: React.FC = () => {
     );
   }
 
+  // 顶部 Tab：选中 null 表示「添加供应商」页
+  const showAddProviderContent = selectedProviderId === null;
+
   return (
     <PageLayout
       title="LLM 模型配置"
       description="管理您的大语言模型 API 配置"
       icon={Brain}
+      variant="persona"
+      personaConstrainContent={true}
     >
-      <div className="flex flex-col md:flex-row gap-4 h-[calc(100vh-200px)]">
-        {/* 左侧：供应商列表（移动端隐藏，通过下拉选择） */}
-        <div className="hidden md:flex w-80 flex-shrink-0 border-r border-gray-200 dark:border-[#404040] [data-skin='niho']:border-[var(--niho-text-border)] flex flex-col">
-          <div className="p-4 border-b border-gray-200 dark:border-[#404040] [data-skin='niho']:border-[var(--niho-text-border)]">
-            <Button
-              onClick={() => setShowCreateProviderDialog(true)}
-              variant="primary"
-              size="sm"
-              className="w-full"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              添加自定义供应商
-            </Button>
-          </div>
-          
-          <div className="flex-1 overflow-y-auto">
-            {isLoadingProviders ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="w-6 h-6 animate-spin text-gray-400 [data-skin='niho']:text-[var(--color-highlight)]" />
+      {/* 顶部 Tab：添加供应商 | 供应商1 | 供应商2 | ... */}
+      <div className="flex-shrink-0 border-b border-gray-200 dark:border-[#404040] [data-skin='niho']:border-[var(--niho-text-border)] -mx-2 px-2 mb-4">
+        <div className="flex gap-0 overflow-x-auto no-scrollbar min-h-10">
+          <button
+            type="button"
+            onClick={() => setSelectedProviderId(null)}
+            className={`
+              flex items-center gap-2 px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors
+              ${showAddProviderContent
+                ? 'border-[var(--color-accent)] text-[var(--color-accent)] [data-skin="niho"]:border-[var(--color-accent)] [data-skin="niho"]:text-[var(--color-accent)]'
+                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 [data-skin="niho"]:text-[var(--niho-skyblue-gray)] [data-skin="niho"]:hover:text-[var(--text-primary)]'
+              }
+            `}
+          >
+            <Plus className="w-4 h-4" />
+            添加供应商
+          </button>
+          {providers.map(provider => {
+            const isActive = selectedProviderId === provider.provider_id;
+            const providerModelCount = configs.filter(c =>
+              (c.supplier || c.provider) === provider.provider_id && c.enabled
+            ).length;
+            return (
+              <div
+                key={provider.provider_id}
+                className="group flex items-center gap-1 flex-shrink-0"
+              >
+                <button
+                  type="button"
+                  onClick={() => setSelectedProviderId(provider.provider_id)}
+                  className={`
+                    flex items-center gap-2 px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors
+                    ${isActive
+                      ? 'border-[var(--color-accent)] text-[var(--color-accent)] [data-skin="niho"]:border-[var(--color-accent)] [data-skin="niho"]:text-[var(--color-accent)]'
+                      : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 [data-skin="niho"]:text-[var(--niho-skyblue-gray)] [data-skin="niho"]:hover:text-[var(--text-primary)]'
+                    }
+                  `}
+                >
+                  <span className="w-5 h-5 rounded flex items-center justify-center overflow-hidden flex-shrink-0">
+                    {renderProviderIcon(provider.provider_type, 'w-full h-full', 20)}
+                  </span>
+                  <span className="truncate max-w-[120px]">{provider.name}</span>
+                  {providerModelCount > 0 && (
+                    <span className="text-xs opacity-70">({providerModelCount})</span>
+                  )}
+                </button>
+                {isActive && (
+                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 [data-skin='niho']:text-[var(--niho-skyblue-gray)] [data-skin='niho']:hover:text-[#00ff88]"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingProvider(provider);
+                        setShowEditProviderDialog(true);
+                      }}
+                      title="编辑"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-destructive [data-skin='niho']:text-[#ff6b9d]"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteProviderTarget(provider);
+                      }}
+                      title="删除"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                )}
               </div>
-            ) : (
-              <>
-                {/* 系统支持的供应商（未添加的） */}
-                {supportedProviders.length > 0 && (() => {
-                  // 找出未添加的系统供应商
-                  const addedProviderTypes = new Set(providers.map(p => p.provider_type));
-                  const unaddedProviders = supportedProviders.filter(
-                    sp => !addedProviderTypes.has(sp.provider_type)
-                  );
-                  
-                  if (unaddedProviders.length === 0) return null;
-                  
-                  return (
-                    <div className="p-2 border-b border-gray-200 dark:border-[#404040] [data-skin='niho']:border-[var(--niho-text-border)]">
-                      <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mb-2 px-2">
-                        系统支持的供应商
-                      </div>
-                      <div className="space-y-1">
-                        {unaddedProviders.map(supportedProvider => (
-                          <button
-                            key={supportedProvider.provider_type}
-                            onClick={async () => {
-                              try {
-                                // 检查是否已有该供应商
-                                let existingProvider = providers.find(p => p.provider_type === supportedProvider.provider_type);
-                                
-                                if (!existingProvider) {
-                                // 自动创建系统供应商
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 内容区：添加供应商 或 当前供应商的 Token/模型 */}
+      {showAddProviderContent ? (
+        <div className="space-y-6">
+          <Card title="添加供应商" description="从系统支持的供应商中添加，或创建自定义供应商" variant="persona" size="relaxed">
+            <div className="space-y-4">
+              <Button
+                onClick={() => setShowCreateProviderDialog(true)}
+                variant="primary"
+                size="sm"
+                className="[data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:text-[#000000]"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                添加自定义供应商
+              </Button>
+              {supportedProviders.length > 0 && (() => {
+                const addedProviderTypes = new Set(providers.map(p => p.provider_type));
+                const unaddedProviders = supportedProviders.filter(
+                  sp => !addedProviderTypes.has(sp.provider_type)
+                );
+                if (unaddedProviders.length === 0) return null;
+                return (
+                  <>
+                    <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                      系统支持的供应商（点击添加）
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {unaddedProviders.map(supportedProvider => (
+                        <button
+                          key={supportedProvider.provider_type}
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              const existingProvider = providers.find(p => p.provider_type === supportedProvider.provider_type);
+                              if (!existingProvider) {
                                 const result = await createProvider({
                                   name: supportedProvider.name,
                                   provider_type: supportedProvider.provider_type,
@@ -1003,209 +1055,58 @@ const LLMConfigPanel: React.FC = () => {
                                   default_api_url: supportedProvider.default_api_url,
                                   logo_theme: 'auto',
                                 });
-                                
                                 await loadProviders();
                                 setSelectedProviderId(result.provider_id);
-                                
-                                toast({
-                                  title: '供应商添加成功',
-                                  description: `已添加 ${supportedProvider.name}`,
-                                  variant: 'success',
-                                });
-                                } else {
-                                  // 如果已存在，直接选中
-                                  setSelectedProviderId(existingProvider.provider_id);
-                                }
-                              } catch (error) {
-                                toast({
-                                  title: '添加供应商失败',
-                                  description: error instanceof Error ? error.message : String(error),
-                                  variant: 'destructive',
-                                });
+                                toast({ title: '供应商添加成功', description: `已添加 ${supportedProvider.name}`, variant: 'success' });
+                              } else {
+                                setSelectedProviderId(existingProvider.provider_id);
                               }
-                            }}
-                            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 [data-skin='niho']:hover:bg-[rgba(0,255,136,0.06)] transition-colors text-left [data-skin='niho']:hover:border-[rgba(0,255,136,0.2)]"
-                          >
-                            <div className="w-6 h-6 rounded flex items-center justify-center flex-shrink-0">
-                              <span className="text-xs">{supportedProvider.icon}</span>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="text-sm font-medium text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[#e8f5f0] truncate">
-                                {supportedProvider.name}
-                              </div>
-                              <div className="text-xs text-gray-500 dark:text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)] truncate">
-                                {supportedProvider.description}
-                              </div>
-                            </div>
-                            <Plus className="w-4 h-4 text-gray-400 [data-skin='niho']:text-[#00ff88] flex-shrink-0" />
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })()}
-                
-                {/* 已添加的供应商列表 */}
-                {providers.length === 0 ? (
-                  <EmptyState
-                    icon={Brain}
-                    title="暂无供应商"
-                    description="从上方系统供应商中选择添加"
-                  />
-                ) : (
-                  <div className="p-2 space-y-1">
-                    {providers.length > 0 && (
-                      <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mb-2 px-2">
-                        已添加的供应商
-                      </div>
-                    )}
-                    {providers.map(provider => {
-                  // 计算该供应商的模型数量
-                  const providerModelCount = configs.filter(c => 
-                    c.provider === provider.provider_type || 
-                    c.provider === provider.provider_id ||
-                    (c as any).provider_id === provider.provider_id
-                  ).length;
-                  
-                  return (
-                    <div
-                      key={provider.provider_id}
-                      className={`
-                        group flex items-center gap-2 px-3 py-2 rounded-lg transition-colors
-                        ${selectedProviderId === provider.provider_id
-                          ? 'bg-primary-50 dark:bg-primary-900/20 [data-skin="niho"]:bg-[rgba(0,255,136,0.08)] [data-skin="niho"]:border [data-skin="niho"]:border-[rgba(0,255,136,0.35)]'
-                          : 'hover:bg-gray-50 dark:hover:bg-gray-800 [data-skin="niho"]:hover:bg-[rgba(0,255,136,0.06)] [data-skin="niho"]:hover:border [data-skin="niho"]:hover:border-[rgba(0,255,136,0.2)]'
-                        }
-                        [data-skin="niho"]:border
-                      `}
-                    >
-                      <button
-                        onClick={() => {
-                          // 直接选中供应商，Token 管理界面会在右侧面板显示
-                          setSelectedProviderId(provider.provider_id);
-                        }}
-                        className={`
-                          flex-1 text-left flex items-center space-x-2
-                          ${selectedProviderId === provider.provider_id
-                            ? 'text-primary-700 dark:text-primary-300 [data-skin="niho"]:text-[#00ff88]'
-                            : 'text-gray-700 dark:text-gray-300 [data-skin="niho"]:text-[#e8f5f0]'
-                          }
-                        `}
-                      >
-                        <div className="w-6 h-6 rounded flex items-center justify-center overflow-hidden flex-shrink-0">
-                          {renderProviderIcon(provider.provider_type, 'w-full h-full', 24)}
-                        </div>
-                        <span className="text-sm font-medium truncate">{provider.name}</span>
-                      </button>
-                      <div className="flex items-center gap-2">
-                        {providerModelCount > 0 && (
-                          <span className="text-xs text-gray-400 dark:text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
-                            {providerModelCount}
+                            } catch (error) {
+                              toast({
+                                title: '添加供应商失败',
+                                description: error instanceof Error ? error.message : String(error),
+                                variant: 'destructive',
+                              });
+                            }
+                          }}
+                          className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-[#404040] [data-skin='niho']:border-[var(--niho-text-border)] bg-white dark:bg-[#2d2d2d] [data-skin='niho']:bg-[#000000] hover:bg-gray-50 dark:hover:bg-[#363636] [data-skin='niho']:hover:bg-[rgba(0,255,136,0.06)] text-left transition-colors"
+                        >
+                          <span className="w-8 h-8 rounded flex items-center justify-center flex-shrink-0 text-lg">
+                            {supportedProvider.icon}
                           </span>
-                        )}
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6 [data-skin='niho']:text-[var(--niho-skyblue-gray)] [data-skin='niho']:hover:text-[#00ff88] [data-skin='niho']:hover:bg-[rgba(0,255,136,0.1)]"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingProvider(provider);
-                            setShowEditProviderDialog(true);
-                          }}
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6 text-destructive [data-skin='niho']:text-[#ff6b9d] [data-skin='niho']:hover:text-[#ff1493] [data-skin='niho']:hover:bg-[rgba(255,107,157,0.1)]"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDeleteProviderTarget(provider);
-                          }}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </Button>
-                        </div>
-                      </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium text-gray-900 dark:text-white [data-skin='niho']:text-[var(--text-primary)] truncate">
+                              {supportedProvider.name}
+                            </div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)] truncate">
+                              {supportedProvider.description}
+                            </div>
+                          </div>
+                          <Plus className="w-4 h-4 text-gray-400 [data-skin='niho']:text-[var(--color-accent)] flex-shrink-0" />
+                        </button>
+                      ))}
                     </div>
-                  );
-                })}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* 移动端：供应商切换（使用项目内 Dialog） */}
-        <div className="md:hidden mb-4">
-          <div className="flex gap-2 items-stretch">
-            <Button
-              variant="outline"
-              type="button"
-              className={`
-                flex-1 justify-between h-10
-                [data-skin='niho']:bg-[rgba(0,0,0,0.55)]
-                [data-skin='niho']:border-[var(--niho-text-border)]
-                [data-skin='niho']:hover:border-[rgba(0,255,136,0.28)]
-                [data-skin='niho']:text-[#e8f5f0]
-              `}
-              onClick={() => setShowProviderSelectDialog(true)}
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                {selectedProvider ? (
-                  <>
-                    <div className="w-5 h-5 rounded flex items-center justify-center overflow-hidden flex-shrink-0">
-                      {renderProviderIcon(selectedProvider.provider_type, 'w-full h-full', 18)}
-                    </div>
-                    <span className="truncate">{selectedProvider.name}</span>
                   </>
-                ) : (
-                  <span className="text-gray-500 dark:text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
-                    选择供应商
-                  </span>
-                )}
-              </div>
-              <ChevronDown className="w-4 h-4 opacity-70 [data-skin='niho']:text-[var(--niho-skyblue-gray)] flex-shrink-0" />
-            </Button>
-
-            {/* 移动端：录入自定义供应商 */}
-            <Button
-              variant="primary"
-              type="button"
-              className="h-10 w-10 px-0"
-              onClick={() => setShowCreateProviderDialog(true)}
-              title="添加自定义供应商"
-            >
-              <Plus className="w-4 h-4" />
-            </Button>
-          </div>
-
-          <ProviderSelectDialog
-            open={showProviderSelectDialog}
-            onOpenChange={setShowProviderSelectDialog}
-            providers={providers.map((p) => ({
-              provider_id: p.provider_id,
-              name: p.name,
-              provider_type: p.provider_type,
-              icon: renderProviderIcon(p.provider_type, 'w-full h-full', 18) as any,
-            }))}
-            selectedProviderId={selectedProviderId}
-            onSelect={(providerId) => setSelectedProviderId(providerId)}
-          />
-        </div>
-
-        {/* 右侧：供应商详情和模型配置 */}
-        <div className="flex-1 overflow-y-auto">
-          {!selectedProvider ? (
+                );
+              })()}
+            </div>
+          </Card>
+          {providers.length === 0 && (
             <EmptyState
               icon={Brain}
-              title="请选择供应商"
-              description="从上方下拉列表或左侧列表中选择一个供应商"
+              title="暂无供应商"
+              description="从上方添加系统支持的供应商，或创建自定义供应商"
             />
-          ) : (
+          )}
+        </div>
+      ) : !selectedProvider ? (
+        <EmptyState
+          icon={Brain}
+          title="请选择供应商"
+          description="点击顶部 Tab 切换供应商"
+        />
+      ) : (
+        <div className="space-y-6">
             <div className="space-y-4">
               {/* 供应商切换提示 - 增强视觉反馈 */}
               <div 
@@ -1241,9 +1142,10 @@ const LLMConfigPanel: React.FC = () => {
               {/* Token 管理界面（仅主流供应商：openai, anthropic, gemini, deepseek）- 替代供应商信息卡片 */}
               {selectedProvider && ['openai', 'anthropic', 'gemini', 'deepseek'].includes(selectedProvider.provider_type) && (
                 <Card 
-                  title="Token 管理"
-                  description="录入和管理 API Token，系统会自动获取支持的模型列表"
+                  title={selectedProvider ? `Token 管理 - ${selectedProvider.name}` : 'Token 管理'}
+                  description={`为 ${selectedProvider.name} 录入和管理 API Token，系统会自动获取支持的模型列表`}
                   size="compact"
+                  variant="persona"
                   headerAction={
                     <div className="relative z-10">
                       <Button
@@ -1308,6 +1210,7 @@ const LLMConfigPanel: React.FC = () => {
                 title={providerConfigs.length === 0 ? '已添加的模型' : `已添加的模型 (${providerConfigs.length})`}
                 description={providerConfigs.length === 0 ? '为当前供应商添加模型配置，每个模型可以设置独立的API密钥和参数' : undefined} 
                 size="compact"
+                variant="persona"
                 headerAction={
                   <Button
                     variant="primary"
@@ -1382,30 +1285,14 @@ const LLMConfigPanel: React.FC = () => {
                               {config.supplier && config.supplier !== config.provider && (
                                 <span className="text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">(兼容: {config.provider})</span>
                               )}
-                              {/* 能力图标 */}
-                              {config.metadata?.capabilities && (
-                                <div className="flex items-center gap-1 ml-1">
-                                  {config.metadata.capabilities.vision && (
-                                    <div title="支持识图">
-                                      <Eye className="w-3 h-3 text-blue-500 [data-skin='niho']:text-[#00e5ff]" />
-                                    </div>
-                                  )}
-                                  {config.metadata.capabilities.image_gen && (
-                                    <div title="支持生图">
-                                      <ImageIcon className="w-3 h-3 text-purple-500 [data-skin='niho']:text-[#ff6b9d]" />
-                                    </div>
-                                  )}
-                                  {config.metadata.capabilities.video_gen && (
-                                    <div title="支持生视频">
-                                      <Video className="w-3 h-3 text-green-500 [data-skin='niho']:text-[#00ff88]" />
-                                    </div>
-                                  )}
-                                </div>
-                              )}
+                              <CapabilityIcons capabilities={config.metadata?.capabilities} modelName={config.model} className="w-3 h-3" />
                             </div>
                           </div>
                           {config.enabled ? (
-                            <span className="ui-badge-success text-xs [data-skin='niho']:bg-[rgba(0,255,136,0.1)] [data-skin='niho']:text-[#00ff88] [data-skin='niho']:border [data-skin='niho']:border-[rgba(0,255,136,0.2)]">已启用</span>
+                            <>
+                              <span className="ui-badge-success text-xs [data-skin='niho']:bg-[rgba(0,255,136,0.1)] [data-skin='niho']:text-[#00ff88] [data-skin='niho']:border [data-skin='niho']:border-[rgba(0,255,136,0.2)]">已启用</span>
+                              <CapabilityIcons capabilities={config.metadata?.capabilities} modelName={config.model} className="w-3.5 h-3.5" />
+                            </>
                           ) : (
                             <span className="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-800 [data-skin='niho']:bg-[#000000] [data-skin='niho']:border [data-skin='niho']:border-[var(--niho-text-border)] text-gray-600 dark:text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)] rounded">
                               已禁用
@@ -1441,6 +1328,7 @@ const LLMConfigPanel: React.FC = () => {
               {isAdding && selectedProvider && (
                 <Card 
                   title={editingId ? '编辑模型配置' : '添加新模型'}
+                  variant="persona"
                   headerAction={
                     <Button onClick={handleCancel} variant="ghost" size="icon">
                       <X className="w-5 h-5" />
@@ -1539,7 +1427,7 @@ const LLMConfigPanel: React.FC = () => {
                                 setModelsError(null);
                               }}
                               className="input-field pr-10 [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[#e8f5f0] [data-skin='niho']:placeholder:text-[var(--niho-skyblue-gray)]"
-                              placeholder={editingId ? '点击右侧眼睛图标查看或留空不更新' : getProviderPlaceholder(selectedProvider?.provider_type || 'openai')}
+                              placeholder={editingId ? '点击右侧眼睛图标查看或留空不更新' : (selectedProvider && selectedProvider.provider_id !== selectedProvider.provider_type ? `请输入 ${selectedProvider.name} 的 API Token（格式如 sk-...）` : getProviderPlaceholder(selectedProvider?.provider_type || 'openai'))}
                               readOnly={editingId !== null && !showApiKey && !newConfig.api_key}
                             />
                             {editingId && (
@@ -1936,9 +1824,8 @@ const LLMConfigPanel: React.FC = () => {
                 </Card>
               )}
             </div>
-          )}
         </div>
-      </div>
+      )}
 
       {/* 创建自定义供应商对话框 */}
       <Dialog open={showCreateProviderDialog} onOpenChange={setShowCreateProviderDialog}>
@@ -2266,9 +2153,11 @@ const LLMConfigPanel: React.FC = () => {
       <Dialog open={showAddTokenDialog} onOpenChange={setShowAddTokenDialog}>
         <DialogContent className="chatee-dialog-standard max-w-2xl w-[95vw] md:w-auto max-h-[80vh] md:max-h-none [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
           <DialogHeader>
-            <DialogTitle className="[data-skin='niho']:text-[#e8f5f0]">录入 Token</DialogTitle>
+            <DialogTitle className="[data-skin='niho']:text-[#e8f5f0]">
+              {selectedProvider ? `录入 Token - ${selectedProvider.name}` : '录入 Token'}
+            </DialogTitle>
             <DialogDescription className="[data-skin='niho']:text-[var(--niho-skyblue-gray)]">
-              输入 API Token，系统将自动获取支持的模型列表
+              {selectedProvider ? `为 ${selectedProvider.name} 输入 API Token，系统将自动获取支持的模型列表` : '输入 API Token，系统将自动获取支持的模型列表'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 max-h-[60vh] overflow-auto no-scrollbar">
@@ -2281,7 +2170,11 @@ const LLMConfigPanel: React.FC = () => {
                 value={newTokenApiKey}
                 onChange={(e) => setNewTokenApiKey(e.target.value)}
                 className="input-field w-full [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[#e8f5f0] [data-skin='niho']:placeholder:text-[var(--niho-skyblue-gray)]"
-                placeholder={selectedProvider ? getProviderPlaceholder(selectedProvider.provider_type) : '请输入 API Token'}
+                placeholder={selectedProvider
+                  ? (selectedProvider.provider_id !== selectedProvider.provider_type
+                    ? `请输入 ${selectedProvider.name} 的 API Token（格式如 sk-...）`
+                    : getProviderPlaceholder(selectedProvider.provider_type))
+                  : '请输入 API Token'}
               />
             </div>
             {tokenError && (
@@ -2354,8 +2247,52 @@ const LLMConfigPanel: React.FC = () => {
               </Button>
             ) : (
               <div>
-                <div className="text-sm font-medium text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mb-2">
-                  选择要启用的模型 ({selectedModelsForToken.size} / {tokenAvailableModels.length})
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                    选择要启用的模型 ({selectedModelsForToken.size} / {tokenAvailableModels.length})
+                  </div>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="shrink-0 [data-skin='niho']:border-[rgba(255,107,157,0.3)] [data-skin='niho']:text-[#ff6b9d] [data-skin='niho']:hover:border-[rgba(255,107,157,0.5)] [data-skin='niho']:hover:bg-[rgba(255,107,157,0.1)]"
+                    onClick={async () => {
+                      if (!selectedProvider || !newTokenApiKey.trim()) return;
+                      setIsLoadingTokenModels(true);
+                      setTokenError(null);
+                      try {
+                        const defaultUrl = selectedProvider.default_api_url || getProviderDefaultUrl(selectedProvider.provider_type);
+                        const models = await fetchModelsForProvider(
+                          selectedProvider.provider_type,
+                          defaultUrl,
+                          newTokenApiKey.trim(),
+                          true
+                        );
+                        if (models.length === 0) {
+                          setTokenError('未获取到可用模型');
+                          return;
+                        }
+                        setTokenAvailableModels(models);
+                        const modelIds = models.map(m => typeof m === 'string' ? m : m.id);
+                        setSelectedModelsForToken(prev => {
+                          const next = new Set<string>();
+                          modelIds.forEach(id => { if (prev.has(id)) next.add(id); });
+                          return next;
+                        });
+                      } catch (error) {
+                        setTokenError(error instanceof Error ? error.message : '获取模型列表失败');
+                      } finally {
+                        setIsLoadingTokenModels(false);
+                      }
+                    }}
+                    disabled={isLoadingTokenModels}
+                  >
+                    {isLoadingTokenModels ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-4 h-4 mr-1" />
+                    )}
+                    重新获取模型列表
+                  </Button>
                 </div>
                 <div className="flex flex-wrap gap-2 mb-2">
                   <Button
@@ -2363,8 +2300,10 @@ const LLMConfigPanel: React.FC = () => {
                     size="sm"
                     className="[data-skin='niho']:border-[rgba(255,107,157,0.3)] [data-skin='niho']:text-[#ff6b9d] [data-skin='niho']:hover:border-[rgba(255,107,157,0.5)] [data-skin='niho']:hover:bg-[rgba(255,107,157,0.1)]"
                     onClick={() => {
-                      const modelIds = tokenAvailableModels.map(m => typeof m === 'string' ? m : m.id);
-                      setSelectedModelsForToken(new Set(modelIds));
+                      const callableIds = tokenAvailableModels
+                        .filter(m => typeof m === 'string' || (m as ModelWithCapabilities).isCallable !== false)
+                        .map(m => typeof m === 'string' ? m : m.id);
+                      setSelectedModelsForToken(new Set(callableIds));
                     }}
                   >
                     全选
@@ -2382,15 +2321,19 @@ const LLMConfigPanel: React.FC = () => {
                   {tokenAvailableModels.map(model => {
                     const modelId = typeof model === 'string' ? model : model.id;
                     const capabilities = typeof model === 'object' && 'capabilities' in model ? model.capabilities : null;
+                    const isCallable = typeof model === 'object' && 'isCallable' in model ? (model as ModelWithCapabilities).isCallable !== false : true;
                     return (
                       <label
                         key={modelId}
-                        className="flex items-center gap-2 p-2 hover:bg-gray-100 dark:hover:bg-[#363636] [data-skin='niho']:hover:bg-[rgba(0,255,136,0.06)] rounded cursor-pointer"
+                        className={`flex items-center gap-2 p-2 rounded ${isCallable ? "hover:bg-gray-100 dark:hover:bg-[#363636] [data-skin='niho']:hover:bg-[rgba(0,255,136,0.06)] cursor-pointer" : 'opacity-60 cursor-not-allowed'}`}
+                        title={!isCallable ? '该模型不支持对话（仅支持生图等），不可用于聊天' : undefined}
                       >
                         <input
                           type="checkbox"
                           checked={selectedModelsForToken.has(modelId)}
+                          disabled={!isCallable}
                           onChange={(e) => {
+                            if (!isCallable) return;
                             const newSet = new Set(selectedModelsForToken);
                             if (e.target.checked) {
                               newSet.add(modelId);
@@ -2402,25 +2345,7 @@ const LLMConfigPanel: React.FC = () => {
                           className="rounded"
                         />
                         <span className="text-sm text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[#e8f5f0] flex-1">{modelId}</span>
-                        {capabilities && (
-                          <div className="flex items-center gap-1">
-                            {capabilities.vision && (
-                              <div title="支持识图">
-                                <Eye className="w-4 h-4 text-blue-500 [data-skin='niho']:text-[#00e5ff]" />
-                              </div>
-                            )}
-                            {capabilities.image_gen && (
-                              <div title="支持生图">
-                                <ImageIcon className="w-4 h-4 text-purple-500 [data-skin='niho']:text-[#ff6b9d]" />
-                              </div>
-                            )}
-                            {capabilities.video_gen && (
-                              <div title="支持生视频">
-                                <Video className="w-4 h-4 text-green-500 [data-skin='niho']:text-[#00ff88]" />
-                              </div>
-                            )}
-                          </div>
-                        )}
+                        <CapabilityIcons capabilities={capabilities} modelName={modelId} className="w-4 h-4" />
                       </label>
                     );
                   })}
@@ -2484,21 +2409,22 @@ const LLMConfigPanel: React.FC = () => {
                     }
                     
                     for (const modelId of selectedModelsForToken) {
-                      // 查找对应的能力信息
                       const modelInfo = tokenAvailableModels.find(m => (typeof m === 'string' ? m : m.id) === modelId);
+                      const isCallable = typeof modelInfo === 'object' && 'isCallable' in modelInfo ? (modelInfo as ModelWithCapabilities).isCallable !== false : true;
+                      if (!isCallable) continue; // 仅支持对话的模型才创建配置
                       const capabilities = typeof modelInfo === 'object' && 'capabilities' in modelInfo ? modelInfo.capabilities : null;
                       
                       const configData = {
                         name: modelId,
-                        provider: selectedProvider.provider_type, // 兼容路由（如 openai）
-                        supplier: supplierId, // supplier=计费/Token 归属（供应商名称，如 NVIDIA）
+                        provider: selectedProvider.provider_type,
+                        supplier: supplierId,
                         api_key: newTokenApiKey.trim(),
                         api_url: defaultUrl,
                         model: modelId,
                         enabled: true,
                         tags: [],
                         description: '',
-                        metadata: capabilities ? { capabilities } : {},
+                        metadata: { ...(capabilities ? { capabilities } : {}), is_callable: isCallable },
                       };
                       
                       console.log('[Token录入] 创建配置数据:', { 
@@ -2574,10 +2500,9 @@ const LLMConfigPanel: React.FC = () => {
                           selectedTokenApiKey,
                           true // includeCapabilities = true
                         );
-                        // 提取模型 ID
                         const modelIds = models.map(m => typeof m === 'string' ? m : m.id);
                         setAvailableModelsForSelectedToken(modelIds);
-                        // 过滤出未添加的模型
+                        setAvailableModelsWithCapabilitiesForToken(models);
                         const existingModelNames = new Set(selectedTokenConfigs.map(c => c.model || c.name));
                         const newModels = modelIds.filter(m => !existingModelNames.has(m));
                         setSelectedNewModels(new Set(newModels));
@@ -2618,7 +2543,7 @@ const LLMConfigPanel: React.FC = () => {
               </div>
             )}
             
-            {/* 模型列表（统一显示所有模型） */}
+            {/* 模型列表（统一显示所有模型，含能力图标） */}
             {showAddModelsSection && availableModelsForSelectedToken.length > 0 && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -2647,64 +2572,51 @@ const LLMConfigPanel: React.FC = () => {
                   </div>
                 </div>
                 <div className="max-h-96 overflow-y-auto border border-gray-200 dark:border-[#404040] rounded-lg p-2 space-y-1">
-                  {availableModelsForSelectedToken.map(model => {
-                    // 查找是否已配置
-                    const existingConfig = selectedTokenConfigs.find(c => (c.model || c.name) === model);
+                  {(availableModelsWithCapabilitiesForToken.length > 0 ? availableModelsWithCapabilitiesForToken : availableModelsForSelectedToken.map(id => id)).map(item => {
+                    const modelId = typeof item === 'string' ? item : item.id;
+                    const capabilities = typeof item === 'object' && item && 'capabilities' in item ? (item as ModelWithCapabilities).capabilities : null;
+                    const isCallable = typeof item === 'object' && item && 'isCallable' in item ? (item as ModelWithCapabilities).isCallable !== false : true;
+                    const existingConfig = selectedTokenConfigs.find(c => (c.model || c.name) === modelId);
                     const isConfigured = !!existingConfig;
+                    const displayCapabilities = existingConfig?.metadata?.capabilities ?? capabilities;
                     
                     if (isConfigured) {
-                      // 已配置的模型：显示启用/禁用开关
+                      // 已配置的模型：显示启用/禁用开关，右侧显示能力
                       return (
                         <div
-                          key={model}
-                          className="flex items-center justify-between p-2 hover:bg-gray-50 dark:hover:bg-[#363636] rounded"
+                          key={modelId}
+                          className={`flex items-center justify-between p-2 rounded ${isCallable ? 'hover:bg-gray-50 dark:hover:bg-[#363636]' : 'opacity-60'}`}
+                          title={!isCallable ? '该模型不支持对话（仅支持生图等），不可用于聊天' : undefined}
                         >
-                          <div className="flex items-center gap-3 flex-1">
+                          <div className="flex items-center gap-3 flex-1 min-w-0">
                             <Switch
                               checked={existingConfig.enabled}
+                              disabled={!isCallable}
                               onCheckedChange={async () => {
+                                if (!isCallable) return;
                                 try {
                                   const newEnabled = !existingConfig.enabled;
-                                  
-                                  // 如果启用，需要先禁用其他 token 的模型
+                                  let toDisable: LLMConfigFromDB[] = [];
                                   if (newEnabled) {
                                     for (const otherConfig of providerConfigs) {
                                       try {
                                         const otherApiKey = await getLLMConfigApiKey(otherConfig.config_id);
                                         const isSameToken = otherApiKey === selectedTokenApiKey;
                                         if (!isSameToken && otherConfig.enabled) {
-                                          await updateLLMConfig(otherConfig.config_id, { enabled: false });
+                                          toDisable.push(otherConfig);
                                         }
-                                      } catch {
-                                        // 如果获取 api_key 失败，跳过
-                                      }
+                                      } catch { /* skip */ }
                                     }
+                                    await Promise.all(toDisable.map(c => updateLLMConfig(c.config_id, { enabled: false })));
                                   }
-                                  
                                   await updateLLMConfig(existingConfig.config_id, { enabled: newEnabled });
-                                  await loadConfigs();
-                                  
-                                  // 重新获取该 token 的所有配置以更新状态
-                                  const allConfigs = await getLLMConfigs();
-                                  const tokenConfigsPromises = allConfigs.map(async (c) => {
-                                    try {
-                                      const apiKey = await getLLMConfigApiKey(c.config_id);
-                                      if (apiKey === selectedTokenApiKey) {
-                                        return c;
-                                      }
-                                      return null;
-                                    } catch {
-                                      return null;
-                                    }
-                                  });
-                                  const resolvedConfigs = await Promise.all(tokenConfigsPromises);
-                                  const updatedConfigs = resolvedConfigs.filter((c): c is LLMConfigFromDB => c !== null);
-                                  setSelectedTokenConfigs(updatedConfigs);
-                                  
-                                  toast({
-                                    title: newEnabled ? '已启用' : '已禁用',
-                                    variant: 'success',
-                                  });
+                                  setConfigs(prev => prev.map(c => {
+                                    if (c.config_id === existingConfig.config_id) return { ...c, enabled: newEnabled };
+                                    if (newEnabled && toDisable.some(d => d.config_id === c.config_id)) return { ...c, enabled: false };
+                                    return c;
+                                  }));
+                                  setSelectedTokenConfigs(prev => prev.map(c => c.config_id === existingConfig.config_id ? { ...c, enabled: newEnabled } : c));
+                                  toast({ title: newEnabled ? '已启用' : '已禁用', variant: 'success' });
                                 } catch (error) {
                                   toast({
                                     title: '更新失败',
@@ -2714,9 +2626,10 @@ const LLMConfigPanel: React.FC = () => {
                                 }
                               }}
                             />
-                            <div className="flex-1">
-                              <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                                {model}
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                                <span className="truncate">{modelId}</span>
+                                <CapabilityIcons capabilities={displayCapabilities} modelName={modelId} className="w-3.5 h-3.5" />
                               </div>
                               <div className="text-xs text-gray-500 dark:text-gray-400">
                                 {existingConfig.enabled ? '已启用' : '未启用'}
@@ -2726,9 +2639,9 @@ const LLMConfigPanel: React.FC = () => {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-7 w-7 text-red-600"
+                            className="h-7 w-7 text-red-600 shrink-0"
                             onClick={async () => {
-                              if (confirm(`确定要删除模型 "${model}" 吗？`)) {
+                              if (confirm(`确定要删除模型 "${modelId}" 吗？`)) {
                                 try {
                                   await deleteLLMConfig(existingConfig.config_id);
                                   await loadConfigs();
@@ -2737,7 +2650,7 @@ const LLMConfigPanel: React.FC = () => {
                                   const updatedConfigs = selectedTokenConfigs.filter(c => c.config_id !== existingConfig.config_id);
                                   setSelectedTokenConfigs(updatedConfigs);
                                   
-                                  // 如果显示了模型列表，需要刷新显示
+                                  // 如果显示了模型列表，需要刷新显示（含能力）
                                   if (showAddModelsSection && selectedProvider && selectedTokenApiKey) {
                                     const defaultUrl = selectedProvider.default_api_url || getProviderDefaultUrl(selectedProvider.provider_type);
                                     try {
@@ -2745,10 +2658,11 @@ const LLMConfigPanel: React.FC = () => {
                                         selectedProvider.provider_type,
                                         defaultUrl,
                                         selectedTokenApiKey,
-                                        true // includeCapabilities = true
+                                        true
                                       );
                                       const modelIds = models.map(m => typeof m === 'string' ? m : m.id);
                                       setAvailableModelsForSelectedToken(modelIds);
+                                      setAvailableModelsWithCapabilitiesForToken(models);
                                     } catch (error) {
                                       console.error('Failed to refresh models:', error);
                                     }
@@ -2774,85 +2688,51 @@ const LLMConfigPanel: React.FC = () => {
                         </div>
                       );
                     } else {
-                      // 未配置的模型：显示灰色的未开启 Switch
+                      // 未配置的模型：显示灰色的未开启 Switch，右侧显示能力；不可对话的模型禁用添加
                       return (
                         <div
-                          key={model}
-                          className="flex items-center justify-between p-2 hover:bg-gray-50 dark:hover:bg-[#363636] rounded"
+                          key={modelId}
+                          className={`flex items-center justify-between p-2 rounded ${isCallable ? 'hover:bg-gray-50 dark:hover:bg-[#363636]' : 'opacity-60'}`}
+                          title={!isCallable ? '该模型不支持对话（仅支持生图等），不可用于聊天' : undefined}
                         >
-                          <div className="flex items-center gap-3 flex-1">
+                          <div className="flex items-center gap-3 flex-1 min-w-0">
                             <Switch
                               checked={false}
+                              disabled={!isCallable}
                               onCheckedChange={async () => {
-                                if (!selectedProvider) return;
+                                if (!isCallable || !selectedProvider) return;
                                 try {
-                                  // 如果启用，需要先禁用其他 token 的模型
+                                  let toDisable: LLMConfigFromDB[] = [];
                                   for (const otherConfig of providerConfigs) {
                                     try {
                                       const otherApiKey = await getLLMConfigApiKey(otherConfig.config_id);
                                       const isSameToken = otherApiKey === selectedTokenApiKey;
-                                      if (!isSameToken && otherConfig.enabled) {
-                                        await updateLLMConfig(otherConfig.config_id, { enabled: false });
-                                      }
-                                    } catch {
-                                      // 如果获取 api_key 失败，跳过
-                                    }
+                                      if (!isSameToken && otherConfig.enabled) toDisable.push(otherConfig);
+                                    } catch { /* skip */ }
                                   }
-                                  
-                                  // 创建新配置并启用
+                                  await Promise.all(toDisable.map(c => updateLLMConfig(c.config_id, { enabled: false })));
                                   const defaultUrl = selectedProvider.default_api_url || getProviderDefaultUrl(selectedProvider.provider_type);
-                                  const newConfig = await createLLMConfig({
-                                    name: model,
+                                  const { config_id } = await createLLMConfig({
+                                    name: modelId,
                                     provider: selectedProvider.provider_type,
-                                    supplier: selectedProvider.provider_id, // supplier=计费/Token 归属
+                                    supplier: selectedProvider.provider_id,
                                     api_key: selectedTokenApiKey,
                                     api_url: defaultUrl,
-                                    model: model,
+                                    model: modelId,
                                     enabled: true,
                                     tags: [],
                                     description: '',
-                                    metadata: {},
+                                    metadata: { ...(capabilities ? { capabilities } : {}), is_callable: isCallable },
                                   });
-                                  
-                                  await loadConfigs();
-                                  
-                                  // 重新获取该 token 的所有配置
-                                  const allConfigs = await getLLMConfigs();
-                                  const tokenConfigsPromises = allConfigs.map(async (c) => {
-                                    try {
-                                      const apiKey = await getLLMConfigApiKey(c.config_id);
-                                      if (apiKey === selectedTokenApiKey) {
-                                        return c;
-                                      }
-                                      return null;
-                                    } catch {
-                                      return null;
-                                    }
-                                  });
-                                  const resolvedConfigs = await Promise.all(tokenConfigsPromises);
-                                  const updatedConfigs = resolvedConfigs.filter((c): c is LLMConfigFromDB => c !== null);
-                                  setSelectedTokenConfigs(updatedConfigs);
-                                  
-                                  // 重新获取模型列表以更新显示状态
-                                  if (selectedProvider && selectedTokenApiKey) {
-                                    const defaultUrl = selectedProvider.default_api_url || getProviderDefaultUrl(selectedProvider.provider_type);
-                                    try {
-                                      const models = await fetchModelsForProvider(
-                                        selectedProvider.provider_type,
-                                        defaultUrl,
-                                        selectedTokenApiKey,
-                                        true // includeCapabilities = true
-                                      );
-                                      const modelIds = models.map(m => typeof m === 'string' ? m : m.id);
-                                      setAvailableModelsForSelectedToken(modelIds);
-                                    } catch (error) {
-                                      console.error('Failed to refresh models:', error);
-                                    }
-                                  }
-                                  
+                                  const fullConfig = await getLLMConfig(config_id);
+                                  setConfigs(prev => [
+                                    ...prev.map(c => toDisable.some(d => d.config_id === c.config_id) ? { ...c, enabled: false } : c),
+                                    fullConfig,
+                                  ]);
+                                  setSelectedTokenConfigs(prev => [...prev, fullConfig]);
                                   toast({
                                     title: '已添加并启用',
-                                    description: `模型 "${model}" 已添加并启用`,
+                                    description: `模型 "${modelId}" 已添加并启用`,
                                     variant: 'success',
                                   });
                                 } catch (error) {
@@ -2865,8 +2745,11 @@ const LLMConfigPanel: React.FC = () => {
                               }}
                               className="opacity-60"
                             />
-                            <div className="flex-1">
-                              <div className="text-sm text-gray-700 dark:text-gray-300">{model}</div>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                                <span className="truncate">{modelId}</span>
+                                <CapabilityIcons capabilities={displayCapabilities} modelName={modelId} className="w-3.5 h-3.5" />
+                              </div>
                               <div className="text-xs text-gray-500 dark:text-gray-400">未配置</div>
                             </div>
                           </div>
@@ -2884,45 +2767,38 @@ const LLMConfigPanel: React.FC = () => {
                 <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
                   已配置的模型 ({selectedTokenConfigs.length})
                 </div>
-                {selectedTokenConfigs.map(config => (
+                {selectedTokenConfigs.map(config => {
+                  const cap = config.metadata?.capabilities;
+                  return (
                 <div
                   key={config.config_id}
                   className="flex items-center justify-between p-3 rounded-lg border border-gray-200 dark:border-[#404040] hover:bg-gray-50 dark:hover:bg-[#363636]"
                 >
-                  <div className="flex items-center gap-3 flex-1">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
                     <Switch
                       checked={config.enabled}
                       onCheckedChange={async () => {
                         try {
                           const newEnabled = !config.enabled;
-                          
-                          // 如果启用，需要先禁用其他 token 的模型
+                          let toDisable: LLMConfigFromDB[] = [];
                           if (newEnabled) {
-                            // 禁用当前供应商下其他 token 的模型（通过比较 api_key）
                             for (const otherConfig of providerConfigs) {
-                              // 检查是否是同一个 token（通过比较 api_key）
                               try {
                                 const otherApiKey = await getLLMConfigApiKey(otherConfig.config_id);
                                 const isSameToken = otherApiKey === selectedTokenApiKey;
-                                if (!isSameToken && otherConfig.enabled) {
-                                  await updateLLMConfig(otherConfig.config_id, { enabled: false });
-                                }
-                              } catch {
-                                // 如果获取 api_key 失败，跳过
-                              }
+                                if (!isSameToken && otherConfig.enabled) toDisable.push(otherConfig);
+                              } catch { /* skip */ }
                             }
+                            await Promise.all(toDisable.map(c => updateLLMConfig(c.config_id, { enabled: false })));
                           }
-                          
                           await updateLLMConfig(config.config_id, { enabled: newEnabled });
-                          await loadConfigs();
-                          const updatedConfigs = selectedTokenConfigs.map(c => 
-                            c.config_id === config.config_id ? { ...c, enabled: newEnabled } : c
-                          );
-                          setSelectedTokenConfigs(updatedConfigs);
-                          toast({
-                            title: newEnabled ? '已启用' : '已禁用',
-                            variant: 'success',
-                          });
+                          setConfigs(prev => prev.map(c => {
+                            if (c.config_id === config.config_id) return { ...c, enabled: newEnabled };
+                            if (newEnabled && toDisable.some(d => d.config_id === c.config_id)) return { ...c, enabled: false };
+                            return c;
+                          }));
+                          setSelectedTokenConfigs(prev => prev.map(c => c.config_id === config.config_id ? { ...c, enabled: newEnabled } : c));
+                          toast({ title: newEnabled ? '已启用' : '已禁用', variant: 'success' });
                         } catch (error) {
                           toast({
                             title: '更新失败',
@@ -2932,9 +2808,10 @@ const LLMConfigPanel: React.FC = () => {
                         }
                       }}
                     />
-                    <div className="flex-1">
-                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                        {config.name}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                        <span className="truncate">{config.name}</span>
+                        <CapabilityIcons capabilities={cap} modelName={config.model} className="w-3.5 h-3.5" />
                       </div>
                       <div className="text-xs text-gray-500 dark:text-gray-400">
                         {config.model || '未设置模型'}
@@ -2944,7 +2821,7 @@ const LLMConfigPanel: React.FC = () => {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-7 w-7 text-red-600"
+                    className="h-7 w-7 text-red-600 shrink-0"
                     onClick={async () => {
                       if (confirm(`确定要删除模型 "${config.name}" 吗？`)) {
                         try {
@@ -2970,7 +2847,8 @@ const LLMConfigPanel: React.FC = () => {
                     <Trash2 className="w-4 h-4" />
                   </Button>
                 </div>
-              ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -2982,6 +2860,7 @@ const LLMConfigPanel: React.FC = () => {
                 setShowAddModelsSection(false);
                 setSelectedNewModels(new Set());
                 setAvailableModelsForSelectedToken([]);
+                setAvailableModelsWithCapabilitiesForToken([]);
               }}
             >
               关闭
@@ -2990,68 +2869,41 @@ const LLMConfigPanel: React.FC = () => {
               variant="primary"
               onClick={async () => {
                 try {
-                  // 禁用其他 token 的模型（通过比较 api_key）
+                  const toDisable: LLMConfigFromDB[] = [];
                   for (const config of providerConfigs) {
                     try {
                       const otherApiKey = await getLLMConfigApiKey(config.config_id);
-                      const isThisToken = otherApiKey === selectedTokenApiKey;
-                      if (!isThisToken && config.enabled) {
-                        await updateLLMConfig(config.config_id, { enabled: false });
-                      }
-                    } catch {
-                      // 如果获取 api_key 失败，跳过
-                    }
+                      if (otherApiKey !== selectedTokenApiKey && config.enabled) toDisable.push(config);
+                    } catch { /* skip */ }
                   }
-                  
-                  // 启用该 token 下所有已配置的模型
-                  for (const config of selectedTokenConfigs) {
-                    if (!config.enabled) {
-                      await updateLLMConfig(config.config_id, { enabled: true });
-                    }
-                  }
-                  
-                  await loadConfigs();
-                  
-                  // 重新获取该 token 的所有配置以更新状态
-                  const allConfigs = await getLLMConfigs();
-                  const tokenConfigsPromises = allConfigs.map(async (c) => {
-                    try {
-                      const apiKey = await getLLMConfigApiKey(c.config_id);
-                      if (apiKey === selectedTokenApiKey) {
-                        return c;
-                      }
-                      return null;
-                    } catch {
-                      return null;
-                    }
-                  });
-                  const resolvedConfigs = await Promise.all(tokenConfigsPromises);
-                  const updatedConfigs = resolvedConfigs.filter((c): c is LLMConfigFromDB => c !== null);
-                  setSelectedTokenConfigs(updatedConfigs);
-                  
+                  await Promise.all(toDisable.map(c => updateLLMConfig(c.config_id, { enabled: false })));
+                  const toEnable = selectedTokenConfigs.filter(c => !c.enabled);
+                  await Promise.all(toEnable.map(c => updateLLMConfig(c.config_id, { enabled: true })));
+                  setConfigs(prev => prev.map(c => {
+                    if (toDisable.some(d => d.config_id === c.config_id)) return { ...c, enabled: false };
+                    if (selectedTokenConfigs.some(t => t.config_id === c.config_id)) return { ...c, enabled: true };
+                    return c;
+                  }));
+                  setSelectedTokenConfigs(prev => prev.map(c => ({ ...c, enabled: true })));
                   toast({
                     title: '已设为当前使用',
-                    description: `已启用该 Token 下的 ${updatedConfigs.filter(c => c.enabled).length} 个模型`,
+                    description: `已启用该 Token 下的 ${selectedTokenConfigs.length} 个模型`,
                     variant: 'success',
                   });
-                  
-                  // 如果显示了模型列表，需要刷新显示
-                  if (showAddModelsSection) {
-                    // 重新获取模型列表以更新状态
-                    if (selectedProvider && selectedTokenApiKey) {
+                  if (showAddModelsSection && selectedProvider && selectedTokenApiKey) {
+                    try {
                       const defaultUrl = selectedProvider.default_api_url || getProviderDefaultUrl(selectedProvider.provider_type);
-                      try {
-                        const models = await fetchModelsForProvider(
-                          selectedProvider.provider_type,
-                          defaultUrl,
-                          selectedTokenApiKey,
-                          true // includeCapabilities = true
-                        );
-                        const modelIds = models.map(m => typeof m === 'string' ? m : m.id);
-                        setAvailableModelsForSelectedToken(modelIds);
-                      } catch (error) {
-                        console.error('Failed to refresh models:', error);
-                      }
+                      const models = await fetchModelsForProvider(
+                        selectedProvider.provider_type,
+                        defaultUrl,
+                        selectedTokenApiKey,
+                        true
+                      );
+                      const modelIds = models.map(m => typeof m === 'string' ? m : m.id);
+                      setAvailableModelsForSelectedToken(modelIds);
+                      setAvailableModelsWithCapabilitiesForToken(models);
+                    } catch (error) {
+                      console.error('Failed to refresh models:', error);
                     }
                   }
                 } catch (error) {

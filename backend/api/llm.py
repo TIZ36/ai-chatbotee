@@ -37,9 +37,11 @@ def infer_model_capabilities(model_id: str, provider: str = None) -> dict:
     
     Returns:
         {
-            'vision': bool,      # 是否支持识图
+            'vision': bool,      # 是否识别图片
             'image_gen': bool,   # 是否支持生图
             'video_gen': bool,  # 是否支持生视频
+            'speech_gen': bool, # 是否支持生语音
+            'thinking': bool,   # 是否为思考模型
         }
     """
     model_lower = model_id.lower()
@@ -49,29 +51,43 @@ def infer_model_capabilities(model_id: str, provider: str = None) -> dict:
         'vision': False,
         'image_gen': False,
         'video_gen': False,
+        'speech_gen': False,
+        'thinking': False,
     }
     
     # 基于模型名推断
     # 识图能力：包含 vision, multimodal, image, gpt-4o, gpt-4-turbo, claude-3, gemini-1.5, gemini-2.0
-    vision_keywords = ['vision', 'multimodal', 'image', 'gpt-4o', 'gpt-4-turbo', 'gpt-4-vision', 
-                       'claude-3', 'claude-3.5', 'gemini-1.5', 'gemini-2.0', 'gemini-pro', 
+    vision_keywords = ['vision', 'multimodal', 'image', 'gpt-4o', 'gpt-4-turbo', 'gpt-4-vision',
+                       'claude-3', 'claude-3.5', 'gemini-1.5', 'gemini-2.0', 'gemini-pro',
                        'gemini-flash', 'o1', 'o1-mini', 'o3', 'o3-mini']
     if any(kw in model_lower for kw in vision_keywords):
         capabilities['vision'] = True
-    
-    # 生图能力：包含 image, image-generation, dalle, midjourney, stable-diffusion, flux
-    image_gen_keywords = ['image-generation', 'dalle', 'midjourney', 'stable-diffusion', 
+
+    # 生图能力：包含 image-generation, dalle, midjourney, stable-diffusion, flux
+    image_gen_keywords = ['image-generation', 'dalle', 'midjourney', 'stable-diffusion',
                          'flux', 'imagen', 'gemini-2.0-flash-image', 'gemini-2.5-flash-image',
                          'gemini-3-pro-image', 'image-gen', 'text-to-image']
     if any(kw in model_lower for kw in image_gen_keywords):
         capabilities['image_gen'] = True
-    
+
     # 生视频能力：包含 video, video-generation, runway, pika, sora, veo
-    video_gen_keywords = ['video-generation', 'runway', 'pika', 'sora', 'veo', 
+    video_gen_keywords = ['video-generation', 'runway', 'pika', 'sora', 'veo',
                          'video-gen', 'text-to-video', 'gemini-2.0-flash-video']
     if any(kw in model_lower for kw in video_gen_keywords):
         capabilities['video_gen'] = True
-    
+
+    # 生语音能力：包含 tts, speech, audio, voice
+    speech_gen_keywords = ['tts', 'speech', 'audio-gen', 'voice', 'whisper', 'bark', 'vits']
+    if any(kw in model_lower for kw in speech_gen_keywords):
+        capabilities['speech_gen'] = True
+
+    # 思考模型：包含 thinking, reasoner, reasoning, o1, o3, deepseek-r1, gemini-thinking
+    thinking_keywords = ['thinking', 'reasoner', 'reasoning', 'o1-mini', 'o1-preview', 'o1',
+                        'o3-mini', 'o3', 'deepseek-r1', 'r1', 'gemini-2.0-flash-thinking',
+                        'gemini-exp', 'exp-']
+    if any(kw in model_lower for kw in thinking_keywords):
+        capabilities['thinking'] = True
+
     # Provider 特定的默认能力
     if provider:
         provider_lower = provider.lower()
@@ -355,7 +371,7 @@ def get_models():
         # 优先使用 Provider 的 models() 方法
         # 注意：只有当 provider 明确指定且不是 'openai'（避免使用默认 OpenAI URL）时才使用
         # 如果 provider 是 'openai' 但 api_url 不是 OpenAI 默认 URL，则直接使用 REST API
-        # 注意：subprovider 参数用于标识真正的供应商（如 nvidia），但不影响 SDK 路由选择
+        # 注意：supplier 用于标识 Token/计费归属（如 nvidia），但不影响 SDK 路由选择
         use_provider_sdk = (
             api_key and 
             provider and 
@@ -376,28 +392,47 @@ def get_models():
                 
                 if hasattr(provider_instance, 'models'):
                     try:
+                        # Gemini/Google: 优先使用 list_models() 以获取 is_callable（仅支持 generateContent 的才可对话）
+                        if provider in ['gemini', 'google'] and hasattr(provider_instance, 'list_models'):
+                            try:
+                                detailed = provider_instance.list_models()
+                                if detailed:
+                                    model_list = [m['id'] for m in detailed if m.get('id')]
+                                    print(f"[LLM Models] Successfully fetched {len(model_list)} models via provider.list_models()")
+                                    if include_capabilities:
+                                        models_with_caps = []
+                                        for m in detailed:
+                                            item = build_model_with_capabilities(m['id'], provider)
+                                            item['is_callable'] = m.get('is_callable', True)
+                                            if m.get('supported_generation_methods') is not None:
+                                                item['supported_generation_methods'] = m['supported_generation_methods']
+                                            models_with_caps.append(item)
+                                        return jsonify({'models': models_with_caps, 'total': len(models_with_caps)})
+                                    return jsonify({'models': model_list, 'total': len(model_list)})
+                            except Exception as e:
+                                print(f"[LLM Models] provider.list_models() failed: {e}, using models()")
                         model_list = provider_instance.models()
                         if model_list:
                             # 过滤无效模型
                             model_list = [m for m in model_list if m and isinstance(m, str) and m.strip()]
                             print(f"[LLM Models] Successfully fetched {len(model_list)} models via provider.models()")
-                            
                             if include_capabilities:
-                                # 返回包含能力的对象数组
                                 models_with_caps = [
                                     build_model_with_capabilities(model_id, provider)
                                     for model_id in model_list
                                 ]
+                                # 非 Gemini 或未提供 list_models 时，默认均可对话
+                                for item in models_with_caps:
+                                    if 'is_callable' not in item:
+                                        item['is_callable'] = True
                                 return jsonify({
                                     'models': models_with_caps,
                                     'total': len(models_with_caps)
                                 })
-                            else:
-                                # 返回字符串数组（向后兼容）
-                                return jsonify({
-                                    'models': model_list,
-                                    'total': len(model_list)
-                                })
+                            return jsonify({
+                                'models': model_list,
+                                'total': len(model_list)
+                            })
                     except Exception as e:
                         print(f"[LLM Models] provider.models() failed: {e}, falling back to REST API")
             except Exception as e:
@@ -437,21 +472,20 @@ def get_models():
                 print(f"[LLM Models] Successfully fetched {len(model_names)} Ollama models")
                 
                 if include_capabilities:
-                    # 返回包含能力的对象数组
                     models_with_caps = [
                         build_model_with_capabilities(model_id, provider)
                         for model_id in model_names
                     ]
+                    for item in models_with_caps:
+                        item.setdefault('is_callable', True)
                     return jsonify({
                         'models': models_with_caps,
                         'total': len(models_with_caps)
                     })
-                else:
-                    return jsonify({
-                        'models': model_names,
-                        'total': len(model_names)
-                    })
-            
+                return jsonify({
+                    'models': model_names,
+                    'total': len(model_names)
+                })
             return jsonify({'error': 'Ollama 服务器返回的数据格式不正确'}), 500
         
         # 根据 provider 类型选择 REST API 端点
@@ -478,37 +512,40 @@ def get_models():
                 return jsonify({'error': f'获取模型列表失败: {response.status_code} {response.reason}'}), response.status_code
             
             data = response.json()
-            # Gemini 格式：{ models: [{ name: "models/gemini-2.0-flash-exp", ... }] }
+            # Gemini 格式：{ models: [{ name: "models/gemini-2.0-flash-exp", supportedGenerationMethods: [...] }] }
             if isinstance(data, dict) and isinstance(data.get('models'), list):
-                model_names = [model.get('name') for model in data['models'] if model.get('name')]
-                # 提取模型 ID
                 model_ids = []
-                for name in model_names:
-                    if name and isinstance(name, str) and name.strip():
-                        if '/' in name:
-                            model_ids.append(name.split('/')[-1])
-                        else:
-                            model_ids.append(name)
-                # 过滤无效模型
-                model_ids = [mid for mid in model_ids if mid and isinstance(mid, str) and mid.strip()]
+                callable_info = {}  # model_id -> (is_callable, supported_generation_methods)
+                for model in data['models']:
+                    name = model.get('name')
+                    if not name or not isinstance(name, str) or not name.strip():
+                        continue
+                    model_id = name.split('/')[-1] if '/' in name else name
+                    if not model_id or not model_id.strip():
+                        continue
+                    model_ids.append(model_id)
+                    methods = model.get('supportedGenerationMethods') or model.get('supported_generation_methods') or []
+                    if isinstance(methods, str):
+                        methods = [methods]
+                    callable_info[model_id] = ('generateContent' in methods, list(methods))
                 print(f"[LLM Models] Successfully fetched {len(model_ids)} Gemini models")
-                
                 if include_capabilities:
-                    # 返回包含能力的对象数组
-                    models_with_caps = [
-                        build_model_with_capabilities(model_id, provider)
-                        for model_id in model_ids
-                    ]
+                    models_with_caps = []
+                    for model_id in model_ids:
+                        item = build_model_with_capabilities(model_id, provider)
+                        is_callable, methods = callable_info.get(model_id, (True, []))
+                        item['is_callable'] = is_callable
+                        if methods is not None:
+                            item['supported_generation_methods'] = methods
+                        models_with_caps.append(item)
                     return jsonify({
                         'models': models_with_caps,
                         'total': len(models_with_caps)
                     })
-                else:
-                    return jsonify({
-                        'models': model_ids,
-                        'total': len(model_ids)
-                    })
-            
+                return jsonify({
+                    'models': model_ids,
+                    'total': len(model_ids)
+                })
             return jsonify({'error': 'Gemini 服务器返回的数据格式不正确'}), 500
         
         elif provider in ['anthropic', 'claude']:
@@ -541,26 +578,23 @@ def get_models():
             # Anthropic 格式：{ data: [{ id: "...", ... }] }
             if isinstance(data, dict) and isinstance(data.get('data'), list):
                 model_ids = [model.get('id') for model in data['data'] if model.get('id')]
-                # 过滤无效模型
                 model_ids = [mid for mid in model_ids if mid and isinstance(mid, str) and mid.strip()]
                 print(f"[LLM Models] Successfully fetched {len(model_ids)} Anthropic models")
-                
                 if include_capabilities:
-                    # 返回包含能力的对象数组
                     models_with_caps = [
                         build_model_with_capabilities(model_id, provider)
                         for model_id in model_ids
                     ]
+                    for item in models_with_caps:
+                        item.setdefault('is_callable', True)
                     return jsonify({
                         'models': models_with_caps,
                         'total': len(models_with_caps)
                     })
-                else:
-                    return jsonify({
-                        'models': model_ids,
-                        'total': len(model_ids)
-                    })
-            
+                return jsonify({
+                    'models': model_ids,
+                    'total': len(model_ids)
+                })
             return jsonify({'error': 'Anthropic 服务器返回的数据格式不正确'}), 500
         
         else:
@@ -610,48 +644,43 @@ def get_models():
             # OpenAI 兼容格式：{ object: "list", data: [{ id: "...", ... }] }
             if isinstance(data, dict) and data.get('object') == 'list' and isinstance(data.get('data'), list):
                 model_ids = [model.get('id') for model in data['data'] if model.get('id')]
-                # 过滤无效模型（空字符串、None、只包含空白字符的）
                 model_ids = [mid for mid in model_ids if mid and isinstance(mid, str) and mid.strip()]
                 print(f"[LLM Models] Successfully fetched {len(model_ids)} models (filtered from {len(data['data'])} total)")
-                
                 if include_capabilities:
-                    # 返回包含能力的对象数组
                     models_with_caps = [
                         build_model_with_capabilities(model_id, provider)
                         for model_id in model_ids
                     ]
+                    for item in models_with_caps:
+                        item.setdefault('is_callable', True)
                     return jsonify({
                         'models': models_with_caps,
                         'total': len(models_with_caps)
                     })
-                else:
-                    return jsonify({
-                        'models': model_ids,
-                        'total': len(model_ids)
-                    })
+                return jsonify({
+                    'models': model_ids,
+                    'total': len(model_ids)
+                })
             
-            # 兼容其他格式：直接是数组
             if isinstance(data, list):
                 model_ids = [item.get('id') if isinstance(item, dict) else item for item in data if item]
-                # 过滤无效模型
                 model_ids = [mid for mid in model_ids if mid and isinstance(mid, str) and mid.strip()]
                 print(f"[LLM Models] Successfully fetched {len(model_ids)} models (array format, filtered from {len(data)} total)")
-                
                 if include_capabilities:
-                    # 返回包含能力的对象数组
                     models_with_caps = [
                         build_model_with_capabilities(model_id, provider)
                         for model_id in model_ids
                     ]
+                    for item in models_with_caps:
+                        item.setdefault('is_callable', True)
                     return jsonify({
                         'models': models_with_caps,
                         'total': len(models_with_caps)
                     })
-                else:
-                    return jsonify({
-                        'models': model_ids,
-                        'total': len(model_ids)
-                    })
+                return jsonify({
+                    'models': model_ids,
+                    'total': len(model_ids)
+                })
             
             return jsonify({'error': '服务器返回的数据格式不正确'}), 500
         
@@ -1389,8 +1418,8 @@ def delete_provider(provider_id):
             conn.close()
             return jsonify({'error': 'Provider not found'}), 404
         
-        # 检查是否有配置使用此供应商（系统供应商和自定义供应商都需要检查）
-        cursor.execute("SELECT COUNT(*) FROM llm_configs WHERE provider_id = %s", (provider_id,))
+        # 检查是否有配置使用此供应商（按 supplier 列归属）
+        cursor.execute("SELECT COUNT(*) FROM llm_configs WHERE supplier = %s", (provider_id,))
         config_count = cursor.fetchone()[0]
         if config_count > 0:
             cursor.close()

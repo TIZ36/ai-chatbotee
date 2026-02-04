@@ -249,8 +249,8 @@ coverage/
 *.tar.gz
 *.rar
 
-# 锁文件（可选，根据团队偏好决定是否提交）
-# package-lock.json
+# 锁文件（前端使用 pnpm，提交 pnpm-lock.yaml；忽略 npm 锁文件避免混用）
+front/package-lock.json
 # yarn.lock
 # pnpm-lock.yaml
 

@@ -9,6 +9,10 @@ export interface RoleVersion {
   created_at?: string;
   updated_at?: string;
   metadata?: any;
+  /** 人设名称（快照） */
+  name?: string | null;
+  /** 人设内容预览（前 300 字） */
+  system_prompt_preview?: string | null;
 }
 
 export async function listRoleVersions(roleId: string): Promise<RoleVersion[]> {
@@ -108,6 +112,24 @@ export async function applyRoleToSession(params: {
   return await resp.json();
 }
 
+/** 人设预设（昵称 + 系统提示词，用于列表与聊天切换） */
+export interface PersonaPreset {
+  id: string;
+  nickname: string;
+  system_prompt: string;
+}
+
+/** 音色预设（昵称 + TTS 配置，用于列表与聊天切换） */
+export interface VoicePreset {
+  id: string;
+  nickname: string;
+  provider: string;
+  voiceId: string;
+  voiceName: string;
+  language?: string;
+  speed?: number;
+}
+
 export async function updateRoleProfile(
   roleId: string,
   updates: {
@@ -119,13 +141,17 @@ export async function updateRoleProfile(
     title?: string | null;
     reason?: string;
     persona?: any; // Persona 高级配置
+    /** 直接更新 ext（与 persona 合并：若同时传 persona 则 ext.persona 以 persona 为准） */
+    ext?: Record<string, any>;
   },
 ): Promise<{ success: boolean; role_id: string; current_role_version_id?: string; message?: string }> {
   const bodyData: any = { ...updates };
-  // 将 persona 移到 ext 字段
-  if (updates.persona) {
-    bodyData.ext = { persona: updates.persona };
+  if (updates.persona != null || updates.ext != null) {
+    bodyData.ext = { ...(updates.ext || {}), ...(updates.persona != null ? { persona: updates.persona } : {}) };
     delete bodyData.persona;
+  }
+  if (updates.ext != null && updates.persona == null) {
+    bodyData.ext = updates.ext;
   }
   const resp = await fetch(`${API_BASE}/agents/${encodeURIComponent(roleId)}/profile`, {
     method: 'PUT',

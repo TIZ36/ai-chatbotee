@@ -49,10 +49,13 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       title="设置"
       description="管理应用配置和偏好设置"
       icon={Settings}
+      variant="persona"
     >
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-w-4xl">
-        {/* 主题设置 */}
-        <Card title="主题">
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--text-primary)]">通用</h2>
+        <div className="flex flex-col gap-4">
+          {/* 主题设置 */}
+          <Card title="主题" variant="persona" size="relaxed">
           <div className="space-y-3">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-[#e0e0e0] mb-1.5">
@@ -74,8 +77,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </div>
         </Card>
 
-        {/* 后端服务器地址配置 */}
-        <Card title="后端服务器">
+          {/* 后端服务器地址配置 */}
+          <Card title="后端服务器" variant="persona" size="relaxed">
           <div className="space-y-3">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-[#e0e0e0] mb-1.5">
@@ -101,7 +104,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </Button>
           </div>
         </Card>
-      </div>
+        </div>
+      </section>
     </PageLayout>
   );
 };

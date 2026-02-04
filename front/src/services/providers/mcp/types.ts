@@ -138,7 +138,7 @@ export interface HealthConfig {
  */
 export const DEFAULT_HEALTH_CONFIG: HealthConfig = {
   enabled: true,
-  interval: 30000,              // 30 秒
+  interval: 60000,              // 60 秒（降低请求频率，避免对 MCP 服务造成压力）
   timeout: 5000,                // 5 秒
   unhealthyThreshold: 3,
   healthyThreshold: 2,
@@ -178,7 +178,7 @@ export const DEFAULT_CLIENT_OPTIONS: Partial<MCPClientOptions> = {
   connectTimeout: 10000,
   requestTimeout: 60000,
   autoReconnect: true,
-  reconnectDelay: 1000,
+  reconnectDelay: 5000,  // 5 秒，避免连接失败时每秒重试打满 MCP 服务
   maxReconnectAttempts: 5,
 };
 

@@ -25,6 +25,10 @@ interface PageLayoutProps {
   fullWidth?: boolean;
   /** 是否使用紧凑模式（减少内边距） */
   compact?: boolean;
+  /** 布局风格：default=原样，persona=与 Persona 管理一致的列状排列（头部+居中滚动区） */
+  variant?: 'default' | 'persona';
+  /** variant=persona 时是否将内容约束在 max-w-3xl 居中；false 时仅应用头部与背景，不约束内容宽度 */
+  personaConstrainContent?: boolean;
 }
 
 const PageLayout: React.FC<PageLayoutProps> = ({
@@ -37,44 +41,71 @@ const PageLayout: React.FC<PageLayoutProps> = ({
   contentClassName = '',
   fullWidth = false,
   compact = false,
+  variant = 'default',
+  personaConstrainContent = true,
 }) => {
+  const isPersona = variant === 'persona';
+  const constrainContent = isPersona && personaConstrainContent;
+
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      {/* 主容器 - 毛玻璃效果 */}
+    <div className={`
+      h-full flex flex-col overflow-hidden
+      ${isPersona ? 'bg-gray-50 dark:bg-[#1a1a1a] [data-skin="niho"]:bg-[#000000]' : ''}
+    `}>
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* 页面头部 - 毛玻璃效果 */}
         {showHeader && (
-          <div className="flex-shrink-0 px-3 py-2 glass-header">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                {Icon && (
-                  <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-[var(--color-accent)]/10 dark:bg-[var(--color-accent)]/20">
-                    <Icon className="w-4 h-4 text-[var(--color-accent)]" strokeWidth={1.5} />
-                  </div>
-                )}
-                <div>
-                  <h1 className="text-sm font-semibold text-gray-900 dark:text-white">{title}</h1>
-                  {description && typeof description === 'string' && description.trim() && description !== '0' && (
-                    <p className="text-[10px] text-gray-500 dark:text-[#808080] mt-0.5">{description}</p>
-                  )}
-                </div>
-              </div>
-              {headerActions && (
-                <div className="flex items-center space-x-1.5">
-                  {headerActions}
+          <div className={`
+            flex-shrink-0 flex items-center justify-between
+            ${isPersona
+              ? 'agents-page-header px-6 py-4 border-b border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] [data-skin="niho"]:bg-[#000000] [data-skin="niho"]:border-[var(--niho-text-border)]'
+              : 'px-3 py-2 glass-header'
+            }
+          `}>
+            <div className="flex items-center space-x-3">
+              {Icon && (
+                <div className={`
+                  rounded-lg flex items-center justify-center flex-shrink-0
+                  ${isPersona
+                    ? 'w-8 h-8 bg-primary-100 dark:bg-primary-900/30 [data-skin="niho"]:bg-[var(--niho-deep-purple-bg)] [data-skin="niho"]:border [data-skin="niho"]:border-[var(--color-accent-bg)]'
+                    : 'w-7 h-7 bg-[var(--color-accent)]/10 dark:bg-[var(--color-accent)]/20'
+                  }
+                `}>
+                  <Icon className={`${isPersona ? 'w-5 h-5 text-primary-600 dark:text-primary-400 [data-skin="niho"]:text-[var(--color-accent)]' : 'w-4 h-4 text-[var(--color-accent)]'}`} strokeWidth={1.5} />
                 </div>
               )}
+              <div>
+                <h1 className={`
+                  font-bold text-gray-900 dark:text-white [data-skin="niho"]:text-[var(--text-primary)]
+                  ${isPersona ? 'text-xl agents-page-title' : 'text-sm font-semibold'}
+                `}>
+                  {title}
+                </h1>
+                {description && typeof description === 'string' && description.trim() && description !== '0' && (
+                  <p className={`text-gray-500 dark:text-[#858585] [data-skin="niho"]:text-[var(--niho-skyblue-gray)] mt-0.5 ${isPersona ? 'text-xs' : 'text-[10px]'}`}>{description}</p>
+                )}
+              </div>
             </div>
+            {headerActions && (
+              <div className="flex items-center space-x-1.5">
+                {headerActions}
+              </div>
+            )}
           </div>
         )}
 
-        {/* 内容区域 - 带滚动 */}
         <div className={`
           flex-1 overflow-auto
-          ${fullWidth ? '' : compact ? 'p-2' : 'p-3'}
+          ${isPersona ? 'agents-page-list p-6 no-scrollbar' : ''}
+          ${!isPersona && (fullWidth ? '' : compact ? 'p-2' : 'p-3')}
           ${contentClassName}
         `}>
-          {children}
+          {constrainContent ? (
+            <div className="max-w-3xl mx-auto space-y-8">
+              {children}
+            </div>
+          ) : (
+            children
+          )}
         </div>
       </div>
     </div>
@@ -83,6 +114,7 @@ const PageLayout: React.FC<PageLayoutProps> = ({
 
 /**
  * 卡片组件 - 用于内容分组 (带立体阴影)
+ * variant=persona 时与 Persona 管理页卡片风格一致
  */
 interface CardProps {
   title?: string;
@@ -95,6 +127,8 @@ interface CardProps {
   headerAction?: React.ReactNode;
   /** 卡片大小: 默认(default)、紧凑(compact)、宽松(relaxed) */
   size?: 'compact' | 'default' | 'relaxed';
+  /** 风格：default=毛玻璃卡片，persona=与 Persona 管理一致的圆角边框卡片 */
+  variant?: 'default' | 'persona';
 }
 
 export const Card: React.FC<CardProps> = ({
@@ -105,6 +139,7 @@ export const Card: React.FC<CardProps> = ({
   noPadding = false,
   headerAction,
   size = 'default',
+  variant = 'default',
 }) => {
   const paddingClass = {
     compact: 'p-2',
@@ -112,22 +147,36 @@ export const Card: React.FC<CardProps> = ({
     relaxed: 'p-4',
   }[size];
 
+  const isPersona = variant === 'persona';
+  const cardClass = isPersona
+    ? 'rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] [data-skin="niho"]:bg-[#000000] [data-skin="niho"]:border-[var(--niho-text-border)]'
+    : 'glass-card';
+  const headerBorderClass = isPersona
+    ? 'border-b border-gray-200 dark:border-[#404040] [data-skin="niho"]:border-[var(--niho-text-border)]'
+    : 'border-b border-gray-200/30 dark:border-white/5';
+  const titleClass = isPersona
+    ? 'text-sm font-medium text-gray-900 dark:text-white [data-skin="niho"]:text-[var(--text-primary)]'
+    : 'text-xs font-semibold text-gray-900 dark:text-white';
+  const descClass = isPersona
+    ? 'text-xs text-gray-500 dark:text-[#858585] [data-skin="niho"]:text-[var(--niho-skyblue-gray)] mt-0.5'
+    : 'text-[10px] text-gray-500 dark:text-[#808080] mt-0.5';
+
   return (
-    <div className={`glass-card ${className}`}>
+    <div className={`${cardClass} ${className}`}>
       {(title || headerAction) && (
-        <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200/30 dark:border-white/5">
+        <div className={`flex items-center justify-between px-3 py-2 ${headerBorderClass} ${isPersona ? 'px-4 pt-4 pb-3' : ''}`}>
           <div>
             {title && (
-              <h3 className="text-xs font-semibold text-gray-900 dark:text-white">{title}</h3>
+              <h3 className={titleClass}>{title}</h3>
             )}
             {description && typeof description === 'string' && description.trim() && description !== '0' && (
-              <p className="text-[10px] text-gray-500 dark:text-[#808080] mt-0.5">{description}</p>
+              <p className={descClass}>{description}</p>
             )}
           </div>
           {headerAction}
         </div>
       )}
-      <div className={noPadding ? '' : paddingClass}>
+      <div className={noPadding ? '' : `${paddingClass} ${isPersona ? 'px-4 pb-4' : ''}`}>
         {children}
       </div>
     </div>

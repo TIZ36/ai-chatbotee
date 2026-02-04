@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Edit2, Save, X, Server, AlertCircle, CheckCircle, Wrench, ExternalLink, Plug, RefreshCcw, Smartphone } from 'lucide-react';
+import { Plus, Trash2, Edit2, Save, X, Server, AlertCircle, Check, CheckCircle, Wrench, ExternalLink, Plug, RefreshCcw, Smartphone } from 'lucide-react';
 import QRCode from 'qrcode';
 import PageLayout, { Card, Section, Alert, EmptyState } from './ui/PageLayout';
 import { Button } from './ui/Button';
@@ -985,22 +985,18 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
   };
 
   return (
-    <div className="flex flex-col h-full mcp-config-container">
-      {/* 头部 */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-[#2d2d2d] mcp-header">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <Plug className="w-5 h-5 text-blue-600 mcp-header-icon" />
-            <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100 mcp-text-primary">MCP 管理</h1>
-          </div>
-        </div>
-
+    <PageLayout
+      title="MCP 录入"
+      description="添加与管理 MCP 服务器，支持 HTTP-Stream 与 Notion"
+      icon={Plug}
+      variant="persona"
+      headerActions={
         <div className="flex items-center gap-3">
           <Button
             variant="secondary"
             size="sm"
             onClick={() => setShowMarketModal(true)}
-            className="flex items-center gap-2 border-gray-300 dark:border-gray-600"
+            className="flex items-center gap-2 [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-transparent [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:hover:border-[var(--color-accent-bg)] [data-skin='niho']:hover:text-[var(--color-accent)]"
           >
             <Plug className="w-4 h-4" />
             <span>市场</span>
@@ -1018,12 +1014,11 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
             <span>新增自定义</span>
           </Button>
         </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-6">
-        <div className="space-y-4">
-          <div
-            className="p-4 bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-gray-800 rounded-xl hover:border-blue-400 transition-all cursor-pointer flex items-center justify-between shadow-sm mcp-notion-card"
+      }
+    >
+      <section className="space-y-4">
+        <div
+          className="rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] p-4 [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] hover:border-blue-400 transition-all cursor-pointer flex items-center justify-between mcp-notion-card"
             onClick={() => {
               // 需求：始终可点，点击后先进入工作区注册/选择
               cancelEdit();
@@ -1045,10 +1040,10 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
             <div className="text-xs font-medium text-blue-600 mcp-notion-card-action">点击录入</div>
           </div>
 
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mcp-text-secondary">服务器 ({servers.length})</h2>
-          </div>
-            
+        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--text-primary)] flex items-center gap-2">
+          <Server className="w-4 h-4 [data-skin='niho']:text-[var(--color-accent)]" />
+          服务器 ({servers.length})
+        </h2>
             {loading ? (
               <div className="flex flex-col items-center justify-center py-20">
                 <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mb-4 mcp-loading-spinner" />
@@ -1061,7 +1056,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                 <Button variant="link" onClick={() => setShowMarketModal(true)} className="mt-2 mcp-text-accent">去市场看看</Button>
               </div>
             ) : (
-              <div className="bg-white dark:bg-[#2d2d2d] border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden shadow-sm mcp-server-table">
+              <div className="rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] overflow-hidden [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] mcp-server-table">
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-800">
@@ -1140,8 +1135,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                 </table>
               </div>
             )}
-        </div>
-      </div>
+      </section>
 
       {/* 新增/编辑自定义服务器弹框 */}
       <Dialog
@@ -1263,20 +1257,27 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                 </div>
 
                 <div className="mt-auto pt-8 flex items-center justify-between border-t border-gray-50 dark:border-gray-800">
-                  <div className="flex gap-2">
+                  <div className="flex items-center gap-2">
                     <Button 
                       variant="secondary" 
                       size="sm" 
                       onClick={() => handleTestConnection(selectedServerForDetail)}
                       disabled={testingServers.has(selectedServerForDetail.id)}
                     >
-                      <RefreshCcw className={`w-4 h-4 mr-2 ${testingServers.has(selectedServerForDetail.id) ? 'animate-spin' : ''}`} />
-                      测试连接
+                      连接
                     </Button>
+                    {testResults.get(selectedServerForDetail.id)?.success && (
+                      <span className="text-xs font-medium flex items-center gap-1.5 text-amber-600 dark:text-amber-400 [data-skin='niho']:text-[var(--color-highlight)]">
+                        <Check className="w-3.5 h-3.5 [data-skin='niho']:text-[var(--color-highlight)]" />
+                        连接成功
+                      </span>
+                    )}
                   </div>
                   <Button 
-                    variant="primary" 
+                    variant={testResults.get(selectedServerForDetail.id)?.connected ? 'primary' : 'secondary'}
                     size="sm"
+                    disabled={!testResults.get(selectedServerForDetail.id)?.connected}
+                    className={!testResults.get(selectedServerForDetail.id)?.connected ? 'opacity-60 cursor-not-allowed' : ''}
                     onClick={() => {
                       setShowToolsInDetail(true);
                       handleFetchTools(selectedServerForDetail);
@@ -1671,7 +1672,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
           await handleDeleteServer(id);
         }}
       />
-    </div>
+    </PageLayout>
   );
 };
 

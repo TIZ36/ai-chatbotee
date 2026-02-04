@@ -3785,7 +3785,7 @@ def list_llm_configs():
                 return jsonify({'configs': [], 'total': 0, 'warning': 'Table llm_configs does not exist'})
             
             cursor.execute("""
-                SELECT config_id, name, shortname, provider, api_url, model, tags, enabled, 
+                SELECT config_id, name, shortname, provider, supplier, api_url, model, tags, enabled, 
                        description, metadata, created_at, updated_at,
                        (CASE WHEN api_key IS NOT NULL AND LENGTH(TRIM(IFNULL(api_key, ''))) > 0 THEN 1 ELSE 0 END) AS has_api_key
                 FROM llm_configs
@@ -3819,6 +3819,8 @@ def list_llm_configs():
                     config['updated_at'] = config['updated_at'].isoformat() if hasattr(config['updated_at'], 'isoformat') else str(config['updated_at'])
                 # 不返回API密钥（列表中已用 has_api_key 表示）
                 config.pop('api_key', None)
+                # supplier = Token/计费归属，前端按此分组
+                config['supplier'] = config.get('supplier') or config.get('provider')
                 # 添加模型的最大 token 限制
                 model_name = config.get('model', 'gpt-4')
                 config['max_tokens'] = get_model_max_tokens(model_name)
@@ -3858,14 +3860,14 @@ def create_llm_config():
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO llm_configs 
-            (config_id, name, shortname, provider, subprovider, api_key, api_url, model, tags, enabled, description, metadata)
+            (config_id, name, shortname, provider, supplier, api_key, api_url, model, tags, enabled, description, metadata)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             config_id,
             name,
             data.get('shortname'),
             provider,
-            data.get('subprovider'),  # 子供应商名称（如 nvidia）
+            data.get('supplier') or provider,
             data.get('api_key'),
             data.get('api_url'),
             data.get('model'),
@@ -3896,7 +3898,7 @@ def get_llm_config(config_id):
         
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT config_id, name, shortname, provider, api_url, model, tags, enabled, 
+            SELECT config_id, name, shortname, provider, supplier, api_url, model, tags, enabled, 
                    description, metadata, created_at, updated_at
             FROM llm_configs
             WHERE config_id = %s
@@ -3921,6 +3923,7 @@ def get_llm_config(config_id):
             except:
                 config['metadata'] = {}
         
+        config['supplier'] = config.get('supplier') or config.get('provider')
         # 添加模型的最大 token 限制
         model_name = config.get('model', 'gpt-4')
         from token_counter import get_model_max_tokens
@@ -3981,6 +3984,9 @@ def update_llm_config(config_id):
         if 'provider' in data:
             updates.append('provider = %s')
             values.append(data['provider'])
+        if 'supplier' in data:
+            updates.append('supplier = %s')
+            values.append(data['supplier'])
         if 'api_key' in data:
             updates.append('api_key = %s')
             values.append(data['api_key'])
@@ -4056,7 +4062,7 @@ def export_llm_config(config_id):
         
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         cursor.execute("""
-            SELECT config_id, name, shortname, provider, api_key, api_url, model, 
+            SELECT config_id, name, shortname, provider, supplier, api_key, api_url, model, 
                    tags, enabled, description, metadata, created_at
             FROM llm_configs WHERE config_id = %s
         """, (config_id,))
@@ -4073,7 +4079,7 @@ def export_llm_config(config_id):
             config['tags'] = json.loads(config['tags'])
         if config.get('metadata') and isinstance(config['metadata'], str):
             config['metadata'] = json.loads(config['metadata'])
-        
+        supplier = config.get('supplier') or config.get('provider')
         export_data = {
             'version': '1.0',
             'export_type': 'llm_config',
@@ -4081,6 +4087,7 @@ def export_llm_config(config_id):
             'llm_config': {
                 'name': config['name'],
                 'provider': config['provider'],
+                'supplier': supplier,
                 'api_key': config['api_key'],
                 'api_url': config['api_url'],
                 'model': config['model'],
@@ -4113,7 +4120,7 @@ def export_all_llm_configs():
         
         cursor = conn.cursor(pymysql.cursors.DictCursor)
         cursor.execute("""
-            SELECT config_id, name, shortname, provider, api_key, api_url, model, 
+            SELECT config_id, name, shortname, provider, supplier, api_key, api_url, model, 
                    tags, enabled, description, metadata, created_at
             FROM llm_configs ORDER BY created_at DESC
         """)
@@ -4129,10 +4136,11 @@ def export_all_llm_configs():
                 config['tags'] = json.loads(config['tags'])
             if config.get('metadata') and isinstance(config['metadata'], str):
                 config['metadata'] = json.loads(config['metadata'])
-            
+            supplier = config.get('supplier') or config.get('provider')
             config_list.append({
                 'name': config['name'],
                 'provider': config['provider'],
+                'supplier': supplier,
                 'api_key': config['api_key'],
                 'api_url': config['api_url'],
                 'model': config['model'],
@@ -4220,13 +4228,14 @@ def import_llm_configs():
             
             cursor.execute("""
                 INSERT INTO llm_configs 
-                (config_id, name, shortname, provider, api_key, api_url, model, tags, enabled, description, metadata)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                (config_id, name, shortname, provider, supplier, api_key, api_url, model, tags, enabled, description, metadata)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 new_config_id,
                 config_name,
                 config.get('shortname'),
                 config.get('provider'),
+                config.get('supplier') or config.get('provider'),
                 config.get('api_key'),
                 config.get('api_url'),
                 config.get('model'),
@@ -4954,14 +4963,20 @@ def list_sessions():
 
 @app.route('/api/sessions', methods=['POST', 'OPTIONS'])
 def create_session():
-    """创建新 Topic"""
+    """创建新 Topic。系统仅支持单一 Agent Chaya，不可通过此接口创建智能体。"""
     if request.method == 'OPTIONS':
         return handle_cors_preflight()
     
     try:
         from services.topic_service import get_topic_service
-        data = request.json
-        owner_id = get_client_ip() # 暂时用 IP 作为 User ID
+        data = request.get_json() or {}
+        # 系统仅支持 Chaya 一个智能体，不开放创建其他智能体
+        if data.get('session_type') == 'agent':
+            return jsonify({
+                'error': '系统仅支持 Chaya 一个智能体',
+                'message': '请直接与 Chaya 对话，或在设置中切换人设、更换模型。'
+            }), 400
+        owner_id = get_client_ip()  # 暂时用 IP 作为 User ID
         
         # 使用 TopicService 创建
         topic = get_topic_service().create_topic(data, owner_id, creator_ip=owner_id)
@@ -6922,7 +6937,7 @@ def update_session_system_prompt(session_id):
         if not conn:
             return jsonify({'error': 'MySQL not available'}), 503
         
-        data = request.json
+        data = request.get_json() or {}
         system_prompt = data.get('system_prompt')  # 系统提示词文本
         
         cursor = None
@@ -6953,6 +6968,13 @@ def update_session_system_prompt(session_id):
                     _create_role_version(conn, session_id, {'reason': 'system_prompt_update'})
                 except Exception as e:
                     print(f"[RoleVersion] Failed to create version on system prompt update: {e}")
+            
+            # 通知 Actor 池重载该会话的配置，使运行中/池中的 Actor 使用新人设
+            try:
+                from services.actor import ActorManager
+                ActorManager.get_instance().reload_actor_config(session_id)
+            except Exception as e:
+                print(f"[Session API] Failed to reload actor config for session {session_id}: {e}")
             
             return jsonify({
                 'session_id': session_id,
@@ -7176,118 +7198,15 @@ def apply_role_to_session(session_id):
 
 @app.route('/api/sessions/<session_id>/upgrade-to-agent', methods=['PUT', 'OPTIONS'])
 def upgrade_to_agent(session_id):
-    """升级记忆体为智能体"""
+    """升级记忆体为智能体。系统仅支持单一 Agent Chaya，此接口仅提示用户使用人设/模型设置。"""
     if request.method == 'OPTIONS':
         return handle_cors_preflight()
     
-    try:
-        from database import get_mysql_connection
-        conn = get_mysql_connection()
-        if not conn:
-            return jsonify({'error': 'MySQL not available'}), 503
-        
-        data = request.json
-        name = data.get('name', '').strip()
-        avatar = data.get('avatar', '').strip()
-        system_prompt = data.get('system_prompt', '').strip()
-        llm_config_id = data.get('llm_config_id', '').strip()
-        
-        # 验证必填字段
-        if not name:
-            return jsonify({'error': '智能体名称是必填的'}), 400
-        if not avatar:
-            return jsonify({'error': '智能体头像是必填的'}), 400
-        if not system_prompt:
-            return jsonify({'error': '智能体人设是必填的'}), 400
-        if not llm_config_id:
-            return jsonify({'error': 'LLM模型是必填的'}), 400
-        
-        cursor = None
-        try:
-            cursor = conn.cursor(pymysql.cursors.DictCursor)
-            
-            # 检查会话是否存在且是记忆体
-            cursor.execute("""
-                SELECT session_id, session_type 
-                FROM sessions 
-                WHERE session_id = %s
-            """, (session_id,))
-            session = cursor.fetchone()
-            
-            if not session:
-                return jsonify({'error': 'Session not found'}), 404
-            
-            if session.get('session_type') != 'memory':
-                return jsonify({'error': '只能将记忆体升级为智能体'}), 400
-            
-            # 升级为智能体（关联固定的LLM模型）
-            # 记录创建者IP（如果还没有记录）
-            creator_ip = get_client_ip()
-            cursor.execute("""
-                UPDATE sessions 
-                SET session_type = 'agent',
-                    name = %s,
-                    avatar = %s,
-                    system_prompt = %s,
-                    llm_config_id = %s,
-                    creator_ip = COALESCE(creator_ip, %s),
-                    updated_at = NOW()
-                WHERE session_id = %s
-            """, (name, avatar, system_prompt, llm_config_id, creator_ip, session_id))
-            conn.commit()
-
-            # 为该角色创建初始版本（如果不存在）
-            try:
-                current_version_id = _ensure_role_current_version(conn, session_id)
-            except Exception as e:
-                current_version_id = None
-                print(f"[RoleVersion] Failed to bootstrap role version for agent {session_id}: {e}")
-            
-            # 获取更新后的会话信息
-            cursor.execute("""
-                SELECT session_id, title, name, llm_config_id, avatar, system_prompt, ext, session_type, created_at, updated_at
-                FROM sessions
-                WHERE session_id = %s
-            """, (session_id,))
-            updated_session = cursor.fetchone()
-            
-            # 处理 ext 字段
-            ext_data = updated_session.get('ext')
-            if ext_data and isinstance(ext_data, str):
-                try:
-                    ext_data = json.loads(ext_data)
-                except:
-                    ext_data = {}
-            elif ext_data is None:
-                ext_data = {}
-
-            return jsonify({
-                'session_id': updated_session['session_id'],
-                'title': updated_session.get('title'),
-                'name': updated_session.get('name'),
-                'llm_config_id': updated_session.get('llm_config_id'),
-                'avatar': updated_session.get('avatar'),
-                'system_prompt': updated_session.get('system_prompt'),
-                'ext': ext_data,
-                'session_type': updated_session.get('session_type', 'agent'),
-                'current_role_version_id': current_version_id,
-                'created_at': updated_session.get('created_at').isoformat() if updated_session.get('created_at') else None,
-                'updated_at': updated_session.get('updated_at').isoformat() if updated_session.get('updated_at') else None,
-                'skill_packs': _get_session_skill_packs_list(cursor, session_id),
-                'message': 'Upgraded to agent successfully'
-            }), 200
-            
-        finally:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
-                
-    except Exception as e:
-        print(f"[Session API] Error upgrading to agent: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+    # 系统仅支持 Chaya 一个智能体，不开放创建其他智能体
+    return jsonify({
+        'error': '系统仅支持 Chaya 一个智能体',
+        'message': '请直接与 Chaya 对话，或在设置中切换人设、更换模型。'
+    }), 400
 
 @app.route('/api/agents', methods=['GET', 'OPTIONS'])
 def list_agents():
@@ -7305,9 +7224,8 @@ def list_agents():
         try:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
             
-            # 查询所有 agent（移除用户访问控制）
-            # 优化：使用子查询计算message_count，避免JOIN messages表导致性能问题
-            # 优化：列表查询不返回完整的system_prompt，减少数据传输量
+            # 系统仅支持单一 Agent Chaya，只返回 Chaya
+            CHAYA_ID = 'agent_chaya'
             try:
                 cursor.execute("""
                     SELECT 
@@ -7326,9 +7244,9 @@ def list_agents():
                         (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.session_id) as message_count
                     FROM sessions s
                     LEFT JOIN role_versions rv ON rv.role_id = s.session_id AND rv.is_current = 1
-                    WHERE s.session_type = 'agent'
+                    WHERE s.session_type = 'agent' AND s.session_id = %s
                     ORDER BY s.updated_at DESC, s.created_at DESC
-                """)
+                """, (CHAYA_ID,))
             except Exception as join_error:
                 print(f"[Agent API] Warning: role_versions join failed, fallback without versions: {join_error}")
                 cursor.execute("""
@@ -7347,9 +7265,9 @@ def list_agents():
                         s.last_message_at,
                         (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.session_id) as message_count
                     FROM sessions s
-                    WHERE s.session_type = 'agent'
+                    WHERE s.session_type = 'agent' AND s.session_id = %s
                     ORDER BY s.updated_at DESC, s.created_at DESC
-                """)
+                """, (CHAYA_ID,))
             
             agents = []
             rows = cursor.fetchall()
@@ -7743,7 +7661,7 @@ def list_role_versions(role_id):
 
             cursor.execute(
                 """
-                SELECT version_id, is_current, created_at, updated_at, metadata
+                SELECT version_id, is_current, created_at, updated_at, metadata, name, system_prompt
                 FROM role_versions
                 WHERE role_id = %s
                 ORDER BY created_at DESC
@@ -7759,12 +7677,15 @@ def list_role_versions(role_id):
                         meta = json.loads(meta)
                     except Exception:
                         meta = None
+                sp = row.get('system_prompt') or ''
                 versions.append({
                     'version_id': row.get('version_id'),
                     'is_current': bool(row.get('is_current')),
                     'created_at': row.get('created_at').isoformat() if row.get('created_at') else None,
                     'updated_at': row.get('updated_at').isoformat() if row.get('updated_at') else None,
                     'metadata': meta,
+                    'name': row.get('name'),
+                    'system_prompt_preview': sp[:300] + ('…' if len(sp) > 300 else '') if sp else '',
                 })
             return jsonify({'versions': versions})
         finally:

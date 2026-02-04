@@ -14,7 +14,8 @@ import { getLLMConfigs, getLLMConfig, getLLMConfigApiKey, LLMConfigFromDB, getPr
 import { mcpManager, MCPServer, MCPTool } from '../services/mcpClient';
 import { getMCPServers, MCPServerConfig } from '../services/mcpApi';
 import { getSessions, getAgents, getSession, createSession, saveMessage, summarizeSession, getSessionSummaries, deleteSession, clearSummarizeCache, deleteMessage, updateSessionAvatar, updateSessionName, updateSessionSystemPrompt, updateSessionMediaOutputPath, updateSessionLLMConfig, upgradeToAgent, updateSessionType, Session, Summary, MessageExt } from '../services/sessionApi';
-import { createRole } from '../services/roleApi';
+import { createRole, updateRoleProfile } from '../services/roleApi';
+import type { PersonaPreset, VoicePreset } from '../services/roleApi';
 import { createSkillPack, saveSkillPack, optimizeSkillPackSummary, getSkillPacks, getSessionSkillPacks, createSopSkillPack, setCurrentSop, getCurrentSop, SkillPack, SessionSkillPack, SkillPackCreationResult, SkillPackProcessInfo } from '../services/skillPackApi';
 import { getBackendUrl } from '../utils/backendUrl';
 import { estimate_messages_tokens, get_model_max_tokens, estimate_tokens } from '../services/tokenCounter';
@@ -86,8 +87,12 @@ import {
 import { TopicConfigDialog, TopicDisplayType } from './workflow/dialogs/TopicConfigDialog';
 import { getParticipants, addParticipant as addSessionParticipant, removeParticipant as removeSessionParticipant, Participant, updateSession } from '../services/sessionApi';
 import AgentPersonaDialog from './AgentPersonaDialog';
+import { ProviderIcon } from './ui/ProviderIcon';
+import { CapabilityIcons } from './ui/CapabilityIcons';
+import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from './ui/Select';
+import { defaultPersonaConfig } from './AgentPersonaConfig';
 
-// 提供商图标映射 - 用于在输入框显示模型提供商 logo
+// 支持的厂商类型（用于 ProviderIcon，未支持时回退 emoji）
 const PROVIDER_ICONS: Record<string, { icon: string; color: string }> = {
   openai: { icon: '🤖', color: '#10A37F' },
   anthropic: { icon: '🧠', color: '#D4A574' },
@@ -99,66 +104,14 @@ const PROVIDER_ICONS: Record<string, { icon: string; color: string }> = {
   custom: { icon: '⚙️', color: '#8B5CF6' },
 };
 
-// 根据 LLM 配置获取提供商图标（优先使用供应商的 logo，其次使用自定义上传的 logo）
-const getProviderIcon = (config: LLMConfigFromDB | null, providers: LLMProvider[] = []): { 
-  icon: string; 
-  color: string; 
-  customLogo?: string;
-  logoLight?: string;
-  logoDark?: string;
-  logoPosition?: { x: number; y: number };
-  logoScale?: number;
-} => {
+// 根据 LLM 配置获取提供商图标（统一用 ProviderIcon / emoji，不再使用自定义 logo 图片）
+const getProviderIcon = (config: LLMConfigFromDB | null, _providers: LLMProvider[] = []): { icon: string; color: string } => {
   if (!config) return { icon: '🤖', color: '#6B7280' };
-  
-  // 确定用于匹配的供应商标识（优先使用 supplier，其次使用 provider）
-  const providerIdentifier = config.supplier || config.provider;
-  
-  // 1. 优先使用供应商的 logo（根据 supplier 或 provider_type 匹配）
-  const provider = providers.find(p => 
-    p.provider_type === providerIdentifier || 
-    p.provider_id === providerIdentifier ||
-    (config as any).provider_id === p.provider_id ||
-    // 也支持通过 supplier 匹配
-    (config.supplier && (p.provider_id === config.supplier || p.name?.toLowerCase() === config.supplier.toLowerCase()))
-  );
-  
-  if (provider && (provider.logo_light || provider.logo_dark)) {
-    return {
-      icon: '',
-      color: 'transparent',
-      logoLight: provider.logo_light,
-      logoDark: provider.logo_dark,
-    };
-  }
-  
-  // 2. 其次使用用户上传的自定义 logo
-  const customLogo = config.metadata?.providerLogo;
-  if (customLogo) {
-    return { 
-      icon: '', 
-      color: 'transparent', 
-      customLogo,
-      logoPosition: {
-        x: config.metadata?.logoPositionX ?? 50,
-        y: config.metadata?.logoPositionY ?? 50,
-      },
-      logoScale: config.metadata?.logoScale ?? 100,
-    };
-  }
-  
-  // 3. 最后使用默认 emoji 图标
-  // 检查 API URL 中是否包含特定提供商
   const apiUrl = config.api_url?.toLowerCase() || '';
   if (apiUrl.includes('deepseek')) return PROVIDER_ICONS.deepseek;
   if (apiUrl.includes('anthropic')) return PROVIDER_ICONS.anthropic;
   if (apiUrl.includes('googleapis') || apiUrl.includes('gemini')) return PROVIDER_ICONS.gemini;
-  if (apiUrl.includes('nvidia') || config.supplier?.toLowerCase() === 'nvidia') {
-    // NVIDIA 使用 OpenAI 兼容 API，但显示 NVIDIA 图标（如果有的话）
-    return PROVIDER_ICONS.openai; // 暂时使用 OpenAI 图标，后续可以添加 NVIDIA 专用图标
-  }
-  
-  // 然后检查 provider 字段（用于 SDK 兼容路由）
+  if (apiUrl.includes('nvidia') || config.supplier?.toLowerCase() === 'nvidia') return PROVIDER_ICONS.openai;
   const providerType = config.provider?.toLowerCase() || 'openai';
   return PROVIDER_ICONS[providerType] || PROVIDER_ICONS.openai;
 };
@@ -5922,6 +5875,94 @@ const Workflow: React.FC<WorkflowProps> = ({
                   <span>人设</span>
                 </button>
               )}
+
+              {/* Chaya 人设/音色预设切换 - 仅在与 Chaya 对话时显示 */}
+              {currentSessionId === 'agent_chaya' && (() => {
+                const currentSession = sessions.find(s => s.session_id === currentSessionId) || (currentSessionMeta?.session_id === currentSessionId ? currentSessionMeta : null);
+                const personaPresets: PersonaPreset[] = (currentSession?.ext as any)?.personaPresets ?? [];
+                const voicePresets: VoicePreset[] = (currentSession?.ext as any)?.voicePresets ?? [];
+                const currentPersonaId = (currentSession?.ext as any)?.currentPersonaId as string | undefined;
+                const currentVoiceId = (currentSession?.ext as any)?.currentVoiceId as string | undefined;
+                if (personaPresets.length === 0 && voicePresets.length === 0) return null;
+                return (
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    {personaPresets.length > 0 && (
+                      <Select
+                        value={currentPersonaId || personaPresets[0]?.id || ''}
+                        onValueChange={async (id) => {
+                          const preset = personaPresets.find(p => p.id === id);
+                          if (!preset || !currentSession) return;
+                          try {
+                            const ext = { ...(currentSession.ext || {}), currentPersonaId: preset.id };
+                            await updateRoleProfile('agent_chaya', { system_prompt: preset.system_prompt, ext });
+                            setCurrentSystemPrompt(preset.system_prompt);
+                            const fresh = await getSession('agent_chaya');
+                            setCurrentSessionMeta(fresh);
+                            emitSessionsChanged();
+                          } catch (e) {
+                            console.warn('[Workflow] Switch persona preset failed:', e);
+                            toast({ title: '切换人设失败', variant: 'destructive' });
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="h-6 text-[10px] px-1.5 min-w-0 max-w-[100px] [data-skin='niho']:bg-[var(--niho-pure-black-elevated)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)]">
+                          <SelectValue placeholder="人设" />
+                        </SelectTrigger>
+                        <SelectContent className="[data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
+                          {personaPresets.map(p => (
+                            <SelectItem key={p.id} value={p.id} className="text-xs [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)]">
+                              {p.nickname}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    {voicePresets.length > 0 && (
+                      <Select
+                        value={currentVoiceId || voicePresets[0]?.id || ''}
+                        onValueChange={async (id) => {
+                          const preset = voicePresets.find(v => v.id === id);
+                          if (!preset || !currentSession) return;
+                          try {
+                            const persona = (currentSession.ext as any)?.persona || { ...defaultPersonaConfig };
+                            const ext = { ...(currentSession.ext || {}), currentVoiceId: preset.id };
+                            const newPersona = {
+                              ...persona,
+                              voice: {
+                                ...persona.voice,
+                                enabled: true,
+                                provider: preset.provider as any,
+                                voiceId: preset.voiceId,
+                                voiceName: preset.voiceName,
+                                language: preset.language || 'zh-CN',
+                                speed: preset.speed ?? 1,
+                              },
+                            };
+                            await updateRoleProfile('agent_chaya', { persona: newPersona, ext });
+                            const fresh = await getSession('agent_chaya');
+                            setCurrentSessionMeta(fresh);
+                            emitSessionsChanged();
+                          } catch (e) {
+                            console.warn('[Workflow] Switch voice preset failed:', e);
+                            toast({ title: '切换音色失败', variant: 'destructive' });
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="h-6 text-[10px] px-1.5 min-w-0 max-w-[100px] [data-skin='niho']:bg-[var(--niho-pure-black-elevated)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)]">
+                          <SelectValue placeholder="音色" />
+                        </SelectTrigger>
+                        <SelectContent className="[data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
+                          {voicePresets.map(v => (
+                            <SelectItem key={v.id} value={v.id} className="text-xs [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)]">
+                              {v.nickname}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* 右侧：模型选择（非话题模式时显示） */}
@@ -5952,36 +5993,9 @@ const Workflow: React.FC<WorkflowProps> = ({
                     <>
                       {(() => {
                         const providerInfo = getProviderIcon(selectedLLMConfig, providers);
-                        if (providerInfo.logoLight || providerInfo.logoDark) {
-                          return (
-                            <>
-                              {providerInfo.logoLight && (
-                                <img src={providerInfo.logoLight} alt="" className="w-3.5 h-3.5 object-cover rounded dark:hidden" />
-                              )}
-                              {providerInfo.logoDark && (
-                                <img src={providerInfo.logoDark} alt="" className="w-3.5 h-3.5 object-cover rounded hidden dark:block" />
-                              )}
-                              {providerInfo.logoLight && !providerInfo.logoDark && (
-                                <img src={providerInfo.logoLight} alt="" className="w-3.5 h-3.5 object-cover rounded hidden dark:block" />
-                              )}
-                              {!providerInfo.logoLight && providerInfo.logoDark && (
-                                <img src={providerInfo.logoDark} alt="" className="w-3.5 h-3.5 object-cover rounded dark:hidden" />
-                              )}
-                            </>
-                          );
-                        }
-                        if (providerInfo.customLogo) {
-                          return (
-                            <img 
-                              src={providerInfo.customLogo} 
-                              alt="" 
-                              className="w-3.5 h-3.5 object-cover rounded"
-                              style={{ 
-                                objectPosition: providerInfo.logoPosition ? `${providerInfo.logoPosition.x}% ${providerInfo.logoPosition.y}%` : '50% 50%',
-                                transform: `scale(${(providerInfo.logoScale ?? 100) / 100})`,
-                              }}
-                            />
-                          );
+                        const providerType = (selectedLLMConfig.supplier || selectedLLMConfig.provider || 'openai').toLowerCase();
+                        if (['openai', 'anthropic', 'google', 'gemini', 'deepseek', 'ollama'].includes(providerType)) {
+                          return <ProviderIcon provider={providerType} size={14} className="flex-shrink-0" />;
                         }
                         return <span className="text-xs">{providerInfo.icon}</span>;
                       })()}
@@ -6704,50 +6718,16 @@ const Workflow: React.FC<WorkflowProps> = ({
                 
                 // 获取 supplier 图标
                 const getSupplierIconElement = (supplier: string, configs: LLMConfigFromDB[]): React.ReactNode => {
-                  const providerInfo = providers.find(p => p.provider_type === supplier || p.provider_id === supplier);
-                  if (!providerInfo) return null;
-                  
                   const iconInfo = getProviderIcon(configs[0], providers);
-                  if (iconInfo.logoLight || iconInfo.logoDark) {
-                    return (
-                      <>
-                        {iconInfo.logoLight && (
-                          <img 
-                            src={iconInfo.logoLight} 
-                            alt={getSupplierName(supplier)} 
-                            className="w-4 h-4 object-cover rounded dark:hidden"
-                          />
-                        )}
-                        {iconInfo.logoDark && (
-                          <img 
-                            src={iconInfo.logoDark} 
-                            alt={getSupplierName(supplier)} 
-                            className="w-4 h-4 object-cover rounded hidden dark:block"
-                          />
-                        )}
-                        {iconInfo.logoLight && !iconInfo.logoDark && (
-                          <img 
-                            src={iconInfo.logoLight} 
-                            alt={getSupplierName(supplier)} 
-                            className="w-4 h-4 object-cover rounded hidden dark:block"
-                          />
-                        )}
-                        {!iconInfo.logoLight && iconInfo.logoDark && (
-                          <img 
-                            src={iconInfo.logoDark} 
-                            alt={getSupplierName(supplier)} 
-                            className="w-4 h-4 object-cover rounded dark:hidden"
-                          />
-                        )}
-                      </>
-                    );
-                  } else {
-                    return (
-                      <span className="text-sm" style={{ filter: 'saturate(1.2)' }}>
-                        {iconInfo.icon}
-                      </span>
-                    );
+                  const pt = supplier.toLowerCase();
+                  if (['openai', 'anthropic', 'google', 'gemini', 'deepseek', 'ollama'].includes(pt)) {
+                    return <ProviderIcon provider={supplier} size={16} className="w-4 h-4 flex-shrink-0" />;
                   }
+                  return (
+                    <span className="text-sm" style={{ filter: 'saturate(1.2)' }}>
+                      {iconInfo.icon}
+                    </span>
+                  );
                 };
                 
                 return (
@@ -6812,64 +6792,13 @@ const Workflow: React.FC<WorkflowProps> = ({
                 <div className="space-y-1 py-2">
                           {groupedBySupplier.get(currentTab)!.map((config) => {
                     const isSelected = selectedLLMConfigId === config.config_id;
+                    const isCallable = config.metadata?.is_callable !== false;
                     const providerInfo = getProviderIcon(config, providers);
-                    
-                    // 构建 avatar：优先使用供应商 logo（主题自适应），其次使用自定义 logo，最后使用 emoji
+                    const pt = (config.supplier || config.provider || 'openai').toLowerCase();
                     let avatarContent: React.ReactNode;
-                    if (providerInfo.logoLight || providerInfo.logoDark) {
-                      // 使用供应商的 logo（主题自适应）
-                      avatarContent = (
-                        <>
-                          {/* 浅色模式显示 */}
-                          {providerInfo.logoLight && (
-                            <img 
-                              src={providerInfo.logoLight} 
-                              alt={config.provider} 
-                              className="w-full h-full object-cover rounded dark:hidden"
-                            />
-                          )}
-                          {/* 深色模式显示 */}
-                          {providerInfo.logoDark && (
-                            <img 
-                              src={providerInfo.logoDark} 
-                              alt={config.provider} 
-                              className="w-full h-full object-cover rounded hidden dark:block"
-                            />
-                          )}
-                          {/* 如果只有一种logo，则都显示 */}
-                          {providerInfo.logoLight && !providerInfo.logoDark && (
-                            <img 
-                              src={providerInfo.logoLight} 
-                              alt={config.provider} 
-                              className="w-full h-full object-cover rounded hidden dark:block"
-                            />
-                          )}
-                          {!providerInfo.logoLight && providerInfo.logoDark && (
-                            <img 
-                              src={providerInfo.logoDark} 
-                              alt={config.provider} 
-                              className="w-full h-full object-cover rounded dark:hidden"
-                            />
-                          )}
-                        </>
-                      );
-                    } else if (providerInfo.customLogo) {
-                      // 使用用户上传的自定义 logo
-                      avatarContent = (
-                        <img 
-                          src={providerInfo.customLogo} 
-                          alt={config.provider} 
-                          className="w-full h-full object-cover rounded"
-                          style={{ 
-                            objectPosition: providerInfo.logoPosition 
-                              ? `${providerInfo.logoPosition.x}% ${providerInfo.logoPosition.y}%` 
-                              : '50% 50%',
-                            transform: `scale(${(providerInfo.logoScale ?? 100) / 100})`,
-                          }}
-                        />
-                      );
+                    if (['openai', 'anthropic', 'google', 'gemini', 'deepseek', 'ollama'].includes(pt)) {
+                      avatarContent = <ProviderIcon provider={pt} size={24} className="w-6 h-6 flex-shrink-0" />;
                     } else {
-                      // 使用默认 emoji
                       avatarContent = (
                         <span className="text-lg" style={{ filter: 'saturate(1.2)' }}>
                           {providerInfo.icon}
@@ -6878,34 +6807,42 @@ const Workflow: React.FC<WorkflowProps> = ({
                     }
                     
                     return (
-                      <DataListItem
-                        key={config.config_id}
-                        id={config.config_id}
-                        title={config.shortname || config.name}
-                        description={
-                          config.supplier && config.supplier !== config.provider
-                            ? `${config.model || config.description || ''} · 兼容: ${config.provider}`
-                            : (config.model || config.description || undefined)
-                        }
-                        avatar={avatarContent}
-                        isSelected={isSelected}
-                        className={`
-                          [data-skin='niho']:border [data-skin='niho']:border-[var(--niho-text-border)]
-                          [data-skin='niho']:bg-[rgba(0,0,0,0.35)]
-                          [data-skin='niho']:hover:bg-[rgba(143,183,201,0.06)]
-                          [data-skin='niho']:hover:border-[rgba(143,183,201,0.25)]
-                          ${isSelected ? "[data-skin='niho']:!bg-[rgba(42,15,63,0.55)] [data-skin='niho']:!border-[rgba(0,255,136,0.35)] [data-skin='niho']:shadow-[0_0_14px_rgba(0,255,136,0.10)]" : ''}
-                        `}
-                        onClick={() => {
-                          handleLLMConfigChange(config.config_id);
-                          setShowModelSelectDialog(false);
-                          // 切换模型后保持浮岛展开状态，并将焦点设置回输入框
-                          setIsInputFocused(true);
-                          setTimeout(() => {
-                            inputRef.current?.focus();
-                          }, 50);
-                        }}
-                      />
+                      <div key={config.config_id} title={!isCallable ? '该模型不支持对话（仅支持生图等），不可用于聊天' : undefined}>
+                        <DataListItem
+                          id={config.config_id}
+                          title={config.shortname || config.name}
+                          description={
+                            config.supplier && config.supplier !== config.provider
+                              ? `${config.model || config.description || ''} · 兼容: ${config.provider}`
+                              : (config.model || config.description || undefined)
+                          }
+                          avatar={avatarContent}
+                          badge={
+                            <CapabilityIcons
+                              capabilities={config.metadata?.capabilities}
+                              modelName={config.model}
+                              className="w-3.5 h-3.5"
+                            />
+                          }
+                          isSelected={isSelected}
+                          disabled={!isCallable}
+                          className={`
+                            [data-skin='niho']:border [data-skin='niho']:border-[var(--niho-text-border)]
+                            [data-skin='niho']:bg-[rgba(0,0,0,0.35)]
+                            [data-skin='niho']:hover:bg-[rgba(143,183,201,0.06)]
+                            [data-skin='niho']:hover:border-[rgba(143,183,201,0.25)]
+                            ${isSelected ? "[data-skin='niho']:!bg-[rgba(42,15,63,0.55)] [data-skin='niho']:!border-[rgba(0,255,136,0.35)] [data-skin='niho']:shadow-[0_0_14px_rgba(0,255,136,0.10)]" : ''}
+                          `}
+                          onClick={() => {
+                            handleLLMConfigChange(config.config_id);
+                            setShowModelSelectDialog(false);
+                            setIsInputFocused(true);
+                            setTimeout(() => {
+                              inputRef.current?.focus();
+                            }, 50);
+                          }}
+                        />
+                      </div>
                     );
                   })}
                 </div>

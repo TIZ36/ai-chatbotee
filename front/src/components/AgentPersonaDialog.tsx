@@ -82,6 +82,8 @@ const AgentPersonaDialog: React.FC<AgentPersonaDialogProps> = ({
           thinking: savedPersona.thinking || defaultPersonaConfig.thinking,
           memoryTriggers: savedPersona.memoryTriggers || [],
           responseMode: savedPersona.responseMode || defaultPersonaConfig.responseMode,
+          memoryTriggersEnabled: savedPersona.memoryTriggersEnabled !== false ? true : false,
+          skillTriggerEnabled: savedPersona.skillTriggerEnabled !== false ? true : false,
         });
       } else {
         setConfig(defaultPersonaConfig);
@@ -144,7 +146,7 @@ const AgentPersonaDialog: React.FC<AgentPersonaDialogProps> = ({
   if (config.responseMode === 'persona') enabledFeatures.push('人格模式');
   if (config.voice.enabled) enabledFeatures.push('语音');
   if (config.thinking.enabled) enabledFeatures.push('自驱思考');
-  if (config.memoryTriggers.length > 0) enabledFeatures.push(`${config.memoryTriggers.length}条触发规则`);
+  if (config.memoryTriggers.length > 0) enabledFeatures.push(`${config.memoryTriggers.length}条记忆锚点`);
 
   const enabledLlmConfigs = llmConfigs.filter(c => c.enabled);
 
@@ -154,7 +156,7 @@ const AgentPersonaDialog: React.FC<AgentPersonaDialogProps> = ({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 [data-skin='niho']:text-[var(--text-primary)]">
             <Settings className="w-5 h-5 [data-skin='niho']:text-[var(--color-accent)]" />
-            智能体配置
+            Persona 管理
           </DialogTitle>
         </DialogHeader>
 
@@ -169,7 +171,7 @@ const AgentPersonaDialog: React.FC<AgentPersonaDialogProps> = ({
             }`}
           >
             <User className="w-3.5 h-3.5" />
-            基本信息
+            人设与声音
           </button>
           <button
             onClick={() => setActiveTab('persona')}
@@ -180,7 +182,7 @@ const AgentPersonaDialog: React.FC<AgentPersonaDialogProps> = ({
             }`}
           >
             <Sliders className="w-3.5 h-3.5" />
-            高级设置
+            Chaya 能力
             {enabledFeatures.length > 0 && (
               <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 rounded [data-skin='niho']:bg-[var(--color-accent-bg)] [data-skin='niho']:text-[var(--color-accent)] [data-skin='niho']:border [data-skin='niho']:border-[var(--color-accent-bg)]">
                 {enabledFeatures.length}
@@ -271,22 +273,26 @@ const AgentPersonaDialog: React.FC<AgentPersonaDialogProps> = ({
                 </Select>
               </div>
 
-              {/* 人设 / System Prompt */}
+              {/* 人设（可切换的 persona） */}
               <div>
-                <Label htmlFor="agent-prompt" className="mb-1 block [data-skin='niho']:text-[var(--text-primary)]">人设 / System Prompt</Label>
+                <Label htmlFor="agent-prompt" className="mb-1 block [data-skin='niho']:text-[var(--text-primary)]">人设</Label>
                 <Textarea
                   id="agent-prompt"
                   value={editSystemPrompt}
                   onChange={(e) => setEditSystemPrompt(e.target.value)}
-                  placeholder="定义智能体的角色、能力和行为..."
+                  placeholder="定义角色、能力和行为..."
                   className="min-h-[160px] [data-skin='niho']:bg-[var(--niho-pure-black-elevated)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:placeholder:text-[var(--niho-skyblue-gray)] [data-skin='niho']:focus:border-[var(--color-accent-bg)] [data-skin='niho']:focus:ring-[var(--color-accent-bg)]"
                 />
               </div>
+
+              {/* 声音（可切换的 persona） */}
+              <AgentPersonaConfig config={config} onChange={setConfig} voiceOnly compact />
             </div>
           ) : (
             <AgentPersonaConfig
               config={config}
               onChange={setConfig}
+              chayaOnly
               compact
             />
           )}
@@ -295,9 +301,9 @@ const AgentPersonaDialog: React.FC<AgentPersonaDialogProps> = ({
         <DialogFooter className="flex items-center justify-between border-t pt-3 [data-skin='niho']:border-[var(--niho-text-border)]">
           <div className="text-[11px] text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
             {activeTab === 'persona' && enabledFeatures.length > 0 
-              ? `已启用: ${enabledFeatures.join('、')}`
+              ? `Chaya 能力已启用: ${enabledFeatures.join('、')}`
               : activeTab === 'persona' 
-                ? '未启用任何高级功能'
+                ? '人格模式、自驱思考、记忆锚点可在上方配置'
                 : ''
             }
           </div>
