@@ -15,7 +15,7 @@ import { mcpManager, MCPServer, MCPTool } from '../services/mcpClient';
 import { getMCPServers, MCPServerConfig } from '../services/mcpApi';
 import { getSessions, getAgents, getSession, createSession, saveMessage, summarizeSession, getSessionSummaries, deleteSession, clearSummarizeCache, deleteMessage, updateSessionAvatar, updateSessionName, updateSessionSystemPrompt, updateSessionMediaOutputPath, updateSessionLLMConfig, upgradeToAgent, updateSessionType, Session, Summary, MessageExt } from '../services/sessionApi';
 import { createRole, updateRoleProfile } from '../services/roleApi';
-import type { PersonaPreset, VoicePreset } from '../services/roleApi';
+import type { PersonaPreset } from '../services/roleApi';
 import { createSkillPack, saveSkillPack, optimizeSkillPackSummary, getSkillPacks, getSessionSkillPacks, createSopSkillPack, setCurrentSop, getCurrentSop, SkillPack, SessionSkillPack, SkillPackCreationResult, SkillPackProcessInfo } from '../services/skillPackApi';
 import { getBackendUrl } from '../utils/backendUrl';
 import { estimate_messages_tokens, get_model_max_tokens, estimate_tokens } from '../services/tokenCounter';
@@ -77,6 +77,7 @@ import {
   AvatarConfigDialog,
   SkillPackDialog,
   PersonaPanel,
+  PersonaSwitchDialog,
   RoleGeneratorDialog,
   HeaderConfigDialog,
   AddProfessionDialog,
@@ -314,6 +315,9 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [showUpgradeToAgentDialog, setShowUpgradeToAgentDialog] = useState(false); // 是否显示升级为智能体对话框
   // 人设（会话）切换：通过对话界面顶部“人设Tag”完成
   const [showPersonaPanel, setShowPersonaPanel] = useState(false);
+  const [showPersonaSwitchDialog, setShowPersonaSwitchDialog] = useState(false); // 人设切换弹框（点击人设打开）
+  const [personaSwitchLoading, setPersonaSwitchLoading] = useState(false);
+  const [personaSaveLoading, setPersonaSaveLoading] = useState(false);
   const [personaSearch, setPersonaSearch] = useState('');
   const [showRoleGenerator, setShowRoleGenerator] = useState(false);
   const [personaAgents, setPersonaAgents] = useState<Session[]>([]);
@@ -5857,12 +5861,16 @@ const Workflow: React.FC<WorkflowProps> = ({
                 onToggleToolCalling={onToggleToolCalling}
               />
 
-              {/* 人设按钮 - 话题会话中隐藏 */}
+              {/* 人设 - 点击后弹框切换（Chaya）或编辑人设（其他 Agent/话题） */}
               {currentSessionType !== 'topic_general' && currentSessionId && (
                 <button
                   onClick={() => {
-                    setSystemPromptDraft(currentSystemPrompt || '');
-                    setIsEditingSystemPrompt(true);
+                    if (currentSessionId === 'agent_chaya') {
+                      setShowPersonaSwitchDialog(true);
+                    } else {
+                      setSystemPromptDraft(currentSystemPrompt || '');
+                      setIsEditingSystemPrompt(true);
+                    }
                   }}
                   className={`niho-persona-btn ring-0 flex items-center space-x-1 px-1.5 py-0.5 rounded text-[11px] transition-all whitespace-nowrap ${
                     currentSystemPrompt
@@ -5875,94 +5883,6 @@ const Workflow: React.FC<WorkflowProps> = ({
                   <span>人设</span>
                 </button>
               )}
-
-              {/* Chaya 人设/音色预设切换 - 仅在与 Chaya 对话时显示 */}
-              {currentSessionId === 'agent_chaya' && (() => {
-                const currentSession = sessions.find(s => s.session_id === currentSessionId) || (currentSessionMeta?.session_id === currentSessionId ? currentSessionMeta : null);
-                const personaPresets: PersonaPreset[] = (currentSession?.ext as any)?.personaPresets ?? [];
-                const voicePresets: VoicePreset[] = (currentSession?.ext as any)?.voicePresets ?? [];
-                const currentPersonaId = (currentSession?.ext as any)?.currentPersonaId as string | undefined;
-                const currentVoiceId = (currentSession?.ext as any)?.currentVoiceId as string | undefined;
-                if (personaPresets.length === 0 && voicePresets.length === 0) return null;
-                return (
-                  <div className="flex items-center gap-1.5 flex-shrink-0">
-                    {personaPresets.length > 0 && (
-                      <Select
-                        value={currentPersonaId || personaPresets[0]?.id || ''}
-                        onValueChange={async (id) => {
-                          const preset = personaPresets.find(p => p.id === id);
-                          if (!preset || !currentSession) return;
-                          try {
-                            const ext = { ...(currentSession.ext || {}), currentPersonaId: preset.id };
-                            await updateRoleProfile('agent_chaya', { system_prompt: preset.system_prompt, ext });
-                            setCurrentSystemPrompt(preset.system_prompt);
-                            const fresh = await getSession('agent_chaya');
-                            setCurrentSessionMeta(fresh);
-                            emitSessionsChanged();
-                          } catch (e) {
-                            console.warn('[Workflow] Switch persona preset failed:', e);
-                            toast({ title: '切换人设失败', variant: 'destructive' });
-                          }
-                        }}
-                      >
-                        <SelectTrigger className="h-6 text-[10px] px-1.5 min-w-0 max-w-[100px] [data-skin='niho']:bg-[var(--niho-pure-black-elevated)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)]">
-                          <SelectValue placeholder="人设" />
-                        </SelectTrigger>
-                        <SelectContent className="[data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
-                          {personaPresets.map(p => (
-                            <SelectItem key={p.id} value={p.id} className="text-xs [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)]">
-                              {p.nickname}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                    {voicePresets.length > 0 && (
-                      <Select
-                        value={currentVoiceId || voicePresets[0]?.id || ''}
-                        onValueChange={async (id) => {
-                          const preset = voicePresets.find(v => v.id === id);
-                          if (!preset || !currentSession) return;
-                          try {
-                            const persona = (currentSession.ext as any)?.persona || { ...defaultPersonaConfig };
-                            const ext = { ...(currentSession.ext || {}), currentVoiceId: preset.id };
-                            const newPersona = {
-                              ...persona,
-                              voice: {
-                                ...persona.voice,
-                                enabled: true,
-                                provider: preset.provider as any,
-                                voiceId: preset.voiceId,
-                                voiceName: preset.voiceName,
-                                language: preset.language || 'zh-CN',
-                                speed: preset.speed ?? 1,
-                              },
-                            };
-                            await updateRoleProfile('agent_chaya', { persona: newPersona, ext });
-                            const fresh = await getSession('agent_chaya');
-                            setCurrentSessionMeta(fresh);
-                            emitSessionsChanged();
-                          } catch (e) {
-                            console.warn('[Workflow] Switch voice preset failed:', e);
-                            toast({ title: '切换音色失败', variant: 'destructive' });
-                          }
-                        }}
-                      >
-                        <SelectTrigger className="h-6 text-[10px] px-1.5 min-w-0 max-w-[100px] [data-skin='niho']:bg-[var(--niho-pure-black-elevated)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)]">
-                          <SelectValue placeholder="音色" />
-                        </SelectTrigger>
-                        <SelectContent className="[data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
-                          {voicePresets.map(v => (
-                            <SelectItem key={v.id} value={v.id} className="text-xs [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)]">
-                              {v.nickname}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  </div>
-                );
-              })()}
             </div>
 
             {/* 右侧：模型选择（非话题模式时显示） */}
@@ -7291,6 +7211,65 @@ const Workflow: React.FC<WorkflowProps> = ({
       onDeleteAgent={(id, name) => setDeleteSessionTarget({ id, name })}
       onShowRoleGenerator={() => setShowRoleGenerator(true)}
     />
+
+    {/* 人设切换弹框（点击输入框上「人设」打开，仅 Chaya） */}
+    {currentSessionId === 'agent_chaya' && (() => {
+      const chayaSession = sessions.find(s => s.session_id === 'agent_chaya') || (currentSessionMeta?.session_id === 'agent_chaya' ? currentSessionMeta : null);
+      const personaPresets: PersonaPreset[] = (chayaSession?.ext as any)?.personaPresets ?? [];
+      const currentPersonaId = (chayaSession?.ext as any)?.currentPersonaId as string | undefined;
+      return (
+        <PersonaSwitchDialog
+          open={showPersonaSwitchDialog}
+          onOpenChange={setShowPersonaSwitchDialog}
+          personaPresets={personaPresets}
+          currentPersonaId={currentPersonaId}
+          personaSwitchLoading={personaSwitchLoading}
+          personaSaveLoading={personaSaveLoading}
+          onSwitchPersona={async (presetId) => {
+            const preset = personaPresets.find(p => p.id === presetId);
+            if (!preset || !chayaSession) return;
+            setPersonaSwitchLoading(true);
+            try {
+              const ext = { ...(chayaSession.ext || {}), currentPersonaId: preset.id };
+              await updateRoleProfile('agent_chaya', { system_prompt: preset.system_prompt, ext });
+              setCurrentSystemPrompt(preset.system_prompt);
+              const fresh = await getSession('agent_chaya');
+              setCurrentSessionMeta(fresh);
+              emitSessionsChanged();
+            } catch (e) {
+              console.warn('[Workflow] Switch persona preset failed:', e);
+              toast({ title: '切换人设失败', variant: 'destructive' });
+            } finally {
+              setPersonaSwitchLoading(false);
+            }
+          }}
+          onSavePersona={async (preset) => {
+            if (!chayaSession) return;
+            setPersonaSaveLoading(true);
+            try {
+              const nextPresets = personaPresets.map((p) => (p.id === preset.id ? preset : p));
+              const ext = { ...(chayaSession.ext || {}), personaPresets: nextPresets };
+              const isCurrent = currentPersonaId === preset.id;
+              await updateRoleProfile('agent_chaya', {
+                ext,
+                ...(isCurrent ? { system_prompt: preset.system_prompt } : {}),
+                reason: 'persona_edit_in_dialog',
+              });
+              if (isCurrent) setCurrentSystemPrompt(preset.system_prompt);
+              const fresh = await getSession('agent_chaya');
+              setCurrentSessionMeta(fresh);
+              emitSessionsChanged();
+              toast({ title: '人设已保存，Chaya 已更新', variant: 'success' });
+            } catch (e) {
+              console.warn('[Workflow] Save persona in dialog failed:', e);
+              toast({ title: '保存失败', variant: 'destructive' });
+            } finally {
+              setPersonaSaveLoading(false);
+            }
+          }}
+        />
+      );
+    })()}
 
     {/* MCP 详情遮罩层 */}
     {showMCPDetailOverlay && selectedMCPDetail && (

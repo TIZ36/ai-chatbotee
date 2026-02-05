@@ -7617,6 +7617,13 @@ def update_agent_profile(role_id):
                     # 兼容：版本表不可用时，仍允许更新角色档案
                     print(f"[RoleVersion] Failed to create version on profile update: {e}")
 
+            # 人设/配置更新后通知 Chaya actor（若有激活的 actor）重新加载配置
+            try:
+                from services.actor import ActorManager
+                ActorManager.get_instance().reload_actor_config(role_id)
+            except Exception as e:
+                print(f"[Agent API] Failed to reload actor config for {role_id}: {e}")
+
             return jsonify({'success': True, 'role_id': role_id, 'current_role_version_id': version_id})
         finally:
             if cursor:

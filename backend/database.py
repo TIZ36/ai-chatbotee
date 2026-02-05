@@ -284,6 +284,7 @@ def create_tables():
         CREATE TABLE IF NOT EXISTS `llm_providers` (
             `id` INT AUTO_INCREMENT PRIMARY KEY,
             `provider_id` VARCHAR(100) NOT NULL UNIQUE COMMENT '供应商ID',
+            `supplier` VARCHAR(100) DEFAULT NULL COMMENT 'Token/计费归属供应商（如 nvidia, openai）',
             `name` VARCHAR(255) NOT NULL COMMENT '供应商名称',
             `provider_type` VARCHAR(50) NOT NULL COMMENT '兼容的供应商类型: openai, deepseek, anthropic, gemini, ollama, local, custom',
             `is_system` TINYINT(1) DEFAULT 0 COMMENT '是否为系统内置供应商',
@@ -296,6 +297,7 @@ def create_tables():
             `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
             `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
             INDEX `idx_provider_id` (`provider_id`),
+            INDEX `idx_provider_supplier` (`supplier`),
             INDEX `idx_provider_type` (`provider_type`),
             INDEX `idx_is_system` (`is_system`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='LLM供应商表';
@@ -303,6 +305,99 @@ def create_tables():
         
         cursor.execute(create_llm_providers_table)
         print("✓ Table 'llm_providers' created/verified successfully")
+
+        # 迁移：为 llm_providers 添加 supplier 列（如果不存在）
+        _ensure_column(
+            'llm_providers',
+            'supplier',
+            """
+                ALTER TABLE `llm_providers`
+                ADD COLUMN `supplier` VARCHAR(100) DEFAULT NULL COMMENT 'Token/计费归属供应商（如 nvidia, openai）'
+                AFTER `provider_id`
+            """,
+            'supplier',
+        )
+        try:
+            cursor.execute("""
+                SELECT COUNT(*) FROM information_schema.STATISTICS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'llm_providers' AND INDEX_NAME = 'idx_provider_supplier'
+            """)
+            if cursor.fetchone()[0] == 0:
+                cursor.execute("ALTER TABLE `llm_providers` ADD INDEX `idx_provider_supplier` (`supplier`)")
+                conn.commit()
+                print("  ✓ Added index 'idx_provider_supplier' to 'llm_providers' table")
+        except Exception as e:
+            print(f"  ⚠️ Warning: Failed to add index 'idx_provider_supplier': {e}")
+        # 回填 supplier：为空时使用 provider_id
+        try:
+            cursor.execute("""
+                UPDATE llm_providers
+                SET supplier = provider_id
+                WHERE supplier IS NULL OR supplier = ''
+            """)
+            if cursor.rowcount > 0:
+                conn.commit()
+                print(f"  ✓ Backfilled supplier for {cursor.rowcount} providers")
+        except Exception as e:
+            print(f"  ⚠️ Warning: Failed to backfill supplier in llm_providers: {e}")
+
+        # 初始化系统内置供应商（如果不存在）
+        try:
+            system_providers = [
+                {
+                    'provider_id': 'openai',
+                    'name': 'OpenAI',
+                    'provider_type': 'openai',
+                    'default_api_url': 'https://api.openai.com/v1/chat/completions',
+                },
+                {
+                    'provider_id': 'anthropic',
+                    'name': 'Anthropic (Claude)',
+                    'provider_type': 'anthropic',
+                    'default_api_url': 'https://api.anthropic.com/v1/messages',
+                },
+                {
+                    'provider_id': 'gemini',
+                    'name': 'Google Gemini',
+                    'provider_type': 'gemini',
+                    'default_api_url': 'https://generativelanguage.googleapis.com/v1beta',
+                },
+                {
+                    'provider_id': 'deepseek',
+                    'name': 'DeepSeek',
+                    'provider_type': 'deepseek',
+                    'default_api_url': 'https://api.deepseek.com/v1/chat/completions',
+                },
+                {
+                    'provider_id': 'ollama',
+                    'name': 'Ollama',
+                    'provider_type': 'ollama',
+                    'default_api_url': 'http://localhost:11434',
+                },
+            ]
+            for provider in system_providers:
+                cursor.execute("SELECT COUNT(*) FROM llm_providers WHERE provider_id = %s", (provider['provider_id'],))
+                exists = cursor.fetchone()[0] > 0
+                if not exists:
+                    cursor.execute("""
+                        INSERT INTO llm_providers
+                        (provider_id, supplier, name, provider_type, is_system, override_url, default_api_url, logo_theme, metadata)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        provider['provider_id'],
+                        provider['provider_id'],
+                        provider['name'],
+                        provider['provider_type'],
+                        1,
+                        0,
+                        provider['default_api_url'],
+                        'auto',
+                        None,
+                    ))
+                    conn.commit()
+                    print(f"  ✓ Inserted system provider: {provider['name']}")
+        except Exception as e:
+            print(f"  ⚠️ Warning: Failed to init system providers: {e}")
         
         # MCP服务器配置表
         create_mcp_servers_table = """

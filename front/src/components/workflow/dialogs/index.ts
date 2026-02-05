@@ -29,3 +29,6 @@ export type { AddProfessionDialogProps } from './AddProfessionDialog';
 export { SystemPromptEditDialog } from './SystemPromptEditDialog';
 export type { SystemPromptEditDialogProps } from './SystemPromptEditDialog';
 
+export { PersonaSwitchDialog } from './PersonaSwitchDialog';
+export type { PersonaSwitchDialogProps } from './PersonaSwitchDialog';
+

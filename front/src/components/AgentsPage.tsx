@@ -183,19 +183,19 @@ const AgentsPage: React.FC = () => {
 
   return (
     <>
-      <div className="agents-page h-full flex flex-col bg-gray-50 dark:bg-[#1a1a1a] [data-skin='niho']:bg-[#000000]">
-        <div className="agents-page-header flex-shrink-0 px-6 py-4 border-b border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
+      <div className="agents-page h-full flex flex-col bg-gray-50 dark:bg-[#1a1a1a]">
+        <div className="agents-page-header flex-shrink-0 px-6 py-4 border-b border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d]">
           <div className="flex items-center justify-between">
             <div>
               <div className="flex items-center space-x-3">
-                <div className="w-8 h-8 rounded-lg bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center [data-skin='niho']:bg-[var(--niho-deep-purple-bg)] [data-skin='niho']:border [data-skin='niho']:border-[var(--color-accent-bg)]">
-                  <Users className="w-5 h-5 text-primary-600 dark:text-primary-400 [data-skin='niho']:text-[var(--color-accent)]" />
+                <div className="agents-page-header-icon w-8 h-8 rounded-lg bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
+                  <Users className="w-5 h-5 text-primary-600 dark:text-primary-400" />
                 </div>
-                <h1 className="agents-page-title text-xl font-bold text-gray-900 dark:text-white [data-skin='niho']:text-[var(--text-primary)]">
+                <h1 className="agents-page-title text-xl font-bold text-gray-900 dark:text-white">
                   Persona 管理
                 </h1>
               </div>
-              <p className="mt-1 text-xs text-gray-500 dark:text-[#858585] [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+              <p className="mt-1 text-xs text-gray-500 dark:text-[#858585]">
                 可添加：人设、音色 · 可开关：人格模式、自驱思考、记忆锚点、技能触发 · 常开：记忆、行为塑造
               </p>
             </div>
@@ -205,13 +205,13 @@ const AgentsPage: React.FC = () => {
         <div className="agents-page-list flex-1 overflow-y-auto p-6 no-scrollbar">
           {isLoadingAgents ? (
             <div className="flex items-center justify-center min-h-[200px]">
-              <Loader className="w-6 h-6 animate-spin text-primary-500 [data-skin='niho']:text-[var(--color-accent)]" />
-              <span className="ml-2 text-sm text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">加载中...</span>
+              <Loader className="w-6 h-6 animate-spin text-primary-500" />
+              <span className="ml-2 text-sm text-gray-500">加载中...</span>
             </div>
           ) : !chaya ? (
-            <div className="flex flex-col items-center justify-center min-h-[200px] text-center py-12">
-              <Bot className="w-12 h-12 text-gray-400 [data-skin='niho']:text-[var(--color-accent)] mb-3" />
-              <p className="text-sm text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+            <div className="agents-page-empty-state flex flex-col items-center justify-center min-h-[200px] text-center py-12">
+              <Bot className="w-12 h-12 text-gray-400 mb-3" />
+              <p className="text-sm text-gray-500">
                 Chaya 未就绪，请刷新或检查后端
               </p>
             </div>
@@ -219,30 +219,30 @@ const AgentsPage: React.FC = () => {
             <div className="max-w-3xl mx-auto space-y-8">
               {/* 可添加部分 */}
               <section className="space-y-3">
-                <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--text-primary)] flex items-center gap-2">
-                  <Plus className="w-4 h-4 [data-skin='niho']:text-[var(--color-accent)]" />
+                <h2 className="agents-page-section-title text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                  <Plus className="w-4 h-4" />
                   可添加
                 </h2>
                 <div className="grid gap-4 sm:grid-cols-2">
                   {/* 人设管理：预设列表 + 添加/编辑弹窗 */}
-                  <div className="rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] p-4 [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
+                  <div className="agents-page-card rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] p-4">
                     <div className="flex items-center justify-between mb-3">
-                      <span className="text-sm font-medium [data-skin='niho']:text-[var(--text-primary)]">人设管理</span>
+                      <span className="text-sm font-medium text-gray-900 dark:text-white">人设管理</span>
                       <Button
                         variant="secondary"
                         size="sm"
                         onClick={() => { setPersonaPresetEdit(null); setPersonaPresetDialogOpen(true); }}
-                        className="[data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-transparent [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:hover:border-[var(--color-accent-bg)] [data-skin='niho']:hover:text-[var(--color-accent)]"
+                        className="agents-page-btn-secondary"
                       >
                         <Plus className="w-3.5 h-3.5 mr-1.5" />
                         添加人设
                       </Button>
                     </div>
-                    <p className="text-xs text-gray-500 dark:text-[#858585] mb-3 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                    <p className="text-xs text-gray-500 dark:text-[#858585] mb-3">
                       添加或编辑人设预设（昵称 + 系统提示词），可在与 Chaya 聊天时切换
                     </p>
                     {personaPresets.length === 0 ? (
-                      <p className="text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                      <p className="text-xs text-gray-500">
                         暂无预设，点击「添加人设」创建
                       </p>
                     ) : (
@@ -250,14 +250,14 @@ const AgentsPage: React.FC = () => {
                         {personaPresets.map((p) => (
                           <li
                             key={p.id}
-                            className="flex items-center justify-between gap-2 py-1.5 px-2 rounded border border-transparent hover:bg-gray-50 dark:hover:bg-[#363636] [data-skin='niho']:hover:bg-[var(--niho-text-bg)]"
+                            className="agents-page-list-item flex items-center justify-between gap-2 py-1.5 px-2 rounded border border-transparent hover:bg-gray-50 dark:hover:bg-[#363636]"
                           >
                             <div className="min-w-0 flex-1">
-                              <div className="text-xs font-medium truncate [data-skin='niho']:text-[var(--text-primary)]">
+                              <div className="text-xs font-medium truncate text-gray-900 dark:text-white">
                                 {p.nickname}
                               </div>
                               {p.system_prompt && (
-                                <div className="text-[10px] text-gray-500 truncate [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                                <div className="text-[10px] text-gray-500 truncate">
                                   {p.system_prompt.slice(0, 60)}{p.system_prompt.length > 60 ? '...' : ''}
                                 </div>
                               )}
@@ -265,7 +265,7 @@ const AgentsPage: React.FC = () => {
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-7 w-7 p-0 [data-skin='niho']:text-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)]"
+                              className="h-7 w-7 p-0 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-[var(--color-accent)]"
                               onClick={() => { setPersonaPresetEdit(p); setPersonaPresetDialogOpen(true); }}
                               title="编辑"
                             >
@@ -277,27 +277,27 @@ const AgentsPage: React.FC = () => {
                     )}
                   </div>
                   {/* TTS / 音色管理：预设列表 + 添加/编辑弹窗 */}
-                  <div className="rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] p-4 [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
+                  <div className="agents-page-card rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] p-4">
                     <div className="flex items-center justify-between mb-3">
-                      <span className="text-sm font-medium [data-skin='niho']:text-[var(--text-primary)] flex items-center gap-2">
-                        <Volume2 className="w-4 h-4 [data-skin='niho']:text-[var(--color-info)]" />
+                      <span className="text-sm font-medium text-gray-900 dark:text-white flex items-center gap-2">
+                        <Volume2 className="w-4 h-4 text-gray-500 dark:text-gray-400" />
                         TTS / 音色管理
                       </span>
                       <Button
                         variant="secondary"
                         size="sm"
                         onClick={() => { setVoicePresetEdit(null); setVoicePresetDialogOpen(true); }}
-                        className="[data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-transparent [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:hover:border-[var(--color-accent-bg)] [data-skin='niho']:hover:text-[var(--color-accent)]"
+                        className="agents-page-btn-secondary"
                       >
                         <Plus className="w-3.5 h-3.5 mr-1.5" />
                         添加音色
                       </Button>
                     </div>
-                    <p className="text-xs text-gray-500 dark:text-[#858585] mb-3 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                    <p className="text-xs text-gray-500 dark:text-[#858585] mb-3">
                       添加或编辑音色预设（昵称 + 提供方/角色），可在与 Chaya 聊天时切换
                     </p>
                     {voicePresets.length === 0 ? (
-                      <p className="text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                      <p className="text-xs text-gray-500">
                         暂无预设，点击「添加音色」创建
                       </p>
                     ) : (
@@ -305,20 +305,20 @@ const AgentsPage: React.FC = () => {
                         {voicePresets.map((v) => (
                           <li
                             key={v.id}
-                            className="flex items-center justify-between gap-2 py-1.5 px-2 rounded border border-transparent hover:bg-gray-50 dark:hover:bg-[#363636] [data-skin='niho']:hover:bg-[var(--niho-text-bg)]"
+                            className="agents-page-list-item flex items-center justify-between gap-2 py-1.5 px-2 rounded border border-transparent hover:bg-gray-50 dark:hover:bg-[#363636]"
                           >
                             <div className="min-w-0 flex-1">
-                              <div className="text-xs font-medium truncate [data-skin='niho']:text-[var(--text-primary)]">
+                              <div className="text-xs font-medium truncate text-gray-900 dark:text-white">
                                 {v.nickname}
                               </div>
-                              <div className="text-[10px] text-gray-500 truncate [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                              <div className="text-[10px] text-gray-500 truncate">
                                 {v.voiceName}
                               </div>
                             </div>
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-7 w-7 p-0 [data-skin='niho']:text-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)]"
+                              className="h-7 w-7 p-0 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-[var(--color-accent)]"
                               onClick={() => { setVoicePresetEdit(v); setVoicePresetDialogOpen(true); }}
                               title="编辑"
                             >
@@ -334,18 +334,18 @@ const AgentsPage: React.FC = () => {
 
               {/* 可开关部分 */}
               <section className="space-y-3">
-                <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--text-primary)] flex items-center gap-2">
-                  <Sliders className="w-4 h-4 [data-skin='niho']:text-[var(--color-accent)]" />
+                <h2 className="agents-page-section-title text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                  <Sliders className="w-4 h-4" />
                   可开关
                 </h2>
-                <div className="rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] p-4 [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
+                <div className="agents-page-card rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] p-4">
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <MessageSquare className="w-4 h-4 text-gray-500 [data-skin='niho']:text-[var(--color-accent)]" />
+                      <div className="flex items-center gap-2 agents-page-icon--accent">
+                        <MessageSquare className="w-4 h-4 text-gray-500" />
                         <div>
-                          <div className="text-sm font-medium [data-skin='niho']:text-[var(--text-primary)]">人格模式</div>
-                          <div className="text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">思考是否要响应后再参与对话</div>
+                          <div className="text-sm font-medium text-gray-900 dark:text-white">人格模式</div>
+                          <div className="text-xs text-gray-500">思考是否要响应后再参与对话</div>
                         </div>
                       </div>
                       <Switch
@@ -355,11 +355,11 @@ const AgentsPage: React.FC = () => {
                       />
                     </div>
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Brain className="w-4 h-4 text-purple-500 [data-skin='niho']:text-[var(--color-secondary)]" />
+                      <div className="flex items-center gap-2 agents-page-icon--secondary">
+                        <Brain className="w-4 h-4 text-purple-500" />
                         <div>
-                          <div className="text-sm font-medium [data-skin='niho']:text-[var(--text-primary)]">自驱思考</div>
-                          <div className="text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">按间隔或记忆自主思考</div>
+                          <div className="text-sm font-medium text-gray-900 dark:text-white">自驱思考</div>
+                          <div className="text-xs text-gray-500">按间隔或记忆自主思考</div>
                         </div>
                       </div>
                       <Switch
@@ -369,11 +369,11 @@ const AgentsPage: React.FC = () => {
                       />
                     </div>
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Sparkles className="w-4 h-4 text-yellow-500 [data-skin='niho']:text-[var(--color-highlight)]" />
+                      <div className="flex items-center gap-2 agents-page-icon--highlight">
+                        <Sparkles className="w-4 h-4 text-yellow-500" />
                         <div>
-                          <div className="text-sm font-medium [data-skin='niho']:text-[var(--text-primary)]">记忆锚点</div>
-                          <div className="text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">根据记忆规则自动执行动作</div>
+                          <div className="text-sm font-medium text-gray-900 dark:text-white">记忆锚点</div>
+                          <div className="text-xs text-gray-500">根据记忆规则自动执行动作</div>
                         </div>
                       </div>
                       <Switch
@@ -383,11 +383,11 @@ const AgentsPage: React.FC = () => {
                       />
                     </div>
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Zap className="w-4 h-4 text-amber-500 [data-skin='niho']:text-[var(--color-highlight)]" />
+                      <div className="flex items-center gap-2 agents-page-icon--highlight">
+                        <Zap className="w-4 h-4 text-amber-500" />
                         <div>
-                          <div className="text-sm font-medium [data-skin='niho']:text-[var(--text-primary)]">技能触发</div>
-                          <div className="text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">根据上下文与技能包自动触发能力</div>
+                          <div className="text-sm font-medium text-gray-900 dark:text-white">技能触发</div>
+                          <div className="text-xs text-gray-500">根据上下文与技能包自动触发能力</div>
                         </div>
                       </div>
                       <Switch
@@ -397,11 +397,11 @@ const AgentsPage: React.FC = () => {
                       />
                     </div>
                   </div>
-                  <p className="mt-3 text-[11px] text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                  <p className="mt-3 text-[11px] text-gray-500">
                     更多细节可在
                     <button
                       type="button"
-                      className="mx-1 underline [data-skin='niho']:text-[var(--color-accent)]"
+                      className="mx-1 underline text-primary-600 dark:text-primary-400 hover:underline"
                       onClick={() => openPersonaDialog('persona')}
                     >
                       Chaya 能力
@@ -413,26 +413,26 @@ const AgentsPage: React.FC = () => {
 
               {/* 不可开关部分 */}
               <section className="space-y-3">
-                <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--text-primary)] flex items-center gap-2">
-                  <Shapes className="w-4 h-4 [data-skin='niho']:text-[var(--niho-skyblue-gray)]" />
+                <h2 className="agents-page-section-title agents-page-section-title--muted text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                  <Shapes className="w-4 h-4" />
                   不可开关（常开能力）
                 </h2>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] p-4 [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] opacity-90">
+                  <div className="agents-page-card rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] p-4 opacity-90">
                     <div className="flex items-center gap-2 mb-2">
-                      <Database className="w-4 h-4 text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)]" />
-                      <span className="text-sm font-medium [data-skin='niho']:text-[var(--text-primary)]">记忆</span>
+                      <Database className="w-4 h-4 text-gray-400" />
+                      <span className="text-sm font-medium text-gray-900 dark:text-white">记忆</span>
                     </div>
-                    <p className="text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                    <p className="text-xs text-gray-500">
                       Chaya 会持续积累与你的对话记忆，用于上下文与长期偏好，无需单独开关。
                     </p>
                   </div>
-                  <div className="rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] p-4 [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] opacity-90">
+                  <div className="agents-page-card rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] p-4 opacity-90">
                     <div className="flex items-center gap-2 mb-2">
-                      <Shapes className="w-4 h-4 text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)]" />
-                      <span className="text-sm font-medium [data-skin='niho']:text-[var(--text-primary)]">行为塑造</span>
+                      <Shapes className="w-4 h-4 text-gray-400" />
+                      <span className="text-sm font-medium text-gray-900 dark:text-white">行为塑造</span>
                     </div>
-                    <p className="text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                    <p className="text-xs text-gray-500">
                       通过长期聊天积累，Chaya 会对自己的能力和行为形成认知，无需单独开关。
                     </p>
                   </div>
@@ -443,7 +443,7 @@ const AgentsPage: React.FC = () => {
                 <Button
                   variant="primary"
                   onClick={() => handleSelectAgent(CHAYA_ID)}
-                  className="[data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:text-[#000000] [data-skin='niho']:hover:bg-[var(--color-accent-hover)]"
+                  className="agents-page-cta"
                 >
                   去和 Chaya 聊天
                 </Button>

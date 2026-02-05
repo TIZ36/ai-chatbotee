@@ -37,25 +37,24 @@ interface NavItemProps {
   tooltipPlacement?: 'right' | 'bottom';
 }
 
-const NavItem: React.FC<NavItemProps> = ({ to, icon, title, isActive, isNiho, tooltipPlacement = 'right' }) => {
+const NavItem: React.FC<NavItemProps> = ({ to, icon, title, isActive, isNiho, tooltipPlacement = 'bottom' }) => {
   const [showTooltip, setShowTooltip] = useState(false);
-  const inactiveClass = isNiho
-    ? 'text-[var(--color-highlight)] hover:bg-white/5 hover:opacity-90'
-    : 'text-gray-500 dark:text-[#a0a0a0] hover:bg-white/50 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white';
-
   const tooltipBottom = tooltipPlacement === 'bottom';
+  const linkClass = [
+    'nav-item',
+    isActive && 'nav-item--active',
+    isNiho && 'nav-item--niho',
+    'w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-200 ease-out relative',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-primary)]',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   return (
     <div className="relative group">
       <Link
         to={to}
-        className={`
-          w-8 h-8 flex items-center justify-center rounded-lg 
-          transition-all duration-200 ease-out relative
-          ${isActive 
-            ? `bg-[var(--color-accent)]/90 shadow-sm backdrop-blur-sm ${isNiho ? 'text-[var(--color-highlight)]' : 'text-white'}`
-            : inactiveClass
-          }
-        `}
+        className={linkClass}
         onMouseEnter={() => setShowTooltip(true)}
         onMouseLeave={() => setShowTooltip(false)}
         title=""
@@ -67,13 +66,13 @@ const NavItem: React.FC<NavItemProps> = ({ to, icon, title, isActive, isNiho, to
       {/* Tooltip - 毛玻璃效果；顶部导航时显示在下方 */}
       {showTooltip && (
         <div
-          className={`absolute px-2 py-1 glass-popup text-gray-800 dark:text-white text-xs z-50 whitespace-nowrap pointer-events-none ${
+          className={`nav-item-tooltip absolute px-2 py-1 glass-popup text-gray-800 dark:text-white text-xs z-50 whitespace-nowrap pointer-events-none ${
             tooltipBottom ? 'left-1/2 -translate-x-1/2 top-full mt-2' : 'left-full ml-2 top-1/2 -translate-y-1/2'
           }`}
         >
           {title}
           <div
-            className={`absolute w-0 h-0 border-transparent ${
+            className={`nav-item-tooltip-arrow absolute w-0 h-0 border-transparent ${
               tooltipBottom
                 ? 'left-1/2 -translate-x-1/2 bottom-full border-b-[6px] border-b-white/85 dark:border-b-[#1e1e1e]/90 border-x-4 border-x-transparent'
                 : 'right-full top-1/2 -translate-y-1/2 border-t-4 border-b-4 border-r-4 border-r-white/85 dark:border-r-[#1e1e1e]/90'

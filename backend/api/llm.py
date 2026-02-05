@@ -1130,6 +1130,7 @@ def get_providers():
         cursor.execute("""
             SELECT 
                 provider_id,
+                supplier,
                 name,
                 provider_type,
                 is_system,
@@ -1193,6 +1194,7 @@ def create_provider():
         
         name = data.get('name')
         provider_type = data.get('provider_type')
+        supplier = data.get('supplier')
         override_url = data.get('override_url', False)
         default_api_url = data.get('default_api_url')
         
@@ -1204,6 +1206,7 @@ def create_provider():
         # provider_id 直接使用供应商名称（作为 supplier）
         # 供应商名称 = supplier，兼容类型 = provider
         provider_id = name.strip()
+        supplier = (supplier or provider_id).strip()
         
         # 确保唯一性
         conn = get_mysql_connection()
@@ -1220,10 +1223,11 @@ def create_provider():
         # 插入新供应商
         cursor.execute("""
             INSERT INTO llm_providers 
-            (provider_id, name, provider_type, is_system, override_url, default_api_url, logo_theme, metadata)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            (provider_id, supplier, name, provider_type, is_system, override_url, default_api_url, logo_theme, metadata)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             provider_id,
+            supplier,
             name,
             provider_type,
             0,  # 自定义供应商
@@ -1266,6 +1270,7 @@ def get_provider(provider_id):
         cursor.execute("""
             SELECT 
                 provider_id,
+                supplier,
                 name,
                 provider_type,
                 is_system,
@@ -1343,6 +1348,10 @@ def update_provider(provider_id):
         if 'provider_type' in data:
             update_fields.append("provider_type = %s")
             update_values.append(data['provider_type'])
+
+        if 'supplier' in data:
+            update_fields.append("supplier = %s")
+            update_values.append(data['supplier'])
         
         if 'override_url' in data:
             update_fields.append("override_url = %s")

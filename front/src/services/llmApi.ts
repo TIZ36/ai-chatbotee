@@ -13,6 +13,7 @@ const API_BASE_URL = `${getBackendUrl()}/api/llm`;
 
 export interface LLMProvider {
   provider_id: string;
+  supplier?: string;
   name: string;
   provider_type: 'openai' | 'deepseek' | 'anthropic' | 'local' | 'custom' | 'ollama' | 'gemini';
   is_system: boolean;
@@ -28,6 +29,7 @@ export interface LLMProvider {
 
 export interface CreateProviderRequest {
   name: string;
+  supplier?: string;
   provider_type: 'openai' | 'deepseek' | 'anthropic' | 'local' | 'custom' | 'ollama' | 'gemini';
   override_url?: boolean;
   default_api_url?: string;
@@ -37,6 +39,7 @@ export interface CreateProviderRequest {
 
 export interface UpdateProviderRequest {
   name?: string;
+  supplier?: string;
   provider_type?: 'openai' | 'deepseek' | 'anthropic' | 'local' | 'custom' | 'ollama' | 'gemini';
   override_url?: boolean;
   default_api_url?: string;

@@ -50,6 +50,22 @@ const PROVIDER_INFO: Record<string, { name: string; color: string; icon: string 
   ollama: { name: 'Ollama', color: '#1D4ED8', icon: '🦙' },
 };
 
+/** 是否为默认供应商：provider_id == provider_type，不可编辑/删除 */
+const isDefaultMainstreamProvider = (provider: { provider_id: string; provider_type: string }): boolean => {
+  const type = (provider.provider_type || '').trim().toLowerCase();
+  const id = (provider.provider_id || '').trim().toLowerCase();
+  return Boolean(type) && type === id;
+};
+
+/** 自定义供应商：provider_id != provider_type，允许编辑/删除 */
+const isCustomProvider = (provider: { provider_id: string; provider_type: string }) =>
+  !isDefaultMainstreamProvider(provider);
+
+/** 列表与标题显示名：统一显示 llm_provider.name */
+const getProviderDisplayName = (provider: { name?: string; provider_id?: string; provider_type: string }): string => {
+  return provider.name?.trim() || provider.provider_id?.trim() || provider.provider_type;
+};
+
 // 供应商图标：使用 ProviderIcon（simple-icons + 内联 SVG）
 const renderProviderIcon = (
   providerType: string,
@@ -181,19 +197,21 @@ const TokenListSimple: React.FC<TokenListSimpleProps> = ({
   if (loadingTokens) {
     return (
       <div className="flex items-center justify-center py-8">
-        <Loader2 className="w-5 h-5 animate-spin text-gray-400 [data-skin='niho']:text-[var(--color-highlight)]" />
-        <span className="ml-2 text-sm text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">加载 Token 列表...</span>
+        <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+        <span className="ml-2 text-sm text-gray-500">加载 Token 列表...</span>
       </div>
     );
   }
 
   if (tokenGroups.size === 0) {
     return (
-      <EmptyState
-        icon={Brain}
-        title="暂无 Token"
-        description="点击右上角按钮录入第一个 Token"
-      />
+      <div className="llm-config-token-empty-wrap">
+        <EmptyState
+          icon={Brain}
+          title="暂无 Token"
+          description="点击右上角按钮录入第一个 Token"
+        />
+      </div>
     );
   }
 
@@ -214,27 +232,22 @@ const TokenListSimple: React.FC<TokenListSimpleProps> = ({
           <div
             key={tokenKey}
             className={`
-              border rounded-lg p-3 cursor-pointer transition-all
+              llm-config-token-card border rounded-lg p-3 cursor-pointer transition-all
               ${group.isActive 
-                ? 'border-green-500 dark:border-green-600 bg-green-50 dark:bg-green-900/10' 
+                ? 'llm-config-token-card--active border-green-500 dark:border-green-600 bg-green-50 dark:bg-green-900/10' 
                 : 'border-gray-200 dark:border-[#404040] hover:border-gray-300 dark:hover:border-gray-600'
               }
-              [data-skin='niho']:bg-[#000000]
-              [data-skin='niho']:border-[var(--niho-text-border)]
-              [data-skin='niho']:hover:border-[rgba(0,255,136,0.35)]
-              [data-skin='niho']:hover:shadow-[0_0_12px_rgba(0,255,136,0.08)]
-              ${group.isActive ? '[data-skin="niho"]:border-[rgba(0,255,136,0.4)] [data-skin="niho"]:bg-[rgba(0,255,136,0.05)]' : ''}
             `}
             onClick={() => onTokenClick(tokenKey, group.configs, group.apiKey)}
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3 flex-1 min-w-0">
-                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${group.isActive ? 'bg-green-500 [data-skin="niho"]:bg-[#00ff88]' : 'bg-gray-400 [data-skin="niho"]:bg-[var(--niho-skyblue-gray)]'}`} />
+                <div className={`w-2 h-2 rounded-full flex-shrink-0 llm-config-token-dot ${group.isActive ? 'llm-config-token-dot--active bg-green-500' : 'bg-gray-400'}`} />
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-gray-900 dark:text-gray-100 [data-skin='niho']:text-[#e8f5f0] truncate">
+                  <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate ">
                     {displayKey ? maskApiKey(displayKey) : '未设置 Token'}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                  <div className="text-xs text-gray-500 dark:text-gray-400">
                     {enabledCount} / {totalCount} 个模型 {group.isActive ? '(当前使用)' : ''}
                   </div>
                 </div>
@@ -259,7 +272,7 @@ const TokenListSimple: React.FC<TokenListSimpleProps> = ({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 text-red-600 [data-skin='niho']:text-[#ff6b9d] [data-skin='niho']:hover:text-[#ff1493] [data-skin='niho']:hover:bg-[rgba(255,107,157,0.1)]"
+                  className="h-7 w-7 text-red-600"
                   onClick={async () => {
                     if (confirm(`确定要删除这个 Token 及其下的 ${totalCount} 个模型吗？`)) {
                       await onDeleteToken(tokenKey, group.configs);
@@ -272,8 +285,8 @@ const TokenListSimple: React.FC<TokenListSimpleProps> = ({
               </div>
             </div>
             {showKey && displayKey && (
-              <div className="mt-2 p-2 bg-white dark:bg-[#363636] [data-skin='niho']:bg-[#000000] rounded border border-gray-200 dark:border-[#404040] [data-skin='niho']:border-[var(--niho-text-border)]">
-                <div className="text-xs font-mono text-gray-600 dark:text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)] break-all">
+              <div className="llm-config-token-copy-box mt-2 p-2 bg-white dark:bg-[#363636] rounded border border-gray-200 dark:border-[#404040]">
+                <div className="text-xs font-mono text-gray-600 dark:text-gray-400 break-all">
                   {displayKey}
                 </div>
               </div>
@@ -914,7 +927,7 @@ const LLMConfigPanel: React.FC = () => {
         variant="persona"
         personaConstrainContent={true}
       >
-        <div className="flex items-center justify-center py-12">
+        <div className="llm-config-loading flex items-center justify-center py-12">
           <div className="w-6 h-6 border-2 border-gray-300 dark:border-gray-600 border-t-[#7c3aed] rounded-full animate-spin" />
           <span className="ml-3 text-gray-500 dark:text-gray-400">加载中...</span>
         </div>
@@ -925,96 +938,137 @@ const LLMConfigPanel: React.FC = () => {
   // 顶部 Tab：选中 null 表示「添加供应商」页
   const showAddProviderContent = selectedProviderId === null;
 
+  // 左侧供应商列表项（复用在侧栏与顶部 Tab）
+  const renderProviderTabs = (vertical: boolean) => (
+    <>
+      <button
+        type="button"
+        onClick={() => setSelectedProviderId(null)}
+        className={`
+          llm-config-tab ${showAddProviderContent ? 'llm-config-tab--active' : ''}
+          flex items-center gap-2 text-sm font-medium whitespace-nowrap transition-colors
+          ${vertical ? 'w-full px-3 py-2.5 rounded-lg text-left border' : 'px-4 py-2.5 border-b-2'}
+          ${showAddProviderContent
+            ? vertical
+              ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
+              : 'border-[var(--color-accent)] text-[var(--color-accent)]'
+            : vertical
+              ? 'border-transparent text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#252525]'
+              : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+          }
+        `}
+      >
+        <Plus className="w-4 h-4 flex-shrink-0" />
+        添加供应商
+      </button>
+      {providers.map(provider => {
+        const isActive = selectedProviderId === provider.provider_id;
+        const providerModelCount = configs.filter(c =>
+          (c.supplier || c.provider) === provider.provider_id && c.enabled
+        ).length;
+        return (
+          <div
+            key={provider.provider_id}
+            className={vertical ? 'group/item' : 'group flex items-center gap-1 flex-shrink-0'}
+          >
+            <button
+              type="button"
+              onClick={() => setSelectedProviderId(provider.provider_id)}
+              className={`
+                llm-config-tab ${isActive ? 'llm-config-tab--active' : ''}
+                flex items-center gap-2 text-sm font-medium whitespace-nowrap transition-colors
+                ${vertical ? 'w-full px-3 py-2.5 rounded-lg text-left border' : 'px-4 py-2.5 border-b-2'}
+                ${isActive
+                  ? vertical
+                    ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
+                    : 'border-[var(--color-accent)] text-[var(--color-accent)]'
+                  : vertical
+                    ? 'border-transparent text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#252525]'
+                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                }
+              `}
+            >
+              <span className="w-5 h-5 rounded flex items-center justify-center overflow-hidden flex-shrink-0">
+                {renderProviderIcon(provider.provider_type, 'w-full h-full', 20)}
+              </span>
+              <span className={vertical ? 'truncate' : 'truncate max-w-[120px]'}>{getProviderDisplayName(provider)}</span>
+              {providerModelCount > 0 && (
+                <span className="text-xs opacity-70 flex-shrink-0">({providerModelCount})</span>
+              )}
+            </button>
+            {vertical && isActive && isCustomProvider(provider) && (
+              <div className="flex items-center gap-0.5 mt-1.5 pl-7 opacity-0 group-hover/item:opacity-100 transition-opacity">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 text-gray-500 hover:text-[var(--color-accent)]"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setEditingProvider(provider);
+                    setShowEditProviderDialog(true);
+                  }}
+                  title="编辑"
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 text-destructive"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDeleteProviderTarget(provider);
+                  }}
+                  title="删除"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </Button>
+              </div>
+            )}
+            {!vertical && isActive && isCustomProvider(provider) && (
+              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-500 hover:text-[var(--color-accent)]" onClick={(e) => { e.stopPropagation(); setEditingProvider(provider); setShowEditProviderDialog(true); }} title="编辑">
+                  <Edit2 className="w-3.5 h-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={(e) => { e.stopPropagation(); setDeleteProviderTarget(provider); }} title="删除">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </Button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+
   return (
     <PageLayout
       title="LLM 模型配置"
       description="管理您的大语言模型 API 配置"
       icon={Brain}
       variant="persona"
-      personaConstrainContent={true}
+      personaConstrainContent={false}
     >
-      {/* 顶部 Tab：添加供应商 | 供应商1 | 供应商2 | ... */}
-      <div className="flex-shrink-0 border-b border-gray-200 dark:border-[#404040] [data-skin='niho']:border-[var(--niho-text-border)] -mx-2 px-2 mb-4">
-        <div className="flex gap-0 overflow-x-auto no-scrollbar min-h-10">
-          <button
-            type="button"
-            onClick={() => setSelectedProviderId(null)}
-            className={`
-              flex items-center gap-2 px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors
-              ${showAddProviderContent
-                ? 'border-[var(--color-accent)] text-[var(--color-accent)] [data-skin="niho"]:border-[var(--color-accent)] [data-skin="niho"]:text-[var(--color-accent)]'
-                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 [data-skin="niho"]:text-[var(--niho-skyblue-gray)] [data-skin="niho"]:hover:text-[var(--text-primary)]'
-              }
-            `}
-          >
-            <Plus className="w-4 h-4" />
-            添加供应商
-          </button>
-          {providers.map(provider => {
-            const isActive = selectedProviderId === provider.provider_id;
-            const providerModelCount = configs.filter(c =>
-              (c.supplier || c.provider) === provider.provider_id && c.enabled
-            ).length;
-            return (
-              <div
-                key={provider.provider_id}
-                className="group flex items-center gap-1 flex-shrink-0"
-              >
-                <button
-                  type="button"
-                  onClick={() => setSelectedProviderId(provider.provider_id)}
-                  className={`
-                    flex items-center gap-2 px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors
-                    ${isActive
-                      ? 'border-[var(--color-accent)] text-[var(--color-accent)] [data-skin="niho"]:border-[var(--color-accent)] [data-skin="niho"]:text-[var(--color-accent)]'
-                      : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 [data-skin="niho"]:text-[var(--niho-skyblue-gray)] [data-skin="niho"]:hover:text-[var(--text-primary)]'
-                    }
-                  `}
-                >
-                  <span className="w-5 h-5 rounded flex items-center justify-center overflow-hidden flex-shrink-0">
-                    {renderProviderIcon(provider.provider_type, 'w-full h-full', 20)}
-                  </span>
-                  <span className="truncate max-w-[120px]">{provider.name}</span>
-                  {providerModelCount > 0 && (
-                    <span className="text-xs opacity-70">({providerModelCount})</span>
-                  )}
-                </button>
-                {isActive && (
-                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 [data-skin='niho']:text-[var(--niho-skyblue-gray)] [data-skin='niho']:hover:text-[#00ff88]"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditingProvider(provider);
-                        setShowEditProviderDialog(true);
-                      }}
-                      title="编辑"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 text-destructive [data-skin='niho']:text-[#ff6b9d]"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeleteProviderTarget(provider);
-                      }}
-                      title="删除"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </Button>
-                  </div>
-                )}
+      {/* 整体居中：供应商列表 + Token/内容区 作为一块，两侧留白 */}
+      <div className="llm-config-page flex-1 min-h-0 overflow-auto flex justify-center p-4 lg:px-6">
+        <div className="flex flex-col lg:flex-row h-full min-h-0 w-full max-w-4xl">
+          {/* 左侧：供应商列表（紧挨内容区） */}
+          <div className="flex-shrink-0 flex flex-col border-b lg:border-b-0 lg:border-r border-gray-200 dark:border-[#404040]  lg:w-52 xl:w-56">
+            {/* 小屏：顶部横向 Tab */}
+            <div className="lg:hidden overflow-x-auto no-scrollbar min-h-10">
+              <div className="flex gap-0">
+                {renderProviderTabs(false)}
               </div>
-            );
-          })}
-        </div>
-      </div>
+            </div>
+            {/* 大屏：左侧竖排列表 */}
+            <div className="hidden lg:flex flex-col flex-1 min-h-0 overflow-y-auto no-scrollbar p-2 gap-1">
+              {renderProviderTabs(true)}
+            </div>
+          </div>
 
-      {/* 内容区：添加供应商 或 当前供应商的 Token/模型 */}
+          {/* 右侧：Token 录入 / 模型内容区 */}
+          <div className="flex-1 min-w-0 overflow-auto pl-4 pr-0 lg:pl-5 lg:pr-0 pt-4 lg:pt-4">
+            <div className="w-full max-w-2xl">
       {showAddProviderContent ? (
         <div className="space-y-6">
           <Card title="添加供应商" description="从系统支持的供应商中添加，或创建自定义供应商" variant="persona" size="relaxed">
@@ -1023,7 +1077,7 @@ const LLMConfigPanel: React.FC = () => {
                 onClick={() => setShowCreateProviderDialog(true)}
                 variant="primary"
                 size="sm"
-                className="[data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:text-[#000000]"
+                className="llm-config-btn-primary"
               >
                 <Plus className="w-4 h-4 mr-2" />
                 添加自定义供应商
@@ -1036,7 +1090,7 @@ const LLMConfigPanel: React.FC = () => {
                 if (unaddedProviders.length === 0) return null;
                 return (
                   <>
-                    <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                    <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 ">
                       系统支持的供应商（点击添加）
                     </div>
                     <div className="grid gap-2 sm:grid-cols-2">
@@ -1069,20 +1123,20 @@ const LLMConfigPanel: React.FC = () => {
                               });
                             }
                           }}
-                          className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-[#404040] [data-skin='niho']:border-[var(--niho-text-border)] bg-white dark:bg-[#2d2d2d] [data-skin='niho']:bg-[#000000] hover:bg-gray-50 dark:hover:bg-[#363636] [data-skin='niho']:hover:bg-[rgba(0,255,136,0.06)] text-left transition-colors"
+                          className="llm-config-provider-card flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] hover:bg-gray-50 dark:hover:bg-[#363636] text-left transition-colors"
                         >
                           <span className="w-8 h-8 rounded flex items-center justify-center flex-shrink-0 text-lg">
                             {supportedProvider.icon}
                           </span>
                           <div className="flex-1 min-w-0">
-                            <div className="text-sm font-medium text-gray-900 dark:text-white [data-skin='niho']:text-[var(--text-primary)] truncate">
+                            <div className="text-sm font-medium text-gray-900 dark:text-white truncate">
                               {supportedProvider.name}
                             </div>
-                            <div className="text-xs text-gray-500 dark:text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)] truncate">
+                            <div className="text-xs text-gray-500 dark:text-gray-400 truncate ">
                               {supportedProvider.description}
                             </div>
                           </div>
-                          <Plus className="w-4 h-4 text-gray-400 [data-skin='niho']:text-[var(--color-accent)] flex-shrink-0" />
+                          <Plus className="w-4 h-4 text-gray-400 flex-shrink-0" />
                         </button>
                       ))}
                     </div>
@@ -1111,25 +1165,22 @@ const LLMConfigPanel: React.FC = () => {
               {/* 供应商切换提示 - 增强视觉反馈 */}
               <div 
                 className={`
-                  p-4 rounded-lg border-2 transition-all duration-300
+                  llm-config-provider-header p-4 rounded-lg border-2 transition-all duration-300
                   ${selectedProvider && ['openai', 'anthropic', 'gemini', 'deepseek'].includes(selectedProvider.provider_type)
                     ? 'border-primary-300 dark:border-primary-700 bg-primary-50/50 dark:bg-primary-900/20'
                     : 'border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/30'
                   }
-                  [data-skin="niho"]:border-[rgba(0,255,136,0.3)]
-                  [data-skin="niho"]:bg-[rgba(0,255,136,0.05)]
-                  [data-skin="niho"]:shadow-[0_0_12px_rgba(0,255,136,0.1)]
                 `}
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg flex items-center justify-center overflow-hidden border border-gray-200 dark:border-gray-700 [data-skin='niho']:border-[rgba(0,255,136,0.3)] bg-white dark:bg-gray-800 [data-skin='niho']:bg-[#000000]">
+                  <div className="w-10 h-10 rounded-lg flex items-center justify-center overflow-hidden border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
                     {renderProviderIcon(selectedProvider.provider_type, 'w-full h-full', 40)}
                   </div>
                   <div className="flex-1">
-                    <div className="font-semibold text-gray-900 dark:text-gray-100 [data-skin='niho']:text-[#e8f5f0]">
-                      {selectedProvider.name}
+                    <div className="font-semibold text-gray-900 dark:text-gray-100">
+                      {getProviderDisplayName(selectedProvider)}
                     </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 [data-skin='niho']:text-[#a0c4b8]">
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 ">
                       {selectedProvider && ['openai', 'anthropic', 'gemini', 'deepseek'].includes(selectedProvider.provider_type)
                         ? '请在下方录入 API Token 以开始使用'
                         : `${providerConfigs.length} 个模型配置`
@@ -1142,8 +1193,9 @@ const LLMConfigPanel: React.FC = () => {
               {/* Token 管理界面（仅主流供应商：openai, anthropic, gemini, deepseek）- 替代供应商信息卡片 */}
               {selectedProvider && ['openai', 'anthropic', 'gemini', 'deepseek'].includes(selectedProvider.provider_type) && (
                 <Card 
-                  title={selectedProvider ? `Token 管理 - ${selectedProvider.name}` : 'Token 管理'}
-                  description={`为 ${selectedProvider.name} 录入和管理 API Token，系统会自动获取支持的模型列表`}
+                  className="llm-config-token-card-wrap"
+                  title={selectedProvider ? `Token 管理 - ${getProviderDisplayName(selectedProvider)}` : 'Token 管理'}
+                  description={`为 ${getProviderDisplayName(selectedProvider)} 录入和管理 API Token，系统会自动获取支持的模型列表`}
                   size="compact"
                   variant="persona"
                   headerAction={
@@ -1163,7 +1215,7 @@ const LLMConfigPanel: React.FC = () => {
                           setShowAddTokenDialog(true);
                           console.log('showAddTokenDialog 设置为 true');
                         }}
-                        className="relative z-10 pointer-events-auto"
+                        className="relative z-10 pointer-events-auto llm-config-btn-primary"
                       >
                         <Plus className="w-4 h-4 mr-2" />
                         录入 Token
@@ -1215,7 +1267,7 @@ const LLMConfigPanel: React.FC = () => {
                   <Button
                     variant="primary"
                     size="sm"
-                    className="w-full md:w-auto"
+                    className="w-full md:w-auto llm-config-btn-primary"
                     onClick={async () => {
                       if (!selectedProvider) {
                         toast({
@@ -1268,33 +1320,33 @@ const LLMConfigPanel: React.FC = () => {
                     {providerConfigs.map(config => (
                       <div
                         key={config.config_id}
-                        className="flex items-center justify-between p-3 rounded-lg border border-gray-200 dark:border-[#404040] [data-skin='niho']:border-[var(--niho-text-border)] hover:bg-gray-50 dark:hover:bg-[#363636] [data-skin='niho']:hover:bg-[rgba(0,255,136,0.06)] [data-skin='niho']:hover:border-[rgba(0,255,136,0.2)] transition-colors"
+                        className="llm-config-model-row flex items-center justify-between p-3 rounded-lg border border-gray-200 dark:border-[#404040] hover:bg-gray-50 dark:hover:bg-[#363636] transition-colors"
                       >
                         <div className="flex items-center space-x-3 flex-1">
-                          <div className="w-8 h-8 rounded flex items-center justify-center overflow-hidden border border-gray-200 dark:border-[#404040] [data-skin='niho']:border-[var(--niho-text-border)]">
+                          <div className="w-8 h-8 rounded flex items-center justify-center overflow-hidden border border-gray-200 dark:border-[#404040]">
                             {/* 优先使用 supplier，其次使用 provider */}
                             {renderProviderIcon(config.supplier || config.provider, 'w-full h-full', 24)}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <div className="font-medium text-sm text-gray-900 dark:text-gray-100 [data-skin='niho']:text-[#e8f5f0]">
+                            <div className="font-medium text-sm text-gray-900 dark:text-gray-100">
                               {config.name}
                             </div>
-                            <div className="text-xs text-gray-500 dark:text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)] flex items-center gap-1">
+                            <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
                               <span>{config.model || '未设置模型'}</span>
                               {/* 兼容路由（provider）作为补充信息展示 */}
                               {config.supplier && config.supplier !== config.provider && (
-                                <span className="text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">(兼容: {config.provider})</span>
+                                <span className="text-gray-400">(兼容: {config.provider})</span>
                               )}
                               <CapabilityIcons capabilities={config.metadata?.capabilities} modelName={config.model} className="w-3 h-3" />
                             </div>
                           </div>
                           {config.enabled ? (
                             <>
-                              <span className="ui-badge-success text-xs [data-skin='niho']:bg-[rgba(0,255,136,0.1)] [data-skin='niho']:text-[#00ff88] [data-skin='niho']:border [data-skin='niho']:border-[rgba(0,255,136,0.2)]">已启用</span>
+                              <span className="ui-badge-success text-xs">已启用</span>
                               <CapabilityIcons capabilities={config.metadata?.capabilities} modelName={config.model} className="w-3.5 h-3.5" />
                             </>
                           ) : (
-                            <span className="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-800 [data-skin='niho']:bg-[#000000] [data-skin='niho']:border [data-skin='niho']:border-[var(--niho-text-border)] text-gray-600 dark:text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)] rounded">
+                            <span className="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded">
                               已禁用
                             </span>
                           )}
@@ -1303,7 +1355,7 @@ const LLMConfigPanel: React.FC = () => {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="[data-skin='niho']:text-[var(--niho-skyblue-gray)] [data-skin='niho']:hover:text-[#00ff88] [data-skin='niho']:hover:bg-[rgba(0,255,136,0.1)]"
+                            className="text-gray-500 hover:text-[var(--color-accent)] hover:bg-[var(--color-accent-bg)]"
                             onClick={() => handleEditConfig(config)}
                           >
                             <Edit2 className="w-4 h-4" />
@@ -1311,7 +1363,7 @@ const LLMConfigPanel: React.FC = () => {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="text-red-600 [data-skin='niho']:text-[#ff6b9d] [data-skin='niho']:hover:text-[#ff1493] [data-skin='niho']:hover:bg-[rgba(255,107,157,0.1)]"
+                            className="text-red-600"
                             onClick={() => setDeleteTarget(config)}
                           >
                             <Trash2 className="w-4 h-4" />
@@ -1345,8 +1397,8 @@ const LLMConfigPanel: React.FC = () => {
                           {selectedProvider.override_url ? (
                             // 如果供应商设置了 override_url，显示可编辑的URL输入框
                             <div className="md:col-span-2">
-                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mb-1">
-                                API URL <span className="text-red-500 [data-skin='niho']:text-[#ff6b9d]">*</span>
+                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                API URL <span className="text-red-500">*</span>
                               </label>
                               <input
                                 type="text"
@@ -1356,15 +1408,15 @@ const LLMConfigPanel: React.FC = () => {
                                   setAvailableModels([]);
                                   setModelsError(null);
                                 }}
-                                className="input-field [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[#e8f5f0] [data-skin='niho']:placeholder:text-[var(--niho-skyblue-gray)]"
+                                className="input-field"
                                 placeholder={selectedProvider.default_api_url || '请输入 API URL'}
                               />
                             </div>
                           ) : selectedProvider.provider_type === 'ollama' ? (
                             // Ollama 需要服务器地址
                             <div className="md:col-span-2">
-                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mb-1">
-                                Ollama 服务器地址 <span className="text-red-500 [data-skin='niho']:text-[#ff6b9d]">*</span>
+                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                Ollama 服务器地址 <span className="text-red-500">*</span>
                               </label>
                               <input
                                 type="text"
@@ -1374,15 +1426,15 @@ const LLMConfigPanel: React.FC = () => {
                                   setAvailableModels([]);
                                   setModelsError(null);
                                 }}
-                                className="input-field [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[#e8f5f0] [data-skin='niho']:placeholder:text-[var(--niho-skyblue-gray)]"
+                                className="input-field"
                                 placeholder={selectedProvider.default_api_url || getProviderDefaultUrl('ollama')}
                               />
-                              <p className="text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mt-1">
+                              <p className="text-xs text-gray-500 mt-1">
                                 默认: {getProviderDefaultUrl('ollama')}
                                 <span className="block mt-1">
                                   💡 提示：输入服务器地址后，点击模型名称输入框可以获取可用模型列表
                                 </span>
-                                <span className="block mt-1 text-green-600 [data-skin='niho']:text-[#00ff88]">
+                                <span className="block mt-1 text-green-600 ">
                                   ✅ Ollama 模型不需要 API 密钥，可以直接使用
                                 </span>
                               </p>
@@ -1390,8 +1442,8 @@ const LLMConfigPanel: React.FC = () => {
                           ) : (
                             // 其他供应商使用默认URL（只读显示）
                             <div className="md:col-span-2">
-                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mb-1">
-                                API URL <span className="text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">(使用默认: {selectedProvider.default_api_url || getProviderDefaultUrl(selectedProvider.provider_type)})</span>
+                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                API URL <span className="text-xs text-gray-500">(使用默认: {selectedProvider.default_api_url || getProviderDefaultUrl(selectedProvider.provider_type)})</span>
                               </label>
                               <input
                                 type="text"
@@ -1401,7 +1453,7 @@ const LLMConfigPanel: React.FC = () => {
                                   setAvailableModels([]);
                                   setModelsError(null);
                                 }}
-                                className="input-field [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[#e8f5f0] [data-skin='niho']:placeholder:text-[var(--niho-skyblue-gray)]"
+                                className="input-field"
                                 placeholder={selectedProvider.default_api_url || getProviderDefaultUrl(selectedProvider.provider_type)}
                                 readOnly
                               />
@@ -1413,8 +1465,8 @@ const LLMConfigPanel: React.FC = () => {
                       {/* API密钥 */}
                       {selectedProvider && selectedProvider.provider_type !== 'ollama' && (
               <div>
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mb-1">
-                            API密钥 {!editingId && <span className="text-red-500 [data-skin='niho']:text-[#ff6b9d]">*</span>} {editingId && <span className="text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">(留空则不更新)</span>}
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            API密钥 {!editingId && <span className="text-red-500">*</span>} {editingId && <span className="text-xs text-gray-500">(留空则不更新)</span>}
                           </label>
                           <div className="relative">
                             <input
@@ -1426,8 +1478,12 @@ const LLMConfigPanel: React.FC = () => {
                                 setAvailableModels([]);
                                 setModelsError(null);
                               }}
-                              className="input-field pr-10 [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[#e8f5f0] [data-skin='niho']:placeholder:text-[var(--niho-skyblue-gray)]"
-                              placeholder={editingId ? '点击右侧眼睛图标查看或留空不更新' : (selectedProvider && selectedProvider.provider_id !== selectedProvider.provider_type ? `请输入 ${selectedProvider.name} 的 API Token（格式如 sk-...）` : getProviderPlaceholder(selectedProvider?.provider_type || 'openai'))}
+                              className="input-field pr-10"
+                              placeholder={editingId
+                                ? '点击右侧眼睛图标查看或留空不更新'
+                                : (selectedProvider
+                                  ? `请输入 ${getProviderDisplayName(selectedProvider)} 的 API Token（格式如 ${getProviderPlaceholder(selectedProvider.provider_type)}）`
+                                  : '请输入 API Token')}
                               readOnly={editingId !== null && !showApiKey && !newConfig.api_key}
                             />
                             {editingId && (
@@ -1435,7 +1491,7 @@ const LLMConfigPanel: React.FC = () => {
                                 type="button"
                                 onClick={handleLoadApiKey}
                                 disabled={loadingApiKey}
-                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 [data-skin='niho']:text-[var(--niho-skyblue-gray)] [data-skin='niho']:hover:text-[#00ff88] transition-colors disabled:opacity-50"
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors disabled:opacity-50"
                                 title={showApiKey ? '隐藏API密钥' : '显示API密钥'}
                               >
                                 {loadingApiKey ? (
@@ -1453,10 +1509,10 @@ const LLMConfigPanel: React.FC = () => {
 
                       {/* 模型名称 */}
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mb-1">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                           模型名称
                           {selectedProvider && ((selectedProvider.provider_type === 'ollama' as any || (selectedProvider.provider_type !== 'ollama' && newConfig.api_key))) && (
-                            <span className="text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">(点击输入框选择模型)</span>
+                            <span className="text-xs text-gray-500">(点击输入框选择模型)</span>
                           )}
                         </label>
                         {selectedProvider && selectedProvider.provider_type === 'ollama' ? (
@@ -1473,7 +1529,7 @@ const LLMConfigPanel: React.FC = () => {
                                   name: prev.name || model,
                                 }));
                               }}
-                              className="input-field cursor-pointer [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[#e8f5f0] [data-skin='niho']:placeholder:text-[var(--niho-skyblue-gray)]"
+                              className="input-field cursor-pointer"
                               placeholder={
                                 newConfig.api_url
                                   ? '点击选择模型'
@@ -1497,18 +1553,18 @@ const LLMConfigPanel: React.FC = () => {
                               readOnly
                             />
                             {isLoadingOllamaModels && (
-                              <div className="flex items-center space-x-2 mt-1 text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
-                                <Loader2 className="w-3 h-3 animate-spin [data-skin='niho']:text-[var(--color-highlight)]" />
+                              <div className="flex items-center space-x-2 mt-1 text-xs text-gray-500">
+                                <Loader2 className="w-3 h-3 animate-spin " />
                                 <span>正在获取模型列表...</span>
                               </div>
                             )}
                             {ollamaError && (
-                              <div className="mt-1 text-xs text-red-600 [data-skin='niho']:text-[#ff6b9d]">
+                              <div className="mt-1 text-xs text-red-600">
                                 {ollamaError}
                               </div>
                             )}
                             {!isLoadingOllamaModels && !ollamaError && ollamaModels.length > 0 && (
-                              <div className="mt-1 text-xs text-green-600 [data-skin='niho']:text-[#00ff88]">
+                              <div className="mt-1 text-xs text-green-600 ">
                                 已找到 {ollamaModels.length} 个模型
                               </div>
                             )}
@@ -1551,7 +1607,7 @@ const LLMConfigPanel: React.FC = () => {
                                   name: prev.name || model,
                                 }));
                               }}
-                              className="input-field cursor-pointer [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[#e8f5f0] [data-skin='niho']:placeholder:text-[var(--niho-skyblue-gray)]"
+                              className="input-field cursor-pointer"
                               placeholder={
                                 newConfig.api_key
                                   ? '点击选择模型'
@@ -1578,18 +1634,18 @@ const LLMConfigPanel: React.FC = () => {
                               readOnly
                             />
                             {isLoadingModels && (
-                              <div className="flex items-center space-x-2 mt-1 text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
-                                <Loader2 className="w-3 h-3 animate-spin [data-skin='niho']:text-[var(--color-highlight)]" />
+                              <div className="flex items-center space-x-2 mt-1 text-xs text-gray-500">
+                                <Loader2 className="w-3 h-3 animate-spin " />
                                 <span>正在从 API 获取模型列表...</span>
                               </div>
                             )}
                             {modelsError && (
-                              <div className="mt-1 text-xs text-red-600 [data-skin='niho']:text-[#ff6b9d]">
+                              <div className="mt-1 text-xs text-red-600">
                                 {modelsError}
                               </div>
                             )}
                             {!isLoadingModels && !modelsError && availableModels.length > 0 && (
-                              <div className="mt-1 text-xs text-green-600 [data-skin='niho']:text-[#00ff88]">
+                              <div className="mt-1 text-xs text-green-600 ">
                                 已找到 {availableModels.length} 个模型
                               </div>
                             )}
@@ -1651,18 +1707,18 @@ const LLMConfigPanel: React.FC = () => {
                         />
                         <label
                           htmlFor="enableThinking"
-                          className="text-sm font-medium text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--niho-skyblue-gray)]"
+                          className="text-sm font-medium text-gray-700 dark:text-gray-300"
                         >
                           启用 Thinking 模式（深度思考）
                         </label>
-                        <span className="text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                        <span className="text-xs text-gray-500">
                           （一旦启用，聊天中不允许切换模式。用户可灵活测试后确认）
                         </span>
                       </div>
 
                       {/* 支持的输入类型 */}
                       <div className="md:col-span-2">
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           支持的输入类型
                         </label>
                         <div className="flex flex-wrap gap-3">
@@ -1702,8 +1758,8 @@ const LLMConfigPanel: React.FC = () => {
                                     });
                                   }}
                                 />
-                                <Icon className="w-4 h-4 text-gray-600 dark:text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)]" />
-                                <span className="text-sm text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[#e8f5f0]">{labels[type]}</span>
+                                <Icon className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                                <span className="text-sm text-gray-700 dark:text-gray-300">{labels[type]}</span>
                               </label>
                             );
                           })}
@@ -1712,7 +1768,7 @@ const LLMConfigPanel: React.FC = () => {
 
                       {/* 支持的输出类型 */}
                       <div className="md:col-span-2">
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mb-2">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                           支持的输出类型
                         </label>
                         <div className="flex flex-wrap gap-3">
@@ -1752,8 +1808,8 @@ const LLMConfigPanel: React.FC = () => {
                                     });
                                   }}
                                 />
-                                <Icon className="w-4 h-4 text-gray-600 dark:text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)]" />
-                                <span className="text-sm text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[#e8f5f0]">{labels[type]}</span>
+                                <Icon className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                                <span className="text-sm text-gray-700 dark:text-gray-300">{labels[type]}</span>
                               </label>
                             );
                           })}
@@ -1771,7 +1827,7 @@ const LLMConfigPanel: React.FC = () => {
                         />
                         <label
                           htmlFor="enabled"
-                          className="text-sm font-medium text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--niho-skyblue-gray)]"
+                          className="text-sm font-medium text-gray-700 dark:text-gray-300"
                         >
                           启用此配置
                         </label>
@@ -1805,10 +1861,11 @@ const LLMConfigPanel: React.FC = () => {
                   </FormFieldGroup>
 
                   {/* 操作按钮 */}
-                  <div className="flex space-x-2 mt-4 pt-4 border-t border-gray-200 dark:border-[#404040] [data-skin='niho']:border-[var(--niho-text-border)]">
+                  <div className="flex space-x-2 mt-4 pt-4 border-t border-gray-200 dark:border-[#404040] [data-skin='niho']:border-t-[var(--niho-text-border)]">
                     <Button
                       onClick={editingId ? handleUpdateConfig : handleAddConfig}
                       variant="primary"
+                      className="[data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:text-black [data-skin='niho']:border-0"
                     >
                       <Save className="w-4 h-4" />
                       <span>{editingId ? '保存' : '添加'}</span>
@@ -1816,7 +1873,7 @@ const LLMConfigPanel: React.FC = () => {
                     <Button
                       onClick={handleCancel}
                       variant="secondary"
-                      className="[data-skin='niho']:border-[rgba(255,107,157,0.3)] [data-skin='niho']:text-[#ff6b9d] [data-skin='niho']:hover:border-[rgba(255,107,157,0.5)] [data-skin='niho']:hover:bg-[rgba(255,107,157,0.1)]"
+                      className="niho-close-pink"
                     >
                       取消
                     </Button>
@@ -1827,11 +1884,16 @@ const LLMConfigPanel: React.FC = () => {
         </div>
       )}
 
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* 创建自定义供应商对话框 */}
       <Dialog open={showCreateProviderDialog} onOpenChange={setShowCreateProviderDialog}>
-        <DialogContent className="max-w-md w-[95vw] md:w-auto max-h-[80vh] md:max-h-none [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
+        <DialogContent className="chatee-dialog-standard max-w-md w-[95vw] md:w-auto max-h-[80vh] md:max-h-none [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)]">
           <DialogHeader>
-            <DialogTitle className="[data-skin='niho']:text-[#e8f5f0]">添加自定义供应商</DialogTitle>
+            <DialogTitle className="[data-skin='niho']:text-[var(--text-primary)]">添加自定义供应商</DialogTitle>
             <DialogDescription className="[data-skin='niho']:text-[var(--niho-skyblue-gray)]">
               添加一个自定义供应商，用于兼容模式的非主流供应商（如 DeepSeek、NVIDIA 等）
             </DialogDescription>
@@ -1852,7 +1914,7 @@ const LLMConfigPanel: React.FC = () => {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mb-1">
-                兼容的供应商类型 <span className="text-red-500 [data-skin='niho']:text-[#ff6b9d]">*</span>
+                兼容的供应商类型 <span className="text-red-500 [data-skin='niho']:text-[var(--color-secondary)]">*</span>
               </label>
               <Select
                 value={newProvider.provider_type}
@@ -1863,7 +1925,7 @@ const LLMConfigPanel: React.FC = () => {
                   });
                 }}
               >
-                <SelectTrigger className="input-field [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[#e8f5f0]">
+                <SelectTrigger className="input-field [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1906,10 +1968,10 @@ const LLMConfigPanel: React.FC = () => {
             )}
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="[data-skin='niho']:border-t-[var(--niho-text-border)]">
             <Button
               variant="secondary"
-              className="[data-skin='niho']:border-[rgba(255,107,157,0.3)] [data-skin='niho']:text-[#ff6b9d] [data-skin='niho']:hover:border-[rgba(255,107,157,0.5)] [data-skin='niho']:hover:bg-[rgba(255,107,157,0.1)]"
+              className="niho-close-pink"
               onClick={() => {
                 setShowCreateProviderDialog(false);
                 setNewProvider({
@@ -1924,6 +1986,7 @@ const LLMConfigPanel: React.FC = () => {
             </Button>
             <Button
               variant="primary"
+              className="[data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:text-black [data-skin='niho']:border-0"
               onClick={async () => {
                 if (!newProvider.name || !newProvider.provider_type) {
                   toast({
@@ -1968,11 +2031,13 @@ const LLMConfigPanel: React.FC = () => {
 
       {/* 编辑供应商对话框 */}
       <Dialog open={showEditProviderDialog} onOpenChange={setShowEditProviderDialog}>
-        <DialogContent className="max-w-md w-[95vw] md:w-auto max-h-[80vh] md:max-h-none [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
+        <DialogContent className="chatee-dialog-standard max-w-md w-[95vw] md:w-auto max-h-[80vh] md:max-h-none [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)]">
           <DialogHeader>
-            <DialogTitle className="[data-skin='niho']:text-[#e8f5f0]">编辑供应商</DialogTitle>
+            <DialogTitle className="[data-skin='niho']:text-[var(--text-primary)]">编辑供应商</DialogTitle>
             <DialogDescription className="[data-skin='niho']:text-[var(--niho-skyblue-gray)]">
-              修改供应商信息
+              {editingProvider && isDefaultMainstreamProvider(editingProvider)
+                ? '默认供应商不可修改'
+                : '修改供应商信息'}
             </DialogDescription>
           </DialogHeader>
           
@@ -1987,15 +2052,17 @@ const LLMConfigPanel: React.FC = () => {
                   value: editingProvider.name,
                   onChange: (e) => setEditingProvider({ ...editingProvider, name: e.target.value }),
                   placeholder: "例如: NVIDIA",
+                  disabled: isDefaultMainstreamProvider(editingProvider),
                 }}
               />
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mb-1">
-                  兼容的供应商类型 <span className="text-red-500 [data-skin='niho']:text-[#ff6b9d]">*</span>
+                  兼容的供应商类型 <span className="text-red-500 [data-skin='niho']:text-[var(--color-secondary)]">*</span>
                 </label>
                 <Select
                   value={editingProvider.provider_type}
+                  disabled={isDefaultMainstreamProvider(editingProvider)}
                   onValueChange={(value) => {
                     setEditingProvider({
                       ...editingProvider,
@@ -2003,7 +2070,7 @@ const LLMConfigPanel: React.FC = () => {
                     });
                   }}
                 >
-                  <SelectTrigger className="input-field [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[#e8f5f0]">
+                  <SelectTrigger className="input-field [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -2020,6 +2087,7 @@ const LLMConfigPanel: React.FC = () => {
                 <Switch
                   id="edit-provider-override-url"
                   checked={editingProvider.override_url || false}
+                  disabled={isDefaultMainstreamProvider(editingProvider)}
                   onCheckedChange={(checked) => {
                     setEditingProvider({ ...editingProvider, override_url: checked });
                   }}
@@ -2041,16 +2109,17 @@ const LLMConfigPanel: React.FC = () => {
                     value: editingProvider.default_api_url || '',
                     onChange: (e) => setEditingProvider({ ...editingProvider, default_api_url: e.target.value }),
                     placeholder: "例如: https://integrate.api.nvidia.com/v1",
+                    disabled: isDefaultMainstreamProvider(editingProvider),
                   }}
                 />
               )}
             </div>
           )}
 
-          <DialogFooter>
+          <DialogFooter className="[data-skin='niho']:border-t-[var(--niho-text-border)]">
             <Button
               variant="secondary"
-              className="[data-skin='niho']:border-[rgba(255,107,157,0.3)] [data-skin='niho']:text-[#ff6b9d] [data-skin='niho']:hover:border-[rgba(255,107,157,0.5)] [data-skin='niho']:hover:bg-[rgba(255,107,157,0.1)]"
+              className="niho-close-pink"
               onClick={() => {
                 setShowEditProviderDialog(false);
                 setEditingProvider(null);
@@ -2060,7 +2129,16 @@ const LLMConfigPanel: React.FC = () => {
             </Button>
             <Button
               variant="primary"
+              className="[data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:text-black [data-skin='niho']:border-0"
+              disabled={Boolean(editingProvider && isDefaultMainstreamProvider(editingProvider))}
               onClick={async () => {
+                if (editingProvider && isDefaultMainstreamProvider(editingProvider)) {
+                  toast({
+                    title: '默认供应商不可修改',
+                    variant: 'destructive',
+                  });
+                  return;
+                }
                 if (!editingProvider || !editingProvider.name || !editingProvider.provider_type) {
                   toast({
                     title: '请填写供应商名称和兼容类型',
@@ -2151,34 +2229,32 @@ const LLMConfigPanel: React.FC = () => {
 
       {/* Token 录入对话框 */}
       <Dialog open={showAddTokenDialog} onOpenChange={setShowAddTokenDialog}>
-        <DialogContent className="chatee-dialog-standard max-w-2xl w-[95vw] md:w-auto max-h-[80vh] md:max-h-none [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]">
+        <DialogContent className="chatee-dialog-standard max-w-2xl w-[95vw] md:w-auto max-h-[80vh] md:max-h-none [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)]">
           <DialogHeader>
-            <DialogTitle className="[data-skin='niho']:text-[#e8f5f0]">
-              {selectedProvider ? `录入 Token - ${selectedProvider.name}` : '录入 Token'}
+            <DialogTitle className="[data-skin='niho']:text-[var(--text-primary)]">
+              {selectedProvider ? `录入 Token - ${getProviderDisplayName(selectedProvider)}` : '录入 Token'}
             </DialogTitle>
             <DialogDescription className="[data-skin='niho']:text-[var(--niho-skyblue-gray)]">
-              {selectedProvider ? `为 ${selectedProvider.name} 输入 API Token，系统将自动获取支持的模型列表` : '输入 API Token，系统将自动获取支持的模型列表'}
+              {selectedProvider ? `为 ${getProviderDisplayName(selectedProvider)} 输入 API Token，系统将自动获取支持的模型列表` : '输入 API Token，系统将自动获取支持的模型列表'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 max-h-[60vh] overflow-auto no-scrollbar">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mb-2">
-                API Token <span className="text-red-500 [data-skin='niho']:text-[#ff6b9d]">*</span>
+                API Token <span className="text-red-500 [data-skin='niho']:text-[var(--color-secondary)]">*</span>
               </label>
               <input
                 type="password"
                 value={newTokenApiKey}
                 onChange={(e) => setNewTokenApiKey(e.target.value)}
-                className="input-field w-full [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[#e8f5f0] [data-skin='niho']:placeholder:text-[var(--niho-skyblue-gray)]"
+                className="input-field w-full"
                 placeholder={selectedProvider
-                  ? (selectedProvider.provider_id !== selectedProvider.provider_type
-                    ? `请输入 ${selectedProvider.name} 的 API Token（格式如 sk-...）`
-                    : getProviderPlaceholder(selectedProvider.provider_type))
+                  ? `请输入 ${getProviderDisplayName(selectedProvider)} 的 API Token（格式如 ${getProviderPlaceholder(selectedProvider.provider_type)}）`
                   : '请输入 API Token'}
               />
             </div>
             {tokenError && (
-              <div className="text-sm text-red-600 dark:text-red-400 [data-skin='niho']:text-[#ff6b9d]">
+              <div className="text-sm text-red-600 dark:text-red-400">
                 {tokenError}
               </div>
             )}
@@ -2234,7 +2310,7 @@ const LLMConfigPanel: React.FC = () => {
                   }
                 }}
                 disabled={isLoadingTokenModels || !newTokenApiKey.trim()}
-                className="w-full"
+                className="w-full "
               >
                 {isLoadingTokenModels ? (
                   <>
@@ -2248,13 +2324,13 @@ const LLMConfigPanel: React.FC = () => {
             ) : (
               <div>
                 <div className="flex items-center justify-between gap-2 mb-2">
-                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
                     选择要启用的模型 ({selectedModelsForToken.size} / {tokenAvailableModels.length})
                   </div>
                   <Button
                     variant="secondary"
                     size="sm"
-                    className="shrink-0 [data-skin='niho']:border-[rgba(255,107,157,0.3)] [data-skin='niho']:text-[#ff6b9d] [data-skin='niho']:hover:border-[rgba(255,107,157,0.5)] [data-skin='niho']:hover:bg-[rgba(255,107,157,0.1)]"
+                    className="shrink-0 "
                     onClick={async () => {
                       if (!selectedProvider || !newTokenApiKey.trim()) return;
                       setIsLoadingTokenModels(true);
@@ -2298,7 +2374,7 @@ const LLMConfigPanel: React.FC = () => {
                   <Button
                     variant="secondary"
                     size="sm"
-                    className="[data-skin='niho']:border-[rgba(255,107,157,0.3)] [data-skin='niho']:text-[#ff6b9d] [data-skin='niho']:hover:border-[rgba(255,107,157,0.5)] [data-skin='niho']:hover:bg-[rgba(255,107,157,0.1)]"
+                    className=""
                     onClick={() => {
                       const callableIds = tokenAvailableModels
                         .filter(m => typeof m === 'string' || (m as ModelWithCapabilities).isCallable !== false)
@@ -2311,13 +2387,13 @@ const LLMConfigPanel: React.FC = () => {
                   <Button
                     variant="secondary"
                     size="sm"
-                    className="[data-skin='niho']:border-[rgba(255,107,157,0.3)] [data-skin='niho']:text-[#ff6b9d] [data-skin='niho']:hover:border-[rgba(255,107,157,0.5)] [data-skin='niho']:hover:bg-[rgba(255,107,157,0.1)]"
+                    className=""
                     onClick={() => setSelectedModelsForToken(new Set())}
                   >
                     全不选
                   </Button>
                 </div>
-                <div className="max-h-60 overflow-y-auto border border-gray-200 dark:border-[#404040] [data-skin='niho']:border-[var(--niho-text-border)] rounded-lg p-2 space-y-1 [data-skin='niho']:bg-[#000000]">
+                <div className="max-h-60 overflow-y-auto border border-gray-200 dark:border-[#404040]  rounded-lg p-2 space-y-1 ">
                   {tokenAvailableModels.map(model => {
                     const modelId = typeof model === 'string' ? model : model.id;
                     const capabilities = typeof model === 'object' && 'capabilities' in model ? model.capabilities : null;
@@ -2325,7 +2401,7 @@ const LLMConfigPanel: React.FC = () => {
                     return (
                       <label
                         key={modelId}
-                        className={`flex items-center gap-2 p-2 rounded ${isCallable ? "hover:bg-gray-100 dark:hover:bg-[#363636] [data-skin='niho']:hover:bg-[rgba(0,255,136,0.06)] cursor-pointer" : 'opacity-60 cursor-not-allowed'}`}
+                        className={`flex items-center gap-2 p-2 rounded ${isCallable ? "hover:bg-gray-100 dark:hover:bg-[#363636]  cursor-pointer" : 'opacity-60 cursor-not-allowed'}`}
                         title={!isCallable ? '该模型不支持对话（仅支持生图等），不可用于聊天' : undefined}
                       >
                         <input
@@ -2344,7 +2420,7 @@ const LLMConfigPanel: React.FC = () => {
                           }}
                           className="rounded"
                         />
-                        <span className="text-sm text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[#e8f5f0] flex-1">{modelId}</span>
+                        <span className="text-sm text-gray-700 dark:text-gray-300 flex-1">{modelId}</span>
                         <CapabilityIcons capabilities={capabilities} modelName={modelId} className="w-4 h-4" />
                       </label>
                     );
@@ -2353,10 +2429,10 @@ const LLMConfigPanel: React.FC = () => {
               </div>
             )}
           </div>
-          <DialogFooter>
+          <DialogFooter className="[data-skin='niho']:border-t-[var(--niho-text-border)]">
             <Button
               variant="secondary"
-              className="[data-skin='niho']:border-[rgba(255,107,157,0.3)] [data-skin='niho']:text-[#ff6b9d] [data-skin='niho']:hover:border-[rgba(255,107,157,0.5)] [data-skin='niho']:hover:bg-[rgba(255,107,157,0.1)]"
+              className="niho-close-pink"
               onClick={() => {
                 setShowAddTokenDialog(false);
                 setNewTokenApiKey('');
@@ -2370,6 +2446,7 @@ const LLMConfigPanel: React.FC = () => {
             {tokenAvailableModels.length > 0 && (
               <Button
                 variant="primary"
+                className="[data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:text-black [data-skin='niho']:border-0"
                 onClick={async () => {
                   if (!selectedProvider) return;
                   if (selectedModelsForToken.size === 0) {
@@ -2474,16 +2551,16 @@ const LLMConfigPanel: React.FC = () => {
 
       {/* Token 模型管理对话框 */}
       <Dialog open={showTokenModelsDialog} onOpenChange={setShowTokenModelsDialog}>
-        <DialogContent className="chatee-dialog-standard max-w-2xl w-[95vw] md:w-auto max-h-[80vh] md:max-h-none">
+        <DialogContent className="chatee-dialog-standard max-w-2xl w-[95vw] md:w-auto max-h-[80vh] md:max-h-none [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)]">
           <DialogHeader>
-            <DialogTitle>管理 Token 模型</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="[data-skin='niho']:text-[var(--text-primary)]">管理 Token 模型</DialogTitle>
+            <DialogDescription className="[data-skin='niho']:text-[var(--niho-skyblue-gray)]">
               查看和管理该 Token 下的所有模型，可以同时启用多个模型，但不同 Token 之间只能启用一个
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 max-h-[60vh] overflow-auto no-scrollbar">
             {selectedTokenApiKey && (
-              <div className="p-3 bg-gray-50 dark:bg-[#2d2d2d] rounded-lg">
+              <div className="p-3 bg-gray-50 dark:bg-[#2d2d2d] rounded-lg ">
                 <div className="flex items-center justify-between mb-2">
                   <div className="text-xs text-gray-500 dark:text-gray-400">API Token</div>
                   <Button
@@ -2537,7 +2614,7 @@ const LLMConfigPanel: React.FC = () => {
                     )}
                   </Button>
                 </div>
-                <div className="text-sm font-mono text-gray-700 dark:text-gray-300 break-all">
+                <div className="text-sm font-mono text-gray-700 dark:text-gray-300 break-all ">
                   {selectedTokenApiKey}
                 </div>
               </div>
@@ -2571,7 +2648,7 @@ const LLMConfigPanel: React.FC = () => {
                     </Button>
                   </div>
                 </div>
-                <div className="max-h-96 overflow-y-auto border border-gray-200 dark:border-[#404040] rounded-lg p-2 space-y-1">
+                <div className="max-h-96 overflow-y-auto border border-gray-200 dark:border-[#404040] rounded-lg p-2 space-y-1  ">
                   {(availableModelsWithCapabilitiesForToken.length > 0 ? availableModelsWithCapabilitiesForToken : availableModelsForSelectedToken.map(id => id)).map(item => {
                     const modelId = typeof item === 'string' ? item : item.id;
                     const capabilities = typeof item === 'object' && item && 'capabilities' in item ? (item as ModelWithCapabilities).capabilities : null;
@@ -2585,7 +2662,7 @@ const LLMConfigPanel: React.FC = () => {
                       return (
                         <div
                           key={modelId}
-                          className={`flex items-center justify-between p-2 rounded ${isCallable ? 'hover:bg-gray-50 dark:hover:bg-[#363636]' : 'opacity-60'}`}
+                          className={`flex items-center justify-between p-2 rounded ${isCallable ? 'hover:bg-gray-50 dark:hover:bg-[#363636] ' : 'opacity-60'}`}
                           title={!isCallable ? '该模型不支持对话（仅支持生图等），不可用于聊天' : undefined}
                         >
                           <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -2627,7 +2704,7 @@ const LLMConfigPanel: React.FC = () => {
                               }}
                             />
                             <div className="flex-1 min-w-0">
-                              <div className="text-sm font-medium text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                              <div className="text-sm font-medium text-gray-900 dark:text-gray-100 flex items-center gap-2 ">
                                 <span className="truncate">{modelId}</span>
                                 <CapabilityIcons capabilities={displayCapabilities} modelName={modelId} className="w-3.5 h-3.5" />
                               </div>
@@ -2639,7 +2716,7 @@ const LLMConfigPanel: React.FC = () => {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-7 w-7 text-red-600 shrink-0"
+                            className="h-7 w-7 text-red-600 shrink-0 "
                             onClick={async () => {
                               if (confirm(`确定要删除模型 "${modelId}" 吗？`)) {
                                 try {
@@ -2692,7 +2769,7 @@ const LLMConfigPanel: React.FC = () => {
                       return (
                         <div
                           key={modelId}
-                          className={`flex items-center justify-between p-2 rounded ${isCallable ? 'hover:bg-gray-50 dark:hover:bg-[#363636]' : 'opacity-60'}`}
+                          className={`flex items-center justify-between p-2 rounded ${isCallable ? 'hover:bg-gray-50 dark:hover:bg-[#363636] ' : 'opacity-60'}`}
                           title={!isCallable ? '该模型不支持对话（仅支持生图等），不可用于聊天' : undefined}
                         >
                           <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -2746,7 +2823,7 @@ const LLMConfigPanel: React.FC = () => {
                               className="opacity-60"
                             />
                             <div className="flex-1 min-w-0">
-                              <div className="text-sm text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                              <div className="text-sm text-gray-700 dark:text-gray-300 flex items-center gap-2 ">
                                 <span className="truncate">{modelId}</span>
                                 <CapabilityIcons capabilities={displayCapabilities} modelName={modelId} className="w-3.5 h-3.5" />
                               </div>
@@ -2772,7 +2849,7 @@ const LLMConfigPanel: React.FC = () => {
                   return (
                 <div
                   key={config.config_id}
-                  className="flex items-center justify-between p-3 rounded-lg border border-gray-200 dark:border-[#404040] hover:bg-gray-50 dark:hover:bg-[#363636]"
+                  className="flex items-center justify-between p-3 rounded-lg border border-gray-200 dark:border-[#404040] hover:bg-gray-50 dark:hover:bg-[#363636]   "
                 >
                   <div className="flex items-center gap-3 flex-1 min-w-0">
                     <Switch
@@ -2809,7 +2886,7 @@ const LLMConfigPanel: React.FC = () => {
                       }}
                     />
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100 flex items-center gap-2 ">
                         <span className="truncate">{config.name}</span>
                         <CapabilityIcons capabilities={cap} modelName={config.model} className="w-3.5 h-3.5" />
                       </div>
@@ -2821,7 +2898,7 @@ const LLMConfigPanel: React.FC = () => {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-7 w-7 text-red-600 shrink-0"
+                    className="h-7 w-7 text-red-600 shrink-0 "
                     onClick={async () => {
                       if (confirm(`确定要删除模型 "${config.name}" 吗？`)) {
                         try {
@@ -2852,9 +2929,10 @@ const LLMConfigPanel: React.FC = () => {
               </div>
             )}
           </div>
-          <DialogFooter>
+          <DialogFooter className="[data-skin='niho']:border-t-[var(--niho-text-border)]">
             <Button
               variant="secondary"
+              className="niho-close-pink"
               onClick={() => {
                 setShowTokenModelsDialog(false);
                 setShowAddModelsSection(false);
@@ -2867,6 +2945,7 @@ const LLMConfigPanel: React.FC = () => {
             </Button>
             <Button
               variant="primary"
+              className="[data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:text-black [data-skin='niho']:border-0"
               onClick={async () => {
                 try {
                   const toDisable: LLMConfigFromDB[] = [];

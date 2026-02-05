@@ -432,6 +432,14 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   background: #000 !important;
 }
 
+[data-skin="niho"] .agents-page-header {
+  border-bottom-color: var(--niho-text-border) !important;
+}
+
+[data-skin="niho"] .agents-page-title {
+  color: var(--text-primary) !important;
+}
+
 [data-skin="niho"] .agents-page-card {
   background: #000 !important;
   border: 1px solid var(--niho-text-border) !important;
@@ -439,20 +447,414 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 }
 
 [data-skin="niho"] .agents-page-card:hover {
-  border-color: rgba(0, 255, 136, 0.22) !important;
-  box-shadow: 0 0 6px rgba(0, 255, 136, 0.08) !important;
+  border-color: rgba(0, 255, 136, 0.25) !important;
+  box-shadow: none !important;
 }
 
 [data-skin="niho"] .agents-page-action--settings {
-  background: rgba(0, 255, 136, 0.12) !important;
-  border: 1px solid rgba(0, 255, 136, 0.22) !important;
-  color: #00ff88 !important;
+  background: rgba(0, 255, 136, 0.1) !important;
+  border: 1px solid var(--niho-text-border-strong) !important;
+  color: var(--color-accent) !important;
+  box-shadow: none !important;
 }
 
 [data-skin="niho"] .agents-page-action--settings:hover {
-  background: rgba(0, 255, 136, 0.18) !important;
+  background: rgba(0, 255, 136, 0.15) !important;
   border-color: rgba(0, 255, 136, 0.35) !important;
-  box-shadow: 0 0 8px rgba(0, 255, 136, 0.12) !important;
+  box-shadow: none !important;
+}
+
+/* Persona 页 Niho：顶栏图标区 - 纯黑 + 细边框 */
+[data-skin="niho"] .agents-page-header-icon {
+  background: var(--niho-pure-black) !important;
+  border: 1px solid var(--niho-text-border) !important;
+}
+
+[data-skin="niho"] .agents-page-header-icon svg {
+  color: var(--color-accent) !important;
+}
+
+/* Persona 页 Niho：分区标题 */
+[data-skin="niho"] .agents-page-section-title {
+  color: var(--text-primary) !important;
+}
+
+[data-skin="niho"] .agents-page-section-title svg {
+  color: var(--color-accent) !important;
+}
+
+[data-skin="niho"] .agents-page-section-title--muted svg {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+/* Persona 页 Niho：卡片内列表项 hover */
+[data-skin="niho"] .agents-page-card .agents-page-list-item:hover {
+  background: var(--niho-text-bg) !important;
+}
+
+/* Persona 页 Niho：次要按钮（添加人设/添加音色） */
+[data-skin="niho"] .agents-page-card .agents-page-btn-secondary {
+  background: var(--niho-pure-black) !important;
+  border: 1px solid var(--niho-text-border) !important;
+  color: var(--text-primary) !important;
+  box-shadow: none !important;
+}
+
+[data-skin="niho"] .agents-page-card .agents-page-btn-secondary:hover {
+  background: var(--color-hover-bg) !important;
+  border-color: rgba(0, 255, 136, 0.25) !important;
+  color: var(--color-accent) !important;
+}
+
+/* Persona 页 Niho：主 CTA 按钮 - 无光晕 */
+[data-skin="niho"] .agents-page-cta {
+  background: var(--color-accent) !important;
+  color: #000 !important;
+  border: 1px solid rgba(0, 255, 136, 0.4) !important;
+  box-shadow: none !important;
+}
+
+[data-skin="niho"] .agents-page-cta:hover {
+  background: var(--color-accent-hover) !important;
+  box-shadow: none !important;
+}
+
+/* Persona 页 Niho：Switch 开关 - 纯色无光晕 */
+[data-skin="niho"] .agents-page [role="switch"] {
+  background: var(--niho-pure-black) !important;
+  border: 1px solid var(--niho-text-border) !important;
+  box-shadow: none !important;
+}
+
+[data-skin="niho"] .agents-page [role="switch"][data-state="checked"] {
+  background: var(--color-accent) !important;
+  border-color: rgba(0, 255, 136, 0.4) !important;
+}
+
+[data-skin="niho"] .agents-page [role="switch"] > span {
+  background: var(--niho-text-border-strong) !important;
+  box-shadow: none !important;
+}
+
+[data-skin="niho"] .agents-page [role="switch"][data-state="checked"] > span {
+  background: #000 !important;
+}
+
+/* Persona 页 Niho：辅助文案与链接统一色 */
+[data-skin="niho"] .agents-page .text-gray-500,
+[data-skin="niho"] .agents-page .text-xs.text-gray-500,
+[data-skin="niho"] .agents-page p.text-gray-500 {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] .agents-page button.underline,
+[data-skin="niho"] .agents-page a.underline {
+  color: var(--color-accent) !important;
+}
+
+[data-skin="niho"] .agents-page button.underline:hover,
+[data-skin="niho"] .agents-page a.underline:hover {
+  color: var(--color-accent-hover) !important;
+}
+
+/* Persona 页 Niho：可开关行内图标语义色 */
+[data-skin="niho"] .agents-page-icon--accent,
+[data-skin="niho"] .agents-page-icon--accent svg {
+  color: var(--color-accent) !important;
+}
+
+[data-skin="niho"] .agents-page-icon--secondary,
+[data-skin="niho"] .agents-page-icon--secondary svg {
+  color: var(--color-secondary) !important;
+}
+
+[data-skin="niho"] .agents-page-icon--highlight,
+[data-skin="niho"] .agents-page-icon--highlight svg {
+  color: var(--color-highlight) !important;
+}
+
+[data-skin="niho"] .agents-page .animate-spin {
+  color: var(--color-accent) !important;
+}
+
+[data-skin="niho"] .agents-page .text-gray-400 {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] .agents-page-empty-state .text-gray-400 {
+  color: var(--color-accent) !important;
+}
+
+/* ========== 模型录入页 (LLM Config) Niho ========== */
+[data-skin="niho"] .llm-config-loading .animate-spin {
+  border-color: var(--niho-text-border) !important;
+  border-top-color: var(--color-accent) !important;
+}
+
+[data-skin="niho"] .llm-config-loading .text-gray-500 {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] .llm-config-page .animate-spin {
+  color: var(--color-accent) !important;
+}
+
+[data-skin="niho"] .llm-config-page .flex-shrink-0.border-b.lg\:border-r {
+  border-color: var(--niho-text-border) !important;
+}
+
+[data-skin="niho"] .llm-config-page .llm-config-token-card-wrap {
+  background: var(--niho-pure-black) !important;
+  border-color: var(--niho-text-border) !important;
+  box-shadow: none !important;
+}
+
+/* 无 Token 时空状态区域在 Niho 下也保持纯黑，避免露出灰色 */
+[data-skin="niho"] .llm-config-page .llm-config-token-empty-wrap {
+  background: var(--niho-pure-black) !important;
+  min-height: 8rem;
+}
+
+[data-skin="niho"] .llm-config-page .rounded-lg:has(.llm-config-token-card) {
+  background: var(--niho-pure-black) !important;
+  border-color: var(--niho-text-border) !important;
+  box-shadow: none !important;
+}
+
+[data-skin="niho"] .llm-config-token-card {
+  background: var(--niho-pure-black) !important;
+  border: 1px solid var(--niho-text-border) !important;
+  box-shadow: none !important;
+}
+
+[data-skin="niho"] .llm-config-token-card:hover {
+  border-color: rgba(0, 255, 136, 0.35) !important;
+}
+
+[data-skin="niho"] .llm-config-token-card--active {
+  border-color: rgba(0, 255, 136, 0.4) !important;
+  background: rgba(0, 255, 136, 0.05) !important;
+}
+
+[data-skin="niho"] .llm-config-token-card .llm-config-token-dot--active {
+  background: var(--color-accent) !important;
+}
+
+[data-skin="niho"] .llm-config-token-card .llm-config-token-dot {
+  background: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] .llm-config-token-card .text-sm.font-medium {
+  color: var(--text-primary) !important;
+}
+
+[data-skin="niho"] .llm-config-token-card .text-xs.text-gray-500 {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] .llm-config-token-card .text-red-600 {
+  color: var(--color-secondary) !important;
+}
+
+[data-skin="niho"] .llm-config-token-card .text-red-600:hover {
+  color: var(--color-secondary-hover) !important;
+  background: var(--color-secondary-bg) !important;
+}
+
+[data-skin="niho"] .llm-config-token-card .llm-config-token-copy-box {
+  background: var(--niho-pure-black) !important;
+  border: 1px solid var(--niho-text-border) !important;
+}
+
+[data-skin="niho"] .llm-config-token-card .llm-config-token-copy-box .text-xs.font-mono {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] .llm-config-token-card .text-xs.font-mono {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] .llm-config-page .llm-config-provider-card {
+  background: var(--niho-pure-black) !important;
+  border: 1px solid var(--niho-text-border) !important;
+  box-shadow: none !important;
+}
+
+[data-skin="niho"] .llm-config-page .llm-config-provider-card:hover {
+  background: var(--neon-green-50) !important;
+  border-color: rgba(0, 255, 136, 0.25) !important;
+}
+
+[data-skin="niho"] .llm-config-page .llm-config-provider-card .text-sm.font-medium {
+  color: var(--text-primary) !important;
+}
+
+[data-skin="niho"] .llm-config-page .llm-config-provider-card .text-xs.text-gray-500 {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] .llm-config-page .llm-config-provider-card .text-gray-400 {
+  color: var(--color-accent) !important;
+}
+
+[data-skin="niho"] .llm-config-page .llm-config-tab--active {
+  border-color: var(--color-accent) !important;
+  background: var(--color-accent-bg) !important;
+  color: var(--color-accent) !important;
+}
+
+[data-skin="niho"] .llm-config-page .llm-config-tab {
+  border-color: var(--niho-text-border) !important;
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] .llm-config-page .llm-config-tab:hover {
+  background: var(--niho-text-bg) !important;
+  color: var(--text-primary) !important;
+}
+
+[data-skin="niho"] .llm-config-page button.bg-primaryToken,
+[data-skin="niho"] .llm-config-page .llm-config-btn-primary {
+  background: var(--color-accent) !important;
+  color: #000 !important;
+  border: 1px solid rgba(0, 255, 136, 0.4) !important;
+  box-shadow: none !important;
+}
+
+[data-skin="niho"] .llm-config-page button.bg-primaryToken:hover,
+[data-skin="niho"] .llm-config-page .llm-config-btn-primary:hover {
+  background: var(--color-accent-hover) !important;
+  box-shadow: none !important;
+}
+
+[data-skin="niho"] .llm-config-page .llm-config-model-row {
+  background: var(--niho-pure-black) !important;
+  border: 1px solid var(--niho-text-border) !important;
+}
+
+[data-skin="niho"] .llm-config-page .llm-config-model-row:hover {
+  background: var(--neon-green-50) !important;
+  border-color: rgba(0, 255, 136, 0.2) !important;
+}
+
+[data-skin="niho"] .llm-config-page .llm-config-model-row .font-medium {
+  color: var(--text-primary) !important;
+}
+
+[data-skin="niho"] .llm-config-page .llm-config-model-row .text-xs.text-gray-500 {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] .llm-config-page .llm-config-model-row .ui-badge-success {
+  background: rgba(0, 255, 136, 0.1) !important;
+  color: var(--color-accent) !important;
+  border: 1px solid rgba(0, 255, 136, 0.2) !important;
+}
+
+[data-skin="niho"] .llm-config-page .llm-config-model-row .bg-gray-100.dark\:bg-gray-800 {
+  background: var(--niho-pure-black) !important;
+  border: 1px solid var(--niho-text-border) !important;
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] .llm-config-page .llm-config-provider-header {
+  border-color: rgba(0, 255, 136, 0.3) !important;
+  background: rgba(0, 255, 136, 0.05) !important;
+}
+
+[data-skin="niho"] .llm-config-page .llm-config-provider-header .font-semibold {
+  color: var(--text-primary) !important;
+}
+
+[data-skin="niho"] .llm-config-page .llm-config-provider-header .text-xs.text-gray-500 {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] .llm-config-page .llm-config-provider-header .w-10.h-10 {
+  border-color: rgba(0, 255, 136, 0.3) !important;
+  background: var(--niho-pure-black) !important;
+}
+
+[data-skin="niho"] .llm-config-page .input-field {
+  background: var(--niho-pure-black) !important;
+  border: 1px solid var(--niho-text-border) !important;
+  color: var(--text-primary) !important;
+}
+
+[data-skin="niho"] .llm-config-page .input-field::placeholder {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] .llm-config-page label.text-sm.font-medium {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] .llm-config-page label .text-red-500 {
+  color: var(--color-secondary) !important;
+}
+
+[data-skin="niho"] .llm-config-page .text-destructive,
+[data-skin="niho"] .llm-config-page button.text-red-600 {
+  color: var(--color-secondary) !important;
+}
+
+[data-skin="niho"] .llm-config-page .text-destructive:hover,
+[data-skin="niho"] .llm-config-page button.text-red-600:hover {
+  color: var(--color-secondary-hover) !important;
+  background: var(--color-secondary-bg) !important;
+}
+
+[data-skin="niho"] .llm-config-page .text-gray-500 {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] .llm-config-page .text-xs.text-gray-500 {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+/* 模型录入页内弹窗（Niho）：弹窗根在 body 下，统一用 data-skin 覆盖 */
+[data-skin="niho"] [role="dialog"] .input-field,
+[data-skin="niho"] [role="dialog"] .chatee-dialog-standard .input-field {
+  background: var(--niho-pure-black) !important;
+  border: 1px solid var(--niho-text-border) !important;
+  color: var(--text-primary) !important;
+}
+
+[data-skin="niho"] [role="dialog"] .input-field::placeholder,
+[data-skin="niho"] [role="dialog"] .chatee-dialog-standard .input-field::placeholder {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] [role="dialog"] label.text-sm,
+[data-skin="niho"] [role="dialog"] .chatee-dialog-standard label {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] [role="dialog"] .text-red-500,
+[data-skin="niho"] [role="dialog"] label .text-red-500 {
+  color: var(--color-secondary) !important;
+}
+
+[data-skin="niho"] [role="dialog"] .text-green-600 {
+  color: var(--color-accent) !important;
+}
+
+[data-skin="niho"] [role="dialog"] .text-red-600 {
+  color: var(--color-secondary) !important;
+}
+
+[data-skin="niho"] [role="dialog"] [data-slot="title"],
+[data-skin="niho"] [role="dialog"] .font-bold.text-lg {
+  color: var(--text-primary) !important;
+}
+
+[data-skin="niho"] [role="dialog"] [data-slot="description"],
+[data-skin="niho"] [role="dialog"] .text-sm.text-muted-foreground {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] [role="dialog"] .border-t {
+  border-color: var(--niho-text-border) !important;
 }
 
 /* Niho 下聊天界面区域纯黑 */
@@ -520,19 +922,39 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 }
 
 [data-skin="niho"] .glass-top-nav {
-  border-right-color: rgba(0, 255, 136, 0.18);
-  border-bottom-color: rgba(0, 255, 136, 0.2);
-  box-shadow: 0 2px 16px rgba(0, 255, 136, 0.05);
+  border: 1px solid var(--niho-text-border) !important;
+  box-shadow: none !important;
 }
 
-[data-skin="niho"] .glass-top-nav a:not([class*="Button"]) {
-  color: var(--color-highlight);
-  text-shadow: 0 0 20px rgba(255, 215, 0, 0.25);
+[data-skin="niho"] .glass-top-nav .nav-item {
+  color: var(--niho-skyblue-gray);
+  background: var(--niho-pure-black);
+  border: 1px solid transparent;
 }
 
-[data-skin="niho"] .glass-top-nav a:not([class*="Button"]):hover {
-  color: var(--color-highlight-hover);
-  text-shadow: 0 0 24px rgba(255, 215, 0, 0.35);
+[data-skin="niho"] .glass-top-nav .nav-item:hover {
+  background: var(--neon-green-50);
+  border-color: var(--niho-text-border);
+  color: var(--color-accent-hover);
+}
+
+[data-skin="niho"] .glass-top-nav .nav-item--active,
+[data-skin="niho"] .glass-top-nav .nav-item.nav-item--active {
+  background: var(--niho-pure-black) !important;
+  color: var(--color-accent) !important;
+  border: 1px solid rgba(0, 255, 136, 0.35) !important;
+  box-shadow: none !important;
+}
+
+[data-skin="niho"] .glass-top-nav .nav-item-tooltip {
+  background: var(--niho-pure-black) !important;
+  border: 1px solid var(--niho-text-border) !important;
+  color: var(--text-primary) !important;
+}
+
+[data-skin="niho"] .nav-item-tooltip .nav-item-tooltip-arrow {
+  border-bottom-color: var(--niho-pure-black) !important;
+  border-right-color: var(--niho-pure-black) !important;
 }
 
 [data-skin="niho"] .glass-toolbar {
@@ -547,11 +969,6 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 [data-skin="niho"] .glass-toolbar:hover {
   border-color: rgba(0, 255, 136, 0.35);
   box-shadow: 0 0 16px rgba(0, 255, 136, 0.1);
-}
-
-/* 导航激活项 - 霓虹绿光晕 */
-[data-skin="niho"] nav a[class*="color-accent"] {
-  box-shadow: 0 0 14px rgba(0, 255, 136, 0.4), 0 0 28px rgba(0, 255, 136, 0.15);
 }
 
 /* 主按钮 / 强调按钮 - 发光 */
@@ -1257,6 +1674,34 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
     box-shadow: 
       0 1px 8px rgba(0, 0, 0, 0.3),
       inset 0 -1px 0 rgba(255, 255, 255, 0.02);
+  }
+
+  /* 顶部导航项 - 基础与默认/暗色主题 */
+  .nav-item {
+    color: var(--text-secondary, #4b5563);
+    background: transparent;
+    border: 1px solid transparent;
+  }
+  .nav-item:hover {
+    background: var(--color-hover-bg, rgba(0, 0, 0, 0.04));
+    border-color: var(--color-hover-border, transparent);
+    color: var(--text-primary, #111827);
+  }
+  .dark .nav-item {
+    color: #a0a0a0;
+  }
+  .dark .nav-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
+  }
+  .nav-item--active {
+    background: var(--color-accent);
+    color: #fff;
+    border-color: transparent;
+    box-shadow: none;
+  }
+  .dark .nav-item--active {
+    color: #000;
   }
 
   /* 头部毛玻璃 - 带底部高光 */

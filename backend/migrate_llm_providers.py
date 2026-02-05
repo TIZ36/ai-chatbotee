@@ -17,6 +17,7 @@ from database import get_mysql_connection, init_mysql
 SYSTEM_PROVIDERS = [
     {
         'provider_id': 'openai',
+        'supplier': 'openai',
         'name': 'OpenAI',
         'provider_type': 'openai',
         'is_system': 1,
@@ -25,6 +26,7 @@ SYSTEM_PROVIDERS = [
     },
     {
         'provider_id': 'anthropic',
+        'supplier': 'anthropic',
         'name': 'Anthropic (Claude)',
         'provider_type': 'anthropic',
         'is_system': 1,
@@ -33,6 +35,7 @@ SYSTEM_PROVIDERS = [
     },
     {
         'provider_id': 'gemini',
+        'supplier': 'gemini',
         'name': 'Google Gemini',
         'provider_type': 'gemini',
         'is_system': 1,
@@ -41,6 +44,7 @@ SYSTEM_PROVIDERS = [
     },
     {
         'provider_id': 'deepseek',
+        'supplier': 'deepseek',
         'name': 'DeepSeek',
         'provider_type': 'deepseek',
         'is_system': 1,
@@ -49,6 +53,7 @@ SYSTEM_PROVIDERS = [
     },
     {
         'provider_id': 'ollama',
+        'supplier': 'ollama',
         'name': 'Ollama',
         'provider_type': 'ollama',
         'is_system': 1,
@@ -142,6 +147,12 @@ def migrate_llm_providers():
         
         # 检查并添加必需的列
         columns_to_add = [
+            ('supplier', """
+                ALTER TABLE `llm_providers`
+                ADD COLUMN `supplier` VARCHAR(100) DEFAULT NULL 
+                COMMENT 'Token/计费归属供应商（如 nvidia, openai）'
+                AFTER `provider_id`
+            """, 'supplier'),
             ('provider_type', """
                 ALTER TABLE `llm_providers`
                 ADD COLUMN `provider_type` VARCHAR(50) NOT NULL DEFAULT 'custom' 
@@ -190,6 +201,34 @@ def migrate_llm_providers():
         
         for column_name, ddl, log_name in columns_to_add:
             _ensure_column('llm_providers', column_name, ddl, log_name)
+
+        # 添加 supplier 索引（如果不存在）
+        try:
+            cursor.execute("""
+                SELECT COUNT(*) FROM information_schema.STATISTICS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'llm_providers'
+                  AND INDEX_NAME = 'idx_provider_supplier'
+            """)
+            if cursor.fetchone()[0] == 0:
+                cursor.execute("ALTER TABLE `llm_providers` ADD INDEX `idx_provider_supplier` (`supplier`)")
+                conn.commit()
+                print("  ✅ 已添加索引 idx_provider_supplier")
+        except Exception as e:
+            print(f"  ⚠️  添加 supplier 索引失败: {e}")
+
+        # 回填 supplier：为空时使用 provider_id
+        try:
+            cursor.execute("""
+                UPDATE llm_providers
+                SET supplier = provider_id
+                WHERE supplier IS NULL OR supplier = ''
+            """)
+            if cursor.rowcount > 0:
+                conn.commit()
+                print(f"  ✅ 已回填 {cursor.rowcount} 条记录的 supplier")
+        except Exception as e:
+            print(f"  ⚠️  回填 supplier 失败: {e}")
         
         # 更新现有记录的 provider_type（如果为空或默认值）
         print("🔄 正在更新现有记录的 provider_type...")
@@ -244,10 +283,11 @@ def migrate_llm_providers():
             if not exists:
                 cursor.execute("""
                     INSERT INTO llm_providers 
-                    (provider_id, name, provider_type, is_system, override_url, default_api_url)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    (provider_id, supplier, name, provider_type, is_system, override_url, default_api_url)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """, (
                     provider['provider_id'],
+                    provider.get('supplier') or provider['provider_id'],
                     provider['name'],
                     provider['provider_type'],
                     provider['is_system'],

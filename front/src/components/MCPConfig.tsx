@@ -80,13 +80,13 @@ const renderServerIcon = (server: MCPServerConfig, size: 'sm' | 'lg' = 'sm') => 
   // 其他服务器显示首字母
   if (size === 'lg') {
     return (
-      <div className="w-20 h-20 rounded-2xl bg-blue-600 flex items-center justify-center text-white text-4xl font-bold shadow-lg shadow-blue-500/20 mcp-server-icon-lg">
+      <div className="w-20 h-20 rounded-2xl bg-blue-600 flex items-center justify-center text-white text-4xl font-bold shadow-lg shadow-blue-500/20 [data-skin='niho']:bg-transparent [data-skin='niho']:shadow-none [data-skin='niho']:border [data-skin='niho']:border-[var(--niho-text-border-strong)] [data-skin='niho']:text-[var(--color-accent)] mcp-server-icon-lg">
         {server.name.charAt(0).toUpperCase()}
       </div>
     );
   }
   return (
-    <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-600 font-bold text-lg border border-blue-100 dark:border-blue-800 mcp-server-icon">
+    <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-600 font-bold text-lg border border-blue-100 dark:border-blue-800 [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--color-accent)] mcp-server-icon">
       {server.name.charAt(0).toUpperCase()}
     </div>
   );
@@ -1008,7 +1008,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
               cancelEdit();
               setIsAdding(true);
             }}
-            className="flex items-center gap-2"
+            className="flex items-center gap-2 [data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:text-black [data-skin='niho']:border-0"
           >
             <Plus className="w-4 h-4" />
             <span>新增自定义</span>
@@ -1018,7 +1018,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
     >
       <section className="space-y-4">
         <div
-          className="rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] p-4 [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] hover:border-blue-400 transition-all cursor-pointer flex items-center justify-between mcp-notion-card"
+          className="rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] p-4 [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:hover:border-[var(--niho-text-border-strong)] transition-all cursor-pointer flex items-center justify-between mcp-notion-card"
             onClick={() => {
               // 需求：始终可点，点击后先进入工作区注册/选择
               cancelEdit();
@@ -1033,11 +1033,11 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                 </svg>
               </div>
               <div>
-                <div className="font-bold text-gray-900 dark:text-gray-100 mcp-notion-card-title">Notion</div>
-                <div className="text-xs text-gray-500 mcp-notion-card-desc">官方推荐 · 录入 Notion 工作区</div>
+                <div className="font-bold text-gray-900 dark:text-gray-100 [data-skin='niho']:text-[var(--text-primary)] mcp-notion-card-title">Notion</div>
+                <div className="text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-notion-card-desc">官方推荐 · 录入 Notion 工作区</div>
               </div>
             </div>
-            <div className="text-xs font-medium text-blue-600 mcp-notion-card-action">点击录入</div>
+            <div className="text-xs font-medium text-blue-600 [data-skin='niho']:text-[var(--color-accent)] mcp-notion-card-action">点击录入</div>
           </div>
 
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--text-primary)] flex items-center gap-2">
@@ -1046,53 +1046,53 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
         </h2>
             {loading ? (
               <div className="flex flex-col items-center justify-center py-20">
-                <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mb-4 mcp-loading-spinner" />
-                <p className="text-gray-500 mcp-loading-text">加载中...</p>
+                <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mb-4 [data-skin='niho']:border-[var(--color-accent)] [data-skin='niho']:border-t-transparent mcp-loading-spinner" />
+                <p className="text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-loading-text">加载中...</p>
               </div>
             ) : servers.length === 0 ? (
-              <div className="text-center py-20 bg-gray-50 dark:bg-gray-800/30 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-800 mcp-empty-state">
-                <Server className="w-12 h-12 text-gray-300 mx-auto mb-4 mcp-empty-state-icon" />
-                <p className="text-gray-500 mcp-empty-state-text">暂无服务器</p>
-                <Button variant="link" onClick={() => setShowMarketModal(true)} className="mt-2 mcp-text-accent">去市场看看</Button>
+              <div className="text-center py-20 bg-gray-50 dark:bg-gray-800/30 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-800 [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)] mcp-empty-state">
+                <Server className="w-12 h-12 text-gray-300 mx-auto mb-4 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-empty-state-icon" />
+                <p className="text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-empty-state-text">暂无服务器</p>
+                <Button variant="link" onClick={() => setShowMarketModal(true)} className="mt-2 [data-skin='niho']:text-[var(--color-accent)] [data-skin='niho']:hover:text-[var(--color-accent-hover)] mcp-text-accent">去市场看看</Button>
               </div>
             ) : (
-              <div className="rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] overflow-hidden [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] mcp-server-table">
+              <div className="rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] overflow-hidden [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)] mcp-server-table">
                 <table className="w-full text-left border-collapse">
                   <thead>
-                    <tr className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-800">
-                      <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase mcp-text-secondary">服务器</th>
-                      <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase mcp-text-secondary">类型</th>
-                      <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase mcp-text-secondary">状态</th>
-                      <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase text-right mcp-text-secondary">操作</th>
+                    <tr className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-800 [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-b-[var(--niho-text-border)]">
+                      <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-text-secondary">服务器</th>
+                      <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-text-secondary">类型</th>
+                      <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-text-secondary">状态</th>
+                      <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase text-right [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-text-secondary">操作</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800 [data-skin='niho']:divide-[var(--niho-text-border)]">
                     {servers.map((server) => (
                       <tr 
                         key={server.id} 
-                        className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors cursor-pointer group mcp-bg-hover"
+                        className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors cursor-pointer group [data-skin='niho']:hover:bg-[var(--niho-text-bg)] mcp-bg-hover"
                         onClick={() => handleViewDetail(server)}
                       >
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-3">
                             {renderServerIcon(server, 'sm')}
                             <div>
-                              <div className="text-sm font-semibold text-gray-900 dark:text-gray-100 mcp-server-name">
+                              <div className="text-sm font-semibold text-gray-900 dark:text-gray-100 [data-skin='niho']:text-[var(--text-primary)] mcp-server-name">
                                 {(server as any).display_name || (server as any).client_name || server.name}
                               </div>
-                              <div className="text-xs text-gray-500 truncate max-w-[200px] mcp-server-url">{server.url}</div>
+                              <div className="text-xs text-gray-500 truncate max-w-[200px] [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-server-url">{server.url}</div>
                             </div>
                           </div>
                         </td>
                         <td className="px-6 py-4">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 uppercase mcp-server-type-badge">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 uppercase [data-skin='niho']:bg-transparent [data-skin='niho']:border [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-server-type-badge">
                             {server.type}
                           </span>
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-1.5">
-                            <div className={`w-2 h-2 rounded-full ${server.enabled ? 'bg-green-500 mcp-server-status-enabled' : 'bg-gray-400 mcp-server-status-disabled'}`} />
-                            <span className={`text-xs text-gray-600 dark:text-gray-400 ${server.enabled ? 'mcp-server-status-enabled' : 'mcp-server-status-disabled'}`}>{server.enabled ? '已启用' : '已禁用'}</span>
+                            <div className={`w-2 h-2 rounded-full ${server.enabled ? 'bg-green-500 [data-skin="niho"]:bg-[var(--color-accent)] mcp-server-status-enabled' : 'bg-gray-400 [data-skin="niho"]:bg-[var(--niho-skyblue-gray)] mcp-server-status-disabled'}`} />
+                            <span className={`text-xs text-gray-600 dark:text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)] ${server.enabled ? '[data-skin="niho"]:text-[var(--color-accent)] mcp-server-status-enabled' : 'mcp-server-status-disabled'}`}>{server.enabled ? '已启用' : '已禁用'}</span>
                           </div>
                         </td>
                         <td className="px-6 py-4 text-right">
@@ -1102,7 +1102,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                                 e.stopPropagation();
                                 handleTestConnection(server);
                               }}
-                              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-md"
+                              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-md [data-skin='niho']:text-[var(--niho-skyblue-gray)] [data-skin='niho']:hover:text-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)]"
                               title="测试连接"
                             >
                               <RefreshCcw className={`w-4 h-4 ${testingServers.has(server.id) ? 'animate-spin' : ''}`} />
@@ -1112,7 +1112,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                                 e.stopPropagation();
                                 handleEditServer(server.id);
                               }}
-                              className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-md"
+                              className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-md [data-skin='niho']:text-[var(--niho-skyblue-gray)] [data-skin='niho']:hover:text-[var(--color-highlight)] [data-skin='niho']:hover:bg-[var(--niho-text-bg)]"
                               title="编辑"
                             >
                               <Edit2 className="w-4 h-4" />
@@ -1122,7 +1122,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                                 e.stopPropagation();
                                 setDeleteTarget(server);
                               }}
-                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md"
+                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md [data-skin='niho']:text-[var(--niho-skyblue-gray)] [data-skin='niho']:hover:text-[var(--color-secondary)] [data-skin='niho']:hover:bg-[var(--niho-mist-pink-bg)]"
                               title="删除"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -1144,10 +1144,10 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
           if (!open) cancelEdit();
         }}
       >
-        <DialogContent className="max-w-2xl bg-white dark:bg-[#1e1e1e] border-gray-200 dark:border-gray-800 mcp-dialog">
+        <DialogContent className="max-w-2xl bg-white dark:bg-[#1e1e1e] border-gray-200 dark:border-gray-800 [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)] chatee-dialog-standard mcp-dialog">
           <DialogHeader>
-            <DialogTitle>{editingId ? '编辑服务器' : '新增服务器'}</DialogTitle>
-            <DialogDescription>填写 MCP 服务器的名称、地址与类型</DialogDescription>
+            <DialogTitle className="[data-skin='niho']:text-[var(--text-primary)]">{editingId ? '编辑服务器' : '新增服务器'}</DialogTitle>
+            <DialogDescription className="[data-skin='niho']:text-[var(--niho-skyblue-gray)]">填写 MCP 服务器的名称、地址与类型</DialogDescription>
           </DialogHeader>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1202,8 +1202,8 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
           </div>
 
           <DialogFooter>
-            <Button variant="secondary" onClick={cancelEdit}>取消</Button>
-            <Button variant="primary" onClick={editingId ? handleUpdateServer : handleAddServer}>
+            <Button variant="secondary" onClick={cancelEdit} className="niho-close-pink">取消</Button>
+            <Button variant="primary" onClick={editingId ? handleUpdateServer : handleAddServer} className="[data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:text-black [data-skin='niho']:border-0">
               {editingId ? '保存修改' : '立即创建'}
             </Button>
           </DialogFooter>
@@ -1212,57 +1212,58 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
 
       {/* 服务器详情弹窗 (明信片样式) */}
       <Dialog open={showDetailModal} onOpenChange={setShowDetailModal}>
-        <DialogContent className="max-w-4xl p-0 overflow-hidden bg-white dark:bg-[#1e1e1e] border-none shadow-2xl mcp-detail-dialog">
+        <DialogContent className="max-w-4xl p-0 overflow-hidden bg-white dark:bg-[#1e1e1e] border-none shadow-2xl [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)] mcp-detail-dialog">
           {selectedServerForDetail && (
             <div className="flex h-[600px]">
               {/* 左侧：详情 (明信片正面) */}
-              <div className="flex-1 p-8 flex flex-col border-r border-gray-100 dark:border-gray-800 mcp-detail-left">
+              <div className="flex-1 p-8 flex flex-col border-r border-gray-100 dark:border-gray-800 [data-skin='niho']:border-r-[var(--niho-text-border)] mcp-detail-left">
                 <div className="flex items-start justify-between mb-8">
                   {renderServerIcon(selectedServerForDetail, 'lg')}
                   <div className="text-right">
-                    <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Server ID</div>
-                    <div className="text-xs font-mono text-gray-500">{selectedServerForDetail.id.substring(0, 8)}...</div>
+                    <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">Server ID</div>
+                    <div className="text-xs font-mono text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">{selectedServerForDetail.id.substring(0, 8)}...</div>
                   </div>
                 </div>
 
                 <div className="flex-1">
-                  <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2 mcp-detail-title">
+                  <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2 [data-skin='niho']:text-[var(--text-primary)] mcp-detail-title">
                     {(selectedServerForDetail as any).display_name || (selectedServerForDetail as any).client_name || selectedServerForDetail.name}
                   </h2>
                   <div className="flex items-center gap-2 mb-6">
-                    <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-xs font-bold rounded uppercase mcp-detail-type-badge">
+                    <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-xs font-bold rounded uppercase [data-skin='niho']:bg-transparent [data-skin='niho']:border [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--color-accent)] mcp-detail-type-badge">
                       {selectedServerForDetail.type}
                     </span>
-                    <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium ${selectedServerForDetail.enabled ? 'bg-green-50 text-green-600 mcp-detail-status-active' : 'bg-gray-50 text-gray-500 mcp-detail-status-disabled'} mcp-detail-status-badge`}>
-                      <div className={`w-1.5 h-1.5 rounded-full ${selectedServerForDetail.enabled ? 'bg-green-500' : 'bg-gray-400'}`} />
+                    <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium ${selectedServerForDetail.enabled ? 'bg-green-50 text-green-600 [data-skin="niho"]:bg-[var(--color-accent-bg)] [data-skin="niho"]:text-[var(--color-accent)] mcp-detail-status-active' : 'bg-gray-50 text-gray-500 [data-skin="niho"]:bg-[var(--niho-text-bg)] [data-skin="niho"]:text-[var(--niho-skyblue-gray)] mcp-detail-status-disabled'} mcp-detail-status-badge`}>
+                      <div className={`w-1.5 h-1.5 rounded-full ${selectedServerForDetail.enabled ? 'bg-green-500 [data-skin="niho"]:bg-[var(--color-accent)]' : 'bg-gray-400 [data-skin="niho"]:bg-[var(--niho-skyblue-gray)]'}`} />
                       {selectedServerForDetail.enabled ? 'Active' : 'Disabled'}
                     </div>
                   </div>
 
                   <div className="space-y-6">
                     <div>
-                      <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 mcp-detail-section-title">Endpoint URL</h4>
-                      <div className="p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-100 dark:border-gray-800 font-mono text-xs break-all text-gray-600 dark:text-gray-400 mcp-detail-url-box">
+                      <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-detail-section-title">Endpoint URL</h4>
+                      <div className="p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-100 dark:border-gray-800 font-mono text-xs break-all text-gray-600 dark:text-gray-400 [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-detail-url-box">
                         {selectedServerForDetail.url}
                       </div>
                     </div>
 
                     <div>
-                      <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 mcp-detail-section-title">Description</h4>
-                      <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed mcp-detail-description">
+                      <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-detail-section-title">Description</h4>
+                      <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-detail-description">
                         {selectedServerForDetail.description || 'No description provided for this server.'}
                       </p>
                     </div>
                   </div>
                 </div>
 
-                <div className="mt-auto pt-8 flex items-center justify-between border-t border-gray-50 dark:border-gray-800">
+                <div className="mt-auto pt-8 flex items-center justify-between border-t border-gray-50 dark:border-gray-800 [data-skin='niho']:border-t-[var(--niho-text-border)]">
                   <div className="flex items-center gap-2">
                     <Button 
                       variant="secondary" 
                       size="sm" 
                       onClick={() => handleTestConnection(selectedServerForDetail)}
                       disabled={testingServers.has(selectedServerForDetail.id)}
+                      className="[data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-transparent [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:hover:border-[var(--color-accent)] [data-skin='niho']:hover:text-[var(--color-accent)]"
                     >
                       连接
                     </Button>
@@ -1277,7 +1278,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                     variant={testResults.get(selectedServerForDetail.id)?.connected ? 'primary' : 'secondary'}
                     size="sm"
                     disabled={!testResults.get(selectedServerForDetail.id)?.connected}
-                    className={!testResults.get(selectedServerForDetail.id)?.connected ? 'opacity-60 cursor-not-allowed' : ''}
+                    className={`${!testResults.get(selectedServerForDetail.id)?.connected ? 'opacity-60 cursor-not-allowed' : ''} [data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:text-black [data-skin='niho']:border-0`}
                     onClick={() => {
                       setShowToolsInDetail(true);
                       handleFetchTools(selectedServerForDetail);
@@ -1290,37 +1291,37 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
               </div>
 
               {/* 右侧：工具列表 (明信片背面/详情页) */}
-              <div className={`w-[380px] bg-gray-50 dark:bg-[#1a1a1a] transition-all duration-500 border-l border-gray-100 dark:border-gray-800 flex flex-col mcp-detail-right ${showToolsInDetail ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'}`}>
-                <div className="p-6 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between bg-white dark:bg-[#1e1e1e] mcp-tools-header">
-                  <h3 className="font-bold flex items-center gap-2 mcp-tools-header-title">
-                    <Wrench className="w-4 h-4 text-blue-600 mcp-tools-header-icon" />
+              <div className={`w-[380px] bg-gray-50 dark:bg-[#1a1a1a] transition-all duration-500 border-l border-gray-100 dark:border-gray-800 flex flex-col [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-l-[var(--niho-text-border)] mcp-detail-right ${showToolsInDetail ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'}`}>
+                <div className="p-6 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between bg-white dark:bg-[#1e1e1e] [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-b-[var(--niho-text-border)] mcp-tools-header">
+                  <h3 className="font-bold flex items-center gap-2 [data-skin='niho']:text-[var(--text-primary)] mcp-tools-header-title">
+                    <Wrench className="w-4 h-4 text-blue-600 [data-skin='niho']:text-[var(--color-accent)] mcp-tools-header-icon" />
                     可用工具
                   </h3>
-                  <span className="text-xs bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full text-gray-500 mcp-tools-count">
+                  <span className="text-xs bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full text-gray-500 [data-skin='niho']:bg-[var(--niho-text-bg)] [data-skin='niho']:border [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-tools-count">
                     {testResults.get(selectedServerForDetail.id)?.tools?.length || 0}
                   </span>
                 </div>
                 
-                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                <div className="flex-1 overflow-y-auto p-4 space-y-3 no-scrollbar">
                   {testingServers.has(selectedServerForDetail.id) ? (
-                    <div className="flex flex-col items-center justify-center h-full text-gray-400">
-                      <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mb-2 mcp-loading-spinner" />
+                    <div className="flex flex-col items-center justify-center h-full text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                      <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mb-2 [data-skin='niho']:border-[var(--color-accent)] [data-skin='niho']:border-t-transparent mcp-loading-spinner" />
                       <span className="text-xs mcp-loading-text">正在获取工具...</span>
                     </div>
                   ) : testResults.get(selectedServerForDetail.id)?.tools ? (
                     testResults.get(selectedServerForDetail.id)!.tools!.map((tool, idx) => (
-                      <div key={idx} className="p-4 bg-white dark:bg-[#2d2d2d] rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm hover:shadow-md transition-shadow mcp-tool-card">
-                        <div className="font-bold text-sm text-gray-900 dark:text-gray-100 mb-1 mcp-tool-name">{tool.name}</div>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3 line-clamp-2 mcp-tool-description">{tool.description}</p>
+                      <div key={idx} className="p-4 bg-white dark:bg-[#2d2d2d] rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm hover:shadow-md transition-shadow [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:shadow-none [data-skin='niho']:hover:border-[var(--niho-text-border-strong)] mcp-tool-card">
+                        <div className="font-bold text-sm text-gray-900 dark:text-gray-100 mb-1 [data-skin='niho']:text-[var(--text-primary)] mcp-tool-name">{tool.name}</div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3 line-clamp-2 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-tool-description">{tool.description}</p>
                         
                         {tool.inputSchema?.properties && (
                           <div className="space-y-1.5">
-                            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mcp-detail-section-title">Parameters</div>
+                            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-detail-section-title">Parameters</div>
                             <div className="flex flex-wrap gap-1.5">
                               {Object.entries(tool.inputSchema.properties).map(([name, schema]: [string, any]) => (
-                                <div key={name} className="flex items-center gap-1 px-1.5 py-0.5 bg-gray-50 dark:bg-gray-800 rounded border border-gray-100 dark:border-gray-700 mcp-tool-param-badge">
-                                  <span className="text-[10px] font-mono text-blue-600 dark:text-blue-400 mcp-tool-param-name">{name}</span>
-                                  <span className="text-[9px] text-gray-400 mcp-tool-param-type">({schema.type || 'any'})</span>
+                                <div key={name} className="flex items-center gap-1 px-1.5 py-0.5 bg-gray-50 dark:bg-gray-800 rounded border border-gray-100 dark:border-gray-700 [data-skin='niho']:bg-transparent [data-skin='niho']:border-[var(--niho-text-border)] mcp-tool-param-badge">
+                                  <span className="text-[10px] font-mono text-blue-600 dark:text-blue-400 [data-skin='niho']:text-[var(--color-accent)] mcp-tool-param-name">{name}</span>
+                                  <span className="text-[9px] text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-tool-param-type">({schema.type || 'any'})</span>
                                 </div>
                               ))}
                             </div>
@@ -1329,8 +1330,8 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                       </div>
                     ))
                   ) : (
-                    <div className="flex flex-col items-center justify-center h-full text-gray-400 text-center px-8">
-                      <Wrench className="w-12 h-12 mb-4 opacity-20" />
+                    <div className="flex flex-col items-center justify-center h-full text-gray-400 text-center px-8 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                      <Wrench className="w-12 h-12 mb-4 opacity-20 [data-skin='niho']:text-[var(--color-accent)]" />
                       <p className="text-xs mcp-text-secondary">点击左侧"获取工具列表"按钮来查看此服务器提供的功能</p>
                     </div>
                   )}
@@ -1343,18 +1344,18 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
 
       {/* 市场弹窗 (重新设计) */}
       <Dialog open={showMarketModal} onOpenChange={setShowMarketModal}>
-        <DialogContent className="max-w-5xl p-0 overflow-hidden bg-white dark:bg-[#1e1e1e] border-none shadow-2xl mcp-market-dialog">
+        <DialogContent className="max-w-5xl p-0 overflow-hidden bg-white dark:bg-[#1e1e1e] border-none shadow-2xl [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)] mcp-market-dialog">
           <div className="flex flex-col h-[700px]">
             {/* 市场头部 */}
-            <div className="px-8 py-6 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between mcp-market-header">
+            <div className="px-8 py-6 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between [data-skin='niho']:border-b-[var(--niho-text-border)] mcp-market-header">
               <div>
-                <h2 className="text-2xl font-bold flex items-center gap-3 mcp-market-title">
-                  <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white mcp-market-icon-box">
+                <h2 className="text-2xl font-bold flex items-center gap-3 [data-skin='niho']:text-[var(--text-primary)] mcp-market-title">
+                  <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white [data-skin='niho']:bg-transparent [data-skin='niho']:border [data-skin='niho']:border-[var(--niho-text-border-strong)] [data-skin='niho']:text-[var(--color-accent)] mcp-market-icon-box">
                     <Plug className="w-6 h-6" />
                   </div>
                   MCP 市场
                 </h2>
-                <p className="text-sm text-gray-500 mt-1 mcp-market-subtitle">发现并安装官方及社区提供的 MCP 服务器</p>
+                <p className="text-sm text-gray-500 mt-1 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-market-subtitle">发现并安装官方及社区提供的 MCP 服务器</p>
               </div>
               <div className="flex items-center gap-3">
                 <div className="relative">
@@ -1364,49 +1365,49 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                     onChange={(e) => setMarketQuery(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleMarketSearch()}
                     placeholder="搜索服务器..."
-                    className="w-64 pl-10 pr-4 py-2 bg-gray-100 dark:bg-gray-800 border-none rounded-xl text-sm focus:ring-2 focus:ring-blue-500 transition-all mcp-market-search-input"
+                    className="w-64 pl-10 pr-4 py-2 bg-gray-100 dark:bg-gray-800 border-none rounded-xl text-sm focus:ring-2 focus:ring-blue-500 transition-all [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:focus:ring-[var(--color-accent)] [data-skin='niho']:placeholder:opacity-60 mcp-market-search-input"
                   />
-                  <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <circle cx="11" cy="11" r="8"></circle>
                     <path d="m21 21-4.35-4.35"></path>
                   </svg>
                 </div>
-                <Button variant="primary" size="sm" onClick={handleMarketSearch} disabled={marketLoading}>
+                <Button variant="primary" size="sm" onClick={handleMarketSearch} disabled={marketLoading} className="[data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:text-black [data-skin='niho']:border-0">
                   {marketLoading ? <RefreshCcw className="w-4 h-4 animate-spin" /> : '搜索'}
                 </Button>
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-8">
+            <div className="flex-1 overflow-y-auto p-8 no-scrollbar">
               {/* 搜索结果 */}
               <div>
-                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
                   {marketQuery ? `搜索结果 (${marketItems.length})` : '全部服务器'}
                 </h3>
                 
                 {marketLoading ? (
                   <div className="flex flex-col items-center justify-center py-20">
-                    <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4" />
-                    <p className="text-gray-500">正在检索市场数据...</p>
+                    <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4 [data-skin='niho']:border-[var(--color-accent)] [data-skin='niho']:border-t-transparent" />
+                    <p className="text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">正在检索市场数据...</p>
                   </div>
                 ) : marketItems.length > 0 ? (
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                     {marketItems.map((item) => (
                       <div 
                         key={item.item_id} 
-                        className="p-4 bg-white dark:bg-[#2d2d2d] border border-gray-100 dark:border-gray-800 rounded-2xl hover:border-blue-400 hover:shadow-xl hover:shadow-blue-500/5 transition-all group cursor-pointer mcp-market-item-card"
+                        className="p-4 bg-white dark:bg-[#2d2d2d] border border-gray-100 dark:border-gray-800 rounded-2xl hover:border-blue-400 hover:shadow-xl hover:shadow-blue-500/5 transition-all group cursor-pointer [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:hover:border-[var(--niho-text-border-strong)] [data-skin='niho']:shadow-none mcp-market-item-card"
                         onClick={() => handleMarketInstall(item)}
                       >
-                        <div className="w-12 h-12 bg-gray-50 dark:bg-gray-800 rounded-xl flex items-center justify-center mb-4 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/20 transition-colors mcp-market-item-icon-box">
-                          <div className="text-xl font-bold text-gray-400 group-hover:text-blue-600 mcp-market-item-icon">
+                        <div className="w-12 h-12 bg-gray-50 dark:bg-gray-800 rounded-xl flex items-center justify-center mb-4 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/20 transition-colors [data-skin='niho']:bg-[var(--niho-text-bg)] [data-skin='niho']:group-hover:bg-[var(--color-accent-bg)] [data-skin='niho']:border [data-skin='niho']:border-[var(--niho-text-border)] mcp-market-item-icon-box">
+                          <div className="text-xl font-bold text-gray-400 group-hover:text-blue-600 [data-skin='niho']:text-[var(--niho-skyblue-gray)] [data-skin='niho']:group-hover:text-[var(--color-accent)] mcp-market-item-icon">
                             {item.name.charAt(0).toUpperCase()}
                           </div>
                         </div>
-                        <div className="font-bold text-sm text-gray-900 dark:text-gray-100 mb-1 truncate mcp-market-item-name">{item.name}</div>
-                        <p className="text-[10px] text-gray-500 line-clamp-2 h-7 mb-4 mcp-market-item-desc">{item.description || 'No description'}</p>
+                        <div className="font-bold text-sm text-gray-900 dark:text-gray-100 mb-1 truncate [data-skin='niho']:text-[var(--text-primary)] mcp-market-item-name">{item.name}</div>
+                        <p className="text-[10px] text-gray-500 line-clamp-2 h-7 mb-4 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-market-item-desc">{item.description || 'No description'}</p>
                         <div className="flex items-center justify-between">
-                          <span className="text-[9px] px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-gray-400 uppercase mcp-market-item-type-badge">{item.runtime_type}</span>
-                          <Plus className="w-4 h-4 text-gray-300 group-hover:text-blue-600 transition-colors mcp-market-item-add-icon" />
+                          <span className="text-[9px] px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-gray-400 uppercase [data-skin='niho']:bg-transparent [data-skin='niho']:border [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-market-item-type-badge">{item.runtime_type}</span>
+                          <Plus className="w-4 h-4 text-gray-300 group-hover:text-blue-600 transition-colors [data-skin='niho']:text-[var(--niho-skyblue-gray)] [data-skin='niho']:group-hover:text-[var(--color-accent)] mcp-market-item-add-icon" />
                         </div>
                       </div>
                     ))}
@@ -1419,11 +1420,11 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
               </div>
             </div>
             
-            <div className="px-8 py-4 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gray-50 dark:bg-gray-800/30 mcp-market-footer">
-              <div className="text-xs text-gray-400 mcp-market-footer-text">
+            <div className="px-8 py-4 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gray-50 dark:bg-gray-800/30 [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-t-[var(--niho-text-border)] mcp-market-footer">
+              <div className="text-xs text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-market-footer-text">
                 数据源: {marketSources.find(s => s.source_id === selectedSourceId)?.display_name || '默认'}
               </div>
-              <Button variant="secondary" size="sm" onClick={() => setShowMarketModal(false)}>关闭</Button>
+              <Button variant="secondary" size="sm" onClick={() => setShowMarketModal(false)} className="niho-close-pink">关闭</Button>
             </div>
           </div>
         </DialogContent>
@@ -1439,21 +1440,21 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
           setShowRegistrationForm(false);
         }}
       >
-        <DialogContent className="max-w-md bg-white dark:bg-[#1e1e1e] border-gray-100 dark:border-gray-800 mcp-dialog">
+        <DialogContent className="max-w-md bg-white dark:bg-[#1e1e1e] border-gray-100 dark:border-gray-800 [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)] chatee-dialog-standard mcp-dialog">
           {showWorkspaceSelection ? (
             <>
               <DialogHeader>
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <DialogTitle>选择 Notion 工作空间</DialogTitle>
-                    <DialogDescription>选择已有工作空间进行连接</DialogDescription>
+                    <DialogTitle className="[data-skin='niho']:text-[var(--text-primary)]">选择 Notion 工作空间</DialogTitle>
+                    <DialogDescription className="[data-skin='niho']:text-[var(--niho-skyblue-gray)]">选择已有工作空间进行连接</DialogDescription>
                   </div>
                   <button
                     onClick={() => {
                       if (isRegistering || notionAuthState === 'authenticating') return;
                       setShowWorkspaceSelection(false);
                     }}
-                    className="text-gray-400 hover:text-gray-600"
+                    className="text-gray-400 hover:text-gray-600 [data-skin='niho']:text-[var(--niho-skyblue-gray)] [data-skin='niho']:hover:text-[var(--color-secondary)] niho-close-pink"
                     disabled={isRegistering || notionAuthState === 'authenticating'}
                     aria-label="关闭"
                   >
@@ -1462,11 +1463,11 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                 </div>
               </DialogHeader>
 
-              <div className="space-y-3 max-h-64 overflow-y-auto pr-2">
+              <div className="space-y-3 max-h-64 overflow-y-auto pr-2 no-scrollbar">
                 {notionRegistrations.map((registration) => (
                   <div
                     key={registration.id}
-                    className="p-4 border border-gray-100 dark:border-gray-800 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-all cursor-pointer group flex items-center justify-between mcp-workspace-card"
+                    className="p-4 border border-gray-100 dark:border-gray-800 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-all cursor-pointer group flex items-center justify-between [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:hover:bg-[var(--niho-text-bg)] mcp-workspace-card"
                     onClick={() => handleUseExistingWorkspace(registration)}
                   >
                     <div className="flex items-center gap-3">
@@ -1477,15 +1478,15 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                         </svg>
                       </div>
                       <div>
-                        <div className="font-bold text-sm">{registration.client_name}</div>
-                        <div className="text-[10px] text-gray-400">ID: {registration.client_id.substring(0, 8)}...</div>
+                        <div className="font-bold text-sm [data-skin='niho']:text-[var(--text-primary)]">{registration.client_name}</div>
+                        <div className="text-[10px] text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">ID: {registration.client_id.substring(0, 8)}...</div>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
                       <Button
                         variant="secondary"
                         size="sm"
-                        className="opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="opacity-0 group-hover:opacity-100 transition-opacity [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-transparent [data-skin='niho']:text-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:hover:border-[var(--color-accent)]"
                         onClick={(e) => {
                           e.stopPropagation();
                           handleUseExistingWorkspace(registration);
@@ -1495,7 +1496,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                       </Button>
                       <button
                         onClick={(e) => handleDeleteNotionRegistration(registration, e)}
-                        className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                        className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg opacity-0 group-hover:opacity-100 transition-all [data-skin='niho']:text-[var(--niho-skyblue-gray)] [data-skin='niho']:hover:text-[var(--color-secondary)] [data-skin='niho']:hover:bg-[var(--niho-mist-pink-bg)]"
                         title="删除工作空间"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -1512,6 +1513,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                     setShowWorkspaceSelection(false);
                     setShowRegistrationForm(true);
                   }}
+                  className="[data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:text-black [data-skin='niho']:border-0"
                 >
                   注册新工作空间
                 </Button>
@@ -1521,6 +1523,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                     if (isRegistering || notionAuthState === 'authenticating') return;
                     setShowWorkspaceSelection(false);
                   }}
+                  className="niho-close-pink"
                 >
                   取消
                 </Button>
@@ -1530,13 +1533,13 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
             <>
               <DialogHeader>
                 <div className="flex items-center justify-between gap-3">
-                  <DialogTitle>注册 Notion 工作空间</DialogTitle>
+                  <DialogTitle className="[data-skin='niho']:text-[var(--text-primary)]">注册 Notion 工作空间</DialogTitle>
                   <button
                     onClick={() => {
                       if (isRegistering || notionAuthState === 'authenticating') return;
                       setShowRegistrationForm(false);
                     }}
-                    className="text-gray-400 hover:text-gray-600"
+                    className="text-gray-400 hover:text-gray-600 [data-skin='niho']:text-[var(--niho-skyblue-gray)] [data-skin='niho']:hover:text-[var(--color-secondary)] niho-close-pink"
                     disabled={isRegistering || notionAuthState === 'authenticating'}
                     aria-label="关闭"
                   >
@@ -1586,6 +1589,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                   variant="primary"
                   onClick={handleRegisterNotion}
                   disabled={isRegistering || !registrationFormData.client_name.trim() || !registrationFormData.workspace_alias.trim()}
+                  className="[data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:text-black [data-skin='niho']:border-0"
                 >
                   {isRegistering ? '正在注册...' : '注册并开始授权'}
                 </Button>
@@ -1595,6 +1599,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                     if (isRegistering || notionAuthState === 'authenticating') return;
                     setShowRegistrationForm(false);
                   }}
+                  className="niho-close-pink"
                 >
                   取消
                 </Button>
@@ -1616,30 +1621,30 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
           }
         }}
       >
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-sm [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)] chatee-dialog-standard">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Smartphone className="w-5 h-5" />
+            <DialogTitle className="flex items-center gap-2 [data-skin='niho']:text-[var(--text-primary)]">
+              <Smartphone className="w-5 h-5 [data-skin='niho']:text-[var(--color-accent)]" />
               MCP 授权
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="[data-skin='niho']:text-[var(--niho-skyblue-gray)]">
               使用手机扫描下方二维码完成授权，或点击「在浏览器中打开」在电脑上完成。
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col items-center gap-4 py-2">
             {oauthQrDataUrl ? (
-              <div className="rounded-lg border border-gray-200 dark:border-[#404040] p-2 bg-white dark:bg-[#262626]">
+              <div className="rounded-lg border border-gray-200 dark:border-[#404040] p-2 bg-white dark:bg-[#262626] [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)]">
                 <img src={oauthQrDataUrl} alt="扫码授权" className="w-[260px] h-[260px]" />
               </div>
             ) : (
-              <div className="w-[260px] h-[260px] rounded-lg border border-gray-200 dark:border-[#404040] flex items-center justify-center bg-gray-50 dark:bg-[#262626] text-sm text-gray-500">
+              <div className="w-[260px] h-[260px] rounded-lg border border-gray-200 dark:border-[#404040] flex items-center justify-center bg-gray-50 dark:bg-[#262626] text-sm text-gray-500 [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
                 加载中…
               </div>
             )}
             {oauthAuthorizationUrl && (
               <Button
                 variant="primary"
-                className="w-full"
+                className="w-full [data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:text-black [data-skin='niho']:border-0"
                 onClick={() => {
                   if (typeof window === 'undefined') return;
                   const url = oauthAuthorizationUrl;
@@ -1652,7 +1657,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
             )}
           </div>
           <DialogFooter>
-            <Button variant="secondary" onClick={() => setOauthQrDialogOpen(false)}>
+            <Button variant="secondary" onClick={() => setOauthQrDialogOpen(false)} className="niho-close-pink">
               关闭
             </Button>
           </DialogFooter>
