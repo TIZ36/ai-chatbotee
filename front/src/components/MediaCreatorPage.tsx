@@ -141,25 +141,22 @@ function fileToMediaItem(file: File): Promise<MediaItem> {
 
 /* ─── 样式常量 ─── */
 const tabBase = 'pb-2 text-sm font-medium transition-colors cursor-pointer select-none';
-const tabInactive = `${tabBase} border-b-2 border-transparent text-gray-500 dark:text-gray-400 [data-skin="niho"]:text-[var(--niho-skyblue-gray)] [data-skin="niho"]:hover:text-[var(--text-primary)] hover:text-gray-700 dark:hover:text-gray-200`;
-const tabActive = `${tabBase} border-b-2 border-[var(--color-accent)] text-gray-900 dark:text-white [data-skin="niho"]:!text-[var(--color-accent)] [data-skin="niho"]:!border-[var(--color-accent)]`;
+const tabInactive = `${tabBase} border-b-2 border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200`;
+const tabActive = `${tabBase} border-b-2 border-[var(--color-accent)] text-gray-900 dark:text-white`;
 
-const btnPrimary = '!bg-[var(--color-accent)] !text-black hover:!bg-[var(--color-accent-hover)] border-0 [data-skin="niho"]:shadow-none';
-const btnSecondary = 'border border-gray-300 dark:border-[#404040] [data-skin="niho"]:!border-[var(--niho-text-border)] [data-skin="niho"]:!text-[var(--niho-skyblue-gray)] [data-skin="niho"]:!bg-transparent bg-transparent [data-skin="niho"]:shadow-none';
-const btnPink = '!bg-[var(--color-secondary)] !text-white hover:!opacity-90 border-0 [data-skin="niho"]:shadow-none';
+const btnPrimary = '!bg-[var(--color-accent)] !text-black hover:!bg-[var(--color-accent-hover)] border-0';
+const btnSecondary = 'border border-gray-300 dark:border-[#404040] bg-transparent';
+const btnPink = '!bg-[var(--color-secondary)] !text-white hover:!opacity-90 border-0';
 
-const textPrimary = 'text-gray-900 dark:text-white [data-skin="niho"]:text-[var(--text-primary)]';
-const textMuted = 'text-gray-500 dark:text-gray-400 [data-skin="niho"]:text-[var(--niho-skyblue-gray)]';
+const textPrimary = 'text-gray-900 dark:text-white';
+const textMuted = 'text-gray-500 dark:text-gray-400';
 
 const inputClass = `w-full px-3 py-2 text-sm rounded-md border
   bg-white dark:bg-[#1a1a1a] border-gray-200 dark:border-[#333]
-  [data-skin="niho"]:!bg-[var(--niho-pure-black)] [data-skin="niho"]:!border-[var(--niho-text-border)]
-  [data-skin="niho"]:text-[var(--text-primary)] [data-skin="niho"]:placeholder:text-[var(--niho-skyblue-gray)]
-  focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)] [data-skin="niho"]:focus:ring-[var(--color-accent)]`;
+  focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]`;
 
 const panelClass = `rounded-lg border
-  bg-gray-50 dark:bg-[#111] border-gray-200 dark:border-[#333]
-  [data-skin="niho"]:!bg-[var(--niho-pure-black)] [data-skin="niho"]:!border-[var(--niho-text-border)]`;
+  bg-gray-50 dark:bg-[#111] border-gray-200 dark:border-[#333]`;
 
 /* ─── 系统提示词预设 ─── */
 interface PromptPreset {
@@ -753,9 +750,9 @@ const MediaCreatorPage: React.FC = () => {
       variant="persona"
       personaConstrainContent={false}
     >
-      <div className="chatu-page max-w-6xl mx-auto flex flex-col gap-4 [data-skin='niho']:!bg-[var(--niho-pure-black)]">
+      <div className="chatu-page max-w-6xl mx-auto flex flex-col gap-4">
         {/* ═══ 顶部：素材库（Tab：Chaya / Chatu 创作） ═══ */}
-        <div className={`rounded-lg border ${panelClass} p-3 space-y-3 [data-skin='niho']:!bg-[var(--niho-pure-black)] [data-skin='niho']:!border-[var(--niho-text-border)]`}>
+        <div className={`niho-card-1 rounded-lg border ${panelClass} p-3 space-y-3`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 border-b border-transparent">
               <button
@@ -889,7 +886,7 @@ const MediaCreatorPage: React.FC = () => {
         <Card title="创作区" variant="persona" size="relaxed">
           <div className="space-y-4">
             {/* Tab */}
-            <div className="flex gap-6 border-b border-gray-200 dark:border-[#333] [data-skin='niho']:border-[var(--niho-text-border)]">
+            <div className="flex gap-6 border-b border-gray-200 dark:border-[#333]">
               <button type="button" className={createTab === 'image' ? tabActive : tabInactive} onClick={() => setCreateTab('image')}>
                 <span className="flex items-center gap-1.5"><ImageIcon className="w-4 h-4" /> 图像</span>
               </button>
@@ -954,7 +951,7 @@ const MediaCreatorPage: React.FC = () => {
                 {/* ═══ 左栏：统一输入区 ═══ */}
                 <div
                   ref={dropZoneRef}
-                  className={`${panelClass} p-4 space-y-4 min-w-0 transition-colors ${dragOver ? '!border-[var(--color-accent)] bg-[var(--color-accent)]/5' : ''}`}
+                  className={`niho-card-2 niho-bar-green ${panelClass} p-4 space-y-4 min-w-0 transition-colors ${dragOver ? '!border-[var(--color-accent)] bg-[var(--color-accent)]/5' : ''}`}
                   onDragOver={onDragOver}
                   onDragLeave={onDragLeave}
                   onDrop={onDrop}
@@ -995,7 +992,7 @@ const MediaCreatorPage: React.FC = () => {
                               </div>
                             )}
                             <button
-                              className="absolute -top-1.5 -right-1.5 p-0.5 rounded-full bg-[var(--color-secondary)] text-white [data-skin='niho']:shadow-none
+                              className="absolute -top-1.5 -right-1.5 p-0.5 rounded-full bg-[var(--color-secondary)] text-white
                                 opacity-0 group-hover/ri:opacity-100 transition-opacity"
                               onClick={() => removeRefImage(idx)}
                             >
@@ -1024,7 +1021,7 @@ const MediaCreatorPage: React.FC = () => {
                       border border-dashed rounded-lg transition-colors
                       ${dragOver
                         ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/5'
-                        : 'border-gray-300 dark:border-[#333] [data-skin="niho"]:border-[var(--niho-text-border)]'
+                        : 'border-gray-300 dark:border-[#333]'
                       }
                     `}>
                       <div className="flex items-center gap-2 min-w-0">
@@ -1149,7 +1146,7 @@ const MediaCreatorPage: React.FC = () => {
                           <div className="space-y-2 mt-1">
                             {/* 当前主人设内容 */}
                             {chayaSystemPrompt && (
-                              <div className={`${panelClass} p-2 space-y-1 !bg-transparent`}>
+                              <div className={`niho-block-green ${panelClass} p-2 space-y-1 !bg-transparent`}>
                                 <div className="flex items-center justify-between">
                                   <span className={`text-[9px] font-medium ${textMuted}`}>
                                     主人设{!chayaCurrentPersonaId && <span className="text-[var(--color-accent)] ml-1">当前激活</span>}
@@ -1170,7 +1167,7 @@ const MediaCreatorPage: React.FC = () => {
                             )}
                             {/* 各预设人设内容 */}
                             {chayaPersonaPresets.map((preset) => (
-                              <div key={preset.id} className={`${panelClass} p-2 space-y-1 !bg-transparent`}>
+                              <div key={preset.id} className={`niho-block-green ${panelClass} p-2 space-y-1 !bg-transparent`}>
                                 <div className="flex items-center justify-between">
                                   <span className={`text-[9px] font-medium ${textMuted}`}>
                                     {preset.nickname}
@@ -1262,7 +1259,7 @@ const MediaCreatorPage: React.FC = () => {
 
                       {/* 新建 / 编辑表单 */}
                       {showAddPrompt && (
-                        <div className={`${panelClass} p-2.5 space-y-2 !bg-transparent`}>
+                        <div className={`niho-block-pink ${panelClass} p-2.5 space-y-2 !bg-transparent`}>
                           <div className="flex gap-2">
                             <input
                               type="text"
@@ -1341,7 +1338,7 @@ const MediaCreatorPage: React.FC = () => {
                   {imgResult && (() => {
                     const resultSrc = safeImgSrc(imgResult.url);
                     return (
-                    <div className={`${panelClass} p-4 space-y-3`}>
+                    <div className={`niho-card-3 niho-line-top ${panelClass} p-4 space-y-3`}>
                       <p className={`text-xs font-medium ${textPrimary} flex items-center gap-1.5`}>
                         <Wand2 className="w-3.5 h-3.5 text-[var(--color-accent)]" /> 生成结果
                       </p>
@@ -1349,11 +1346,11 @@ const MediaCreatorPage: React.FC = () => {
                         <img
                           src={resultSrc}
                           alt="生成结果"
-                          className="rounded-md border border-gray-200 dark:border-[#333] [data-skin='niho']:border-[var(--niho-text-border)] w-full h-auto max-h-[320px] object-contain cursor-pointer"
+                          className="rounded-md border border-gray-200 dark:border-[#333] w-full h-auto max-h-[320px] object-contain cursor-pointer"
                           onClick={() => setLightboxUrl(resolveMediaSrc(imgResult!.url ?? ''))}
                         />
                       ) : (
-                        <div className="rounded-md border border-gray-200 dark:border-[#333] [data-skin='niho']:border-[var(--niho-text-border)] w-full min-h-[120px] flex items-center justify-center bg-black/50 text-[var(--niho-skyblue-gray)]">
+                        <div className="rounded-md border border-gray-200 dark:border-[#333] w-full min-h-[120px] flex items-center justify-center bg-black/50 text-[var(--niho-skyblue-gray)]">
                           <ImageIcon className="w-10 h-10" />
                         </div>
                       )}
@@ -1371,7 +1368,7 @@ const MediaCreatorPage: React.FC = () => {
 
                   {/* 空结果提示 */}
                   {!imgResult && (
-                    <div className={`${panelClass} p-6 flex flex-col items-center justify-center min-h-[200px]`}>
+                    <div className={`niho-card-1 ${panelClass} p-6 flex flex-col items-center justify-center min-h-[200px]`}>
                       <ImageIcon className={`w-10 h-10 ${textMuted} opacity-30 mb-3`} />
                       <p className={`text-xs ${textMuted}`}>生成结果将显示在此处</p>
                       <p className={`text-[10px] ${textMuted} opacity-60 mt-1`}>在左侧输入提示词后点击生成</p>
@@ -1407,7 +1404,7 @@ const MediaCreatorPage: React.FC = () => {
                 )}
 
                 {/* 视频参考图 + 提示词 */}
-                <div className={`${panelClass} p-4 space-y-3`}>
+                <div className={`niho-card-2 niho-bar-green ${panelClass} p-4 space-y-3`}>
                   <h3 className={`text-sm font-medium ${textPrimary} flex items-center gap-1.5`}>
                     <Video className="w-4 h-4 text-[var(--color-accent)]" /> 视频创作
                   </h3>
@@ -1528,7 +1525,7 @@ const MediaCreatorPage: React.FC = () => {
 
                 {/* 视频状态 */}
                 {(videoTaskId || videoError) && (
-                  <div className={`${panelClass} p-4 space-y-2`}>
+                  <div className={`niho-card-2 niho-bar-gold ${panelClass} p-4 space-y-2`}>
                     <h4 className={`text-xs font-medium ${textPrimary}`}>视频任务</h4>
                     {videoError && <p className="text-xs text-[var(--color-secondary)]">{videoError}</p>}
                     {videoTaskId && (
@@ -1584,13 +1581,13 @@ const MediaCreatorPage: React.FC = () => {
 
       {/* ════════ 模型选择弹框 ════════ */}
       <Dialog open={showModelDialog} onOpenChange={setShowModelDialog}>
-        <DialogContent className="chatee-dialog-standard max-w-md [data-skin='niho']:bg-[rgba(0,0,0,0.92)] [data-skin='niho']:border-[var(--niho-text-border)]">
+        <DialogContent className="chatee-dialog-standard max-w-md">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 [data-skin='niho']:text-[var(--text-primary)]">
+            <DialogTitle className="flex items-center gap-2">
               <Wand2 className="w-5 h-5 text-[var(--color-accent)]" />
               选择{createTab === 'image' ? '图像' : '视频'}模型
             </DialogTitle>
-            <DialogDescription className="[data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+            <DialogDescription>
               {createTab === 'image' ? '选择一个支持图像生成的模型' : '选择一个支持视频生成的模型'}
             </DialogDescription>
           </DialogHeader>
@@ -1608,18 +1605,17 @@ const MediaCreatorPage: React.FC = () => {
               <div className="flex flex-col max-h-[60vh]">
                 {/* 供应商 Tab */}
                 {entries.length > 1 && (
-                  <div className="flex border-b border-gray-200 dark:border-[#404040] overflow-x-auto no-scrollbar [data-skin='niho']:border-[var(--niho-text-border)]">
+                  <div className="flex border-b border-gray-200 dark:border-[#404040] overflow-x-auto no-scrollbar">
                     {entries.map(([provName, configs]) => (
                       <button
                         key={provName}
                         className={`
                           flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors whitespace-nowrap border-b-2
-                          [data-skin='niho']:bg-transparent [data-skin='niho']:text-[var(--niho-skyblue-gray)]
                           border-transparent hover:text-[var(--color-accent)] hover:border-[var(--color-accent)]/30
                         `}
                       >
                         <span>{provName}</span>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/5 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/5">
                           {configs.length}
                         </span>
                       </button>
@@ -1657,13 +1653,7 @@ const MediaCreatorPage: React.FC = () => {
                                 />
                               }
                               isSelected={isSelected}
-                              className={`
-                                [data-skin='niho']:border [data-skin='niho']:border-[var(--niho-text-border)]
-                                [data-skin='niho']:bg-[rgba(0,0,0,0.35)]
-                                [data-skin='niho']:hover:bg-[rgba(143,183,201,0.06)]
-                                [data-skin='niho']:hover:border-[rgba(143,183,201,0.25)]
-                                ${isSelected ? "[data-skin='niho']:!bg-[var(--niho-pure-black)] [data-skin='niho']:!border-[var(--color-accent)]" : ''}
-                              `}
+                              className=""
                               onClick={() => {
                                 setSelectedConfigId(c.config_id);
                                 setShowModelDialog(false);
@@ -1688,21 +1678,21 @@ const MediaCreatorPage: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm" onClick={() => setLightboxUrl(null)}>
           <div className="relative max-w-[90vw] max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
             {lbSrc ? (
-              <img src={lbSrc} alt="" className="max-w-full max-h-[85vh] rounded-lg shadow-2xl [data-skin='niho']:shadow-none [data-skin='niho']:border [data-skin='niho']:border-[var(--niho-text-border)]" />
+              <img src={lbSrc} alt="" className="max-w-full max-h-[85vh] rounded-lg shadow-2xl" />
             ) : (
-              <div className="max-w-full max-h-[85vh] flex items-center justify-center rounded-lg border [data-skin='niho']:border-[var(--niho-text-border)] bg-black/50 text-[var(--niho-skyblue-gray)] px-8 py-6">
+              <div className="max-w-full max-h-[85vh] flex items-center justify-center rounded-lg border border-[#333] bg-black/50 text-[var(--niho-skyblue-gray)] px-8 py-6">
                 无法加载图片
               </div>
             )}
-            <button className="absolute top-2 right-2 p-1.5 rounded-full bg-black/60 text-white hover:bg-black/80 [data-skin='niho']:!bg-[var(--niho-pure-black)] [data-skin='niho']:!border [data-skin='niho']:!border-[var(--niho-text-border)] [data-skin='niho']:hover:!border-[var(--color-accent)]" onClick={() => setLightboxUrl(null)}>
+            <button className="absolute top-2 right-2 p-1.5 rounded-full bg-black/60 text-white hover:bg-black/80" onClick={() => setLightboxUrl(null)}>
               <X className="w-5 h-5" />
             </button>
             <div className="absolute bottom-2 right-2 flex gap-2">
-              <button className="p-1.5 rounded-full bg-black/60 text-white hover:bg-black/80 [data-skin='niho']:!bg-[var(--niho-pure-black)] [data-skin='niho']:!border [data-skin='niho']:!border-[var(--niho-text-border)] [data-skin='niho']:hover:!border-[var(--color-accent)]" onClick={() => lbSrc && dl(lbSrc, 'image.png')}>
+              <button className="p-1.5 rounded-full bg-black/60 text-white hover:bg-black/80" onClick={() => lbSrc && dl(lbSrc, 'image.png')}>
                 <Download className="w-4 h-4" />
               </button>
               <button
-                className="p-1.5 rounded-full bg-[var(--color-secondary)]/80 text-white hover:bg-[var(--color-secondary)] [data-skin='niho']:shadow-none"
+                className="p-1.5 rounded-full bg-[var(--color-secondary)]/80 text-white hover:bg-[var(--color-secondary)]"
                 onClick={() => { if (lightboxUrl) pickRefImage({ url: lightboxUrl }); setLightboxUrl(null); }}
               >
                 <Sparkles className="w-4 h-4" />

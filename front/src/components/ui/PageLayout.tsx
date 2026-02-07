@@ -50,14 +50,14 @@ const PageLayout: React.FC<PageLayoutProps> = ({
   return (
     <div className={`
       h-full flex flex-col overflow-hidden
-      ${isPersona ? 'bg-gray-50 dark:bg-[#1a1a1a] [data-skin="niho"]:bg-[#000000]' : ''}
+      ${isPersona ? 'persona-page-root bg-gray-50 dark:bg-[#1a1a1a]' : ''}
     `}>
       <div className="flex-1 flex flex-col overflow-hidden">
         {showHeader && (
           <div className={`
             flex-shrink-0
             ${isPersona
-              ? 'agents-page-header py-4 border-b border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] [data-skin="niho"]:bg-[#000000] [data-skin="niho"]:border-[var(--niho-text-border)]'
+              ? 'agents-page-header py-4 border-b border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d]'
               : 'px-3 py-2 glass-header'
             }
           `}>
@@ -139,7 +139,7 @@ export const Card: React.FC<CardProps> = ({
 
   const isPersona = variant === 'persona';
   const cardClass = isPersona
-    ? 'rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] [data-skin="niho"]:!bg-[#000000] [data-skin="niho"]:!border-[var(--niho-text-border)]'
+    ? 'agents-page-card rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d]'
     : 'glass-card';
   const headerBorderClass = isPersona
     ? 'border-b border-gray-200 dark:border-[#404040] [data-skin="niho"]:border-[var(--niho-text-border)]'

@@ -373,6 +373,31 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   --niho-text-border-strong: rgba(255, 255, 255, 0.14);
   --niho-text-bg: rgba(255, 255, 255, 0.04);
 
+  /* --- 卡片体积系统 (Card Elevation Tokens) --- */
+  /* L0 背景 (page surface) */
+  --niho-elevation-0-bg: #000000;
+  --niho-elevation-0-border: transparent;
+
+  /* L1 基础卡片 — 最轻量的容器感 */
+  --niho-elevation-1-bg: #000000;
+  --niho-elevation-1-border: rgba(255, 255, 255, 0.07);
+
+  /* L2 提升卡片 — 可感知的"浮出"，用于重要区域 */
+  --niho-elevation-2-bg: rgba(255, 255, 255, 0.02);
+  --niho-elevation-2-border: rgba(255, 255, 255, 0.13);
+
+  /* L3 焦点卡片 — 当前任务 / 主操作区，带色彩倾向 */
+  --niho-elevation-3-bg: rgba(0, 255, 136, 0.025);
+  --niho-elevation-3-border: rgba(0, 255, 136, 0.20);
+
+  /* L3 变体：粉色焦点 */
+  --niho-elevation-3-pink-bg: rgba(255, 107, 157, 0.025);
+  --niho-elevation-3-pink-border: rgba(255, 107, 157, 0.20);
+
+  /* L3 变体：金色焦点 */
+  --niho-elevation-3-gold-bg: rgba(255, 215, 0, 0.025);
+  --niho-elevation-3-gold-border: rgba(255, 215, 0, 0.20);
+
   /* --- 饱和度扩展系统 (Opacity Gradient System) --- */
   
   /* 荧光绿 (Neon Green) 透明度梯度 */
@@ -410,6 +435,248 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   --neon-cyan-500: #00e5ff;
   --neon-cyan-600: #00b8d4;
 }
+
+/* ========== Niho 卡片体积系统 (Card Elevation System) ========== */
+/*
+ * 设计原理：纯黑主题下，"深度"不能靠灰度堆叠（禁止灰色）。
+ * 取而代之的三个深度线索：
+ *   1. 边框亮度 — 越亮 = 越近观察者（L1 → L2 → L3）
+ *   2. 背景微染 — 极低透明度的白色/强调色叠加在 #000 上（肉眼可辨但不刺眼）
+ *   3. 强调标记 — 色彩条 / 顶部光线 / 焦点环 作为视觉锚点
+ */
+
+/* --- L1 基础卡片 — 最轻量容器 --- */
+[data-skin="niho"] .niho-card-1 {
+  background: var(--niho-elevation-1-bg) !important;
+  border: 1px solid var(--niho-elevation-1-border) !important;
+  border-radius: 8px;
+  box-shadow: none !important;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+[data-skin="niho"] .niho-card-1:hover {
+  border-color: var(--niho-elevation-2-border) !important;
+}
+
+/* --- L2 提升卡片 — 重要区域 / 展开面板 --- */
+[data-skin="niho"] .niho-card-2 {
+  background: var(--niho-elevation-2-bg) !important;
+  border: 1px solid var(--niho-elevation-2-border) !important;
+  border-radius: 8px;
+  box-shadow: none !important;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+[data-skin="niho"] .niho-card-2:hover {
+  border-color: rgba(255, 255, 255, 0.20) !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+}
+
+/* --- L3 焦点卡片 — 当前任务 / 主操作区 --- */
+[data-skin="niho"] .niho-card-3 {
+  background: var(--niho-elevation-3-bg) !important;
+  border: 1px solid var(--niho-elevation-3-border) !important;
+  border-radius: 8px;
+  box-shadow: none !important;
+  position: relative;
+}
+
+[data-skin="niho"] .niho-card-3-pink {
+  background: var(--niho-elevation-3-pink-bg) !important;
+  border: 1px solid var(--niho-elevation-3-pink-border) !important;
+  border-radius: 8px;
+  box-shadow: none !important;
+  position: relative;
+}
+
+[data-skin="niho"] .niho-card-3-gold {
+  background: var(--niho-elevation-3-gold-bg) !important;
+  border: 1px solid var(--niho-elevation-3-gold-border) !important;
+  border-radius: 8px;
+  box-shadow: none !important;
+  position: relative;
+}
+
+/* ========== Niho 突现模式 (Emphasis Patterns) ========== */
+
+/* --- 左侧强调条 (Accent Bar Left) ---
+ * 为卡片添加 2px 左边色条，创建视觉锚点，引导扫视方向。
+ * 不同颜色对应不同语义：绿=主操作, 粉=创意/特色, 金=数据/警告
+ */
+[data-skin="niho"] .niho-bar-green {
+  border-left: 2px solid rgba(0, 255, 136, 0.6) !important;
+}
+
+[data-skin="niho"] .niho-bar-pink {
+  border-left: 2px solid rgba(255, 107, 157, 0.6) !important;
+}
+
+[data-skin="niho"] .niho-bar-gold {
+  border-left: 2px solid rgba(255, 215, 0, 0.6) !important;
+}
+
+[data-skin="niho"] .niho-bar-cyan {
+  border-left: 2px solid rgba(0, 229, 255, 0.6) !important;
+}
+
+/* --- 顶部渐变光线 (Top Accent Line) ---
+ * 1px 顶部渐变条，赋予卡片"头部"方向感。
+ * 适用于焦点卡片、展开面板、当前任务区。
+ */
+[data-skin="niho"] .niho-line-top {
+  position: relative;
+  overflow: hidden;
+}
+
+[data-skin="niho"] .niho-line-top::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 8px;
+  right: 8px;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(0, 255, 136, 0.45) 25%,
+    rgba(0, 255, 136, 0.65) 50%,
+    rgba(0, 255, 136, 0.45) 75%,
+    transparent 100%
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* 粉色变体 */
+[data-skin="niho"] .niho-line-top-pink::before {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 107, 157, 0.45) 25%,
+    rgba(255, 107, 157, 0.65) 50%,
+    rgba(255, 107, 157, 0.45) 75%,
+    transparent 100%
+  );
+}
+
+/* 金色变体 */
+[data-skin="niho"] .niho-line-top-gold::before {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 215, 0, 0.40) 25%,
+    rgba(255, 215, 0, 0.55) 50%,
+    rgba(255, 215, 0, 0.40) 75%,
+    transparent 100%
+  );
+}
+
+/* --- 焦点块 (Highlight Block) ---
+ * 卡片内部的信息焦点区域：极低透明度色彩底 + 同色边框。
+ * 用于关键数据展示、操作提示、状态摘要等需要"聚焦阅读"的区域。
+ */
+[data-skin="niho"] .niho-block-green {
+  background: rgba(0, 255, 136, 0.04) !important;
+  border: 1px solid rgba(0, 255, 136, 0.14) !important;
+  border-radius: 6px;
+  padding: 10px 14px;
+}
+
+[data-skin="niho"] .niho-block-pink {
+  background: rgba(255, 107, 157, 0.04) !important;
+  border: 1px solid rgba(255, 107, 157, 0.14) !important;
+  border-radius: 6px;
+  padding: 10px 14px;
+}
+
+[data-skin="niho"] .niho-block-gold {
+  background: rgba(255, 215, 0, 0.04) !important;
+  border: 1px solid rgba(255, 215, 0, 0.14) !important;
+  border-radius: 6px;
+  padding: 10px 14px;
+}
+
+[data-skin="niho"] .niho-block-cyan {
+  background: rgba(0, 229, 255, 0.04) !important;
+  border: 1px solid rgba(0, 229, 255, 0.14) !important;
+  border-radius: 6px;
+  padding: 10px 14px;
+}
+
+/* --- 选中 / 激活态 (Selected & Active States) ---
+ * 在 L1/L2 卡片上叠加使用，表示"当前选中"。
+ * 通过边框提亮 + 微染背景创建"从列表中跃出"的效果。
+ */
+[data-skin="niho"] .niho-selected {
+  border-color: rgba(0, 255, 136, 0.35) !important;
+  background: rgba(0, 255, 136, 0.035) !important;
+}
+
+[data-skin="niho"] .niho-selected-pink {
+  border-color: rgba(255, 107, 157, 0.35) !important;
+  background: rgba(255, 107, 157, 0.035) !important;
+}
+
+/* --- 焦点环 (Focus Ring) ---
+ * 键盘导航或 programmatic focus 时的环形指示。
+ * 用 box-shadow 模拟，不占据布局空间。
+ */
+[data-skin="niho"] .niho-focus-ring {
+  box-shadow: 0 0 0 1px #000, 0 0 0 3px rgba(0, 255, 136, 0.35);
+}
+
+[data-skin="niho"] .niho-focus-ring-pink {
+  box-shadow: 0 0 0 1px #000, 0 0 0 3px rgba(255, 107, 157, 0.35);
+}
+
+/* --- 数据强调 (Data Emphasis) ---
+ * 数值、统计数字、关键指标的排版增强。
+ */
+[data-skin="niho"] .niho-data {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+[data-skin="niho"] .niho-data-green {
+  color: var(--color-accent);
+  font-variant-numeric: tabular-nums;
+}
+
+[data-skin="niho"] .niho-data-gold {
+  color: var(--color-highlight);
+  font-variant-numeric: tabular-nums;
+}
+
+[data-skin="niho"] .niho-data-pink {
+  color: var(--color-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- 分组标题 (Section Header) ---
+ * 卡片内的子分区标题，带有弱色条 + 强调色图标。
+ * 制造"段落分割"感，避免大面积内容无锚点。
+ */
+[data-skin="niho"] .niho-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--niho-text-border);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+[data-skin="niho"] .niho-section-header svg {
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+/* --- 组合示例：L2 卡片 + 左绿条 + 顶部光线 ---
+ * .niho-card-2.niho-bar-green.niho-line-top
+ * → 背景微亮 + 强边框 + 左绿条 + 顶部渐变线 = 高焦点
+ */
 
 /* Niho 皮肤下全局背景与根容器 - 聊天界面纯黑 */
 [data-skin="niho"] body {
@@ -451,8 +718,110 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   box-shadow: none !important;
 }
 
-/* Niho 下 chatu 页纯黑，无灰色 */
+/* ========== Chatu 创作页 Niho：彻底去灰 ========== */
 [data-skin="niho"] .chatu-page {
+  background: #000 !important;
+}
+
+/* 面板 / 卡片容器（.rounded-lg.border 组合）— 纯黑 + 细灰边框 */
+[data-skin="niho"] .chatu-page .rounded-lg.border {
+  background: #000 !important;
+  border-color: var(--niho-text-border) !important;
+  box-shadow: none !important;
+}
+
+/* 单独的 rounded 面板（含 border-gray / bg-gray）也覆盖 */
+[data-skin="niho"] .chatu-page .rounded-md.border {
+  background: #000 !important;
+  border-color: var(--niho-text-border) !important;
+}
+
+/* 输入框 / 文本域 */
+[data-skin="niho"] .chatu-page input,
+[data-skin="niho"] .chatu-page textarea,
+[data-skin="niho"] .chatu-page select {
+  background: #000 !important;
+  border-color: var(--niho-text-border) !important;
+  color: var(--text-primary) !important;
+}
+
+[data-skin="niho"] .chatu-page input::placeholder,
+[data-skin="niho"] .chatu-page textarea::placeholder {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] .chatu-page input:focus,
+[data-skin="niho"] .chatu-page textarea:focus {
+  border-color: rgba(0, 255, 136, 0.45) !important;
+}
+
+/* 虚线拖放区 */
+[data-skin="niho"] .chatu-page .border-dashed {
+  border-color: var(--niho-text-border) !important;
+}
+
+/* 灰色文字 → 灰调天蓝 */
+[data-skin="niho"] .chatu-page .text-gray-400,
+[data-skin="niho"] .chatu-page .text-gray-500,
+[data-skin="niho"] .chatu-page .text-gray-700 {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] .chatu-page .text-gray-900 {
+  color: var(--text-primary) !important;
+}
+
+/* 灰色边框 → niho 细边框 */
+[data-skin="niho"] .chatu-page .border-gray-200,
+[data-skin="niho"] .chatu-page .border-gray-300 {
+  border-color: var(--niho-text-border) !important;
+}
+
+/* 所有按钮：去背光 */
+[data-skin="niho"] .chatu-page button {
+  box-shadow: none !important;
+}
+
+/* bg-white / bg-gray-50 等浅色背景 → 纯黑 */
+[data-skin="niho"] .chatu-page .bg-white,
+[data-skin="niho"] .chatu-page .bg-gray-50 {
+  background: #000 !important;
+}
+
+/* Tab 文字：inactive → 灰调天蓝，active → 荧光绿 */
+[data-skin="niho"] .chatu-page .border-b-2.border-transparent {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] .chatu-page .border-b-2.border-transparent:hover {
+  color: var(--text-primary) !important;
+}
+
+[data-skin="niho"] .chatu-page .border-b-2.border-\[var\(--color-accent\)\] {
+  color: var(--color-accent) !important;
+}
+
+/* dark 模式下的灰色背景值 → 纯黑 */
+[data-skin="niho"] .chatu-page .dark\:bg-\[\#111\],
+[data-skin="niho"] .chatu-page .dark\:bg-\[\#1a1a1a\],
+[data-skin="niho"] .chatu-page .dark\:bg-\[\#2d2d2d\] {
+  background: #000 !important;
+}
+
+/* dark 模式下的灰色边框值 → niho 边框 */
+[data-skin="niho"] .chatu-page .dark\:border-\[\#333\],
+[data-skin="niho"] .chatu-page .dark\:border-\[\#404040\] {
+  border-color: var(--niho-text-border) !important;
+}
+
+/* Chatu Lightbox — niho 下去光晕 */
+[data-skin="niho"] .chatu-page .shadow-2xl {
+  box-shadow: none !important;
+  border: 1px solid var(--niho-text-border) !important;
+}
+
+/* Persona 页面布局根容器 — 纯黑（修复 Tailwind 变体失效） */
+[data-skin="niho"] .persona-page-root {
   background: #000 !important;
 }
 
@@ -1231,32 +1600,26 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   background: #000 !important;
   backdrop-filter: none !important;
   border: 1px solid rgba(0, 255, 136, 0.22) !important;
-  box-shadow: 0 0 12px rgba(0, 255, 136, 0.06) !important;
+  box-shadow: none !important;
 }
 
 
 [data-skin="niho"] .glass-toolbar:hover {
   border-color: rgba(0, 255, 136, 0.35);
-  box-shadow: 0 0 16px rgba(0, 255, 136, 0.1);
+  box-shadow: none;
 }
 
-/* 主按钮 / 强调按钮 - 发光 */
+/* 主按钮 / 强调按钮 - 无光晕（仅实色填充 + 边框） */
 [data-skin="niho"] button.bg-primaryToken,
 [data-skin="niho"] button[class*="color-accent"] {
-  box-shadow:
-    0 0 20px rgba(0, 255, 136, 0.25),
-    0 0 40px rgba(0, 255, 136, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  box-shadow: none;
 }
 
 [data-skin="niho"] button.bg-primaryToken:hover {
-  box-shadow:
-    0 0 24px rgba(0, 255, 136, 0.4),
-    0 0 48px rgba(0, 255, 136, 0.15),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  box-shadow: none;
 }
 
-/* 次要按钮 - 霓虹粉 */
+/* 次要按钮 - 霓虹粉 无光晕 */
 [data-skin="niho"] button.bg-secondaryToken {
   border-color: rgba(255, 107, 157, 0.3);
   color: #ff6b9d;
@@ -1265,7 +1628,7 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 [data-skin="niho"] button.bg-secondaryToken:hover {
   background-color: rgba(255, 107, 157, 0.1);
   border-color: #ff6b9d;
-  box-shadow: 0 0 15px rgba(255, 107, 157, 0.2);
+  box-shadow: none;
 }
 
 /* 链接与可点击文字 - 霓虹绿 + 微光 */
@@ -1449,7 +1812,7 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   color: #ff1493 !important;
   background-color: rgba(255, 20, 147, 0.18) !important;
   border-color: rgba(255, 20, 147, 0.45) !important;
-  box-shadow: 0 0 10px rgba(255, 20, 147, 0.18);
+  box-shadow: none;
 }
 [data-skin="niho"] .niho-persona-btn--active:hover {
   color: #ff1493 !important;
@@ -1470,7 +1833,7 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 [data-skin="niho"] .avatar-user {
   background-color: #00e5ff !important;
   color: #000 !important;
-  box-shadow: 0 0 10px rgba(0, 229, 255, 0.3);
+  box-shadow: none;
 }
 
 [data-skin="niho"] .message-bubble-assistant {
@@ -1480,7 +1843,7 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 [data-skin="niho"] .avatar-assistant {
   background-color: #00ff88 !important;
   color: #000 !important;
-  box-shadow: 0 0 10px rgba(0, 255, 136, 0.3);
+  box-shadow: none;
 }
 
 /* ProcessTag (思考链标签) 精准应用 - Niho */
