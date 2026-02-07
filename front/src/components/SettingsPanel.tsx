@@ -51,26 +51,26 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       icon={Settings}
       variant="persona"
     >
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--text-primary)]">通用</h2>
-        <div className="flex flex-col gap-4">
+      <section className="settings-panel space-y-3">
+        <h2 className="settings-panel-section-title text-sm font-semibold text-gray-700 dark:text-gray-300">通用</h2>
+        <div className="settings-panel-cards flex flex-col gap-4">
           {/* 主题设置 */}
-          <Card title="主题" variant="persona" size="relaxed">
+          <Card title="主题" variant="persona" size="relaxed" className="settings-panel-card">
           <div className="space-y-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-[#e0e0e0] mb-1.5">
+              <label className="settings-panel-label block text-sm font-medium text-gray-700 dark:text-[#e0e0e0] mb-1.5">
                 选择主题
               </label>
               <select
                 value={currentTheme}
                 onChange={(e) => handleThemeChange(e.target.value as 'light' | 'dark' | 'niho')}
-                className="w-full px-3 py-2 text-sm rounded-lg bg-white dark:bg-[#2d2d2d] border border-gray-300 dark:border-[#505050] text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/50 focus:border-[#7c3aed] transition-all duration-150"
+                className="settings-panel-select w-full px-3 py-2 text-sm rounded-lg bg-white dark:bg-[#2d2d2d] border border-gray-300 dark:border-[#505050] text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/50 focus:border-[#7c3aed] transition-all duration-150"
               >
                 <option value="light">浅色</option>
                 <option value="dark">深色</option>
                 <option value="niho">霓虹</option>
               </select>
-              <p className="text-xs text-gray-500 dark:text-[#a0a0a0] mt-1">
+              <p className="settings-panel-desc text-xs text-gray-500 dark:text-[#a0a0a0] mt-1">
                 选择界面的显示主题
               </p>
             </div>
@@ -78,10 +78,10 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </Card>
 
           {/* 后端服务器地址配置 */}
-          <Card title="后端服务器" variant="persona" size="relaxed">
+          <Card title="后端服务器" variant="persona" size="relaxed" className="settings-panel-card">
           <div className="space-y-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-[#e0e0e0] mb-1.5">
+              <label className="settings-panel-label block text-sm font-medium text-gray-700 dark:text-[#e0e0e0] mb-1.5">
                 后端服务器地址
               </label>
               <Input
@@ -91,14 +91,14 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 placeholder="http://localhost:3002"
                 className="w-full"
               />
-              <p className="text-xs text-gray-500 dark:text-[#a0a0a0] mt-1">
+              <p className="settings-panel-desc text-xs text-gray-500 dark:text-[#a0a0a0] mt-1">
                 设置后端 API 服务器地址，留空则使用默认值或根据当前域名自动推断
               </p>
               </div>
               <Button
               variant="primary"
               onClick={handleSaveBackendUrl}
-              className="w-full"
+              className="settings-panel-btn-primary w-full"
             >
               保存后端地址
             </Button>

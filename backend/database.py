@@ -1202,6 +1202,29 @@ def create_tables():
 
         cursor.execute(create_research_documents_table)
         print("✓ Table 'research_documents' created/verified successfully")
+
+        # 媒体创作产出表（chatu 生成图/视频持久化；启动时自动建表，无需单独迁移）
+        create_media_outputs_table = """
+        CREATE TABLE IF NOT EXISTS `media_outputs` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `output_id` VARCHAR(100) NOT NULL UNIQUE COMMENT '产出ID',
+            `media_type` VARCHAR(20) NOT NULL COMMENT 'image / video',
+            `file_path` VARCHAR(500) NOT NULL COMMENT '相对路径 uploads/media/...',
+            `mime_type` VARCHAR(100) DEFAULT NULL COMMENT 'image/png, video/mp4 等',
+            `prompt` TEXT DEFAULT NULL COMMENT '生成时使用的提示词',
+            `model` VARCHAR(200) DEFAULT NULL COMMENT '使用的模型',
+            `provider` VARCHAR(50) DEFAULT NULL COMMENT 'gemini / runway',
+            `source` VARCHAR(50) DEFAULT 'generated' COMMENT 'generated / uploaded',
+            `file_size` INT DEFAULT NULL COMMENT '文件大小(字节)',
+            `metadata` JSON DEFAULT NULL COMMENT '扩展信息(config_id等)',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+            INDEX `idx_output_id` (`output_id`),
+            INDEX `idx_media_type` (`media_type`),
+            INDEX `idx_created_at` (`created_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='媒体创作产出';
+        """
+        cursor.execute(create_media_outputs_table)
+        print("✓ Table 'media_outputs' created/verified successfully")
         
         # 爬虫模块表
         create_crawler_modules_table = """

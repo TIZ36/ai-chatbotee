@@ -451,6 +451,11 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   box-shadow: none !important;
 }
 
+/* Niho 下 chatu 页纯黑，无灰色 */
+[data-skin="niho"] .chatu-page {
+  background: #000 !important;
+}
+
 [data-skin="niho"] .agents-page-action--settings {
   background: rgba(0, 255, 136, 0.1) !important;
   border: 1px solid var(--niho-text-border-strong) !important;
@@ -809,6 +814,270 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 }
 
 [data-skin="niho"] .llm-config-page .text-xs.text-gray-500 {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+/* ========== 爬虫配置页 Niho ========== */
+[data-skin="niho"] .crawler-config-page {
+  background: #000 !important;
+}
+
+[data-skin="niho"] .crawler-config-section-title {
+  color: var(--text-primary) !important;
+}
+
+[data-skin="niho"] .crawler-config-section-icon,
+[data-skin="niho"] .crawler-config-module-icon {
+  color: var(--color-accent) !important;
+}
+
+[data-skin="niho"] .crawler-config-loading .animate-spin {
+  border-color: var(--niho-text-border) !important;
+  border-top-color: var(--color-accent) !important;
+}
+
+[data-skin="niho"] .crawler-config-loading .text-gray-500 {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] .crawler-config-card {
+  background: var(--niho-pure-black) !important;
+  border: 1px solid var(--niho-text-border) !important;
+  box-shadow: none !important;
+}
+
+[data-skin="niho"] .crawler-config-module-header {
+  border-color: transparent !important;
+}
+
+[data-skin="niho"] .crawler-config-module-header:hover {
+  background: var(--niho-text-bg) !important;
+}
+
+[data-skin="niho"] .crawler-config-chevron {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] .crawler-config-module-name {
+  color: var(--text-primary) !important;
+}
+
+[data-skin="niho"] .crawler-config-module-desc,
+[data-skin="niho"] .crawler-config-batch-count,
+[data-skin="niho"] .crawler-config-muted,
+[data-skin="niho"] .crawler-config-empty-batch,
+[data-skin="niho"] .crawler-config-batch-meta {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] .crawler-config-btn-delete:hover {
+  color: var(--color-secondary) !important;
+}
+
+[data-skin="niho"] .crawler-config-btn-action:hover {
+  color: var(--color-accent) !important;
+}
+
+[data-skin="niho"] .crawler-config-batch-list {
+  border-top-color: var(--niho-text-border) !important;
+}
+
+[data-skin="niho"] .crawler-config-batch-row:hover {
+  background: var(--niho-text-bg) !important;
+}
+
+[data-skin="niho"] .crawler-config-batch-name {
+  color: var(--text-primary) !important;
+}
+
+[data-skin="niho"] .crawler-config-batch-icon {
+  color: var(--color-accent) !important;
+}
+
+[data-skin="niho"] .crawler-config-batch-error {
+  color: var(--color-secondary) !important;
+}
+
+[data-skin="niho"] .crawler-config-spinner {
+  color: var(--color-accent) !important;
+}
+
+[data-skin="niho"] .crawler-config-header-cta {
+  background: var(--color-accent) !important;
+  color: #000 !important;
+  box-shadow: none !important;
+}
+
+[data-skin="niho"] .crawler-config-header-cta:hover {
+  background: var(--color-accent-hover) !important;
+  box-shadow: none !important;
+}
+
+[data-skin="niho"] .crawler-config-page .divide-y > * {
+  border-color: var(--niho-text-border) !important;
+}
+
+/* ========== 爬虫测试页（弹层）Niho ========== */
+[data-skin="niho"] .crawler-test-panel {
+  background: var(--niho-pure-black) !important;
+  border: 1px solid var(--niho-text-border) !important;
+  box-shadow: none !important;
+}
+
+[data-skin="niho"] .crawler-test-header {
+  background: var(--niho-pure-black) !important;
+  border-bottom-color: var(--niho-text-border) !important;
+}
+
+[data-skin="niho"] .crawler-test-header-icon {
+  color: var(--color-accent) !important;
+}
+
+[data-skin="niho"] .crawler-test-title {
+  color: var(--text-primary) !important;
+}
+
+[data-skin="niho"] .crawler-test-close:hover {
+  background: var(--niho-text-bg) !important;
+  color: var(--text-primary) !important;
+}
+
+[data-skin="niho"] .crawler-test-content {
+  background: var(--niho-pure-black) !important;
+}
+
+[data-skin="niho"] .crawler-test-label {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] .crawler-test-panel .input-field {
+  background: var(--niho-pure-black) !important;
+  border: 1px solid var(--niho-text-border) !important;
+  color: var(--text-primary) !important;
+}
+
+[data-skin="niho"] .crawler-test-panel .input-field::placeholder {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] .crawler-test-btn-primary {
+  background: var(--color-accent) !important;
+  color: #000 !important;
+  box-shadow: none !important;
+}
+
+[data-skin="niho"] .crawler-test-btn-primary:hover:not(:disabled) {
+  background: var(--color-accent-hover) !important;
+  box-shadow: none !important;
+}
+
+[data-skin="niho"] .crawler-test-error {
+  background: rgba(255, 107, 157, 0.08) !important;
+  border-color: rgba(255, 107, 157, 0.35) !important;
+}
+
+[data-skin="niho"] .crawler-test-error .text-red-500 {
+  color: var(--color-secondary) !important;
+}
+
+[data-skin="niho"] .crawler-test-error .text-red-700,
+[data-skin="niho"] .crawler-test-error .text-red-400,
+[data-skin="niho"] .crawler-test-error p {
+  color: var(--color-secondary) !important;
+}
+
+[data-skin="niho"] .crawler-test-block {
+  background: var(--niho-pure-black) !important;
+  border: 1px solid var(--niho-text-border) !important;
+}
+
+[data-skin="niho"] .crawler-test-block-toggle {
+  color: var(--text-primary) !important;
+}
+
+[data-skin="niho"] .crawler-test-block-toggle:hover {
+  background: var(--niho-text-bg) !important;
+}
+
+[data-skin="niho"] .crawler-test-block-body {
+  border-top-color: var(--niho-text-border) !important;
+}
+
+[data-skin="niho"] .crawler-test-panel .font-medium {
+  color: var(--text-primary) !important;
+}
+
+[data-skin="niho"] .crawler-test-panel .border-t {
+  border-top-color: var(--niho-text-border) !important;
+}
+
+[data-skin="niho"] .crawler-test-panel .bg-gray-50,
+[data-skin="niho"] .crawler-test-panel .dark\:bg-gray-900,
+[data-skin="niho"] .crawler-test-panel .bg-white,
+[data-skin="niho"] .crawler-test-panel .dark\:bg-gray-800 {
+  background: var(--niho-pure-black) !important;
+}
+
+[data-skin="niho"] .crawler-test-panel textarea.input-field {
+  background: var(--niho-pure-black) !important;
+  border: 1px solid var(--niho-text-border) !important;
+  color: var(--text-primary) !important;
+}
+
+/* ========== 设置页 Niho ========== */
+[data-skin="niho"] .settings-panel {
+  background: #000 !important;
+}
+
+[data-skin="niho"] .settings-panel-section-title {
+  color: var(--text-primary) !important;
+}
+
+[data-skin="niho"] .settings-panel-card {
+  background: var(--niho-pure-black) !important;
+  border: 1px solid var(--niho-text-border) !important;
+  box-shadow: none !important;
+}
+
+[data-skin="niho"] .settings-panel-label {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] .settings-panel-desc {
+  color: var(--niho-skyblue-gray) !important;
+}
+
+[data-skin="niho"] .settings-panel-select {
+  background: var(--niho-pure-black) !important;
+  border: 1px solid var(--niho-text-border) !important;
+  color: var(--text-primary) !important;
+}
+
+[data-skin="niho"] .settings-panel-select:focus {
+  outline: none !important;
+  border-color: var(--color-accent) !important;
+  box-shadow: none !important;
+}
+
+[data-skin="niho"] .settings-panel-btn-primary {
+  background: var(--color-accent) !important;
+  color: #000 !important;
+  box-shadow: none !important;
+}
+
+[data-skin="niho"] .settings-panel-btn-primary:hover {
+  background: var(--color-accent-hover) !important;
+  box-shadow: none !important;
+}
+
+[data-skin="niho"] .settings-panel .input-field,
+[data-skin="niho"] .settings-panel input[type="text"] {
+  background: var(--niho-pure-black) !important;
+  border: 1px solid var(--niho-text-border) !important;
+  color: var(--text-primary) !important;
+}
+
+[data-skin="niho"] .settings-panel .input-field::placeholder {
   color: var(--niho-skyblue-gray) !important;
 }
 

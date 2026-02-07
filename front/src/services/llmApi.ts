@@ -164,9 +164,13 @@ export async function deleteLLMConfig(configId: string): Promise<{ message: stri
 
 /**
  * 获取LLM配置的API密钥（用于调用）
+ * 配置已删除时（404）返回空字符串，不抛错，避免删除 Token 后前端大量报错
  */
 export async function getLLMConfigApiKey(configId: string): Promise<string> {
   const response = await fetch(`${API_BASE_URL}/configs/${configId}/api-key`);
+  if (response.status === 404) {
+    return '';
+  }
   if (!response.ok) {
     throw new Error(`Failed to get API key: ${response.statusText}`);
   }

@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { Plug, Package, Paperclip } from 'lucide-react';
+import { Plug, Package, Paperclip, FileText } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Switch } from './ui/Switch';
 import { Label } from './ui/Label';
@@ -39,9 +39,12 @@ interface AttachmentMenuProps {
   attachedCount?: number;
   toolCallingEnabled?: boolean;
   onToggleToolCalling?: (enabled: boolean) => void;
+  /** Chaya 主界面：在插件弹框中显示 SOP 入口 */
+  showSopPlugin?: boolean;
+  onOpenAddSop?: () => void;
 }
 
-type PluginTab = 'mcp' | 'skillPack' | 'media' | 'settings';
+type PluginTab = 'mcp' | 'skillPack' | 'media' | 'settings' | 'sop';
 
 const AttachmentMenu: React.FC<AttachmentMenuProps> = ({
   mcpServers,
@@ -59,6 +62,8 @@ const AttachmentMenu: React.FC<AttachmentMenuProps> = ({
   attachedCount = 0,
   toolCallingEnabled = false,
   onToggleToolCalling,
+  showSopPlugin = false,
+  onOpenAddSop,
 }) => {
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<PluginTab>('mcp');
@@ -107,6 +112,7 @@ const AttachmentMenu: React.FC<AttachmentMenuProps> = ({
               {[
                 { id: 'mcp' as const, label: '工具 / MCP', count: mcpServers.length, show: true },
                 { id: 'skillPack' as const, label: '技能包', count: skillPacks.length, show: true },
+                { id: 'sop' as const, label: 'SOP', count: 0, show: showSopPlugin },
                 { id: 'media' as const, label: '媒体', count: attachedCount, show: true },
                 { id: 'settings' as const, label: '功能开关', count: onToggleToolCalling ? 1 : 0, show: !!onToggleToolCalling },
               ]
@@ -297,6 +303,29 @@ const AttachmentMenu: React.FC<AttachmentMenuProps> = ({
                     );
                   })
                 )}
+              </div>
+            )}
+
+            {activeTab === 'sop' && showSopPlugin && onOpenAddSop && (
+              <div className="space-y-2 py-2">
+                <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-[#888] mb-2">
+                  <FileText className="w-3.5 h-3.5 text-emerald-600 dark:text-[#00d4aa]" />
+                  <span>SOP（标准作业流程）</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenAddSop();
+                    setOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm bg-muted/50 text-gray-700 dark:text-[#d0d0d0] hover:bg-muted/70 border border-transparent hover:border-border/40 transition-colors text-left"
+                >
+                  <Package className="w-4 h-4 flex-shrink-0 text-emerald-600 dark:text-[#00d4aa]" />
+                  <span>设置 SOP</span>
+                </button>
+                <p className="text-[11px] text-gray-500 dark:text-[#888] px-1">
+                  创建或编辑 SOP 技能包，用于指导对话流程。
+                </p>
               </div>
             )}
 

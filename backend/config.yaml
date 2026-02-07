@@ -44,6 +44,15 @@ crawler:
   default_timeout: 30
   default_user_agent: ""
 
+# 媒体生成按供应商配置（API Key 等）
+media:
+  runway:
+    api_key: ""   # 可选，不配置则 Runway 接口返回 501
+    api_base: "https://api.runwayml.com"
+  veo:
+    api_key: ""
+    api_base: ""
+
 # 默认 Agent Chaya 配置
 chaya:
   name: "Chaya"

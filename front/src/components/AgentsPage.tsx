@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Bot, Sliders, Users, Loader, Volume2, Plus, Check, Brain, Sparkles, Zap,
+  Bot, Sliders, Loader, Volume2, Plus, Check, Brain, Sparkles, Zap,
   MessageSquare, Database, Shapes, Pencil
 } from 'lucide-react';
 import { getAgents, Session } from '../services/sessionApi';
@@ -185,20 +185,17 @@ const AgentsPage: React.FC = () => {
     <>
       <div className="agents-page h-full flex flex-col bg-gray-50 dark:bg-[#1a1a1a]">
         <div className="agents-page-header flex-shrink-0 px-6 py-4 border-b border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d]">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="flex items-center space-x-3">
-                <div className="agents-page-header-icon w-8 h-8 rounded-lg bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
-                  <Users className="w-5 h-5 text-primary-600 dark:text-primary-400" />
-                </div>
-                <h1 className="agents-page-title text-xl font-bold text-gray-900 dark:text-white">
-                  Persona 管理
-                </h1>
-              </div>
-              <p className="mt-1 text-xs text-gray-500 dark:text-[#858585]">
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 min-h-9">
+            <div className="flex items-center justify-start min-w-0" />
+            <div className="flex flex-col items-center justify-center min-w-0 max-w-full px-2 text-center">
+              <h1 className="agents-page-title text-xl font-bold text-gray-900 dark:text-white">
+                Persona 管理
+              </h1>
+              <p className="mt-0.5 text-xs text-gray-500 dark:text-[#858585]">
                 可添加：人设、音色 · 可开关：人格模式、自驱思考、记忆锚点、技能触发 · 常开：记忆、行为塑造
               </p>
             </div>
+            <div className="flex items-center justify-end min-w-0" />
           </div>
         </div>
 

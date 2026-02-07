@@ -42,9 +42,26 @@ function isProbablyLocalAbsolutePath(src: string): boolean {
  * - 本地绝对路径：转 file://
  * - /uploads/... 或 uploads/...：补齐后端 base URL
  */
+/** 若已是 data URL 但被重复加上 data:...;base64, 前缀，则只保留最内层合法 data URL */
+function unwrapDoubleDataUrl(src: string): string {
+  let s = src;
+  let prev = '';
+  while (s !== prev) {
+    prev = s;
+    const match = /^data:[^;,]+(;[^,]*)?,(data:.*)$/.exec(s);
+    if (match) s = match[2];
+  }
+  return s;
+}
+
 export function resolveMediaSrc(raw: string, mimeType?: string): string {
-  const src = String(raw ?? '').trim();
+  let src = String(raw ?? '').trim();
   if (!src) return src;
+
+  // 防止双重 data URL 前缀（后端或上游有时把完整 data URL 再包一层）
+  if (/^data:/i.test(src)) {
+    src = unwrapDoubleDataUrl(src);
+  }
 
   // already absolute urls
   if (/^(https?:|data:|blob:|file:)/i.test(src)) return src;
@@ -62,8 +79,8 @@ export function resolveMediaSrc(raw: string, mimeType?: string): string {
     return `${getBackendUrl()}${src}`;
   }
 
-  // backend-relative without leading slash (e.g. uploads/xxx.png)
-  if (src.startsWith('uploads/') || src.startsWith('static/')) {
+  // backend-relative without leading slash (e.g. uploads/xxx.png, api/media/...)
+  if (src.startsWith('uploads/') || src.startsWith('static/') || src.startsWith('api/')) {
     return `${getBackendUrl()}/${src}`;
   }
 

@@ -932,18 +932,18 @@ ${html}
   };
   
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl w-full max-w-6xl max-h-[95vh] overflow-hidden flex flex-col">
+    <div className="crawler-test-page fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="crawler-test-panel bg-white dark:bg-gray-900 rounded-xl shadow-2xl w-full max-w-6xl max-h-[95vh] overflow-hidden flex flex-col">
         {/* 标题栏 */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+        <div className="crawler-test-header flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center space-x-2">
-            <Globe className="w-6 h-6 text-blue-500" />
-            <h2 className="text-xl font-semibold">爬虫测试与配置</h2>
+            <Globe className="w-6 h-6 text-blue-500 crawler-test-header-icon" />
+            <h2 className="crawler-test-title text-xl font-semibold">爬虫测试与配置</h2>
           </div>
           {onClose && (
             <button
               onClick={onClose}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+              className="crawler-test-close p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
@@ -951,10 +951,10 @@ ${html}
         </div>
         
         {/* 内容区域 */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        <div className="crawler-test-content flex-1 overflow-y-auto p-6 space-y-4">
           {/* URL输入 */}
-          <div>
-            <label className="block text-sm font-medium mb-2">目标URL *</label>
+          <div className="crawler-test-section">
+            <label className="crawler-test-label block text-sm font-medium mb-2">目标URL *</label>
             <div className="flex space-x-2">
               <input
                 type="text"
@@ -967,6 +967,7 @@ ${html}
                 onClick={handleTestCrawl}
                 disabled={isLoading || !url.trim()}
                 variant="primary"
+                className="crawler-test-btn-primary"
               >
                 {isLoading ? (
                   <Loader className="w-4 h-4 mr-2 animate-spin" />
@@ -980,7 +981,7 @@ ${html}
           
           {/* 错误提示 */}
           {error && (
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 flex items-start space-x-2">
+            <div className="crawler-test-error bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 flex items-start space-x-2">
               <XCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
               <div className="flex-1">
                 <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
@@ -989,10 +990,10 @@ ${html}
           )}
           
           {/* 认证配置 */}
-          <div className="border border-gray-200 dark:border-gray-700 rounded-lg">
+          <div className="crawler-test-block border border-gray-200 dark:border-gray-700 rounded-lg">
             <button
               onClick={() => setShowAuthConfig(!showAuthConfig)}
-              className="w-full flex items-center justify-between p-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+              className="crawler-test-block-toggle w-full flex items-center justify-between p-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
             >
               <span className="font-medium">认证配置</span>
               {showAuthConfig ? (
@@ -1003,7 +1004,7 @@ ${html}
             </button>
             
             {showAuthConfig && (
-              <div className="p-4 space-y-4 border-t border-gray-200 dark:border-gray-700">
+              <div className="crawler-test-block-body p-4 space-y-4 border-t border-gray-200 dark:border-gray-700">
                 {/* Cookie输入 */}
                 <div>
                   <label className="block text-sm font-medium mb-2">
@@ -1104,10 +1105,10 @@ ${html}
           </div>
           
           {/* 高级选项 */}
-          <div className="border border-gray-200 dark:border-gray-700 rounded-lg">
+          <div className="crawler-test-block border border-gray-200 dark:border-gray-700 rounded-lg">
             <button
               onClick={() => setShowAdvanced(!showAdvanced)}
-              className="w-full flex items-center justify-between p-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+              className="crawler-test-block-toggle w-full flex items-center justify-between p-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
             >
               <span className="font-medium">高级选项</span>
               {showAdvanced ? (
@@ -1158,8 +1159,8 @@ ${html}
           
           {/* 爬取结果预览 */}
           {crawlResult && (
-            <div className="border border-gray-200 dark:border-gray-700 rounded-lg">
-              <div className="p-3 border-b border-gray-200 dark:border-gray-700">
+            <div className="crawler-test-block border border-gray-200 dark:border-gray-700 rounded-lg">
+              <div className="crawler-test-block-body p-3 border-b border-gray-200 dark:border-gray-700">
                 <div className="flex items-center justify-between mb-2">
                   <span className="font-medium">爬取结果预览</span>
                   {crawlResult.success ? (
@@ -1828,10 +1829,10 @@ ${html}
           )}
           
           {/* 模块配置 */}
-          <div className="border border-gray-200 dark:border-gray-700 rounded-lg">
+          <div className="crawler-test-block border border-gray-200 dark:border-gray-700 rounded-lg">
             <button
               onClick={() => setShowModuleConfig(!showModuleConfig)}
-              className="w-full flex items-center justify-between p-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+              className="crawler-test-block-toggle w-full flex items-center justify-between p-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
             >
               <span className="font-medium">模块配置</span>
               {showModuleConfig ? (
@@ -1879,10 +1880,10 @@ ${html}
           </div>
           
           {/* 标准化配置 */}
-          <div className="border border-gray-200 dark:border-gray-700 rounded-lg">
+          <div className="crawler-test-block border border-gray-200 dark:border-gray-700 rounded-lg">
             <button
               onClick={() => setShowNormalizeConfig(!showNormalizeConfig)}
-              className="w-full flex items-center justify-between p-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+              className="crawler-test-block-toggle w-full flex items-center justify-between p-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
             >
               <span className="font-medium">标准化配置</span>
               {showNormalizeConfig ? (

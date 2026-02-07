@@ -179,13 +179,12 @@ const CrawlerConfigPage: React.FC = () => {
     <Button
       onClick={() => setShowTestPage(true)}
       variant="primary"
+      className="crawler-config-header-cta"
     >
       <Plus className="w-4 h-4 mr-2" />
       <span>新建爬虫模块</span>
     </Button>
   );
-
-  const cardClass = "rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] [data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)]";
 
   return (
     <PageLayout
@@ -195,15 +194,15 @@ const CrawlerConfigPage: React.FC = () => {
       headerActions={headerActions}
       variant="persona"
     >
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--text-primary)] flex items-center gap-2">
-          <Package className="w-4 h-4 [data-skin='niho']:text-[var(--color-accent)]" />
+      <section className="crawler-config-page space-y-3">
+        <h2 className="crawler-config-section-title text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">
+          <Package className="w-4 h-4 crawler-config-section-icon" />
           爬虫模块
         </h2>
         {loading ? (
-          <div className="flex items-center justify-center py-16">
+          <div className="crawler-config-loading flex items-center justify-center py-16">
             <div className="w-6 h-6 border-2 border-gray-300 dark:border-gray-600 border-t-[#7c3aed] rounded-full animate-spin" />
-            <span className="ml-3 text-gray-500 dark:text-gray-400">加载中...</span>
+            <span className="ml-3 text-sm text-gray-500 dark:text-gray-400">加载中...</span>
           </div>
         ) : modules.length === 0 ? (
           <EmptyState
@@ -221,7 +220,7 @@ const CrawlerConfigPage: React.FC = () => {
             }
           />
         ) : (
-          <div className="space-y-4">
+          <div className="crawler-config-list space-y-4">
             {modules.map(module => {
               const isExpanded = expandedModuleId === module.module_id;
               const batches = moduleBatches.get(module.module_id) || [];
@@ -230,27 +229,27 @@ const CrawlerConfigPage: React.FC = () => {
               return (
                 <div
                   key={module.module_id}
-                  className={`${cardClass} overflow-hidden`}
+                  className="crawler-config-card rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] overflow-hidden"
                 >
                   {/* 模块头部 */}
-                  <div className="flex items-center justify-between p-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                  <div className="crawler-config-module-header flex items-center justify-between p-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                     <div className="flex items-center space-x-3 flex-1 min-w-0">
                       <button
                         onClick={() => handleModuleToggle(module.module_id)}
                         className="flex items-center space-x-2 flex-1 min-w-0 text-left"
                       >
                         {isExpanded ? (
-                          <ChevronDown className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                          <ChevronDown className="w-5 h-5 text-gray-400 flex-shrink-0 crawler-config-chevron" />
                         ) : (
-                          <ChevronRight className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                          <ChevronRight className="w-5 h-5 text-gray-400 flex-shrink-0 crawler-config-chevron" />
                         )}
-                        <Package className="w-5 h-5 text-blue-500 flex-shrink-0" />
+                        <Package className="w-5 h-5 text-blue-500 flex-shrink-0 crawler-config-module-icon" />
                         <div className="flex-1 min-w-0">
-                          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate">
+                          <h3 className="crawler-config-module-name text-lg font-semibold text-gray-900 dark:text-gray-100 truncate">
                             {module.module_name}
                           </h3>
                           {module.description && (
-                            <p className="text-sm text-gray-500 dark:text-gray-400 truncate mt-1">
+                            <p className="crawler-config-module-desc text-sm text-gray-500 dark:text-gray-400 truncate mt-1">
                               {module.description}
                             </p>
                           )}
@@ -258,12 +257,12 @@ const CrawlerConfigPage: React.FC = () => {
                       </button>
                     </div>
                     <div className="flex items-center space-x-2 flex-shrink-0 ml-4">
-                      <span className="text-sm text-gray-500 dark:text-gray-400">
+                      <span className="crawler-config-batch-count text-sm text-gray-500 dark:text-gray-400">
                         {batches.length} 个批次
                       </span>
                       <button
                         onClick={() => handleDeleteModule(module.module_id)}
-                        className="p-2 text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                        className="crawler-config-btn-delete p-2 text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
                         title="删除模块"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -273,14 +272,14 @@ const CrawlerConfigPage: React.FC = () => {
 
                   {/* 批次列表 */}
                   {isExpanded && (
-                    <div className="border-t border-gray-200 dark:border-gray-700">
+                    <div className="crawler-config-batch-list border-t border-gray-200 dark:border-gray-700">
                       {isLoadingBatches ? (
                         <div className="flex items-center justify-center p-8">
-                          <Loader className="w-5 h-5 animate-spin text-gray-400" />
-                          <span className="ml-2 text-sm text-gray-500">加载批次中...</span>
+                          <Loader className="w-5 h-5 animate-spin text-gray-400 crawler-config-spinner" />
+                          <span className="ml-2 text-sm text-gray-500 crawler-config-muted">加载批次中...</span>
                         </div>
                       ) : batches.length === 0 ? (
-                        <div className="p-8 text-center text-sm text-gray-500 dark:text-gray-400">
+                        <div className="crawler-config-empty-batch p-8 text-center text-sm text-gray-500 dark:text-gray-400">
                           该模块还没有批次数据
                         </div>
                       ) : (
@@ -290,14 +289,14 @@ const CrawlerConfigPage: React.FC = () => {
                             return (
                               <div
                                 key={batch.batch_id}
-                                className="p-4 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors"
+                                className="crawler-config-batch-row p-4 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors"
                               >
                                 <div className="flex items-center justify-between">
                                   <div className="flex items-center space-x-3 flex-1 min-w-0">
-                                    <Database className="w-4 h-4 text-green-500 flex-shrink-0" />
+                                    <Database className="w-4 h-4 text-green-500 flex-shrink-0 crawler-config-batch-icon" />
                                     <div className="flex-1 min-w-0">
                                       <div className="flex items-center space-x-2">
-                                        <span className="font-medium text-gray-900 dark:text-gray-100">
+                                        <span className="crawler-config-batch-name font-medium text-gray-900 dark:text-gray-100">
                                           {batch.batch_name}
                                         </span>
                                         <Badge 
@@ -312,7 +311,7 @@ const CrawlerConfigPage: React.FC = () => {
                                           {batch.status === 'completed' ? '已完成' : batch.status === 'error' ? '错误' : '进行中'}
                                         </Badge>
                                       </div>
-                                      <div className="flex items-center space-x-4 mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                      <div className="crawler-config-batch-meta flex items-center space-x-4 mt-1 text-xs text-gray-500 dark:text-gray-400">
                                         {batch.crawled_at && (
                                           <span>
                                             爬取时间: {new Date(batch.crawled_at).toLocaleString('zh-CN')}
@@ -323,7 +322,7 @@ const CrawlerConfigPage: React.FC = () => {
                                         )}
                                       </div>
                                       {batch.error_message && (
-                                        <div className="flex items-center space-x-1 mt-1 text-xs text-red-600 dark:text-red-400">
+                                        <div className="crawler-config-batch-error flex items-center space-x-1 mt-1 text-xs text-red-600 dark:text-red-400">
                                           <AlertCircle className="w-3 h-3" />
                                           <span>{batch.error_message}</span>
                                         </div>
@@ -336,7 +335,7 @@ const CrawlerConfigPage: React.FC = () => {
                                         <button
                                           onClick={() => handleQuickCreateBatch(module.module_id, batch.batch_id, batch.batch_name)}
                                           disabled={quickCreatingBatch === `${module.module_id}:${batch.batch_id}`}
-                                          className="p-2 text-gray-400 hover:text-green-600 dark:hover:text-green-400 transition-colors disabled:opacity-50"
+                                          className="crawler-config-btn-action p-2 text-gray-400 hover:text-green-600 dark:hover:text-green-400 transition-colors disabled:opacity-50"
                                           title="基于此批次快速创建新批次"
                                         >
                                           {quickCreatingBatch === `${module.module_id}:${batch.batch_id}` ? (
@@ -348,7 +347,7 @@ const CrawlerConfigPage: React.FC = () => {
                                       <button
                                         onClick={() => handleRefreshBatch(module.module_id, batch.batch_name)}
                                         disabled={isRefreshing}
-                                        className="p-2 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors disabled:opacity-50"
+                                        className="crawler-config-btn-action p-2 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors disabled:opacity-50"
                                         title="刷新批次"
                                       >
                                         {isRefreshing ? (
@@ -365,14 +364,14 @@ const CrawlerConfigPage: React.FC = () => {
                                         setEditingBatchId(batch.batch_id);
                                         setShowTestPage(true);
                                       }}
-                                      className="p-2 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                                      className="crawler-config-btn-action p-2 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
                                       title="编辑批次解析数据"
                                     >
                                       <Edit2 className="w-4 h-4" />
                                     </button>
                                     <button
                                       onClick={() => handleDeleteBatch(module.module_id, batch.batch_id)}
-                                      className="p-2 text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                                      className="crawler-config-btn-delete p-2 text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
                                       title="删除批次"
                                     >
                                       <Trash2 className="w-4 h-4" />

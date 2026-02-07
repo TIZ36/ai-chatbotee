@@ -8,6 +8,7 @@ from .mcp_server import MCPServer
 from .session import Session
 from .message import Message
 from .workflow import Workflow
+from .media_output import MediaOutput
 
 __all__ = [
     'LLMConfig',
@@ -15,4 +16,5 @@ __all__ = [
     'Session',
     'Message',
     'Workflow',
+    'MediaOutput',
 ]

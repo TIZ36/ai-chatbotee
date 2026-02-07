@@ -55,41 +55,31 @@ const PageLayout: React.FC<PageLayoutProps> = ({
       <div className="flex-1 flex flex-col overflow-hidden">
         {showHeader && (
           <div className={`
-            flex-shrink-0 flex items-center justify-between
+            flex-shrink-0
             ${isPersona
-              ? 'agents-page-header px-6 py-4 border-b border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] [data-skin="niho"]:bg-[#000000] [data-skin="niho"]:border-[var(--niho-text-border)]'
+              ? 'agents-page-header py-4 border-b border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] [data-skin="niho"]:bg-[#000000] [data-skin="niho"]:border-[var(--niho-text-border)]'
               : 'px-3 py-2 glass-header'
             }
           `}>
-            <div className="flex items-center space-x-3">
-              {Icon && (
-                <div className={`
-                  rounded-lg flex items-center justify-center flex-shrink-0
-                  ${isPersona
-                    ? 'w-8 h-8 bg-primary-100 dark:bg-primary-900/30 [data-skin="niho"]:bg-[var(--niho-deep-purple-bg)] [data-skin="niho"]:border [data-skin="niho"]:border-[var(--color-accent-bg)]'
-                    : 'w-7 h-7 bg-[var(--color-accent)]/10 dark:bg-[var(--color-accent)]/20'
-                  }
-                `}>
-                  <Icon className={`${isPersona ? 'w-5 h-5 text-primary-600 dark:text-primary-400 [data-skin="niho"]:text-[var(--color-accent)]' : 'w-4 h-4 text-[var(--color-accent)]'}`} strokeWidth={1.5} />
+            <div className={isPersona ? 'max-w-3xl w-full mx-auto px-6' : ''}>
+              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 min-h-9">
+                <div className="flex items-center justify-start min-w-0" />
+                <div className="flex flex-col items-center justify-center min-w-0 max-w-full px-2 text-center">
+                  <h1 className={`
+                    font-bold text-gray-900 dark:text-white [data-skin="niho"]:text-[var(--text-primary)]
+                    ${isPersona ? 'text-xl agents-page-title' : 'text-sm font-semibold'}
+                  `}>
+                    {title}
+                  </h1>
+                  {description && typeof description === 'string' && description.trim() && description !== '0' && (
+                    <p className={`text-gray-500 dark:text-[#858585] [data-skin="niho"]:text-[var(--niho-skyblue-gray)] mt-0.5 ${isPersona ? 'text-xs' : 'text-[10px]'}`}>{description}</p>
+                  )}
                 </div>
-              )}
-              <div>
-                <h1 className={`
-                  font-bold text-gray-900 dark:text-white [data-skin="niho"]:text-[var(--text-primary)]
-                  ${isPersona ? 'text-xl agents-page-title' : 'text-sm font-semibold'}
-                `}>
-                  {title}
-                </h1>
-                {description && typeof description === 'string' && description.trim() && description !== '0' && (
-                  <p className={`text-gray-500 dark:text-[#858585] [data-skin="niho"]:text-[var(--niho-skyblue-gray)] mt-0.5 ${isPersona ? 'text-xs' : 'text-[10px]'}`}>{description}</p>
-                )}
+                <div className="flex items-center justify-end min-w-0">
+                  {headerActions}
+                </div>
               </div>
             </div>
-            {headerActions && (
-              <div className="flex items-center space-x-1.5">
-                {headerActions}
-              </div>
-            )}
           </div>
         )}
 
@@ -149,7 +139,7 @@ export const Card: React.FC<CardProps> = ({
 
   const isPersona = variant === 'persona';
   const cardClass = isPersona
-    ? 'rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] [data-skin="niho"]:bg-[#000000] [data-skin="niho"]:border-[var(--niho-text-border)]'
+    ? 'rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] [data-skin="niho"]:!bg-[#000000] [data-skin="niho"]:!border-[var(--niho-text-border)]'
     : 'glass-card';
   const headerBorderClass = isPersona
     ? 'border-b border-gray-200 dark:border-[#404040] [data-skin="niho"]:border-[var(--niho-text-border)]'

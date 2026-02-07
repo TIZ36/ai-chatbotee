@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
-import { Brain, Plug, Settings, MessageCircle, Globe, Bot, Users, BookOpen, Plus, FolderOpen, Image as ImageIcon } from 'lucide-react';
+import { Brain, Plug, Settings, MessageCircle, Globe, Bot, Users, BookOpen, Plus, FolderOpen } from 'lucide-react';
 import appLogoDark from '../assets/app_logo_dark.png';
 import appLogoLight from '../assets/app_logo_light.png';
+import appLogoChatu from '../assets/app_logo_chatu.png';
 import { Button } from './components/ui/Button';
 import { Input } from './components/ui/Input';
 import { ScrollArea } from './components/ui/ScrollArea';
@@ -21,6 +22,7 @@ import MCPConfig from './components/MCPConfig';
 import Workflow from './components/Workflow';
 import CrawlerConfigPage from './components/CrawlerConfigPage';
 import AgentsPage from './components/AgentsPage';
+import MediaCreatorPage from './components/MediaCreatorPage';
 // 新架构组件
 import StatusBar from './components/StatusBar';
 import { getAgents, getSessions, createSession, deleteSession, type Session } from './services/sessionApi';
@@ -378,14 +380,20 @@ const App: React.FC = () => {
           icon={
             chayaAvatar ? (
               <img src={chayaAvatar} alt="Chaya" className="w-[18px] h-[18px] rounded-full object-cover" />
-            ) : isDarkMode ? (
-              <img src={appLogoDark} alt="Chaya" className="w-[18px] h-[18px] object-contain" />
             ) : (
-              <img src={appLogoLight} alt="Chaya" className="w-[18px] h-[18px] object-contain" />
+              <img src={appLogoDark} alt="Chaya" className="w-[18px] h-[18px] object-contain" />
             )
           }
           title="Chaya 对话"
           isActive={location.pathname === '/'}
+          isNiho={isNiho}
+          tooltipPlacement="bottom"
+        />
+        <NavItem
+          to="/media-creator"
+          icon={<img src={appLogoChatu} alt="Chatu" className="w-[18px] h-[18px] rounded-full object-cover" />}
+          title="Chatu 插图"
+          isActive={location.pathname === '/media-creator'}
           isNiho={isNiho}
           tooltipPlacement="bottom"
         />
@@ -635,6 +643,9 @@ const App: React.FC = () => {
 
                     {/* 爬虫配置页面 */}
                     <Route path="/crawler-config" element={<CrawlerConfigPage />} />
+
+                    {/* chatu 页面 */}
+                    <Route path="/media-creator" element={<MediaCreatorPage />} />
 
                     {/* 设置页面 */}
                     <Route path="/settings" element={

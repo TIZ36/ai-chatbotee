@@ -355,6 +355,7 @@ class MessageService:
     ) -> Tuple[List[dict], int]:
         """
         获取会话的媒体列表
+        优先从 Redis 缓存读取；若缓存为空则从数据库加载含媒体的消息并返回。
         
         Args:
             session_id: 会话ID
@@ -364,7 +365,38 @@ class MessageService:
         Returns:
             (媒体消息列表, 总数)
         """
-        return self.cache_service.get_media_list(session_id, limit=limit, offset=offset)
+        media_list, total = self.cache_service.get_media_list(session_id, limit=limit, offset=offset)
+        if total > 0:
+            return media_list, total
+        # 缓存为空时从 DB 加载：拉取近期消息，筛选含 ext.media 或 tool_calls.media 的消息
+        db_messages = self.repository.find_by_session(session_id, limit=500)
+        with_media = []
+        for msg in db_messages:
+            ext = msg.ext or {}
+            if isinstance(ext, str):
+                try:
+                    import json
+                    ext = json.loads(ext) if ext else {}
+                except Exception:
+                    ext = {}
+            has_media = (ext and (ext.get('media') or ext.get('images')))
+            if not has_media and msg.tool_calls:
+                tc = msg.tool_calls
+                if isinstance(tc, dict):
+                    has_media = bool(tc.get('media'))
+                elif isinstance(tc, list):
+                    for tc_item in tc:
+                        if isinstance(tc_item, dict) and tc_item.get('media'):
+                            has_media = True
+                            break
+            if has_media:
+                with_media.append(msg.to_dict())
+        total_db = len(with_media)
+        # 按时间倒序，再做 offset/limit
+        with_media.reverse()
+        start = min(offset, total_db)
+        end = min(offset + limit, total_db)
+        return with_media[start:end], total_db
     
     def get_cache_stats(self, session_id: str) -> Dict[str, Any]:
         """获取会话缓存统计信息"""

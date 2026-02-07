@@ -5114,12 +5114,16 @@ const Workflow: React.FC<WorkflowProps> = ({
   return (
     <>
     <div className="workflow-chat-outer h-full flex flex-col bg-gray-50 dark:bg-[#1a1a1a]">
-      <div className="flex-1 flex min-h-0 p-2 gap-2">
-        <div className="workflow-chat-panel flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-[#2d2d2d] overflow-hidden">
+      <div className="flex-1 flex min-h-0 p-2 justify-center">
+        <div className="w-full max-w-3xl flex-1 flex flex-col min-h-0 min-w-0">
+        <div className="workflow-chat-panel flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-[#2d2d2d] overflow-hidden rounded-lg">
+          {/* Chaya 主界面不显示顶部 header（头像框与栏目），直接显示对话；SOP 入口移至输入框插件弹框 */}
+          {currentSessionId !== 'agent_chaya' && (
           <div className="workflow-chat-header border-b border-gray-200 dark:border-[#404040] px-3 py-0.5 bg-gradient-to-r from-gray-50 to-white dark:from-gray-800 dark:to-gray-900 flex-shrink-0">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center space-x-2">
-                  <div className="w-7 h-7 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary-400 hover:ring-offset-1 transition-all overflow-hidden" onClick={async () => {
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 min-h-9">
+            {/* 左区：头像 */}
+            <div className="flex items-center justify-start min-w-0">
+                  <div className="w-7 h-7 flex-shrink-0 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary-400 hover:ring-offset-1 transition-all overflow-hidden" onClick={async () => {
                   if (currentSessionId ) {
                     // 从当前会话获取数据
                     let currentSession =
@@ -5178,9 +5182,11 @@ const Workflow: React.FC<WorkflowProps> = ({
                   <Bot className="w-4 h-4 text-primary-600 dark:text-primary-400" />
                 )}
               </div>
-              <div className="flex flex-col min-w-0 flex-1">
+            </div>
+            {/* 中区：标题居中 */}
+            <div className="flex flex-col items-center justify-center min-w-0 max-w-full px-2">
                 <span 
-                  className="text-xs font-semibold text-gray-900 dark:text-[#ffffff] leading-tight truncate min-w-0 flex items-center gap-1.5"
+                  className="text-xs font-semibold text-gray-900 dark:text-[#ffffff] leading-tight truncate max-w-full text-center block"
                 >
                   {(() => {
                     const currentSession =
@@ -5192,7 +5198,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                   })()}
                 </span>
                 {currentSessionType !== 'agent' && (
-                  <div className="flex items-center gap-1.5 text-[10px] text-gray-500 dark:text-[#9a9a9a] truncate">
+                  <div className="flex items-center justify-center gap-1.5 text-[10px] text-gray-500 dark:text-[#9a9a9a] truncate">
                     <span className="inline-flex items-center rounded-full px-1.5 py-0.5 border border-border/60 bg-muted/60">
                       {currentSessionType === 'topic_general' ? '话题' : '临时会话'}
                     </span>
@@ -5206,7 +5212,7 @@ const Workflow: React.FC<WorkflowProps> = ({
 
                 {/* 话题参与者头像列表 */}
                 {currentSessionType === 'topic_general' && topicParticipants.length > 0 && (
-                  <div className="flex -space-x-1.5 overflow-hidden ml-1 flex-shrink-0">
+                  <div className="flex justify-center -space-x-1.5 overflow-hidden flex-shrink-0">
                     {topicParticipants
                       .filter(p => p.participant_type === 'agent')
                       .map(p => (
@@ -5243,10 +5249,8 @@ const Workflow: React.FC<WorkflowProps> = ({
                     }
                   </div>
                 )}
-              </div>
-              
             </div>
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center justify-end space-x-2 min-w-0">
               {/* 当前SOP状态显示（话题群专用） */}
               {currentSessionType === 'topic_general' && currentSopSkillPack && (
                 <div className="flex items-center gap-1 px-2 py-1 text-xs bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 rounded">
@@ -5262,7 +5266,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                 </div>
               )}
               
-              {/* 添加SOP按钮（非单Agent） */}
+              {/* 添加SOP按钮（非单Agent，且非 Chaya：Chaya 的 SOP 在插件弹框） */}
               {currentSessionType !== 'agent' && (
                 <button
                   onClick={() => setShowAddSopDialog(true)}
@@ -5274,8 +5278,8 @@ const Workflow: React.FC<WorkflowProps> = ({
                 </button>
               )}
               
-              {/* 制作技能包按钮 - 在有消息时显示 */}
-              {currentSessionId  && messages.filter(m => m.role !== 'system').length > 0 && !skillPackSelectionMode && (
+              {/* 制作技能包按钮 - 在有消息时显示（Chaya 不在此显示，SOP 在插件弹框） */}
+              {currentSessionId  && currentSessionId !== 'agent_chaya' && messages.filter(m => m.role !== 'system').length > 0 && !skillPackSelectionMode && (
                 <button
                   onClick={() => {
                     if (currentSessionType === 'agent') {
@@ -5298,6 +5302,7 @@ const Workflow: React.FC<WorkflowProps> = ({
             </div>
           </div>
         </div>
+          )}
 
         {/* 消息列表 - 正常顺序显示（老消息在上，新消息在下） - 优化布局 */}
           <div 
@@ -5859,30 +5864,44 @@ const Workflow: React.FC<WorkflowProps> = ({
                 attachedCount={attachedMedia.length}
                 toolCallingEnabled={toolCallingEnabled}
                 onToggleToolCalling={onToggleToolCalling}
+                showSopPlugin={currentSessionId === 'agent_chaya'}
+                onOpenAddSop={currentSessionId === 'agent_chaya' ? () => setShowAddSopDialog(true) : undefined}
               />
 
-              {/* 人设 - 点击后弹框切换（Chaya）或编辑人设（其他 Agent/话题） */}
-              {currentSessionType !== 'topic_general' && currentSessionId && (
-                <button
-                  onClick={() => {
-                    if (currentSessionId === 'agent_chaya') {
-                      setShowPersonaSwitchDialog(true);
-                    } else {
-                      setSystemPromptDraft(currentSystemPrompt || '');
-                      setIsEditingSystemPrompt(true);
-                    }
-                  }}
-                  className={`niho-persona-btn ring-0 flex items-center space-x-1 px-1.5 py-0.5 rounded text-[11px] transition-all whitespace-nowrap ${
-                    currentSystemPrompt
-                      ? 'niho-persona-btn--active font-medium'
-                      : 'niho-persona-btn--inactive'
-                  }`}
-                  title={currentSystemPrompt ? `人设: ${currentSystemPrompt.length > 50 ? currentSystemPrompt.slice(0, 50) + '...' : currentSystemPrompt}` : '点击设置人设'}
-                >
-                  <FileText className="w-3 h-3 flex-shrink-0" />
-                  <span>人设</span>
-                </button>
-              )}
+              {/* 人设 - 点击后弹框切换（Chaya）或编辑人设（其他 Agent/话题）；Chaya 选中预设时按钮显示昵称（最多 5 字） */}
+              {currentSessionType !== 'topic_general' && currentSessionId && (() => {
+                const chayaSession = currentSessionId === 'agent_chaya'
+                  ? (sessions.find(s => s.session_id === 'agent_chaya') || (currentSessionMeta?.session_id === 'agent_chaya' ? currentSessionMeta : null))
+                  : null;
+                const personaPresets: PersonaPreset[] = (chayaSession?.ext as any)?.personaPresets ?? [];
+                const currentPersonaId = (chayaSession?.ext as any)?.currentPersonaId as string | undefined;
+                const currentPreset = currentPersonaId ? personaPresets.find(p => p.id === currentPersonaId) : null;
+                const nickname = currentPreset?.nickname?.trim() || '';
+                const personaButtonLabel = nickname
+                  ? (nickname.length <= 5 ? nickname : nickname.slice(0, 5) + '…')
+                  : '人设';
+                return (
+                  <button
+                    onClick={() => {
+                      if (currentSessionId === 'agent_chaya') {
+                        setShowPersonaSwitchDialog(true);
+                      } else {
+                        setSystemPromptDraft(currentSystemPrompt || '');
+                        setIsEditingSystemPrompt(true);
+                      }
+                    }}
+                    className={`niho-persona-btn ring-0 flex items-center space-x-1 px-1.5 py-0.5 rounded text-[11px] transition-all whitespace-nowrap ${
+                      currentSystemPrompt
+                        ? 'niho-persona-btn--active font-medium'
+                        : 'niho-persona-btn--inactive'
+                    }`}
+                    title={currentSystemPrompt ? `人设: ${currentSystemPrompt.length > 50 ? currentSystemPrompt.slice(0, 50) + '...' : currentSystemPrompt}` : '点击设置人设'}
+                  >
+                    <FileText className="w-3 h-3 flex-shrink-0" />
+                    <span>{personaButtonLabel}</span>
+                  </button>
+                );
+              })()}
             </div>
 
             {/* 右侧：模型选择（非话题模式时显示） */}
@@ -7325,6 +7344,7 @@ const Workflow: React.FC<WorkflowProps> = ({
       title="图片/媒体预览"
     />
       </div>
+        </div>
         </div>
       </div>
     </>
