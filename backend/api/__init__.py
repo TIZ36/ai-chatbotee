@@ -14,6 +14,7 @@ from .workflow import workflow_bp, init_workflow_api
 from .health import health_bp
 from .actor_pool import actor_pool_bp
 from .media import media_bp
+from .discord import discord_bp
 
 
 def register_api_routes(app, get_connection=None, config=None):
@@ -58,5 +59,6 @@ def register_api_routes(app, get_connection=None, config=None):
     app.register_blueprint(health_bp, url_prefix='/api/health')
     app.register_blueprint(actor_pool_bp, url_prefix='/api/actor-pool')
     app.register_blueprint(media_bp)
-    
+    app.register_blueprint(discord_bp, url_prefix='/api/discord')
+
     print("[API] All API routes registered successfully")

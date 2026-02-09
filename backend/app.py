@@ -4309,6 +4309,25 @@ def init_services():
         print(f"[Services] Warning: Failed to register new API routes: {e}")
         import traceback
         traceback.print_exc()
+
+    # 配置并可选启动 Discord Bot（token 来源：config > 持久化文件，前端录入后会写入持久化文件）
+    try:
+        from database import get_mysql_connection
+        from services.discord_service import DiscordService
+        discord_cfg = config.get('discord') or {}
+        if discord_cfg:
+            svc = DiscordService.get_instance()
+            svc.configure(config, get_mysql_connection)
+            token = (discord_cfg.get('bot_token') or '').strip() or DiscordService.get_persisted_token()
+            if discord_cfg.get('auto_start') and token:
+                if svc.start(token):
+                    print("[Services] Discord Bot started (auto_start=true)")
+                else:
+                    print("[Services] Discord Bot auto_start failed (check token and discord.py)")
+            else:
+                print("[Services] Discord integration loaded (set discord.bot_token or use frontend to save token, and discord.auto_start to enable)")
+    except Exception as e:
+        print(f"[Services] Discord integration skipped: {e}")
     
     # 初始化默认 Agent "chaya"
     # 只有在 MySQL 初始化成功时才尝试初始化
@@ -4321,6 +4340,13 @@ def init_services():
             _init_default_agent()
             app._default_agent_initialized = True
             print("[Services] Default agent initialized")
+            # 历史 Discord 绑定：为未配置 LLM 的会话回填应用默认模型，避免机器人不回答
+            try:
+                from database import get_mysql_connection
+                from models.discord_channel import backfill_discord_sessions_default_llm
+                backfill_discord_sessions_default_llm(get_mysql_connection)
+            except Exception as _e:
+                print(f"[Services] Discord sessions LLM backfill skipped: {_e}")
         except Exception as e:
             print(f"[Services] Warning: Failed to initialize default agent: {e}")
             import traceback

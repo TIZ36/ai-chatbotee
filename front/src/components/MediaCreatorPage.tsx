@@ -204,7 +204,12 @@ function saveCustomPrompts(prompts: CustomPrompt[]) {
 
 /* ═══════════════════════════════════════════════════════════ */
 
-const MediaCreatorPage: React.FC = () => {
+interface MediaCreatorPageProps {
+  /** 嵌入模式：不包裹 PageLayout，由父级提供布局 */
+  embedded?: boolean;
+}
+
+const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false }) => {
   /* ─── State ─── */
   const [chayaMedia, setChayaMedia] = useState<MediaItem[]>([]);
   const [chayaLoading, setChayaLoading] = useState(true);
@@ -743,13 +748,9 @@ const MediaCreatorPage: React.FC = () => {
   const triggerFileInput = () => fileInputRef.current?.click();
 
   /* ═══════════════ RENDER ═══════════════ */
-  return (
-    <PageLayout
-      title="chatu"
-      description="文生图 / 图生图 / 视频创作"
-      variant="persona"
-      personaConstrainContent={false}
-    >
+
+  const mainContent = (
+    <>
       <div className="chatu-page max-w-6xl mx-auto flex flex-col gap-4">
         {/* ═══ 顶部：素材库（Tab：Chaya / Chatu 创作） ═══ */}
         <div className={`niho-card-1 rounded-lg border ${panelClass} p-3 space-y-3`}>
@@ -791,8 +792,8 @@ const MediaCreatorPage: React.FC = () => {
                     return (
                       <div
                         key={i}
-                        className={`flex-shrink-0 w-14 h-14 rounded-md overflow-hidden cursor-pointer border-2 transition-all
-                          ${isActive ? 'border-[var(--color-accent)]' : 'border-transparent hover:border-[var(--color-accent)]/40'}`}
+                        className={`chatu-thumb flex-shrink-0 w-14 h-14 rounded-md overflow-hidden cursor-pointer border-2 transition-all
+                          ${isActive ? 'chatu-thumb--active border-[var(--color-accent)]' : 'border-transparent hover:border-[var(--color-accent)]/40'}`}
                         onClick={() => pickRefImage(item)}
                         title="选用"
                       >
@@ -836,8 +837,8 @@ const MediaCreatorPage: React.FC = () => {
                       return (
                         <div
                           key={`c-${i}`}
-                          className={`flex-shrink-0 w-14 h-14 rounded-md overflow-hidden cursor-pointer border-2 transition-all relative group/ct
-                            ${isActive ? 'border-[var(--color-secondary)]' : 'border-transparent hover:border-[var(--color-secondary)]/40'}`}
+                          className={`chatu-thumb flex-shrink-0 w-14 h-14 rounded-md overflow-hidden cursor-pointer border-2 transition-all relative group/ct
+                            ${isActive ? 'chatu-thumb--active-pink border-[var(--color-secondary)]' : 'border-transparent hover:border-[var(--color-secondary)]/40'}`}
                           onClick={() => !isVideo && pickRefImage(item)}
                           title={isVideo ? '视频' : '选用二创'}
                         >
@@ -951,7 +952,7 @@ const MediaCreatorPage: React.FC = () => {
                 {/* ═══ 左栏：统一输入区 ═══ */}
                 <div
                   ref={dropZoneRef}
-                  className={`niho-card-2 niho-bar-green ${panelClass} p-4 space-y-4 min-w-0 transition-colors ${dragOver ? '!border-[var(--color-accent)] bg-[var(--color-accent)]/5' : ''}`}
+                  className={`niho-card-2 ${panelClass} p-4 space-y-4 min-w-0 transition-colors ${dragOver ? '!border-[var(--color-accent)] bg-[var(--color-accent)]/5' : ''}`}
                   onDragOver={onDragOver}
                   onDragLeave={onDragLeave}
                   onDrop={onDrop}
@@ -1338,7 +1339,7 @@ const MediaCreatorPage: React.FC = () => {
                   {imgResult && (() => {
                     const resultSrc = safeImgSrc(imgResult.url);
                     return (
-                    <div className={`niho-card-3 niho-line-top ${panelClass} p-4 space-y-3`}>
+                    <div className={`niho-card-3 ${panelClass} p-4 space-y-3`}>
                       <p className={`text-xs font-medium ${textPrimary} flex items-center gap-1.5`}>
                         <Wand2 className="w-3.5 h-3.5 text-[var(--color-accent)]" /> 生成结果
                       </p>
@@ -1368,7 +1369,7 @@ const MediaCreatorPage: React.FC = () => {
 
                   {/* 空结果提示 */}
                   {!imgResult && (
-                    <div className={`niho-card-1 ${panelClass} p-6 flex flex-col items-center justify-center min-h-[200px]`}>
+                    <div className={`chatu-empty-result niho-card-1 ${panelClass} p-6 flex flex-col items-center justify-center min-h-[200px]`}>
                       <ImageIcon className={`w-10 h-10 ${textMuted} opacity-30 mb-3`} />
                       <p className={`text-xs ${textMuted}`}>生成结果将显示在此处</p>
                       <p className={`text-[10px] ${textMuted} opacity-60 mt-1`}>在左侧输入提示词后点击生成</p>
@@ -1404,7 +1405,7 @@ const MediaCreatorPage: React.FC = () => {
                 )}
 
                 {/* 视频参考图 + 提示词 */}
-                <div className={`niho-card-2 niho-bar-green ${panelClass} p-4 space-y-3`}>
+                <div className={`niho-card-2 ${panelClass} p-4 space-y-3`}>
                   <h3 className={`text-sm font-medium ${textPrimary} flex items-center gap-1.5`}>
                     <Video className="w-4 h-4 text-[var(--color-accent)]" /> 视频创作
                   </h3>
@@ -1525,7 +1526,7 @@ const MediaCreatorPage: React.FC = () => {
 
                 {/* 视频状态 */}
                 {(videoTaskId || videoError) && (
-                  <div className={`niho-card-2 niho-bar-gold ${panelClass} p-4 space-y-2`}>
+                  <div className={`niho-card-2 ${panelClass} p-4 space-y-2`}>
                     <h4 className={`text-xs font-medium ${textPrimary}`}>视频任务</h4>
                     {videoError && <p className="text-xs text-[var(--color-secondary)]">{videoError}</p>}
                     {videoTaskId && (
@@ -1702,6 +1703,25 @@ const MediaCreatorPage: React.FC = () => {
         </div>
         );
       })()}
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <div className="h-full overflow-y-auto no-scrollbar px-2 py-3">
+        {mainContent}
+      </div>
+    );
+  }
+
+  return (
+    <PageLayout
+      title="chatu"
+      description="文生图 / 图生图 / 视频创作"
+      variant="persona"
+      personaConstrainContent={false}
+    >
+      {mainContent}
     </PageLayout>
   );
 };

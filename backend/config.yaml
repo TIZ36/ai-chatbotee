@@ -53,6 +53,16 @@ media:
     api_key: ""
     api_base: ""
 
+# Discord Bot 集成（Chaya 接入 Discord，每频道独立 Actor + 独立消息历史）
+discord:
+  bot_token: ""                      # Discord Bot Token（Developer Portal 获取）
+  auto_start: true                  # 应用启动时是否自动启动 Bot
+  auto_create_session: true          # 未绑定频道 @Chaya 时自动创建专属 session
+  default_trigger_mode: "mention"    # 默认触发方式：mention（仅 @ 回复）/ all（所有消息回复）
+  default_llm_config_id: ""         # 自动创建 session 时使用的 LLM（空则继承 agent_chaya）
+  max_response_length: 1900          # 单条 Discord 消息字数上限（留余量）
+  session_id_prefix: "dc"            # 自动创建的 session_id 前缀
+
 # 默认 Agent Chaya 配置
 chaya:
   name: "Chaya"

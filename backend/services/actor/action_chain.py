@@ -695,6 +695,10 @@ class ActionResult:
     # 工具名称（便于显示）
     tool_name: Optional[str] = None
     
+    # 兼容旧调用：thinking / process_steps 曾作为直接参数传入，现保留为可选字段避免 init 报错
+    thinking: Optional[str] = None
+    process_steps: Any = None
+    
     def __post_init__(self):
         """初始化后处理"""
         # 从 step 提取 tool_name
@@ -703,6 +707,13 @@ class ActionResult:
                 self.tool_name = f"{self.step.mcp_server_id}:{self.step.mcp_tool_name}"
             elif self.step.target_agent_id:
                 self.tool_name = f"@{self.step.target_agent_id}"
+        # 兼容：若通过 thinking/process_steps 传入，同步到 metadata 便于下游使用
+        if self.thinking is not None and "thinking" not in self.metadata:
+            self.metadata = dict(self.metadata)
+            self.metadata["thinking"] = self.thinking
+        if self.process_steps is not None and "process_steps" not in self.metadata:
+            self.metadata = dict(self.metadata)
+            self.metadata["process_steps"] = self.process_steps
     
     @classmethod
     def success_result(

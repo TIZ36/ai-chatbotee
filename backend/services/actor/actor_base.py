@@ -3284,10 +3284,10 @@ class ActorBase(ABC):
                     error_msg = f"Agent {self.agent_id} 未配置默认LLM模型，且用户未选择模型。请在Agent配置中设置默认LLM模型。"
                     print(f"{RED}[MCP DEBUG] ❌ {error_msg}{RESET}")
                     return ActionResult(
+                        action_type="chat",
                         success=False,
                         error=error_msg,
-                        thinking="无法执行MCP调用：缺少LLM配置",
-                        process_steps=ctx.to_process_steps_dict(),
+                        metadata={"thinking": "无法执行MCP调用：缺少LLM配置", "process_steps": ctx.to_process_steps_dict()},
                     )
 
             user_content = ctx.original_message.get('content', '')
@@ -4001,10 +4001,10 @@ class ActorBase(ABC):
                 error_msg = f"Agent {self.agent_id} 未配置默认LLM模型，且用户未选择模型。请在Agent配置中设置默认LLM模型。"
                 print(f"{RED}[ActorBase:{self.agent_id}] ❌ {error_msg}{RESET}")
                 return ActionResult(
+                    action_type="chat",
                     success=False,
                     error=error_msg,
-                    thinking="无法生成回复：缺少LLM配置",
-                    process_steps=ctx.to_process_steps_dict(),
+                    metadata={"thinking": "无法生成回复：缺少LLM配置", "process_steps": ctx.to_process_steps_dict()},
                 )
         
         # 直接使用 Repository 获取配置
@@ -4013,10 +4013,10 @@ class ActorBase(ABC):
         if not config_obj:
             error_msg = f"LLM config not found: {final_llm_config_id}"
             return ActionResult(
+                action_type="chat",
                 success=False,
                 error=error_msg,
-                thinking="无法生成回复：LLM配置不存在",
-                process_steps=ctx.to_process_steps_dict(),
+                metadata={"thinking": "无法生成回复：LLM配置不存在", "process_steps": ctx.to_process_steps_dict()},
             )
         
         provider = config_obj.provider or 'unknown'
@@ -4380,7 +4380,14 @@ class ActorBase(ABC):
                         msg['media'] = media
                         media_loaded += 1
         
-        messages.extend(history_msgs)
+        # 过滤历史中的系统错误占位消息（如之前 ActionResult 等报错写入的），避免污染 LLM 上下文
+        filtered_history = []
+        for m in history_msgs:
+            content = (m.get('content') or '').strip()
+            if m.get('role') == 'assistant' and content.startswith('[错误]') and '无法产生回复' in content:
+                continue
+            filtered_history.append(m)
+        messages.extend(filtered_history)
         
         # 如果有工具结果，作为助手消息注入（在用户消息之前）
         if ctx.tool_results_text:
@@ -4681,11 +4688,18 @@ class ActorBase(ABC):
         })
     
     def _handle_process_error(self, ctx: IterationContext, error: Exception):
-        """处理处理错误"""
+        """处理处理错误（Discord / 应用内共用此流程，错误会写入会话并展示给用户）"""
         from services.topic_service import get_topic_service
         
         topic_id = ctx.topic_id or self.topic_id
         message_id = ctx.reply_message_id
+        err_str = str(error)
+        # 避免把 Python 内部错误（如 ActionResult init 参数）直接展示给 Discord/用户
+        if "unexpected keyword argument 'thinking'" in err_str or "ActionResult" in err_str and "thinking" in err_str:
+            logger.warning(f"[ActorBase:{self.agent_id}] 内部参数错误（请重启后端以加载 ActionResult 兼容）: {err_str}")
+            user_visible_error = "回复生成暂时失败，请稍后重试或联系管理员重启服务。"
+        else:
+            user_visible_error = err_str
         
         # 发送错误事件
         get_topic_service()._publish_event(topic_id, 'agent_stream_done', {
@@ -4695,11 +4709,11 @@ class ActorBase(ABC):
             'message_id': message_id,
             'content': '',
             'processSteps': ctx.to_process_steps_dict(),
-            'error': str(error),
+            'error': user_visible_error,
         })
         
-        # 保存错误消息
-        error_content = f"[错误] {self.info.get('name', 'Agent')} 无法产生回复: {str(error)}"
+        # 保存错误消息（写入会话历史，避免把裸 Python 异常写进 Discord/前端）
+        error_content = f"[错误] {self.info.get('name', 'Agent')} 无法产生回复: {user_visible_error}"
         get_topic_service().send_message(
             topic_id=topic_id,
             sender_id=self.agent_id,
@@ -4709,7 +4723,7 @@ class ActorBase(ABC):
             message_id=message_id,
             sender_name=self.info.get('name'),
             sender_avatar=self.info.get('avatar'),
-            ext={'processSteps': ctx.to_process_steps_dict(), 'error': str(error)},
+            ext={'processSteps': ctx.to_process_steps_dict(), 'error': user_visible_error},
         )
         
         # 追加到本地历史

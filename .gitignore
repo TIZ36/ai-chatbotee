@@ -217,6 +217,9 @@ start.sh
 secrets/
 .secrets
 
+# Discord Bot Token（前端录入后持久化，不提交）
+backend/.discord_bot_token
+
 # ====================
 # 测试和覆盖率
 # ====================

@@ -1225,7 +1225,45 @@ def create_tables():
         """
         cursor.execute(create_media_outputs_table)
         print("✓ Table 'media_outputs' created/verified successfully")
-        
+
+        # Discord 频道绑定表（每频道独立 Actor + 独立消息历史）
+        create_discord_channels_table = """
+        CREATE TABLE IF NOT EXISTS `discord_channels` (
+            `channel_id` VARCHAR(100) NOT NULL COMMENT 'Discord 频道 ID',
+            `guild_id` VARCHAR(100) NOT NULL COMMENT 'Discord 服务器 ID',
+            `guild_name` VARCHAR(255) DEFAULT NULL COMMENT '服务器名',
+            `channel_name` VARCHAR(255) DEFAULT NULL COMMENT '频道名',
+            `session_id` VARCHAR(100) NOT NULL COMMENT '专属 Chaya 会话 ID',
+            `enabled` TINYINT(1) DEFAULT 1 COMMENT '是否启用',
+            `trigger_mode` VARCHAR(20) DEFAULT 'mention' COMMENT 'mention / all',
+            `config_override` JSON DEFAULT NULL COMMENT '按频道覆盖 system_prompt / llm_config_id 等',
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+            PRIMARY KEY (`channel_id`),
+            UNIQUE KEY `uniq_session_id` (`session_id`),
+            INDEX `idx_guild_id` (`guild_id`),
+            INDEX `idx_session_id` (`session_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Discord 频道绑定';
+        """
+        cursor.execute(create_discord_channels_table)
+        print("✓ Table 'discord_channels' created/verified successfully")
+
+        # Discord 应用级配置（单行：默认模型等，前端录入持久化）
+        create_discord_app_config_table = """
+        CREATE TABLE IF NOT EXISTS `discord_app_config` (
+            `id` INT NOT NULL DEFAULT 1 COMMENT '唯一行',
+            `default_llm_config_id` VARCHAR(100) DEFAULT NULL COMMENT '新频道默认使用的 LLM 配置 ID',
+            `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Discord 应用配置';
+        """
+        cursor.execute(create_discord_app_config_table)
+        cursor.execute(
+            "INSERT IGNORE INTO discord_app_config (id) VALUES (1)"
+        )
+        conn.commit()
+        print("✓ Table 'discord_app_config' created/verified successfully")
+
         # 爬虫模块表
         create_crawler_modules_table = """
         CREATE TABLE IF NOT EXISTS `crawler_modules` (

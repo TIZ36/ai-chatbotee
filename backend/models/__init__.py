@@ -9,6 +9,7 @@ from .session import Session
 from .message import Message
 from .workflow import Workflow
 from .media_output import MediaOutput
+from .discord_channel import DiscordChannel
 
 __all__ = [
     'LLMConfig',
@@ -17,4 +18,5 @@ __all__ = [
     'Message',
     'Workflow',
     'MediaOutput',
+    'DiscordChannel',
 ]

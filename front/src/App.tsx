@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
-import { Brain, Plug, Settings, MessageCircle, Globe, Bot, Users, BookOpen, Plus, FolderOpen } from 'lucide-react';
+import { Brain, Plug, Settings, MessageCircle, Globe, Bot, Users, BookOpen, Plus, FolderOpen, ImageIcon } from 'lucide-react';
 import appLogoDark from '../assets/app_logo_dark.png';
 import appLogoLight from '../assets/app_logo_light.png';
-import appLogoChatu from '../assets/app_logo_chatu.png';
 import { Button } from './components/ui/Button';
 import { Input } from './components/ui/Input';
 import { ScrollArea } from './components/ui/ScrollArea';
@@ -23,6 +22,7 @@ import Workflow from './components/Workflow';
 import CrawlerConfigPage from './components/CrawlerConfigPage';
 import AgentsPage from './components/AgentsPage';
 import MediaCreatorPage from './components/MediaCreatorPage';
+import DiscordPanel, { DiscordIcon } from './components/DiscordPanel';
 // 新架构组件
 import StatusBar from './components/StatusBar';
 import { getAgents, getSessions, createSession, deleteSession, type Session } from './services/sessionApi';
@@ -116,6 +116,10 @@ const App: React.FC = () => {
     }
     return lastSession;
   });
+
+  /** Chaya 二级 Tab: 'chat' = 对话, 'create' = 创作 (Chatu), 'discord' = Discord 管理 */
+  type ChayaSubTab = 'chat' | 'create' | 'discord';
+  const [chayaSubTab, setChayaSubTab] = useState<ChayaSubTab>('chat');
   const [settings, setSettings] = useState<Settings>(() => {
     const saved = localStorage.getItem('settings');
     if (saved) {
@@ -233,8 +237,16 @@ const App: React.FC = () => {
 
   // 判断是否显示terminal独占页面
   
-  // 判断是否为聊天页面
-  const isChatPage = location.pathname === '/';
+  // 判断是否为 Chaya 主页面（含 chat / create 子 Tab）
+  const isChatPage = location.pathname === '/' || location.pathname === '/media-creator';
+
+  // 旧 /media-creator 路由兼容：自动切到 create tab 并重定向回 /
+  useEffect(() => {
+    if (location.pathname === '/media-creator') {
+      setChayaSubTab('create');
+      navigate('/', { replace: true });
+    }
+  }, [location.pathname, navigate]);
   
   const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 
@@ -384,16 +396,8 @@ const App: React.FC = () => {
               <img src={appLogoDark} alt="Chaya" className="w-[18px] h-[18px] object-contain" />
             )
           }
-          title="Chaya 对话"
-          isActive={location.pathname === '/'}
-          isNiho={isNiho}
-          tooltipPlacement="bottom"
-        />
-        <NavItem
-          to="/media-creator"
-          icon={<img src={appLogoChatu} alt="Chatu" className="w-[18px] h-[18px] rounded-full object-cover" />}
-          title="Chatu 插图"
-          isActive={location.pathname === '/media-creator'}
+          title="Chaya"
+          isActive={location.pathname === '/' || location.pathname === '/media-creator'}
           isNiho={isNiho}
           tooltipPlacement="bottom"
         />
@@ -597,20 +601,59 @@ const App: React.FC = () => {
         >
           
           {isChatPage ? (
-          /* 聊天页面 - 毛玻璃效果 */
-          <div className="relative flex flex-1 min-h-0 min-w-0 p-0">
-            <div className="flex-1 relative overflow-hidden">
-              <div
-                key={`chat-${selectedSessionId}`}
-                className="h-full fade-in"
+          /* Chaya 主页面 — 含二级 Tab (对话 / 创作) */
+          <div className="relative flex flex-col flex-1 min-h-0 min-w-0 p-0">
+            {/* ─── 二级 Tab 切换栏（纯图标） ─── */}
+            <div className="chaya-sub-tabs flex items-center justify-center gap-1 py-1 px-2 flex-shrink-0">
+              <button
+                type="button"
+                className={`chaya-sub-tab chaya-sub-tab--chat ${chayaSubTab === 'chat' ? 'chaya-sub-tab--active' : ''}`}
+                onClick={() => setChayaSubTab('chat')}
+                title="对话"
               >
+                <MessageCircle className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                className={`chaya-sub-tab chaya-sub-tab--create ${chayaSubTab === 'create' ? 'chaya-sub-tab--active' : ''}`}
+                onClick={() => setChayaSubTab('create')}
+                title="创作"
+              >
+                <ImageIcon className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                className={`chaya-sub-tab chaya-sub-tab--discord ${chayaSubTab === 'discord' ? 'chaya-sub-tab--active' : ''}`}
+                onClick={() => setChayaSubTab('discord')}
+                title="Discord"
+              >
+                <DiscordIcon className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* ─── 内容区 ─── */}
+            <div className="flex-1 relative overflow-hidden min-h-0">
+              {chayaSubTab === 'chat' ? (
+                <div
+                  key={`chat-${selectedSessionId}`}
+                  className="h-full fade-in"
+                >
                   <Workflow
                     sessionId={selectedSessionId}
                     onSelectSession={handleSelectSession}
                     enableToolCalling={settings.enableToolCalling}
                     onToggleToolCalling={(enabled) => updateSettings({ enableToolCalling: enabled })}
                   />
-              </div>
+                </div>
+              ) : chayaSubTab === 'create' ? (
+                <div className="h-full fade-in">
+                  <MediaCreatorPage embedded />
+                </div>
+              ) : (
+                <div className="h-full fade-in">
+                  <DiscordPanel embedded />
+                </div>
+              )}
             </div>
           </div>
         ) : (
@@ -643,9 +686,6 @@ const App: React.FC = () => {
 
                     {/* 爬虫配置页面 */}
                     <Route path="/crawler-config" element={<CrawlerConfigPage />} />
-
-                    {/* chatu 页面 */}
-                    <Route path="/media-creator" element={<MediaCreatorPage />} />
 
                     {/* 设置页面 */}
                     <Route path="/settings" element={

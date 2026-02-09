@@ -5115,7 +5115,7 @@ const Workflow: React.FC<WorkflowProps> = ({
     <>
     <div className="workflow-chat-outer h-full flex flex-col bg-gray-50 dark:bg-[#1a1a1a]">
       <div className="flex-1 flex min-h-0 p-2 justify-center">
-        <div className="w-full max-w-3xl flex-1 flex flex-col min-h-0 min-w-0">
+        <div className="w-full max-w-6xl flex-1 flex flex-col min-h-0 min-w-0">
         <div className="workflow-chat-panel flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-[#2d2d2d] overflow-hidden rounded-lg">
           {/* Chaya 主界面不显示顶部 header（头像框与栏目），直接显示对话；SOP 入口移至输入框插件弹框 */}
           {currentSessionId !== 'agent_chaya' && (
@@ -5861,6 +5861,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                 onSelectSkillPack={handleSelectSkillPackFromThumbnail}
                 onDeselectSkillPack={handleDeselectSkillPackFromThumbnail}
                 onAttachFile={handleAttachFile}
+                onAttachMediaDirect={(item) => setAttachedMedia(prev => [...prev, item])}
                 attachedCount={attachedMedia.length}
                 toolCallingEnabled={toolCallingEnabled}
                 onToggleToolCalling={onToggleToolCalling}
