@@ -5780,9 +5780,8 @@ def save_message(session_id):
         content = data.get('content', '')
         mentions = data.get('mentions', [])
         ext = data.get('ext', {})
-        
-        # 使用 TopicService 发送消息
-        # 内部会处理数据库持久化和 Redis Pub/Sub 发布
+
+        # 发送消息：持久化 + 发布 new_message 到 Redis；ActorManager 监听 topic:*，收到后按需激活 Agent 并分发
         msg = get_topic_service().send_message(
             topic_id=session_id,
             sender_id=sender_id,
@@ -5795,51 +5794,8 @@ def save_message(session_id):
         )
 
         # 媒体库缓存增量更新已在 TopicService.send_message 内统一处理（包含 AgentActor 直连场景）
-        
-        if msg:
-            # 确保智能体处于激活状态 (Actor 模型)，并直接处理触发消息
-            # - topic_general：激活话题中的所有 Agent 参与者
-            # - agent：激活私聊的单个 Agent（session_id 就是 agent_id）
-            try:
-                from database import get_mysql_connection
-                conn = get_mysql_connection()
-                if conn:
-                    import pymysql
-                    cursor = conn.cursor(pymysql.cursors.DictCursor)
-                    cursor.execute("SELECT session_type FROM sessions WHERE session_id = %s", (session_id,))
-                    session_row = cursor.fetchone()
-                    cursor.close()
-                    conn.close()
-                    
-                    session_type = session_row.get('session_type') if session_row else None
-                    
-                    # 构建触发消息数据（用于 AgentActor 直接处理）
-                    trigger_message = {
-                        'message_id': msg.get('message_id'),
-                        'sender_id': msg.get('sender_id'),
-                        'sender_type': msg.get('sender_type'),
-                        'content': msg.get('content'),
-                        'role': msg.get('role'),
-                        'mentions': msg.get('mentions'),
-                        'ext': msg.get('ext'),
-                        'timestamp': msg.get('timestamp'),
-                        'model': data.get('model'),  # 传递用户选择的模型
-                    }
-                    
-                    if session_type == 'topic_general':
-                        # topic_general：激活话题中的所有 Agent 参与者，并传入触发消息
-                        from services.actor import activate_agent
-                        participants = get_topic_service().get_participants(session_id)
-                        for p in participants:
-                            if p.get('participant_type') == 'agent':
-                                activate_agent(p['participant_id'], session_id, trigger_message)
-                    elif session_type == 'agent':
-                        # agent 私聊：只激活该 Agent，并传入触发消息
-                        from services.actor import activate_agent
-                        activate_agent(session_id, session_id, trigger_message)
-            except Exception as e:
-                print(f"[Message API] Warning: Failed to auto-activate agents: {e}")
 
+        if msg:
             return jsonify(msg), 201
         else:
             return jsonify({'error': 'Failed to save message'}), 500
@@ -10414,6 +10370,7 @@ def crawler_fetch():
             'message': str(e),
             'url': data.get('url', '') if 'data' in locals() else ''
         }), 500
+
 
 @app.route('/api/crawler/normalize', methods=['POST', 'OPTIONS'])
 def crawler_normalize():

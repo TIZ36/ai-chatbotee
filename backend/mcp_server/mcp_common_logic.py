@@ -4,6 +4,7 @@ MCP 服务器通用逻辑
 """
 
 import json
+import re
 import time
 import requests
 from typing import Optional, Dict, Any
@@ -746,15 +747,49 @@ def get_mcp_tools_list(target_url: str, headers: Dict[str, str], use_cache: bool
     return None
 
 
+def _repair_newlines_in_json_strings(s: str) -> str:
+    """
+    将 JSON 字符串值内的字面换行替换为 \\n，以便 json.loads 能解析。
+    部分 MCP（如 Playwright）在 result.content[].text 中返回未转义的换行，导致 Unterminated string。
+    """
+    if '\n' not in s and '\r' not in s:
+        return s
+    result = []
+    i = 0
+    in_string = False
+    escape = False
+    while i < len(s):
+        c = s[i]
+        if escape:
+            result.append(c)
+            escape = False
+            i += 1
+            continue
+        if c == '\\' and in_string:
+            result.append(c)
+            escape = True
+            i += 1
+            continue
+        if c == '"' and not escape:
+            in_string = not in_string
+            result.append(c)
+            i += 1
+            continue
+        if in_string and c in ('\n', '\r'):
+            result.append('\\n' if c == '\n' else '\\r')
+            if c == '\r' and i + 1 < len(s) and s[i + 1] == '\n':
+                i += 1
+            i += 1
+            continue
+        result.append(c)
+        i += 1
+    return ''.join(result)
+
+
 def parse_mcp_jsonrpc_response(data: str) -> Optional[Dict[str, Any]]:
     """
     解析标准 MCP JSON-RPC 响应（通用）
-    
-    Args:
-        data: JSON-RPC 响应字符串
-        
-    Returns:
-        解析后的响应字典，如果解析失败则返回 None
+    若首次解析失败且为 Unterminated string，尝试将字符串值内的字面换行转为 \\n 后再解析。
     """
     try:
         # 移除可能的 "data: " 前缀（SSE 格式）
@@ -762,32 +797,36 @@ def parse_mcp_jsonrpc_response(data: str) -> Optional[Dict[str, Any]]:
             json_str = data[6:]
         else:
             json_str = data
-        
-        # 解析 JSON
-        response_data = json.loads(json_str)
-        
+
+        try:
+            response_data = json.loads(json_str)
+        except json.JSONDecodeError:
+            # 任意 JSON 解码错误都尝试一次“换行修复”（Playwright 等在 text 里返回未转义换行）
+            json_str = _repair_newlines_in_json_strings(json_str)
+            response_data = json.loads(json_str)
+
         # 验证 JSON-RPC 格式
         if not isinstance(response_data, dict):
             print(f"[MCP Parse] Invalid response format: not a dict")
             return None
-        
+
         if response_data.get('jsonrpc') != '2.0':
             print(f"[MCP Parse] Invalid JSON-RPC version: {response_data.get('jsonrpc')}")
             return None
-        
+
         # 检查是否有错误
         if 'error' in response_data:
             error = response_data['error']
             print(f"[MCP Parse] Error in response: {error.get('code', 'unknown')} - {error.get('message', 'unknown error')}")
             return response_data
-        
+
         # 检查是否有结果
         if 'result' not in response_data:
             print(f"[MCP Parse] No result in response")
             return None
-        
+
         return response_data
-        
+
     except json.JSONDecodeError as e:
         print(f"[MCP Parse] ❌ JSON decode error: {e}")
         print(f"[MCP Parse] Raw data: {data[:200]}...")
@@ -929,6 +968,21 @@ def call_mcp_tool(target_url: str, headers: Dict[str, str], tool_name: str, tool
             else:
                 response_data = response.json()
             
+            # SSE 解析失败时（如 JSON 内含未转义换行）：不报错，从原始 body 提可读文本交给 LLM 继续处理
+            if (not response_data or (isinstance(response_data, dict) and 'result' not in response_data and 'error' not in response_data)) and 'text/event-stream' in content_type and response.text:
+                fallback_text = _sse_raw_body_to_fallback_text(response.text, max_chars=50000)
+                if fallback_text:
+                    if add_log:
+                        add_log("⚠️ SSE 响应 JSON 解析失败，已提取原始文本交给 LLM 继续处理")
+                    print(f"[MCP TOOL] ⚠️ SSE 解析失败，使用原始文本回退（{len(fallback_text)} 字符）")
+                    return {
+                        "success": True,
+                        "data": fallback_text,
+                        "raw_result": {"content": [{"type": "text", "text": fallback_text}]},
+                        "text": fallback_text,
+                        "tool_name": tool_name,
+                    }
+            
             if 'error' in response_data:
                 error = response_data['error']
                 error_code = error.get('code', 'unknown')
@@ -979,31 +1033,40 @@ def call_mcp_tool(target_url: str, headers: Dict[str, str], tool_name: str, tool
                         "tool_name": tool_name,
                     }
             
-            if 'result' not in response_data:
+            # 兼容：标准为 result；部分 MCP 实现可能把 content 放在顶层
+            if 'result' in response_data:
+                result = response_data['result']
+            elif isinstance(response_data, dict) and 'content' in response_data:
+                result = {'content': response_data['content']}
+            else:
                 if add_log:
-                    add_log(f"❌ MCP工具响应格式错误: 缺少result字段")
+                    add_log(f"❌ MCP工具响应格式错误: 缺少 result/content 字段，keys={list(response_data.keys()) if isinstance(response_data, dict) else 'n/a'}")
                 return {
                     "success": False,
                     "error_type": "format",
-                    "error": "响应缺少 result 字段",
+                    "error": "响应缺少 result 字段（或 content）",
                     "tool_name": tool_name,
                 }
             
-            result = response_data['result']
-            
-            # 提取内容（可能是content字段）
+            # 提取内容：result.content 可能有多项（如 Playwright 先返回 "Ran code"，再返回 "Page URL / 快照"），全部拼接避免“空白页”
             extracted_data = result
             extracted_text = None
             if isinstance(result, dict) and 'content' in result:
                 content = result['content']
                 if isinstance(content, list) and len(content) > 0:
-                    # 取第一个content项
-                    first_content = content[0]
-                    if isinstance(first_content, dict) and 'text' in first_content:
-                        extracted_text = first_content['text']
-                        extracted_data = first_content['text']
+                    text_parts = []
+                    for item in content:
+                        if isinstance(item, dict) and item.get('text'):
+                            text_parts.append(str(item['text']))
+                    if text_parts:
+                        extracted_text = '\n\n'.join(text_parts)
+                        extracted_data = extracted_text
                     else:
-                        extracted_data = first_content
+                        first_content = content[0]
+                        if isinstance(first_content, dict):
+                            extracted_data = first_content
+                        else:
+                            extracted_data = first_content
                 else:
                     extracted_data = content
             
@@ -1081,28 +1144,113 @@ def call_mcp_tool(target_url: str, headers: Dict[str, str], tool_name: str, tool
     }
 
 
+def _sse_raw_body_to_fallback_text(sse_text: str, max_chars: int = 50000) -> str:
+    """
+    SSE 响应 JSON 解析失败时，从原始 body 提取可读文本交给 LLM。
+    按行扫描：遇到 data: 行取其后内容，直到下一 data: 或空行算一段，多段用换行拼接，不解析 JSON。
+    """
+    if not sse_text or not sse_text.strip():
+        return ""
+    chunks = []
+    current = []
+    for line in sse_text.splitlines():
+        s = line.strip()
+        if s.startswith("data:"):
+            if current:
+                chunks.append("\n".join(current))
+                current = []
+            rest = s[5:].lstrip() if len(s) > 5 else ""
+            if rest:
+                current.append(rest)
+        elif s:
+            current.append(s)
+        else:
+            if current:
+                chunks.append("\n".join(current))
+                current = []
+    if current:
+        chunks.append("\n".join(current))
+    payload = "\n\n".join(chunks) if chunks else sse_text.strip()
+    if len(payload) > max_chars:
+        payload = payload[:max_chars] + "..."
+    return payload
+
+
 def _parse_sse_text_to_jsonrpc(sse_text: str) -> Optional[Dict[str, Any]]:
     """将 text/event-stream 的 body 解析为最后一个有效 JSON-RPC 响应 dict。
 
-    兼容格式：
-    - data: {...}
-    - event: message + data: {...}
+    SSE 规范：事件以双换行分隔；同一 event 内可能有多行 data:，或单行 data: 后跟多行 JSON（Playwright 等
+    在 result.content[].text 中返回含换行的内容，导致整段 JSON 跨多行）。先按双换行切事件，再对每个
+    事件取「第一个 data: 之后到事件末尾」的整段作为 payload，避免按单行切分截断 JSON。
+    优先返回带 result 或 error 的响应（tools/call 的正式结果），否则返回最后一个合法 JSON-RPC 对象。
     """
     try:
         if not sse_text:
             return None
-        last_ok = None
-        for line in sse_text.splitlines():
-            line = line.strip()
-            if not line.startswith('data:'):
+        # 按双换行切分为事件（兼容 \n\n 与 \r\n\r\n）
+        raw_events = re.split(r'\r?\n\r?\n', sse_text)
+        last_with_result_or_error = None
+        last_any_jsonrpc = None
+
+        def try_parse(payload: str) -> Optional[Dict[str, Any]]:
+            if not payload or not payload.strip():
+                return None
+            payload = payload.strip()
+            if not payload.startswith('data:'):
+                payload = 'data: ' + payload
+            return parse_mcp_jsonrpc_response(payload)
+
+        for event_block in raw_events:
+            if not event_block.strip():
                 continue
-            data = line[5:].strip()
-            if not data:
+            lines = event_block.splitlines()
+            if not lines:
                 continue
-            parsed = parse_mcp_jsonrpc_response(data)
+            first = lines[0].strip()
+            if not first.startswith('data:'):
+                continue
+            # 第一个 data: 行：取 "data: " 之后的内容；若 JSON 跨多行，后续行不再带 "data:"，整段拼成一条 payload
+            if first.startswith('data: '):
+                payload_start = first[6:]  # 含首行 data 后的内容
+            else:
+                payload_start = first[5:].lstrip()
+            if len(lines) > 1:
+                payload = payload_start + '\n' + '\n'.join(lines[1:])
+            else:
+                payload = payload_start
+            parsed = try_parse(payload)
             if isinstance(parsed, dict) and parsed.get('jsonrpc') == '2.0':
-                last_ok = parsed
-        return last_ok
+                last_any_jsonrpc = parsed
+                if 'result' in parsed or 'error' in parsed:
+                    last_with_result_or_error = parsed
+
+        # 若上面未解析到任何事件（例如没有双换行），回退为按行收集 data: 的旧逻辑
+        if last_any_jsonrpc is None:
+            current_data_lines = []
+            for line in sse_text.splitlines():
+                stripped = line.strip()
+                if stripped.startswith('data:'):
+                    current_data_lines.append(stripped[5:].strip() if len(stripped) > 5 else '')
+                else:
+                    if current_data_lines:
+                        payload = '\n'.join(current_data_lines)
+                        current_data_lines = []
+                        parsed = try_parse(payload)
+                        if isinstance(parsed, dict) and parsed.get('jsonrpc') == '2.0':
+                            last_any_jsonrpc = parsed
+                            if 'result' in parsed or 'error' in parsed:
+                                last_with_result_or_error = parsed
+                    if not stripped:
+                        current_data_lines = []
+            if current_data_lines:
+                payload = '\n'.join(current_data_lines)
+                parsed = try_parse(payload)
+                if isinstance(parsed, dict) and parsed.get('jsonrpc') == '2.0':
+                    last_any_jsonrpc = parsed
+                    if 'result' in parsed or 'error' in parsed:
+                        last_with_result_or_error = parsed
+
+        return last_with_result_or_error if last_with_result_or_error is not None else last_any_jsonrpc
     except Exception as e:
         print(f"[MCP Common] ⚠️ Failed to parse SSE as JSON-RPC: {e}")
         return None

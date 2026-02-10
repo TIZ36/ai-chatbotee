@@ -97,6 +97,8 @@ export interface SplitViewMessageProps {
   processMessages?: ProcessMessage[];
   /** 执行日志（持久化） */
   executionLogs?: ExecutionLogEntry[];
+  /** 打断生成回调（处理中时在思维链右侧显示打断按钮） */
+  onInterrupt?: () => void;
 }
 
 export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
@@ -130,6 +132,7 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
   onRetry,
   processMessages,
   executionLogs,
+  onInterrupt,
 }) => {
   const leftRef = useRef<HTMLDivElement>(null);
 
@@ -246,9 +249,8 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
                   <Quote className="w-3 h-3" />
                 </Button>
               )}
-              {/* 思维链按钮（有执行日志或 processMessages 时显示） */}
-              {/* 思维链按钮（有执行日志或 processMessages 时显示） */}
-              {((executionLogs && executionLogs.length > 0) || (processMessages && processMessages.length > 0)) && (
+              {/* 思维链区域：有过程数据或正在处理时显示（处理开始时即显示，便于展示打断按钮） */}
+              {((executionLogs && executionLogs.length > 0) || (processMessages && processMessages.length > 0) || isThinking || isStreaming) && (
                 <ProcessStepsViewer
                   processMessages={processMessages}
                   executionLogs={executionLogs}
@@ -257,6 +259,7 @@ export const SplitViewMessage: React.FC<SplitViewMessageProps> = ({
                   hideTitle
                   showTags={false}
                   defaultExpanded={false}
+                  onInterrupt={onInterrupt}
                 />
               )}
             </div>

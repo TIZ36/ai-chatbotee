@@ -28,7 +28,8 @@ class ChatAgent(ActorBase):
     
     实现 _should_respond 决策逻辑，根据会话类型和消息内容决定是否响应。
     """
-    
+    # 使用旧流程 process_message（直接流式生成），新流程已停用
+
     def _should_respond(self, topic_id: str, msg_data: Dict[str, Any]) -> ResponseDecision:
         """
         决策是否响应

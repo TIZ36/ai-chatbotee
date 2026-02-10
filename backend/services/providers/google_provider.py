@@ -29,6 +29,8 @@ class GoogleProvider(BaseLLMProvider):
         self._client = None
         self._types = None
         self.use_thoughtsig = kwargs.get('use_thoughtsig', True)  # 签名开关，默认开启
+        # 联网搜索 (Google Search Grounding)：从 metadata.enableGoogleSearch 或 enable_google_search 读取
+        self._enable_google_search = kwargs.get('enableGoogleSearch', False) or kwargs.get('enable_google_search', False)
         super().__init__(api_key, api_url, model, **kwargs)
     
     def _init_sdk(self):
@@ -148,6 +150,13 @@ class GoogleProvider(BaseLLMProvider):
             if self._is_image_generation_model():
                 config['response_modalities'] = ['TEXT', 'IMAGE']
                 self._log("Enabled response_modalities: ['TEXT', 'IMAGE']")
+            elif self._enable_google_search and self._types:
+                # 联网搜索 (Google Search Grounding)，仅非图片模型
+                try:
+                    config['tools'] = [self._types.Tool(google_search=self._types.GoogleSearch())]
+                    self._log("Enabled Google Search Grounding")
+                except Exception as e:
+                    self._log(f"Could not add google_search tool: {e}")
             
             self._log(f"Calling SDK: model={self.model}, contents={len(contents)}")
             
@@ -220,6 +229,12 @@ class GoogleProvider(BaseLLMProvider):
             # 图片生成模型配置
             if self._is_image_generation_model():
                 config['response_modalities'] = ['TEXT', 'IMAGE']
+            elif self._enable_google_search and self._types:
+                try:
+                    config['tools'] = [self._types.Tool(google_search=self._types.GoogleSearch())]
+                    self._log("Enabled Google Search Grounding (stream)")
+                except Exception as e:
+                    self._log(f"Could not add google_search tool: {e}")
             
             self._log(f"Calling SDK stream: model={self.model}")
             

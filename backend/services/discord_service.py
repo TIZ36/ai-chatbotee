@@ -338,16 +338,7 @@ class DiscordService:
             if not msg:
                 print(f"{_TAG} send_message 返回 None (session={session_id})")
                 return
-            from services.actor import activate_agent
-            activate_agent(session_id, session_id, {
-                "message_id": msg.get("message_id"),
-                "sender_id": msg.get("sender_id"),
-                "sender_type": msg.get("sender_type"),
-                "content": msg.get("content"),
-                "role": msg.get("role"),
-                "mentions": msg.get("mentions"),
-                "ext": msg.get("ext"),
-            })
+            # 不在此处 activate_agent：ActorManager 收到 new_message 后会按 DB 解析并自动激活
         except Exception as e:
             print(f"{_TAG} _dispatch_to_actor 异常: {e}")
             traceback.print_exc()

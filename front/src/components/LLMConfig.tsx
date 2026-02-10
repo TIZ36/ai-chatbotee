@@ -1718,6 +1718,40 @@ const LLMConfigPanel: React.FC = () => {
                         className="md:col-span-2"
                       />
 
+                      {/* Gemini/Google 专用：联网搜索（放在 Thinking 前，便于找到） */}
+                      {selectedProvider && (() => {
+                        const pt = (selectedProvider.provider_type || '').toLowerCase();
+                        const pid = (selectedProvider.provider_id || '').toLowerCase();
+                        return pt === 'gemini' || pt === 'google' || pid === 'gemini' || pid === 'google';
+                      })() && (
+                        <div className="md:col-span-2 space-y-2">
+                          <div className="text-xs font-medium text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-600 pb-1">
+                            Gemini / Google 选项
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Switch
+                              id="enableGoogleSearch"
+                              checked={newConfig.metadata?.enableGoogleSearch ?? false}
+                              onCheckedChange={(checked) => {
+                                setNewConfig({
+                                  ...newConfig,
+                                  metadata: {
+                                    ...newConfig.metadata,
+                                    enableGoogleSearch: checked,
+                                  },
+                                });
+                              }}
+                            />
+                            <label htmlFor="enableGoogleSearch" className="text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer">
+                              启用联网搜索（Google Search）
+                            </label>
+                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                              可检索实时网页并引用来源，需付费额度
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Thinking 模式配置 */}
                       <div className="md:col-span-2 flex items-center space-x-2">
                         <Switch

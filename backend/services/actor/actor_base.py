@@ -555,15 +555,8 @@ class ActorBase(ABC):
             self._handle_delegate_decision(topic_id, msg_data, decision)
             return
         
-        # 6. 选择处理流程
-        use_new_flow = ext.get('use_new_flow', self.USE_NEW_PROCESS_FLOW)
-        
-        if use_new_flow:
-            # 使用新的处理流程
-            self.process_message_v2(topic_id, msg_data, decision)
-        else:
-            # 使用旧的迭代器模式
-            self.process_message(topic_id, msg_data, decision)
+        # 6. 仅使用旧流程（迭代器模式）；新流程 process_message_v2 已停用
+        self.process_message(topic_id, msg_data, decision)
     
     def process_message(
         self,
@@ -1651,7 +1644,6 @@ class ActorBase(ABC):
                 tools = self._get_mcp_tools_for_server(server_id)
                 if tools:
                     mcp_tools.extend(tools)
-            
             ctx.set_mcp_tools(mcp_tools, mcp_server_ids)
             
             ctx.update_phase(status='completed', llm_config_id=final_llm_config_id, mcp_server_count=len(mcp_server_ids), tool_count=len(mcp_tools))
@@ -2054,7 +2046,6 @@ class ActorBase(ABC):
                 server_id = tool_call.get('server_id') or tool_call.get('mcp_server_id')
                 tool_name = tool_call.get('tool_name')
                 params = tool_call.get('params', {})
-                
                 if server_id and tool_name:
                     # 记录 MCP 调用决策日志
                     ctx.add_execution_log(
@@ -2068,14 +2059,12 @@ class ActorBase(ABC):
                     )
                     self._send_execution_log(ctx, f'选择MCP工具: {tool_name} (服务器: {server_id})', log_type='step')
                     
-                    # 创建 MCP 调用 Action
-                    action = Action.mcp(
-                        server_id=server_id,
-                        tool_name=tool_name,
+                    # 创建 MCP 调用 Step 并执行
+                    step = create_mcp_step(
+                        mcp_server_id=server_id,
+                        mcp_tool_name=tool_name,
                         params=params,
                     )
-                    
-                    # 执行 MCP 调用
                     result = self._call_mcp(step, ctx)
                     
                     # 记录 MCP 调用结果日志
@@ -2380,6 +2369,17 @@ class ActorBase(ABC):
 - agent_msg: Agent 链式追加消息
 - result_msg: 工具调用结果消息
 
+【可用工具】
+调用工具时，server_id 必须与下列列表中的一致。
+"""
+        mcp_tools = getattr(ctx, 'mcp_tools', None) or []
+        for t in mcp_tools[:20]:
+            name = t.get('name', '')
+            sid = t.get('server_id', '')
+            desc = (t.get('description') or t.get('desc') or '')[:100]
+            if name and sid:
+                system_prompt += f"- {name} (server_id: {sid}): {desc}\n"
+        system_prompt += """
 【工具调用格式】
 如果需要调用工具，请返回以下 JSON 格式：
 ```json
@@ -2461,7 +2461,6 @@ class ActorBase(ABC):
         
         # 构建带消息类型标记的内容
         typed_content = f"【消息类型: {msg_type}】\n{user_content}"
-        
         # 如果有结果消息，附加到内容
         if ctx.result_msg:
             result_content = ctx.result_msg.get('content', '')
@@ -2511,13 +2510,13 @@ class ActorBase(ABC):
             data = json.loads(json_str)
             
             action = data.get('action', '').lower()
-            
-            if action == 'tool_call' and data.get('tool'):
+            tool = data.get('tool')
+            if action == 'tool_call' and tool:
                 # 单个工具调用
                 decision = LLMDecision.CONTINUE
                 decision_data = {
                     'content': content,
-                    'next_tool_call': data['tool'],
+                    'next_tool_call': tool,
                 }
             elif action == 'action_plan' and data.get('plan'):
                 # 链式执行计划
@@ -2542,7 +2541,6 @@ class ActorBase(ABC):
                 decision_data = {'content': content}
                 
         except (json.JSONDecodeError, AttributeError):
-            # 不是 JSON，使用原始内容作为回复
             decision_data = {'content': content}
         
         return decision, decision_data
@@ -3164,7 +3162,8 @@ class ActorBase(ABC):
         """
         start_time = time.time()
         server_id = step.mcp_server_id
-        
+        tool_name = step.mcp_tool_name or ''
+
         # ANSI 颜色码
         CYAN = '\033[96m'
         GREEN = '\033[92m'
@@ -4453,6 +4452,7 @@ class ActorBase(ABC):
         BOLD = '\033[1m'
 
         # 如果指定了 llm_config_id，使用指定的配置；否则使用 session 默认配置
+        config_obj = None
         if llm_config_id:
             # 直接使用 Repository 获取配置
             repository = LLMConfigRepository(get_mysql_connection)
@@ -4491,7 +4491,7 @@ class ActorBase(ABC):
             content_preview = content[:500] + '...' if len(content) > 500 else content
             print(f"{CYAN}[Actor Mode] {role.upper()} 提示词 ({len(content)} 字符): {content_preview}{RESET}")
 
-        # 获取签名开关配置
+        # 获取签名开关、metadata（含用户本条消息的覆盖，如联网搜索）
         orig_ext = (ctx.original_message or {}).get('ext', {}) or {} if ctx else {}
         use_thoughtsig = True
         try:
@@ -4499,13 +4499,28 @@ class ActorBase(ABC):
         except Exception:
             use_thoughtsig = True
         
-        # 创建 Provider（传递签名开关配置）
+        # 从 DB 配置与消息 ext 合并 metadata（如 enableGoogleSearch），供 Gemini 等使用
+        provider_extra = {'use_thoughtsig': use_thoughtsig}
+        if config_obj:
+            meta = getattr(config_obj, 'metadata', None) or {}
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta) if meta else {}
+                except Exception:
+                    meta = {}
+            provider_extra.update(meta)
+        override = orig_ext.get('user_llm_metadata_override') or {}
+        provider_extra.update(override)
+        if override.get('enableGoogleSearch') is not None:
+            print(f"{CYAN}[Actor Mode] 用户本条消息启用联网搜索: {bool(override.get('enableGoogleSearch'))}{RESET}")
+        
+        # 创建 Provider（传递签名开关与 metadata，如 enableGoogleSearch）
         llm_provider = create_provider(
             provider_type=provider,
             api_key=api_key,
             api_url=api_url,
             model=model,
-            use_thoughtsig=use_thoughtsig,  # 传递签名开关
+            **provider_extra,
         )
 
         # 流式调用

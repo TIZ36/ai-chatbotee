@@ -3,24 +3,6 @@ Token 计数工具
 支持多种模型的 Token 计数
 """
 
-import logging
-import sys
-
-# 配置模块级别的 logger
-logger = logging.getLogger(__name__)
-
-# 如果没有配置过 handler，添加一个基本的控制台 handler
-if not logger.handlers:
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    ))
-    handler.setLevel(logging.DEBUG)  # handler 级别
-    logger.addHandler(handler)
-    logger.setLevel(logging.DEBUG)  # logger 级别
-    logger.propagate = False  # 不传播到父 logger，确保日志直接输出
-
 # 缓存模型的最大 token 限制，避免重复查询
 _model_max_tokens_cache = {}
 
@@ -107,10 +89,7 @@ def get_model_max_tokens(model: str) -> int:
     """
     # 检查缓存
     if model in _model_max_tokens_cache:
-        logger.debug(f"Cache hit for model '{model}': {_model_max_tokens_cache[model]}")
         return _model_max_tokens_cache[model]
-    
-    logger.debug(f"Getting max tokens for model: {model}")
     
     # 常见模型的最大 token 限制
     model_limits = {
@@ -152,15 +131,11 @@ def get_model_max_tokens(model: str) -> int:
     # 检查是否匹配（支持部分匹配）
     for key, limit in model_limits.items():
         if key.lower() in model.lower():
-            logger.debug(f"Matched model '{key}' -> max_tokens: {limit}")
-            # 缓存结果
             _model_max_tokens_cache[model] = limit
             return limit
     
     # 默认值（保守估计）
     default_limit = 8192
-    logger.warning(f"No matching model found for '{model}', using default max_tokens: {default_limit}")
-    # 缓存默认值，避免重复警告
     _model_max_tokens_cache[model] = default_limit
     return default_limit
 

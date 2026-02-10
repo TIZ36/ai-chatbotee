@@ -20,6 +20,7 @@ import {
   X,
   Brain,
   Quote,
+  SquareStop,
 } from 'lucide-react';
 import { truncateBase64Strings } from '../../utils/textUtils';
 import { parseMCPContentBlocks, renderMCPBlocks } from '../workflow/mcpRender';
@@ -95,6 +96,8 @@ export interface ProcessStepsViewerProps {
   hideTitle?: boolean;
   showTags?: boolean;
   onQuote?: () => void;
+  /** 打断生成回调，传入时在思维链右侧显示雾粉色打断按钮（仅 isThinking/isStreaming 时显示） */
+  onInterrupt?: () => void;
 }
 
 /** 步骤归类：思考 / MCP调用 / 决策 / 输出 */
@@ -169,6 +172,7 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
   hideTitle = false,
   showTags = true,
   onQuote,
+  onInterrupt,
 }) => {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
@@ -357,7 +361,8 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [pinnedIndex]);
 
-  if (orderedSteps.length === 0) return null;
+  // 无步骤时也渲染，以便处理中（isThinking/isStreaming）时显示思维链右侧的打断按钮
+  if (orderedSteps.length === 0 && !((isThinking || isStreaming) && onInterrupt)) return null;
 
   const formatDuration = (ms?: number) => (ms == null ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`);
   const formatTime = (timestamp?: number) => {
@@ -584,6 +589,20 @@ export const ProcessStepsViewer: React.FC<ProcessStepsViewerProps> = ({
             >
               <Brain className={`w-3 h-3 transition-transform ${(isThinking || isStreaming) ? 'animate-bounce text-primary' : ''}`} />
             </Button>
+            {/* 开始处理时在思维链右侧显示雾粉色打断按钮 */}
+            {(isThinking || isStreaming) && onInterrupt && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onInterrupt}
+                aria-label="打断生成"
+                title="打断生成"
+                className="h-6 px-1.5 flex-shrink-0 text-[11px] font-medium bg-[var(--color-secondary)] text-black border-0 hover:opacity-90 [data-skin=niho]:bg-[var(--color-secondary)] [data-skin=niho]:text-black [data-skin=niho]:border-0 [data-skin=niho]:hover:bg-[var(--niho-mist-pink)]"
+              >
+                <SquareStop className="w-3 h-3 mr-0.5" />
+                打断
+              </Button>
+            )}
           </div>
         </div>
       )}

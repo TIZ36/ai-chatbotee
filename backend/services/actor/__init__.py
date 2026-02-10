@@ -27,7 +27,13 @@ from .iteration_context import IterationContext, DecisionContext
 from .actions import Action, ActionResult, ResponseDecision  # Action = ActionStep 别名
 from .capability_registry import CapabilityRegistry
 from .actor_base import ActorBase
-from .actor_manager import ActorManager, activate_agent, get_active_agents
+from .actor_manager import (
+    ActorManager,
+    activate_agent,
+    get_active_agents,
+    deactivate_agent,
+    deactivate_topic,
+)
 from .agents import ChatAgent
 from .action_chain import (
     ActionChain, ActionStep, ActionChainStore,
@@ -65,4 +71,6 @@ __all__ = [
     # 辅助函数
     'activate_agent',
     'get_active_agents',
+    'deactivate_agent',
+    'deactivate_topic',
 ]

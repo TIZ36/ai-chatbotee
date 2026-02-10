@@ -1425,28 +1425,31 @@ export class LLMClient {
         console.log(`[LLM] Gemini thinking mode: ${this.config.metadata?.enableThinking ? 'enabled' : 'disabled'}`);
       }
       
-      // 添加工具（如果提供）- 图片生成模型可能不支持工具，但仍然尝试添加
-      if (tools && tools.length > 0 && !supportsImageGeneration) {
-        // 转换工具格式：支持 MCP 格式和 OpenAI 格式
-        config.tools = [{
-          functionDeclarations: tools.map(tool => {
-            // 检查是否是 OpenAI 格式 (有 function 属性) 还是 MCP 格式 (直接有 name 属性)
-            if (tool.function) {
-              return {
-                name: tool.function.name,
-                description: tool.function.description,
-                parameters: tool.function.parameters,
-              };
-            } else {
-              // MCP 格式
+      // 工具列表：可同时启用联网搜索 (Google Search Grounding) 与 MCP/Function 工具
+      if (!supportsImageGeneration) {
+        config.tools = [];
+        if (this.config.metadata?.enableGoogleSearch) {
+          config.tools.push({ googleSearch: {} });
+          console.log(`[LLM] Gemini 联网搜索 (Google Search Grounding) 已启用`);
+        }
+        if (tools && tools.length > 0) {
+          config.tools.push({
+            functionDeclarations: tools.map((tool: any) => {
+              if (tool.function) {
+                return {
+                  name: tool.function.name,
+                  description: tool.function.description,
+                  parameters: tool.function.parameters,
+                };
+              }
               return {
                 name: tool.name,
                 description: tool.description,
                 parameters: tool.inputSchema,
               };
-            }
-          }),
-        }];
+            }),
+          });
+        }
       }
       
       console.log(`[LLM] Gemini 请求配置:`, JSON.stringify(config, null, 2));
@@ -1687,28 +1690,31 @@ export class LLMClient {
           : { thinkingBudget: 0 };
       }
       
-      // 添加工具（如果提供）- 图片生成模型可能不支持工具
-      if (tools && tools.length > 0 && !supportsImageGeneration) {
-        // 转换工具格式：支持 MCP 格式和 OpenAI 格式
-        config.tools = [{
-          functionDeclarations: tools.map(tool => {
-            // 检查是否是 OpenAI 格式 (有 function 属性) 还是 MCP 格式 (直接有 name 属性)
-            if (tool.function) {
-              return {
-                name: tool.function.name,
-                description: tool.function.description,
-                parameters: tool.function.parameters,
-              };
-            } else {
-              // MCP 格式
+      // 工具列表：可同时启用联网搜索与 MCP/Function 工具
+      if (!supportsImageGeneration) {
+        config.tools = [];
+        if (this.config.metadata?.enableGoogleSearch) {
+          config.tools.push({ googleSearch: {} });
+          console.log(`[LLM] Gemini 联网搜索 (Google Search Grounding) 已启用`);
+        }
+        if (tools && tools.length > 0) {
+          config.tools.push({
+            functionDeclarations: tools.map((tool: any) => {
+              if (tool.function) {
+                return {
+                  name: tool.function.name,
+                  description: tool.function.description,
+                  parameters: tool.function.parameters,
+                };
+              }
               return {
                 name: tool.name,
                 description: tool.description,
                 parameters: tool.inputSchema,
               };
-            }
-          }),
-        }];
+            }),
+          });
+        }
       }
       
       // 调用非流式 API

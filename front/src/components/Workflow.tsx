@@ -5,7 +5,7 @@
 
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Send, Loader, Loader2, Bot, Wrench, AlertCircle, CheckCircle, Brain, Plug, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Sparkles, Workflow as WorkflowIcon, Play, ArrowRight, Trash2, X, Edit2, RotateCw, Database, Paperclip, Music, HelpCircle, Package, CheckSquare, Square, Quote, Lightbulb, Eye, Volume2, Paintbrush, Image, Plus, CornerDownRight } from 'lucide-react';
+import { Send, Loader, Loader2, Bot, Wrench, AlertCircle, CheckCircle, Brain, Plug, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Sparkles, Workflow as WorkflowIcon, Play, ArrowRight, Trash2, X, Edit2, RotateCw, Database, Paperclip, Music, HelpCircle, Package, CheckSquare, Square, Quote, Lightbulb, Eye, Volume2, Paintbrush, Image, Plus, CornerDownRight, Globe } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Virtuoso } from 'react-virtuoso';
@@ -200,6 +200,8 @@ const Workflow: React.FC<WorkflowProps> = ({
     setMediaPreviewOpen(true);
   }, []);
   const [streamEnabled, setStreamEnabled] = useState(true); // 流式响应开关
+  // 联网搜索（仅 Gemini）：null 表示使用配置中的值，true/false 为本次会话覆盖
+  const [enableGoogleSearchInChat, setEnableGoogleSearchInChat] = useState<boolean | null>(null);
   const [collapsedThinking, setCollapsedThinking] = useState<Set<string>>(new Set()); // 已折叠的思考过程
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null); // 正在编辑的消息ID
   const [quotedMessageId, setQuotedMessageId] = useState<string | null>(null); // 引用的消息ID
@@ -1247,6 +1249,15 @@ const Workflow: React.FC<WorkflowProps> = ({
               return updated;
             });
             
+          } else if (payload.type === 'agent_interrupt_ack') {
+            // 后端已处理打断：解绑旧 Actor、绑定新 Actor，前端结束加载并提示
+            const data = payload.data || {};
+            setIsLoading(false);
+            setIsExecuting(false);
+            setAbortController(null);
+            setMessages((prev) => prev.map((m) => ({ ...m, isStreaming: false, isThinking: false })));
+            const msg = (data.message as string) || '处理已终止，您可以继续输入';
+            toast({ title: msg, variant: 'default' });
           } else if (payload.type === 'agent_stream_done') {
             // 流式完成（可能包含错误）
             const data = payload.data;
@@ -2403,6 +2414,14 @@ const Workflow: React.FC<WorkflowProps> = ({
           if (sessionForActor?.session_type === 'agent' && selectedLLMConfigId) {
             messageData.ext.user_llm_config_id = selectedLLMConfigId;
           }
+          // 传递用户在本条消息上的 LLM 元数据覆盖（如联网搜索开关），供后端合并到 config.metadata
+          if (selectedLLMConfig) {
+            const pt = (selectedLLMConfig.supplier || selectedLLMConfig.provider || '').toLowerCase();
+            if (pt === 'gemini' || pt === 'google') {
+              const effective = enableGoogleSearchInChat ?? selectedLLMConfig.metadata?.enableGoogleSearch ?? false;
+              messageData.ext.user_llm_metadata_override = { enableGoogleSearch: effective };
+            }
+          }
         }
         
         await saveMessage(sessionId, messageData);
@@ -2441,9 +2460,9 @@ const Workflow: React.FC<WorkflowProps> = ({
       }
       const toolsForRequest = toolCallingEnabled && allTools.length > 0 ? allTools : [];
 
-      // 创建LLM客户端（传递 thinking 配置）
-      // 使用模型配置中的 thinking 模式，而不是用户切换的状态
+      // 创建LLM客户端（传递 thinking、联网搜索等）
       const enableThinking = selectedLLMConfig.metadata?.enableThinking ?? false;
+      const effectiveGoogleSearch = enableGoogleSearchInChat ?? selectedLLMConfig.metadata?.enableGoogleSearch ?? false;
       const llmClient = new LLMClient({
         id: selectedLLMConfig.config_id,
         provider: selectedLLMConfig.provider,
@@ -2454,7 +2473,8 @@ const Workflow: React.FC<WorkflowProps> = ({
         enabled: selectedLLMConfig.enabled,
         metadata: {
           ...selectedLLMConfig.metadata,
-          enableThinking: enableThinking, // 使用模型配置中的 thinking 模式
+          enableThinking: enableThinking,
+          enableGoogleSearch: effectiveGoogleSearch, // 输入框上方 tag 或配置中的联网搜索
         },
       });
 
@@ -3398,9 +3418,9 @@ const Workflow: React.FC<WorkflowProps> = ({
           : msg
       ));
       
-      // 重新发送请求（传递 thinking 配置）
-      // 使用模型配置中的 thinking 模式，而不是用户切换的状态
+      // 重新发送请求（传递 thinking、联网搜索等）
       const enableThinking = selectedLLMConfig!.metadata?.enableThinking ?? false;
+      const effectiveGoogleSearch = enableGoogleSearchInChat ?? selectedLLMConfig!.metadata?.enableGoogleSearch ?? false;
       const llmClient = new LLMClient({
         id: selectedLLMConfig!.config_id,
         provider: selectedLLMConfig!.provider,
@@ -3411,7 +3431,8 @@ const Workflow: React.FC<WorkflowProps> = ({
         enabled: selectedLLMConfig!.enabled,
         metadata: {
           ...selectedLLMConfig!.metadata,
-          enableThinking: enableThinking, // 使用模型配置中的 thinking 模式
+          enableThinking: enableThinking,
+          enableGoogleSearch: effectiveGoogleSearch,
         },
       });
       
@@ -3913,6 +3934,26 @@ const Workflow: React.FC<WorkflowProps> = ({
     // 聚焦输入框，方便继续输入
     setTimeout(() => inputRef.current?.focus(), 0);
   };
+
+  /** 前端打断：请求后端解绑旧 Actor 并绑定新 Actor，本地中止请求并清空加载状态 */
+  const handleInterrupt = useCallback(async () => {
+    if (!currentSessionId) return;
+    const agentId = messages.find(m => m.isStreaming || m.isThinking)?.sender_id || currentSessionId;
+    try {
+      await fetch(`${getBackendUrl()}/api/sessions/${currentSessionId}/interrupt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent_id: agentId, reason: 'user_interrupt' }),
+      });
+    } catch (_) { /* 忽略网络错误，仍做本地清理 */ }
+    if (abortController) {
+      abortController.abort();
+      setAbortController(null);
+    }
+    setMessages(prev => prev.map(m => ({ ...m, isStreaming: false, isThinking: false })));
+    setIsLoading(false);
+    setIsExecuting(false);
+  }, [currentSessionId, messages, abortController]);
 
   const handleRollbackToMessage = async (messageId: string) => {
     if (!confirm('确定要回滚到这条消息吗？这条消息之后的所有对话都会被删除。')) return;
@@ -4797,6 +4838,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                 return getLogsFromMessage(message);
               })()
             }
+            onInterrupt={handleInterrupt}
           />
         );
       }
@@ -5483,13 +5525,14 @@ const Workflow: React.FC<WorkflowProps> = ({
                     {/* 执行轨迹（使用统一的 ProcessStepsViewer 组件） */}
                     {(state.status === 'deciding' || (state.processMessages && state.processMessages.length > 0)) && !isImmediateReply && (
                       <div className="ml-3">
-                        <ProcessStepsViewer 
-                          processMessages={state.processMessages || []} 
+                        <ProcessStepsViewer
+                          processMessages={state.processMessages || []}
                           executionLogs={state.executionLogs || []}
                           isThinking={state.status === 'deciding'}
                           isStreaming={false}
                           hideTitle
                           defaultExpanded
+                          onInterrupt={handleInterrupt}
                         />
                       </div>
                     )}
@@ -5582,6 +5625,24 @@ const Workflow: React.FC<WorkflowProps> = ({
           (window as any).__chatActiveToolType = activeToolType;
           return null;
         })()}
+
+        {/* 加载中时在输入区上方显示「停止生成」条，便于打断 */}
+        {isLoading && (
+          <div className="flex-shrink-0 px-2 sm:px-4 py-1.5 bg-amber-50 dark:bg-amber-900/20 border-t border-amber-200 dark:border-amber-800 flex items-center justify-center gap-2">
+            <Loader className="w-3.5 h-3.5 animate-spin text-amber-600 dark:text-amber-400" />
+            <span className="text-xs text-amber-800 dark:text-amber-200">正在生成回复</span>
+            <Button
+              onClick={handleInterrupt}
+              variant="destructive"
+              size="sm"
+              className="gap-1 px-2 py-0.5 h-6 text-xs"
+              title="停止生成并可立即发送下一条"
+            >
+              <XCircle className="w-3 h-3" />
+              <span>停止生成</span>
+            </Button>
+          </div>
+        )}
 
         {/* 输入框（固定在底部，不再浮动） */}
           <div className="flex-shrink-0 px-2 sm:px-4 pb-3 pt-2 bg-white dark:bg-[#2d2d2d] border-t border-gray-200 dark:border-[#404040] workflow-chat-input-area">
@@ -5963,6 +6024,28 @@ const Workflow: React.FC<WorkflowProps> = ({
                   )}
                 </button>
 
+                {/* Gemini 联网搜索 tag：仅在选择 Gemini/Google 模型时显示，点击切换 */}
+                {selectedLLMConfig && (() => {
+                  const pt = (selectedLLMConfig.supplier || selectedLLMConfig.provider || '').toLowerCase();
+                  if (pt !== 'gemini' && pt !== 'google') return null;
+                  const effective = enableGoogleSearchInChat ?? selectedLLMConfig.metadata?.enableGoogleSearch ?? false;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => setEnableGoogleSearchInChat(!effective)}
+                      title={effective ? '联网搜索已开，点击关闭' : '点击开启联网搜索（Google Search）'}
+                      className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium transition-all ${
+                        effective
+                          ? 'bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300 ring-1 ring-sky-300 dark:ring-sky-600'
+                          : 'text-gray-400 dark:text-[#666] hover:bg-gray-100 dark:hover:bg-[#1a1a1a] hover:text-gray-600 dark:hover:text-[#888]'
+                      }`}
+                    >
+                      <Globe className="w-3 h-3 flex-shrink-0" />
+                      <span>联网搜索</span>
+                    </button>
+                  );
+                })()}
+
                 {/* 签名回灌开关（生图模型时显示） */}
                 {(() => {
                   const isImageGenModel = (selectedLLMConfig?.model || '').toLowerCase().includes('image');
@@ -6153,7 +6236,21 @@ const Workflow: React.FC<WorkflowProps> = ({
                   });
                 }
               }}
-                onKeyDown={handleKeyDown}
+                onKeyDown={(e) => {
+                  // Tab：在支持联网的模型下切换联网搜索开关
+                  if (e.key === 'Tab' && selectedLLMConfig) {
+                    const pt = (selectedLLMConfig.supplier || selectedLLMConfig.provider || '').toLowerCase();
+                    if (pt === 'gemini' || pt === 'google') {
+                      e.preventDefault();
+                      setEnableGoogleSearchInChat((prev) => {
+                        const effective = prev ?? selectedLLMConfig!.metadata?.enableGoogleSearch ?? false;
+                        return !effective;
+                      });
+                      return;
+                    }
+                  }
+                  handleKeyDown(e);
+                }}
                 onBlur={(e) => {
                   // 检查焦点是否移到了浮岛容器内的其他元素
                   const relatedTarget = e.relatedTarget as HTMLElement;
@@ -6266,24 +6363,18 @@ const Workflow: React.FC<WorkflowProps> = ({
                 {/* 右侧：发送/中断按钮 */}
                 <div className="flex flex-col items-end gap-0.5 flex-shrink-0 pb-0.5">
                   <div className="flex items-center gap-1">
-                  {isLoading ? (
-                    // 加载时：显示中断按钮
-                    <Button
-                      onClick={() => {
-                        if (abortController) {
-                          abortController.abort();
-                          setAbortController(null);
-                          setMessages(prev => prev.filter(msg => !msg.isStreaming && !msg.isThinking));
-                          setIsLoading(false);
-                        }
-                      }}
-                      variant="destructive"
-                      size="sm"
-                      className="gap-1 px-2 py-1 h-7 text-xs"
-                    >
-                      <XCircle className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">中断</span>
-                    </Button>
+                {isLoading ? (
+                  // 加载时：显示打断按钮（请求后端解绑旧 Actor、绑定新 Actor，并本地中止）
+                  <Button
+                    onClick={handleInterrupt}
+                    variant="destructive"
+                    size="sm"
+                    className="gap-1.5 px-3 py-1 h-7 text-xs shrink-0"
+                    title="停止生成并可立即发送下一条"
+                  >
+                    <XCircle className="w-3.5 h-3.5" />
+                    <span>停止生成</span>
+                  </Button>
                   ) : (
                     <>
                       {/* 发送按钮 - 萤绿色 */}
