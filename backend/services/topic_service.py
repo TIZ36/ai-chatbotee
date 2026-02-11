@@ -510,7 +510,7 @@ class TopicService:
         if not self.redis_client:
             return False
         
-        # 设置 Redis 中断标记 (TTL 60秒)
+        # 设置 Redis 中断标记 (TTL 60秒)，供 Actor 轮询检查
         interrupt_key = f'interrupt:{topic_id}:{agent_id}'
         try:
             self.redis_client.setex(interrupt_key, 60, reason)
@@ -518,14 +518,20 @@ class TopicService:
             print(f"[TopicService] Failed to set interrupt flag: {e}")
             return False
         
-        # 发布中断事件
-        event_data = {
-            'agent_id': agent_id,
-            'reason': reason,
-            'timestamp': time.time(),
-        }
-        self._publish_event(topic_id, TopicEventType.ACTION_CHAIN_INTERRUPT, event_data)
-        print(f"[TopicService] 🛑 Published interrupt for agent {agent_id} in {topic_id}")
+        # 打断走独立通道 actor_manager:interrupt，由 ActorManager 单独订阅，避免与 topic:* 混在一起被阻塞
+        try:
+            channel = "actor_manager:interrupt"
+            payload = {
+                'topic_id': topic_id,
+                'agent_id': agent_id,
+                'reason': reason,
+                'timestamp': time.time(),
+            }
+            self.redis_client.publish(channel, json.dumps(payload))
+        except Exception as e:
+            print(f"[TopicService] Failed to publish interrupt to manager channel: {e}")
+            return False
+        print(f"[TopicService] 🛑 Published interrupt for agent {agent_id} in {topic_id} (channel={channel})")
         return True
 
     def check_interrupt(self, topic_id: str, agent_id: str) -> bool:

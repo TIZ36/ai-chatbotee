@@ -921,40 +921,34 @@ class ActorBase(ABC):
             if ctx.should_continue and ctx.next_tool_call:
                 logger.info(f"[ActorBase:{self.agent_id}] Tool call triggered, waiting for next message")
             else:
-                # 发送完成事件（包含 media，用于前端显示 thoughtSignature 状态）
-                # 获取 media 数据（来自 ext_data）
-                ext_data = ctx.build_ext_data()
-                media_data = ext_data.get('media') if ext_data else None
-                
-                # 添加完成日志
-                ctx.add_execution_log('处理完成', log_type='success')
-                self._send_execution_log(ctx, '处理完成', log_type='success')
-                
-                # 将执行日志添加到 ext_data 中
-                if ctx.execution_logs:
-                    ext_data['log'] = ctx.execution_logs
-                
-                get_topic_service()._publish_event(topic_id, 'agent_stream_done', {
-                    'agent_id': self.agent_id,
-                    'agent_name': self.info.get('name', 'Agent'),
-                    'agent_avatar': self.info.get('avatar'),
-                    'message_id': reply_message_id,
-                    'content': ctx.final_content,
-                    'processSteps': ctx.to_process_steps_dict(),
-                    'process_version': 'v2',
-                    'media': media_data,  # 包含 thoughtSignature
-                    'execution_logs': ctx.execution_logs,  # 包含执行日志
-                })
-                
-                # 追加到本地历史
-                self.state.append_history({
-                    'message_id': reply_message_id,
-                    'role': 'assistant',
-                    'content': ctx.final_content,
-                    'created_at': time.time(),
-                    'sender_id': self.agent_id,
-                    'sender_type': 'agent',
-                })
+                # 被 stop 的 Actor 不再推送完成事件与写库，前端不关心其输出
+                if self.is_running:
+                    # 发送完成事件（包含 media，用于前端显示 thoughtSignature 状态）
+                    ext_data = ctx.build_ext_data()
+                    media_data = ext_data.get('media') if ext_data else None
+                    ctx.add_execution_log('处理完成', log_type='success')
+                    self._send_execution_log(ctx, '处理完成', log_type='success')
+                    if ctx.execution_logs:
+                        ext_data['log'] = ctx.execution_logs
+                    get_topic_service()._publish_event(topic_id, 'agent_stream_done', {
+                        'agent_id': self.agent_id,
+                        'agent_name': self.info.get('name', 'Agent'),
+                        'agent_avatar': self.info.get('avatar'),
+                        'message_id': reply_message_id,
+                        'content': ctx.final_content,
+                        'processSteps': ctx.to_process_steps_dict(),
+                        'process_version': 'v2',
+                        'media': media_data,
+                        'execution_logs': ctx.execution_logs,
+                    })
+                    self.state.append_history({
+                        'message_id': reply_message_id,
+                        'role': 'assistant',
+                        'content': ctx.final_content,
+                        'created_at': time.time(),
+                        'sender_id': self.agent_id,
+                        'sender_type': 'agent',
+                    })
             
             logger.info(f"[ActorBase:{self.agent_id}] Message processed successfully (V2)")
             
@@ -1516,11 +1510,10 @@ class ActorBase(ABC):
     def _publish_chain_progress(self, ctx: IterationContext, chain: ActionChain):
         """
         发布 ActionChain 进度事件
-        
-        Args:
-            ctx: 迭代上下文
-            chain: ActionChain 对象
+        被 stop 的 Actor 不再推送。
         """
+        if not self.is_running:
+            return
         from services.topic_service import get_topic_service
         
         progress = chain.get_progress()
@@ -3118,6 +3111,7 @@ class ActorBase(ABC):
     ):
         """
         发布处理流程事件
+        被 stop 的 Actor 不再推送。
         
         Args:
             ctx: 迭代上下文
@@ -3125,6 +3119,8 @@ class ActorBase(ABC):
             status: 状态
             data: 附加数据
         """
+        if not self.is_running:
+            return
         try:
             from services.topic_service import get_topic_service
             
@@ -3870,12 +3866,15 @@ class ActorBase(ABC):
     ):
         """
         统一消息出口 - 规范化 + 发送到 Pub/Sub
+        被 stop 的 Actor 不再推送，前端不关心其输出。
         
         Args:
             msg_type: 消息类型
             content: 内容
             ext: 扩展数据
         """
+        if not self.is_running:
+            return
         from services.topic_service import get_topic_service
         
         if ext and 'processSteps' in ext and 'processMessages' not in ext:
@@ -3912,6 +3911,7 @@ class ActorBase(ABC):
     ):
         """
         发送执行日志到前端
+        被 stop 的 Actor 不再推送。
         
         Args:
             ctx: 迭代上下文
@@ -3920,6 +3920,8 @@ class ActorBase(ABC):
             detail: 详细信息
             duration: 耗时（毫秒）
         """
+        if not self.is_running:
+            return
         from services.topic_service import get_topic_service
         
         topic_id = ctx.topic_id or self.topic_id
@@ -4087,9 +4089,9 @@ class ActorBase(ABC):
         
         try:
             for chunk in self._stream_llm_response(messages, llm_config_id=final_llm_config_id, ctx=ctx):
+                if not self.is_running:
+                    break
                 full_content += chunk
-
-                # 发送流式 chunk
                 get_topic_service()._publish_event(topic_id, 'agent_stream_chunk', {
                     'agent_id': self.agent_id,
                     'agent_name': self.info.get('name', 'Agent'),
@@ -4098,71 +4100,58 @@ class ActorBase(ABC):
                     'chunk': chunk,
                     'accumulated': full_content,
                     'processSteps': ctx.to_process_steps_dict(),
+                }            )
+            
+            # 被 stop 的 Actor 不再推送、写库，老线程无脑回收
+            if self.is_running:
+                ctx.update_last_step(
+                    status='completed',
+                    is_final_iteration=not ctx.should_continue,
+                )
+                ctx.final_content = full_content
+                ctx.add_execution_log('执行完成', log_type='success')
+                self._send_execution_log(ctx, '执行完成', log_type='success')
+                ext_data = ctx.build_ext_data()
+                ext_data['llmInfo'] = {
+                    'provider': provider,
+                    'model': model,
+                    'configId': final_llm_config_id,
+                }
+                if self._pending_reply_media:
+                    ext_data['media'] = self._normalize_media_for_ext(self._pending_reply_media)
+                    self._pending_reply_media = None
+                if ctx.execution_logs:
+                    ext_data['log'] = ctx.execution_logs
+                get_topic_service().send_message(
+                    topic_id=topic_id,
+                    sender_id=self.agent_id,
+                    sender_type='agent',
+                    content=full_content,
+                    role='assistant',
+                    message_id=message_id,
+                    sender_name=self.info.get('name'),
+                    sender_avatar=self.info.get('avatar'),
+                    ext=ext_data,
+                )
+                self.state.append_history({
+                    'message_id': message_id,
+                    'role': 'assistant',
+                    'content': full_content,
+                    'created_at': time.time(),
+                    'sender_id': self.agent_id,
+                    'sender_type': 'agent',
                 })
-            
-            # 更新步骤：完成，并标记是否为最终轮次
-            ctx.update_last_step(
-                status='completed',
-                is_final_iteration=not ctx.should_continue,  # 是否是最终轮次
-            )
-            ctx.final_content = full_content
-            
-            # 发送执行完成日志
-            ctx.add_execution_log('执行完成', log_type='success')
-            self._send_execution_log(ctx, '执行完成', log_type='success')
-            
-            # 构建扩展数据
-            ext_data = ctx.build_ext_data()
-            ext_data['llmInfo'] = {
-                'provider': provider,
-                'model': model,
-                'configId': final_llm_config_id,
-            }
-            
-            # 处理多模态媒体
-            if self._pending_reply_media:
-                ext_data['media'] = self._normalize_media_for_ext(self._pending_reply_media)
-                self._pending_reply_media = None
-            
-            # 将执行日志保存到 ext.log 中
-            if ctx.execution_logs:
-                ext_data['log'] = ctx.execution_logs
-            
-            # 保存消息
-            get_topic_service().send_message(
-                topic_id=topic_id,
-                sender_id=self.agent_id,
-                sender_type='agent',
-                content=full_content,
-                role='assistant',
-                message_id=message_id,
-                sender_name=self.info.get('name'),
-                sender_avatar=self.info.get('avatar'),
-                ext=ext_data,
-            )
-            
-            # 追加到本地历史（确保 history 包含 LLM 输出）
-            self.state.append_history({
-                'message_id': message_id,
-                'role': 'assistant',
-                'content': full_content,
-                'created_at': time.time(),
-                'sender_id': self.agent_id,
-                'sender_type': 'agent',
-            })
-            
-            # 发送完成事件（含 processMessages 与 execution_logs，供前端区分思考内容与正式输出）
-            get_topic_service()._publish_event(topic_id, 'agent_stream_done', {
-                'agent_id': self.agent_id,
-                'agent_name': self.info.get('name', 'Agent'),
-                'agent_avatar': self.info.get('avatar'),
-                'message_id': message_id,
-                'content': full_content,
-                'processSteps': ctx.to_process_steps_dict(),
-                'processMessages': ctx.to_process_messages(),
-                'execution_logs': ctx.execution_logs,
-                'media': ext_data.get('media'),
-            })
+                get_topic_service()._publish_event(topic_id, 'agent_stream_done', {
+                    'agent_id': self.agent_id,
+                    'agent_name': self.info.get('name', 'Agent'),
+                    'agent_avatar': self.info.get('avatar'),
+                    'message_id': message_id,
+                    'content': full_content,
+                    'processSteps': ctx.to_process_steps_dict(),
+                    'processMessages': ctx.to_process_messages(),
+                    'execution_logs': ctx.execution_logs,
+                    'media': ext_data.get('media'),
+                })
             
         except Exception as e:
             ctx.mark_error(str(e))
@@ -4654,7 +4643,9 @@ class ActorBase(ABC):
         msg_data: Dict[str, Any],
         decision: ResponseDecision,
     ):
-        """处理沉默决策"""
+        """处理沉默决策。被 stop 的 Actor 不再推送。"""
+        if not self.is_running:
+            return
         from services.topic_service import get_topic_service
         
         get_topic_service()._publish_event(topic_id, 'agent_silent', {
@@ -4703,7 +4694,9 @@ class ActorBase(ABC):
         })
     
     def _handle_process_error(self, ctx: IterationContext, error: Exception):
-        """处理处理错误（Discord / 应用内共用此流程，错误会写入会话并展示给用户）"""
+        """处理处理错误。被 stop 的 Actor 不再推送。"""
+        if not self.is_running:
+            return
         from services.topic_service import get_topic_service
         
         topic_id = ctx.topic_id or self.topic_id

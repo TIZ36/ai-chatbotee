@@ -7,7 +7,8 @@ Actor 管理器
 职责：
 - 维护 topic → agent 映射（channel → [agent_id, ...]），按 DB 解析并按需激活/销毁
 - Redis 全局监听 topic:*（psubscribe），收到 new_message 时若无订阅者则 _ensure_topic_handled 激活
-- 收到 action_chain_interrupt（前端打断）时：解绑并销毁旧 Actor，激活全新 Actor 并重新绑定 topic
+- 收到 actor_manager:interrupt（前端打断，独立通道）时：解绑并销毁旧 Actor，激活全新 Actor 并重新绑定 topic
+- 被终止的 Actor 不再向 topic 推送（Actor 内 is_running 守卫），前端不关心其输出；新消息由新 Actor 接管、独立队列；老线程仅 stop 后无脑回收
 - 事件分发；deactivate_agent / deactivate_topic 用于显式取消订阅或销毁
 """
 
@@ -178,7 +179,7 @@ class ActorManager:
         agent_id = data.get("agent_id")
         reason = data.get("reason", "user_interrupt")
         if not agent_id:
-            logger.warning("[ActorManager] action_chain_interrupt missing agent_id, skip")
+            logger.warning("[ActorManager] interrupt missing agent_id, skip")
             return
         # 1. 解绑并销毁旧 Actor（stop_actor=True 会 remove_actor，旧线程退出）
         self.deactivate_agent(agent_id, topic_id, stop_actor=True)
@@ -251,9 +252,10 @@ class ActorManager:
                 return
             self._pubsub = self._redis_client.pubsub(ignore_subscribe_messages=True)
             self._pubsub.psubscribe("topic:*")
+            self._pubsub.subscribe("actor_manager:interrupt")
         
         def _listen():
-            logger.info("[ActorManager] Listener started (psubscribe topic:*)")
+            logger.info("[ActorManager] Listener started (topic:* + actor_manager:interrupt)")
             while True:
                 try:
                     message = self._pubsub.get_message(timeout=1.0)
@@ -275,13 +277,16 @@ class ActorManager:
                         data = json.loads(raw)
                     except Exception:
                         continue
+
+                    # 打断走独立通道，不受 topic 消息队列影响，优先处理
+                    if channel == "actor_manager:interrupt":
+                        topic_id = data.get("topic_id") or ""
+                        if topic_id:
+                            self._on_interrupt(topic_id, channel, data)
+                        continue
+
                     event_type = data.get("type")
                     topic_id = _channel_to_topic_id(channel)
-
-                    # 前端打断：解绑并销毁旧 Actor，激活全新 Actor 并重新绑定，发布 agent_interrupt_ack
-                    if event_type == "action_chain_interrupt":
-                        self._on_interrupt(topic_id, channel, data)
-                        continue
 
                     if event_type not in (
                         "new_message",
@@ -336,7 +341,8 @@ class ActorManager:
         finally:
             self._pubsub = self._redis_client.pubsub(ignore_subscribe_messages=True)
             self._pubsub.psubscribe("topic:*")
-            logger.info("[ActorManager] Listener restarted (psubscribe topic:*)")
+            self._pubsub.subscribe("actor_manager:interrupt")
+            logger.info("[ActorManager] Listener restarted (topic:* + actor_manager:interrupt)")
     
     def get_active_agents(self) -> Dict[str, 'ActorBase']:
         """获取所有活跃的 Actor"""
