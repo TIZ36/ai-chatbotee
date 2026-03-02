@@ -583,12 +583,14 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false })
     handleFileUpload(e.dataTransfer.files);
   };
 
-  /* ─── 获取 base64 ─── */
-  const getB64 = (item: MediaItem): string => {
+  /* ─── 获取 base64（支持 URL / data URL / rawB64） ─── */
+  const getB64 = useCallback(async (item: MediaItem): Promise<string | null> => {
     if (item.rawB64) return item.rawB64;
     if (item.url.startsWith('data:') && item.url.includes(';base64,')) return item.url.split(';base64,')[1];
-    return item.url;
-  };
+    if (item.url.startsWith('data:')) return item.url.split(',')[1] ?? null;
+    // 其他情况（如后端文件 URL）转成 base64
+    return getBase64FromItem(item);
+  }, [getBase64FromItem]);
 
   /* ─── 统一图像生成（无图=文生图，有图=二创，支持多图） ─── */
   const handleGenerate = async () => {
@@ -600,10 +602,17 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false })
       const cfgId = activeConfig.config_id;
       if (isEdit) {
         // 二创（图生图）— 传所有参考图
-        const images_b64 = refImages.map((img) => ({
-          data: getB64(img),
-          mime: img.mimeType || 'image/png',
-        }));
+        const images_b64 = (await Promise.all(refImages.map(async (img) => {
+          const data = await getB64(img);
+          if (!data) return null;
+          return {
+            data,
+            mime: img.mimeType || 'image/png',
+          };
+        }))).filter(Boolean) as Array<{ data: string; mime: string }>;
+        if (images_b64.length === 0) {
+          throw new Error('参考图无效或无法读取');
+        }
         if (activeProviderId === 'gemini') {
           result = await mediaApi.geminiImageEdit({
             prompt: imgPrompt,
@@ -645,7 +654,11 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false })
       if (activeProviderId === 'gemini') {
         // Gemini Veo 视频生成
         const body: any = { prompt: videoPrompt };
-        if (refImages.length > 0) body.image_b64 = getB64(refImages[0]);
+        if (refImages.length > 0) {
+          const b64 = await getB64(refImages[0]);
+          if (!b64) throw new Error('参考图无效或无法读取');
+          body.image_b64 = b64;
+        }
         if (activeConfig) {
           body.config_id = activeConfig.config_id;
           body.model = activeConfig.model;
