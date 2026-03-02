@@ -535,6 +535,94 @@ def gemini_video_status(task_name: str, config_id: Optional[str] = None) -> Dict
         op = genai_types.GenerateVideosOperation(name=task_name)
         op = client.operations.get(op)
 
+        def _extract_video_uri(obj: Any) -> Optional[str]:
+            """Best-effort extract video URI from various SDK response shapes."""
+            if obj is None:
+                return None
+            # common object attributes
+            video = getattr(obj, 'video', None)
+            if video is not None:
+                uri = getattr(video, 'uri', None) or getattr(video, 'video_uri', None)
+                if uri:
+                    return uri
+            uri = (
+                getattr(obj, 'uri', None)
+                or getattr(obj, 'video_uri', None)
+                or getattr(obj, 'videoUri', None)
+            )
+            if uri:
+                return uri
+            # dict-like fallback
+            if isinstance(obj, dict):
+                if obj.get('uri') or obj.get('video_uri') or obj.get('videoUri'):
+                    return obj.get('uri') or obj.get('video_uri') or obj.get('videoUri')
+                if isinstance(obj.get('video'), dict):
+                    v = obj.get('video') or {}
+                    return v.get('uri') or v.get('video_uri') or v.get('videoUri')
+            return None
+
+        def _extract_payload_dict(obj: Any) -> Dict[str, Any]:
+            """尽量把 SDK 对象转成可遍历字典，用于日志与兜底解析。"""
+            if obj is None:
+                return {}
+            if isinstance(obj, dict):
+                return obj
+            for method_name in ('model_dump', 'to_dict', 'dict'):
+                method = getattr(obj, method_name, None)
+                if callable(method):
+                    try:
+                        data = method()
+                        if isinstance(data, dict):
+                            return data
+                    except Exception:
+                        pass
+            to_json = getattr(obj, 'to_json', None)
+            if callable(to_json):
+                try:
+                    import json
+                    raw = to_json()
+                    data = json.loads(raw) if isinstance(raw, str) else raw
+                    if isinstance(data, dict):
+                        return data
+                except Exception:
+                    pass
+            data = getattr(obj, '__dict__', None)
+            return data if isinstance(data, dict) else {}
+
+        def _search_uri_tree(obj: Any, max_nodes: int = 2000) -> Optional[str]:
+            """Breadth-first search for keys that look like video uri."""
+            queue = [obj]
+            seen = 0
+            while queue and seen < max_nodes:
+                cur = queue.pop(0)
+                seen += 1
+                uri = _extract_video_uri(cur)
+                if uri:
+                    return uri
+                if isinstance(cur, dict):
+                    queue.extend(cur.values())
+                elif isinstance(cur, (list, tuple)):
+                    queue.extend(list(cur))
+                else:
+                    # try object __dict__ to inspect nested attrs
+                    data = getattr(cur, '__dict__', None)
+                    if isinstance(data, dict):
+                        queue.extend(data.values())
+            return None
+
+        def _compact_json(obj: Any, max_len: int = 4000) -> str:
+            """用于日志：尽量序列化对象并截断，避免日志过大。"""
+            try:
+                import json
+                payload = _extract_payload_dict(obj)
+                s = json.dumps(payload, ensure_ascii=False, default=str)
+            except Exception:
+                try:
+                    s = str(obj)
+                except Exception:
+                    s = '<unserializable>'
+            return s[:max_len]
+
         done = getattr(op, 'done', False)
         if done:
             # 检查错误
@@ -548,16 +636,79 @@ def gemini_video_status(task_name: str, config_id: Optional[str] = None) -> Dict
             generated_videos = getattr(response, 'generated_videos', []) if response else []
             if generated_videos:
                 video_obj = generated_videos[0]
-                video = getattr(video_obj, 'video', None)
-                video_uri = getattr(video, 'uri', None) if video else None
-                return {
-                    'status': 'SUCCEEDED',
-                    'output': video_uri,
-                }
+                video_uri = _extract_video_uri(video_obj)
+                if not video_uri:
+                    video_uri = _search_uri_tree(video_obj)
+                if video_uri:
+                    return {
+                        'status': 'SUCCEEDED',
+                        'output': video_uri,
+                    }
+
+            # 兼容 SDK/返回字段变化（如 preview 版本）
+            for candidate in (
+                response,
+                getattr(op, 'result', None),
+                getattr(op, 'response', None),
+                getattr(op, 'metadata', None),
+                getattr(op, '__dict__', None),
+            ):
+                video_uri = _search_uri_tree(candidate)
+                if video_uri:
+                    return {
+                        'status': 'SUCCEEDED',
+                        'output': video_uri,
+                    }
+
+            # SDK 解析不到时，回退 REST operations.get 再查一次（部分版本字段映射有差异）
+            api_key = config.get('api_key') or ''
+            base_url = (config.get('api_url') or 'https://generativelanguage.googleapis.com').rstrip('/')
+            for suffix in ('/v1beta', '/v1', '/v1beta/', '/v1/'):
+                if base_url.endswith(suffix):
+                    base_url = base_url[:-len(suffix)]
+                    break
+            op_path = task_name.lstrip('/')
+            rest_url = f'{base_url}/v1beta/{op_path}'
+            try:
+                r = requests.get(
+                    rest_url,
+                    headers={'x-goog-api-key': api_key, 'Content-Type': 'application/json'},
+                    timeout=30,
+                )
+                if r.status_code == 200:
+                    payload = r.json()
+                    video_uri = _search_uri_tree(payload)
+                    if video_uri:
+                        return {'status': 'SUCCEEDED', 'output': video_uri}
+                    logger.warning(
+                        '[Gemini Video SDK] SUCCEEDED but no URI. REST payload keys=%s task=%s',
+                        list(payload.keys())[:20], task_name
+                    )
+                else:
+                    logger.warning(
+                        '[Gemini Video SDK] REST fallback failed status=%s task=%s body=%s',
+                        r.status_code, task_name, (r.text or '')[:500]
+                    )
+            except Exception as rest_err:
+                logger.warning('[Gemini Video SDK] REST fallback exception task=%s err=%s', task_name, rest_err)
+
+            # 记录 SDK/REST 关键结构，便于后续定位
+            logger.warning(
+                '[Gemini Video SDK] SUCCEEDED but no URI. task=%s op_keys=%s response_keys=%s metadata_keys=%s op_json=%s response_json=%s metadata_json=%s',
+                task_name,
+                list(_extract_payload_dict(op).keys())[:20],
+                list(_extract_payload_dict(response).keys())[:20],
+                list(_extract_payload_dict(getattr(op, 'metadata', None)).keys())[:20],
+                _compact_json(op),
+                _compact_json(response),
+                _compact_json(getattr(op, 'metadata', None)),
+            )
             return {
-                'status': 'SUCCEEDED',
+                # 某些 Veo preview 任务会先标记 done，再异步补齐可下载 URI；
+                # 返回 PROCESSING 让前端继续轮询，避免提前终止为“无视频地址”。
+                'status': 'PROCESSING',
                 'output': None,
-                'error': '视频生成完成但未返回视频地址',
+                'error': '任务已完成但视频地址尚未就绪，继续轮询中',
             }
         else:
             return {'status': 'PROCESSING'}
