@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
-import { Brain, Plug, Settings, MessageCircle, Globe, Bot, Users, BookOpen, Plus, FolderOpen, ImageIcon } from 'lucide-react';
+import { Brain, Plug, Settings, MessageCircle, Globe, Bot, Users, BookOpen, Plus, FolderOpen, ImageIcon, Video } from 'lucide-react';
 import appLogoDark from '../assets/app_logo_dark.png';
 import appLogoLight from '../assets/app_logo_light.png';
 import { Button } from './components/ui/Button';
@@ -117,8 +117,8 @@ const App: React.FC = () => {
     return lastSession;
   });
 
-  /** Chaya 二级 Tab: 'chat' = 对话, 'create' = 创作 (Chatu), 'discord' = Discord 管理 */
-  type ChayaSubTab = 'chat' | 'create' | 'discord';
+  /** Chaya 二级 Tab: chat / 图片生成 / 视频生成 / Discord */
+  type ChayaSubTab = 'chat' | 'image' | 'video' | 'discord';
   const [chayaSubTab, setChayaSubTab] = useState<ChayaSubTab>('chat');
   const [settings, setSettings] = useState<Settings>(() => {
     const saved = localStorage.getItem('settings');
@@ -237,13 +237,17 @@ const App: React.FC = () => {
 
   // 判断是否显示terminal独占页面
   
-  // 判断是否为 Chaya 主页面（含 chat / create 子 Tab）
-  const isChatPage = location.pathname === '/' || location.pathname === '/media-creator';
+  // 判断是否为 Chaya 主页面（含 chat / image / video 子 Tab）
+  const isChatPage = location.pathname === '/' || location.pathname === '/media-creator' || location.pathname === '/media-creator-image' || location.pathname === '/media-creator-video';
 
-  // 旧 /media-creator 路由兼容：自动切到 create tab 并重定向回 /
+  // 旧创作路由兼容：自动切到对应子 tab 并重定向回 /
   useEffect(() => {
-    if (location.pathname === '/media-creator') {
-      setChayaSubTab('create');
+    if (location.pathname === '/media-creator' || location.pathname === '/media-creator-image') {
+      setChayaSubTab('image');
+      navigate('/', { replace: true });
+    }
+    if (location.pathname === '/media-creator-video') {
+      setChayaSubTab('video');
       navigate('/', { replace: true });
     }
   }, [location.pathname, navigate]);
@@ -601,7 +605,7 @@ const App: React.FC = () => {
         >
           
           {isChatPage ? (
-          /* Chaya 主页面 — 含二级 Tab (对话 / 创作) */
+          /* Chaya 主页面 — 含二级 Tab (对话 / 图片 / 视频 / Discord) */
           <div className="relative flex flex-col flex-1 min-h-0 min-w-0 p-0">
             {/* ─── 二级 Tab 切换栏（纯图标） ─── */}
             <div className="chaya-sub-tabs flex items-center justify-center gap-1 py-1 px-2 flex-shrink-0">
@@ -615,11 +619,19 @@ const App: React.FC = () => {
               </button>
               <button
                 type="button"
-                className={`chaya-sub-tab chaya-sub-tab--create ${chayaSubTab === 'create' ? 'chaya-sub-tab--active' : ''}`}
-                onClick={() => setChayaSubTab('create')}
-                title="创作"
+                className={`chaya-sub-tab chaya-sub-tab--create ${chayaSubTab === 'image' ? 'chaya-sub-tab--active' : ''}`}
+                onClick={() => setChayaSubTab('image')}
+                title="图片生成"
               >
                 <ImageIcon className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                className={`chaya-sub-tab chaya-sub-tab--video ${chayaSubTab === 'video' ? 'chaya-sub-tab--active' : ''}`}
+                onClick={() => setChayaSubTab('video')}
+                title="视频生成"
+              >
+                <Video className="w-4 h-4" />
               </button>
               <button
                 type="button"
@@ -645,9 +657,13 @@ const App: React.FC = () => {
                     onToggleToolCalling={(enabled) => updateSettings({ enableToolCalling: enabled })}
                   />
                 </div>
-              ) : chayaSubTab === 'create' ? (
+              ) : chayaSubTab === 'image' ? (
                 <div className="h-full fade-in">
-                  <MediaCreatorPage embedded />
+                  <MediaCreatorPage embedded mode="image" />
+                </div>
+              ) : chayaSubTab === 'video' ? (
+                <div className="h-full fade-in">
+                  <MediaCreatorPage embedded mode="video" />
                 </div>
               ) : (
                 <div className="h-full fade-in">

@@ -51,7 +51,7 @@ def save_output():
 def list_outputs():
     """产出列表。Query: limit=50&offset=0"""
     try:
-        limit = min(int(request.args.get('limit', 50)), 100)
+        limit = min(int(request.args.get('limit', 50)), 500)
         offset = max(0, int(request.args.get('offset', 0)))
         svc = get_media_output_service()
         items = svc.list_outputs(limit=limit, offset=offset)

@@ -1,9 +1,8 @@
 /**
  * chatu 页
- * - Chaya 图片工具栏：水平滚动缩略图条，一键选用
  * - 创作区：图像 Tab（文生图 / 图生图）、视频 Tab
- *   图片来源：Chaya 工具栏选取、本地上传、剪贴板粘贴
- * - 媒体管理区
+ *   图片来源：本地上传、剪贴板粘贴、Chatu 创作产出
+ * - 媒体管理区：Chatu 创作产出，按时间分段展示
  *
  * 遵循 niho_color_rule 与 front-mainpanel-layout
  */
@@ -20,7 +19,6 @@ import {
   DialogDescription,
 } from './ui/Dialog';
 import { CapabilityIcons } from './ui/CapabilityIcons';
-import { messageApi, type Message } from '../services/api';
 import { mediaApi, type MediaProvider } from '../services/mediaApi';
 import { getSession } from '../services/sessionApi';
 import type { PersonaPreset } from '../services/roleApi';
@@ -32,12 +30,10 @@ import {
   Loader2,
   X,
   Download,
-  RefreshCw,
   Sparkles,
   Wand2,
   Upload,
   Clipboard,
-  ZoomIn,
   Tag,
   Plus,
   Save,
@@ -73,56 +69,35 @@ interface MediaItem {
   source?: 'chaya' | 'upload' | 'paste' | 'generated';
   /** 持久化产出 ID（后端 media_outputs.output_id） */
   output_id?: string;
+  /** 创建时间（ISO 字符串），用于按时间分段 */
+  created_at?: string;
+  /** 本地生成任务ID（用于并发占位与回填） */
+  job_id?: string;
+  /** 生成状态：pending=生成中，ready=完成，error=失败 */
+  status?: 'pending' | 'ready' | 'error';
+  error_message?: string;
 }
 
-/* ─── 从 Message[] 提取图片 ─── */
-function extractMediaFromMessages(messages: Message[]): MediaItem[] {
-  const out: MediaItem[] = [];
-  for (const msg of messages) {
-    let ext: any = msg.ext;
-    if (typeof ext === 'string') { try { ext = JSON.parse(ext); } catch { ext = null; } }
-    const collect = (list: any[], msgId?: string) => {
-      if (!Array.isArray(list)) return;
-      for (const m of list) {
-        if (!m || typeof m !== 'object') continue;
-        if (m.type && m.type !== 'image') continue;
-        const mime = m.mimeType || m.mime_type || 'image/png';
-        const raw = m.data ?? m.url ?? '';
-        const url = (typeof raw === 'string' && raw.startsWith('data:'))
-          ? raw
-          : (m.url || (raw ? `data:${mime};base64,${raw}` : ''));
-        if (url) out.push({ url, mimeType: mime, rawB64: typeof raw === 'string' && !raw.startsWith('data:') ? raw : undefined, messageId: msgId, source: 'chaya' });
-      }
-    };
-    if (ext) { collect(ext.media, msg.message_id); collect(ext.images, msg.message_id); }
-    const tc = msg.tool_calls as any;
-    if (tc) {
-      if (Array.isArray(tc)) { for (const item of tc) { if (item && typeof item === 'object' && Array.isArray(item.media)) collect(item.media, msg.message_id); } }
-      else if (typeof tc === 'object' && Array.isArray(tc.media)) collect(tc.media, msg.message_id);
-    }
-    let mcp: any = msg.mcpdetail;
-    if (typeof mcp === 'string') { try { mcp = JSON.parse(mcp); } catch { mcp = null; } }
-    if (mcp && Array.isArray(mcp.raw_result)) {
-      for (const item of mcp.raw_result) {
-        if (item?.type === 'image') {
-          const mime = item.mimeType || 'image/png';
-          const raw = item.data ?? item.url ?? '';
-          const url = (typeof raw === 'string' && raw.startsWith('data:'))
-            ? raw
-            : (item.url || (raw ? `data:${mime};base64,${raw}` : ''));
-          if (url) out.push({ url, mimeType: mime, rawB64: typeof raw === 'string' && !raw.startsWith('data:') ? raw : undefined, messageId: msg.message_id, source: 'chaya' });
-        }
-      }
-    }
-    if (msg.content) {
-      const b64Re = /data:image\/[^;]+;base64,[A-Za-z0-9+/=]{100,}/g;
-      let match: RegExpExecArray | null;
-      while ((match = b64Re.exec(msg.content)) !== null) {
-        out.push({ url: match[0], messageId: msg.message_id, source: 'chaya' });
-      }
-    }
-  }
-  return out;
+/** 按 created_at 得到时间分段标签（今天/昨天/N天前/更早），用于图库列表展示顺序 */
+function getDateLabel(iso: string | undefined): string {
+  if (!iso) return '更早';
+  const d = new Date(iso);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const itemDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const diffDays = Math.floor((today.getTime() - itemDay.getTime()) / (24 * 60 * 60 * 1000));
+  if (diffDays === 0) return '今天';
+  if (diffDays === 1) return '昨天';
+  if (diffDays <= 31) return `${diffDays}天前`;
+  return '更早';
+}
+
+function dateSegmentSortKey(label: string): number {
+  if (label === '今天') return 0;
+  if (label === '昨天') return 1;
+  const match = label.match(/^(\d+)天前$/);
+  if (match) return 2 + parseInt(match[1], 10);
+  return 999;
 }
 
 /* ─── File → MediaItem ─── */
@@ -207,26 +182,23 @@ function saveCustomPrompts(prompts: CustomPrompt[]) {
 interface MediaCreatorPageProps {
   /** 嵌入模式：不包裹 PageLayout，由父级提供布局 */
   embedded?: boolean;
+  /** 外部控制模式：both=页内可切换；image/video=固定模式 */
+  mode?: 'both' | 'image' | 'video';
 }
 
-const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false }) => {
+const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, mode = 'both' }) => {
   /* ─── State ─── */
-  const [chayaMedia, setChayaMedia] = useState<MediaItem[]>([]);
-  const [chayaLoading, setChayaLoading] = useState(true);
-
   const [providers, setProviders] = useState<MediaProvider[]>([]);
   const [providerLoading, setProviderLoading] = useState(true);
   /** 选中的 config_id（粒度到具体模型配置） */
   const [selectedConfigId, setSelectedConfigId] = useState('');
 
-  const [createTab, setCreateTab] = useState<CreateTab>('image');
+  const [createTab, setCreateTab] = useState<CreateTab>(mode === 'video' ? 'video' : 'image');
   const [showModelDialog, setShowModelDialog] = useState(false);
 
   // 统一图像生成（无图=文生图，有图=二创）
   const [refImages, setRefImages] = useState<MediaItem[]>([]);
   const [imgPrompt, setImgPrompt] = useState('');
-  const [imgLoading, setImgLoading] = useState(false);
-  const [imgResult, setImgResult] = useState<MediaItem | null>(null);
   const [imgError, setImgError] = useState<string | null>(null);
   // 拖拽高亮
   const [dragOver, setDragOver] = useState(false);
@@ -239,14 +211,8 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false })
   const [videoOutput, setVideoOutput] = useState<string | null>(null);
   const [videoError, setVideoError] = useState<string | null>(null);
 
-  // 创作产出媒体库（持久化懒加载：一次 10 条）
+  // 创作产出媒体库（全量加载）
   const [createdMedia, setCreatedMedia] = useState<MediaItem[]>([]);
-  const [createdMediaLoading, setCreatedMediaLoading] = useState(true);
-  const [createdMediaHasMore, setCreatedMediaHasMore] = useState(true);
-  const [createdMediaLoadingMore, setCreatedMediaLoadingMore] = useState(false);
-
-  // 素材库 Tab：Chaya / Chatu 创作
-  const [materialTab, setMaterialTab] = useState<'chaya' | 'chatu'>('chaya');
 
   // Chaya 人设
   const [chayaSystemPrompt, setChayaSystemPrompt] = useState('');
@@ -263,24 +229,14 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false })
 
   // Lightbox
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  // 紧凑图库滑动索引
+  const [galleryIndex, setGalleryIndex] = useState(0);
+
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
 
   /* ─── Load ─── */
-  const loadChayaMedia = useCallback(async () => {
-    setChayaLoading(true);
-    try {
-      const res = await messageApi.getMessagesPaginated(CHAYA_SESSION_ID, { limit: 200 });
-      setChayaMedia(extractMediaFromMessages(res.messages || []));
-    } catch {
-      try {
-        const msgs = await messageApi.getMessages(CHAYA_SESSION_ID, { limit: 200 });
-        setChayaMedia(extractMediaFromMessages(Array.isArray(msgs) ? msgs : []));
-      } catch { setChayaMedia([]); }
-    } finally { setChayaLoading(false); }
-  }, []);
-
   const loadProviders = useCallback(async () => {
     setProviderLoading(true);
     try {
@@ -312,17 +268,30 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false })
     } catch { /* ignore */ }
   }, []);
 
-  useEffect(() => { loadChayaMedia(); }, [loadChayaMedia]);
   useEffect(() => { loadProviders(); }, [loadProviders]);
   useEffect(() => { loadChayaPersona(); }, [loadChayaPersona]);
 
-  const PAGE_SIZE = 10;
-  /* ─── 持久化创作产出：懒加载，首次 10 条 ─── */
+  useEffect(() => {
+    if (mode === 'image' || mode === 'video') {
+      setCreateTab(mode);
+    }
+  }, [mode]);
+
+  useEffect(() => {
+    if (createdMedia.length === 0) {
+      setGalleryIndex(0);
+      return;
+    }
+    if (galleryIndex > createdMedia.length - 1) {
+      setGalleryIndex(createdMedia.length - 1);
+    }
+  }, [createdMedia.length, galleryIndex]);
+
+  const FULL_LOAD_LIMIT = 500;
+  /* ─── 持久化创作产出：全量加载 ─── */
   useEffect(() => {
     let cancelled = false;
-    setCreatedMediaLoading(true);
-    setCreatedMediaHasMore(true);
-    mediaApi.listOutputs(PAGE_SIZE, 0)
+    mediaApi.listOutputs(FULL_LOAD_LIMIT, 0)
       .then((res) => {
         if (cancelled) return;
         const list = res.items || [];
@@ -331,33 +300,13 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false })
           mimeType: o.mime_type,
           source: 'generated' as const,
           output_id: o.output_id,
+          created_at: o.created_at,
         }));
         setCreatedMedia(items);
-        setCreatedMediaHasMore(list.length >= PAGE_SIZE);
       })
-      .catch(() => { if (!cancelled) setCreatedMedia([]); setCreatedMediaHasMore(false); })
-      .finally(() => { if (!cancelled) setCreatedMediaLoading(false); });
+      .catch(() => { if (!cancelled) setCreatedMedia([]); })
     return () => { cancelled = true; };
   }, []);
-
-  const loadMoreCreatedMedia = useCallback(() => {
-    if (createdMediaLoadingMore || !createdMediaHasMore) return;
-    setCreatedMediaLoadingMore(true);
-    mediaApi.listOutputs(PAGE_SIZE, createdMedia.length)
-      .then((res) => {
-        const list = res.items || [];
-        const items: MediaItem[] = list.map((o) => ({
-          url: mediaApi.getOutputFileUrl(o.output_id),
-          mimeType: o.mime_type,
-          source: 'generated' as const,
-          output_id: o.output_id,
-        }));
-        setCreatedMedia((prev) => [...prev, ...items]);
-        setCreatedMediaHasMore(list.length >= PAGE_SIZE);
-      })
-      .catch(() => setCreatedMediaHasMore(false))
-      .finally(() => setCreatedMediaLoadingMore(false));
-  }, [createdMedia.length, createdMediaHasMore, createdMediaLoadingMore]);
 
   /* ─── 自定义提示词 CRUD ─── */
   const addCustomPrompt = () => {
@@ -460,9 +409,12 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false })
   /* ─── 添加到创作产出库 ─── */
   const addToCreated = useCallback((item: MediaItem) => {
     setCreatedMedia((prev) => {
-      // 去重（按 url 或 output_id）
-      if (prev.some((p) => p.url === item.url || (item.output_id && p.output_id === item.output_id))) return prev;
-      return [item, ...prev];
+      // 去重（按 job_id / output_id / 有效 url）
+      if (item.job_id && prev.some((p) => p.job_id === item.job_id)) return prev;
+      if (item.output_id && prev.some((p) => p.output_id === item.output_id)) return prev;
+      if (item.url && prev.some((p) => p.url === item.url)) return prev;
+      const withTime = { ...item, created_at: item.created_at ?? new Date().toISOString() };
+      return [withTime, ...prev];
     });
   }, []);
 
@@ -505,8 +457,14 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false })
         return;
       }
       const fileUrl = mediaApi.getOutputFileUrl(res.output_id);
+      const createdAt = (res as { created_at?: string }).created_at ?? new Date().toISOString();
       setCreatedMedia((prev) =>
-        prev.map((p) => (p.url === item.url ? { ...p, url: fileUrl, output_id: res.output_id } : p))
+        prev.map((p) => {
+          const byJob = item.job_id && p.job_id === item.job_id;
+          const byUrl = item.url && p.url === item.url;
+          if (!byJob && !byUrl) return p;
+          return { ...p, url: fileUrl, output_id: res.output_id, created_at: createdAt, status: 'ready', error_message: undefined };
+        })
       );
     } catch (e) {
       console.warn('[chatu] 保存产出异常:', e);
@@ -521,7 +479,6 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false })
       if (prev.some((p) => p.url === item.url)) return prev;
       return [...prev, item];
     });
-    setImgResult(null);
     setImgError(null);
     if (createTab !== 'image') setCreateTab('image');
   };
@@ -593,13 +550,25 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false })
   /* ─── 统一图像生成（无图=文生图，有图=二创，支持多图） ─── */
   const handleGenerate = async () => {
     if (!imgPrompt.trim() || !activeConfig) return;
-    setImgLoading(true); setImgError(null); setImgResult(null);
+    setImgError(null);
+
     const isEdit = refImages.length > 0;
+    const jobId = `img-job-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    // 先插入“生成中”占位，复用下方图库区域
+    addToCreated({
+      url: '',
+      mimeType: 'image/png',
+      source: 'generated',
+      created_at: new Date().toISOString(),
+      job_id: jobId,
+      status: 'pending',
+    });
+
     try {
       let result: any;
       const cfgId = activeConfig.config_id;
       if (isEdit) {
-        // 二创（图生图）— 传所有参考图
         const images_b64 = refImages.map((img) => ({
           data: getB64(img),
           mime: img.mimeType || 'image/png',
@@ -615,26 +584,38 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false })
           throw new Error(`不支持的图像供应商: ${activeProviderId}`);
         }
       } else {
-        // 文生图
         if (activeProviderId === 'gemini') {
           result = await mediaApi.geminiImageGenerate({ prompt: imgPrompt, config_id: cfgId });
         } else {
           throw new Error(`不支持的图像供应商: ${activeProviderId}`);
         }
       }
+
       if (result.error) throw new Error(result.error);
       const m = result.media?.[0];
       if (!m) throw new Error('未返回图片');
+
       const mime = m.mimeType || 'image/png';
       const url = m.url || (m.data ? `data:${mime};base64,${m.data}` : '');
-      if (url) {
-        const item: MediaItem = { url, mimeType: mime, rawB64: m.data, source: 'generated' };
-        setImgResult(item);
-        addToCreated(item);
-        persistCreatedItem(item);
-      }
-    } catch (e: any) { setImgError(e?.message || String(e)); }
-    finally { setImgLoading(false); }
+      if (!url) throw new Error('未返回可用图片URL');
+
+      const finalItem: MediaItem = {
+        url,
+        mimeType: mime,
+        rawB64: m.data,
+        source: 'generated',
+        created_at: new Date().toISOString(),
+        job_id: jobId,
+        status: 'ready',
+      };
+
+      setCreatedMedia((prev) => prev.map((p) => (p.job_id === jobId ? { ...p, ...finalItem } : p)));
+      persistCreatedItem(finalItem);
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      setImgError(msg);
+      setCreatedMedia((prev) => prev.map((p) => (p.job_id === jobId ? { ...p, status: 'error', error_message: msg } : p)));
+    }
   };
 
   /* ─── 视频（支持 Gemini/Veo 和 Runway） ─── */
@@ -747,154 +728,35 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false })
   /* ─── 隐藏 file input ─── */
   const triggerFileInput = () => fileInputRef.current?.click();
 
+  const pendingImageJobs = createdMedia.filter((i) => i.status === 'pending').length;
+
+  const removeCreatedItem = async (item: MediaItem, index: number) => {
+    if (item.output_id) {
+      try { await mediaApi.deleteOutput(item.output_id); } catch { /* ignore */ }
+    }
+    setCreatedMedia((prev) => prev.filter((_, i) => i !== index));
+  };
+
   /* ═══════════════ RENDER ═══════════════ */
 
   const mainContent = (
     <>
       <div className="chatu-page max-w-6xl mx-auto flex flex-col gap-4">
-        {/* ═══ 顶部：素材库（Tab：Chaya / Chatu 创作） ═══ */}
-        <div className={`niho-card-1 rounded-lg border ${panelClass} p-3 space-y-3`}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 border-b border-transparent">
-              <button
-                type="button"
-                className={`pb-1.5 text-[11px] font-medium border-b-2 transition-colors ${materialTab === 'chaya' ? 'border-[var(--color-accent)] text-[var(--color-accent)]' : `border-transparent ${textMuted}`}`}
-                onClick={() => setMaterialTab('chaya')}
-              >
-                Chaya
-              </button>
-              <button
-                type="button"
-                className={`pb-1.5 text-[11px] font-medium border-b-2 transition-colors ${materialTab === 'chatu' ? 'border-[var(--color-secondary)] text-[var(--color-secondary)]' : `border-transparent ${textMuted}`}`}
-                onClick={() => setMaterialTab('chatu')}
-              >
-                Chatu 创作
-              </button>
-            </div>
-          </div>
-          {materialTab === 'chaya' && (
-            <div className="min-w-0">
-              <p className={`text-[10px] ${textMuted} mb-1.5 flex items-center gap-1`}>
-                {chayaLoading ? '...' : `${chayaMedia.length} 张`}
-                <button type="button" onClick={loadChayaMedia} disabled={chayaLoading} className="p-0.5 rounded hover:bg-white/10" title="刷新">
-                  <RefreshCw className={`w-3 h-3 ${chayaLoading ? 'animate-spin' : ''}`} />
-                </button>
-              </p>
-              <div className="flex gap-2 overflow-x-auto no-scrollbar py-1">
-                {chayaMedia.length === 0 && !chayaLoading ? (
-                  <span className={`text-[10px] ${textMuted}`}>暂无 — 与 Chaya 对话后出现</span>
-                ) : chayaLoading ? (
-                  <Loader2 className="w-4 h-4 animate-spin text-[var(--color-accent)]" />
-                ) : (
-                  chayaMedia.map((item, i) => {
-                    const isActive = refImages.some((r) => r.url === item.url);
-                    const src = safeImgSrc(item.url);
-                    return (
-                      <div
-                        key={i}
-                        className={`chatu-thumb flex-shrink-0 w-14 h-14 rounded-md overflow-hidden cursor-pointer border-2 transition-all
-                          ${isActive ? 'chatu-thumb--active border-[var(--color-accent)]' : 'border-transparent hover:border-[var(--color-accent)]/40'}`}
-                        onClick={() => pickRefImage(item)}
-                        title="选用"
-                      >
-                        {src ? (
-                          <img src={src} alt="" className="w-full h-full object-cover bg-black" />
-                        ) : (
-                          <div className="w-full h-full bg-black flex items-center justify-center text-[var(--niho-skyblue-gray)]">
-                            <ImageIcon className="w-6 h-6" />
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          )}
-          {materialTab === 'chatu' && (
-            <div className="min-w-0">
-              <p className={`text-[10px] ${textMuted} mb-1.5 flex items-center gap-1`}>
-                {createdMediaLoading ? '加载中...' : `${createdMedia.length} 项`}
-                {createdMedia.length > 0 && (
-                  <button type="button" className="p-0.5 rounded hover:bg-white/10" title="清空" onClick={async () => {
-                    await Promise.all(createdMedia.filter((i) => i.output_id).map((i) => mediaApi.deleteOutput(i.output_id!)));
-                    setCreatedMedia([]);
-                  }}>
-                    <X className="w-3 h-3" />
-                  </button>
-                )}
-              </p>
-              <div className="flex gap-2 overflow-x-auto no-scrollbar py-1">
-                {createdMediaLoading ? (
-                  <Loader2 className="w-4 h-4 animate-spin text-[var(--color-secondary)]" />
-                ) : createdMedia.length === 0 ? (
-                  <span className={`text-[10px] ${textMuted}`}>生成后自动保存并出现在这里</span>
-                ) : (
-                  <>
-                    {createdMedia.map((item, i) => {
-                      const isVideo = item.mimeType?.startsWith('video/');
-                      const isActive = refImages.some((r) => r.url === item.url);
-                      return (
-                        <div
-                          key={`c-${i}`}
-                          className={`chatu-thumb flex-shrink-0 w-14 h-14 rounded-md overflow-hidden cursor-pointer border-2 transition-all relative group/ct
-                            ${isActive ? 'chatu-thumb--active-pink border-[var(--color-secondary)]' : 'border-transparent hover:border-[var(--color-secondary)]/40'}`}
-                          onClick={() => !isVideo && pickRefImage(item)}
-                          title={isVideo ? '视频' : '选用二创'}
-                        >
-                          {isVideo ? (
-                            <div className="w-full h-full bg-black flex items-center justify-center">
-                              <Film className="w-4 h-4 text-[var(--color-secondary)]" />
-                            </div>
-                          ) : (() => {
-                            const src = safeImgSrc(item.url);
-                            return src ? (
-                              <img src={src} alt="" className="w-full h-full object-cover bg-black" />
-                            ) : (
-                              <div className="w-full h-full bg-black flex items-center justify-center text-[var(--niho-skyblue-gray)]">
-                                <ImageIcon className="w-6 h-6" />
-                              </div>
-                            );
-                          })()}
-                          <div className="absolute inset-0 bg-black/0 group-hover/ct:bg-black/40 flex items-end justify-center opacity-0 group-hover/ct:opacity-100 pb-0.5 gap-0.5 transition-colors">
-                            <button className="p-0.5 rounded bg-black/60 text-white" onClick={(e) => { e.stopPropagation(); isVideo ? window.open(item.url, '_blank') : setLightboxUrl(resolveMediaSrc(item.url ?? '')); }}><ZoomIn className="w-2.5 h-2.5" /></button>
-                            <button className="p-0.5 rounded bg-black/60 text-white" onClick={(e) => { e.stopPropagation(); dl(item.output_id ? `${mediaApi.getOutputFileUrl(item.output_id)}?download=1` : resolveMediaSrc(item.url ?? ''), isVideo ? `video-${i}.mp4` : `created-${i}.png`); }}><Download className="w-2.5 h-2.5" /></button>
-                          </div>
-                          <span className="absolute top-0 left-0 text-[7px] px-0.5 rounded-br bg-[var(--color-secondary)]/80 text-white">{isVideo ? '视频' : '图'}</span>
-                        </div>
-                      );
-                    })}
-                    {createdMediaHasMore && (
-                      <button
-                        type="button"
-                        className="flex-shrink-0 w-14 h-14 rounded-md border-2 border-dashed border-[var(--niho-text-border)] flex items-center justify-center text-[10px] text-[var(--niho-skyblue-gray)] hover:border-[var(--color-secondary)]/50 hover:text-[var(--color-secondary)] transition-colors disabled:opacity-50"
-                        onClick={loadMoreCreatedMedia}
-                        disabled={createdMediaLoadingMore}
-                        title="加载更多"
-                      >
-                        {createdMediaLoadingMore ? <Loader2 className="w-4 h-4 animate-spin" /> : '加载更多'}
-                      </button>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-
         <div className="flex-1 min-w-0 space-y-6">
         {/* ════════ 创作区 ════════ */}
         <Card title="创作区" variant="persona" size="relaxed">
           <div className="space-y-4">
-            {/* Tab */}
-            <div className="flex gap-6 border-b border-gray-200 dark:border-[#333]">
-              <button type="button" className={createTab === 'image' ? tabActive : tabInactive} onClick={() => setCreateTab('image')}>
-                <span className="flex items-center gap-1.5"><ImageIcon className="w-4 h-4" /> 图像</span>
-              </button>
-              <button type="button" className={createTab === 'video' ? tabActive : tabInactive} onClick={() => setCreateTab('video')}>
-                <span className="flex items-center gap-1.5"><Film className="w-4 h-4" /> 视频</span>
-              </button>
-            </div>
+            {/* Tab（仅 both 模式显示） */}
+            {mode === 'both' && (
+              <div className="flex gap-6 border-b border-gray-200 dark:border-[#333]">
+                <button type="button" className={createTab === 'image' ? tabActive : tabInactive} onClick={() => setCreateTab('image')}>
+                  <span className="flex items-center gap-1.5"><ImageIcon className="w-4 h-4" /> 图像</span>
+                </button>
+                <button type="button" className={createTab === 'video' ? tabActive : tabInactive} onClick={() => setCreateTab('video')}>
+                  <span className="flex items-center gap-1.5"><Film className="w-4 h-4" /> 视频</span>
+                </button>
+              </div>
+            )}
 
             {/* 模型选择 — 图像 Tab 时右侧放生成按钮 */}
             {providerLoading ? (
@@ -932,11 +794,11 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false })
                   <Button
                     className={refImages.length > 0 ? btnPink : btnPrimary}
                     size="sm"
-                    disabled={imgLoading || !imgPrompt.trim() || !activeConfig}
+                    disabled={!imgPrompt.trim() || !activeConfig}
                     onClick={handleGenerate}
                   >
-                    {imgLoading
-                      ? <><Loader2 className="w-4 h-4 animate-spin mr-1" /> 生成中...</>
+                    {pendingImageJobs > 0
+                      ? <><Loader2 className="w-4 h-4 animate-spin mr-1" /> 生成中({pendingImageJobs})</>
                       : refImages.length > 0
                         ? <><Sparkles className="w-4 h-4 mr-1" /> 二创</>
                         : <><Wand2 className="w-4 h-4 mr-1" /> 生成</>
@@ -1000,7 +862,7 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false })
                               <X className="w-2.5 h-2.5" />
                             </button>
                             <span className="absolute bottom-0.5 left-0.5 text-[7px] px-0.5 py-0 rounded bg-black/60 text-white leading-tight">
-                              {img.source === 'chaya' ? 'Chaya' : img.source === 'upload' ? '上传' : img.source === 'paste' ? '粘贴' : '生成'}
+                              {img.source === 'upload' ? '上传' : img.source === 'paste' ? '粘贴' : '生成'}
                             </span>
                           </div>
                           );
@@ -1314,7 +1176,7 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false })
                     rows={4}
                     value={imgPrompt}
                     onChange={(e) => setImgPrompt(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !imgLoading) { e.preventDefault(); handleGenerate(); } }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleGenerate(); } }}
                   />
 
                   {/* 操作栏：清空描述等，生成按钮已移至模型选择右侧 */}
@@ -1333,48 +1195,124 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false })
                   {imgError && <p className="text-xs text-[var(--color-secondary)]">{imgError}</p>}
                 </div>
 
-                {/* ═══ 右栏：结果区 ═══ */}
-                <div className="space-y-4 min-w-0">
-                  {/* 最新结果 */}
-                  {imgResult && (() => {
-                    const resultSrc = safeImgSrc(imgResult.url);
-                    return (
-                    <div className={`niho-card-3 ${panelClass} p-4 space-y-3`}>
-                      <p className={`text-xs font-medium ${textPrimary} flex items-center gap-1.5`}>
-                        <Wand2 className="w-3.5 h-3.5 text-[var(--color-accent)]" /> 生成结果
-                      </p>
-                      {resultSrc ? (
-                        <img
-                          src={resultSrc}
-                          alt="生成结果"
-                          className="rounded-md border border-gray-200 dark:border-[#333] w-full h-auto max-h-[320px] object-contain cursor-pointer"
-                          onClick={() => setLightboxUrl(resolveMediaSrc(imgResult!.url ?? ''))}
-                        />
-                      ) : (
-                        <div className="rounded-md border border-gray-200 dark:border-[#333] w-full min-h-[120px] flex items-center justify-center bg-black/50 text-[var(--niho-skyblue-gray)]">
-                          <ImageIcon className="w-10 h-10" />
-                        </div>
-                      )}
-                      <div className="flex gap-2">
-                        <Button size="sm" className={btnSecondary} onClick={() => resultSrc && dl(resultSrc, 'gen.png')}>
-                          <Download className="w-3.5 h-3.5 mr-1" /> 下载
-                        </Button>
-                        <Button size="sm" className={btnPink} onClick={() => pickRefImage(imgResult)}>
-                          <Sparkles className="w-3.5 h-3.5 mr-1" /> 用于二创
-                        </Button>
+                {/* ═══ 右栏：当前大图 + 图库列表（按时间分段） ═══ */}
+                <div className="space-y-3 min-w-0 flex flex-col">
+                  <div className={`niho-card-3 ${panelClass} p-3 space-y-3 flex-1 min-h-0 flex flex-col`}>
+                    {createdMedia.length === 0 ? (
+                      <div className={`chatu-empty-result ${panelClass} p-6 flex flex-col items-center justify-center min-h-[260px]`}>
+                        <ImageIcon className={`w-10 h-10 ${textMuted} opacity-30 mb-3`} />
+                        <p className={`text-xs ${textMuted}`}>生成结果将在这里展示</p>
+                        <p className={`text-[10px] ${textMuted} opacity-60 mt-1`}>左侧输入提示词后点击生成</p>
                       </div>
-                    </div>
-                    );
-                  })()}
-
-                  {/* 空结果提示 */}
-                  {!imgResult && (
-                    <div className={`chatu-empty-result niho-card-1 ${panelClass} p-6 flex flex-col items-center justify-center min-h-[200px]`}>
-                      <ImageIcon className={`w-10 h-10 ${textMuted} opacity-30 mb-3`} />
-                      <p className={`text-xs ${textMuted}`}>生成结果将显示在此处</p>
-                      <p className={`text-[10px] ${textMuted} opacity-60 mt-1`}>在左侧输入提示词后点击生成</p>
-                    </div>
-                  )}
+                    ) : (() => {
+                      const main = createdMedia[galleryIndex] ?? createdMedia[0];
+                      const mainIsVideo = !!main?.mimeType?.startsWith('video/');
+                      const mainSrc = safeImgSrc(main?.url);
+                      const mainPending = main?.status === 'pending';
+                      const mainError = main?.status === 'error';
+                      const timeGroups = (() => {
+                        const withLabel = createdMedia.map((item, i) => ({ item, index: i, label: getDateLabel(item.created_at) }));
+                        const map = new Map<string, { item: MediaItem; index: number }[]>();
+                        withLabel.forEach(({ item, index, label }) => {
+                          if (!map.has(label)) map.set(label, []);
+                          map.get(label)!.push({ item, index });
+                        });
+                        const order = Array.from(map.keys()).sort((a, b) => dateSegmentSortKey(a) - dateSegmentSortKey(b));
+                        return order.map((label) => ({ label, items: map.get(label)! }));
+                      })();
+                      return (
+                        <>
+                          <div className="flex items-center justify-between">
+                            <p className={`text-xs font-medium ${textPrimary} flex items-center gap-1.5`}>
+                              <Sparkles className="w-3.5 h-3.5 text-[var(--color-secondary)]" /> 当前图片
+                            </p>
+                            <span className={`text-[10px] ${textMuted}`}>{createdMedia.length} 项</span>
+                          </div>
+                          <div className="relative rounded-lg overflow-hidden border border-[var(--niho-text-border)] bg-black aspect-[4/3] max-h-[320px] min-h-[200px] group/main flex-shrink-0">
+                            {mainPending ? (
+                              <div className="chatu-generating-spectrum-strong w-full h-full flex flex-col items-center justify-center gap-2 text-[var(--niho-skyblue-gray)]">
+                                <span className="text-[11px] font-medium text-white/90">图片生成中...</span>
+                              </div>
+                            ) : mainError ? (
+                              <div className="w-full h-full flex flex-col items-center justify-center gap-1 text-[var(--color-secondary)] px-3">
+                                <X className="w-6 h-6" />
+                                <span className="text-[10px] text-center">{main?.error_message || '生成失败'}</span>
+                              </div>
+                            ) : mainIsVideo ? (
+                              <button type="button" className="w-full h-full flex items-center justify-center" onClick={() => main && window.open(main.url, '_blank')}>
+                                <Film className="w-10 h-10 text-[var(--color-secondary)]" />
+                              </button>
+                            ) : mainSrc ? (
+                              <img src={mainSrc} alt="当前图片" className="w-full h-full object-contain cursor-pointer" onClick={() => main && setLightboxUrl(resolveMediaSrc(main.url ?? ''))} />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-[var(--niho-skyblue-gray)]">
+                                <ImageIcon className="w-8 h-8" />
+                              </div>
+                            )}
+                            <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover/main:opacity-100 transition-opacity">
+                              <button type="button" className="p-1 rounded bg-black/60 text-white hover:bg-[var(--color-secondary)]/80" onClick={() => main && removeCreatedItem(main, galleryIndex)} title="删除">
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                              {!mainPending && !mainError && !mainIsVideo && mainSrc && (
+                                <button type="button" className="p-1 rounded bg-black/60 text-white hover:bg-black/80" onClick={() => dl(mainSrc, 'gen.png')} title="下载">
+                                  <Download className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex flex-col gap-3 min-h-0 overflow-hidden">
+                            <p className={`text-[10px] font-medium ${textMuted} flex-shrink-0`}>图库（按时间）</p>
+                            <div className="flex flex-col gap-2 overflow-y-auto no-scrollbar min-h-0">
+                              {timeGroups.map(({ label, items }) => (
+                                <div key={label} className="flex-shrink-0">
+                                  <p className={`text-[10px] ${textMuted} mb-1.5`}>{label}</p>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {items.map(({ item, index }) => {
+                                      const src = safeImgSrc(item.url);
+                                      const isVideo = !!item.mimeType?.startsWith('video/');
+                                      const isPending = item.status === 'pending';
+                                      const isError = item.status === 'error';
+                                      const active = index === galleryIndex;
+                                      return (
+                                        <div key={`lib-${item.output_id || item.job_id || index}`} className="relative group/thumb">
+                                          <button
+                                            type="button"
+                                            className={`flex-shrink-0 w-12 h-12 rounded border overflow-hidden ${active ? 'border-[var(--color-secondary)] ring-1 ring-[var(--color-secondary)]/50' : 'border-[var(--niho-text-border)]'} bg-black`}
+                                            onClick={() => setGalleryIndex(index)}
+                                            title={isVideo ? '视频' : '图片'}
+                                          >
+                                            {isPending ? (
+                                              <div className="chatu-generating-spectrum w-full h-full" title="生成中" />
+                                            ) : isError ? (
+                                              <div className="w-full h-full flex items-center justify-center"><X className="w-3 h-3 text-[var(--color-secondary)]" /></div>
+                                            ) : isVideo ? (
+                                              <div className="w-full h-full flex items-center justify-center"><Film className="w-3 h-3 text-[var(--color-secondary)]" /></div>
+                                            ) : src ? (
+                                              <img src={src} alt="" className="w-full h-full object-cover" />
+                                            ) : (
+                                              <div className="w-full h-full flex items-center justify-center text-[var(--niho-skyblue-gray)]"><ImageIcon className="w-3 h-3" /></div>
+                                            )}
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="absolute -top-0.5 -right-0.5 p-0.5 rounded bg-black/80 text-white opacity-0 group-hover/thumb:opacity-100 transition-opacity"
+                                            onClick={(e) => { e.stopPropagation(); removeCreatedItem(item, index); }}
+                                            title="删除"
+                                          >
+                                            <X className="w-2.5 h-2.5" />
+                                          </button>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
                 </div>
               </div>
             )}
@@ -1434,7 +1372,7 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false })
                       <Button variant="outline" size="sm" className={btnSecondary} onClick={triggerFileInput}>
                         <Upload className="w-3.5 h-3.5 mr-1" /> 上传首帧
                       </Button>
-                      <span className={`text-xs self-center ${textMuted}`}>或从 Chaya 工具栏选取，或拖拽/粘贴</span>
+                      <span className={`text-xs self-center ${textMuted}`}>或拖拽/粘贴</span>
                     </div>
                   )}
 
@@ -1567,6 +1505,7 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false })
             )}
           </div>
         </Card>
+
         </div>
       </div>
 

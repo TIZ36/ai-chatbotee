@@ -13,6 +13,11 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5177,
     strictPort: true,
+    // 使用 0.0.0.0 时 HMR WebSocket 会拿到错误地址，需显式指定
+    hmr: {
+      host: 'localhost',
+      port: 5177,
+    },
     watch: {
       // 忽略不需要监视的目录，减少文件监视器数量
       ignored: [
