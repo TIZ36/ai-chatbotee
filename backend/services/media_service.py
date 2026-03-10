@@ -202,14 +202,23 @@ def _create_genai_client(config: dict):
     return genai.Client(api_key=api_key)
 
 
-def _imagen_generate_via_sdk(client, model: str, prompt: str) -> Dict[str, Any]:
+# Imagen 支持的宽高比（与 Vertex 文档一致）
+_IMAGEN_ASPECT_RATIOS = frozenset({'1:1', '3:4', '4:3', '9:16', '16:9'})
+
+
+def _imagen_generate_via_sdk(client, model: str, prompt: str,
+                             number_of_images: int = 1,
+                             aspect_ratio: Optional[str] = None) -> Dict[str, Any]:
     """
     通过 google.genai Client 的 generate_images 调用 Imagen（仅文生图）。
     Imagen 不支持 generateContent，必须用此专用 API。
     """
     try:
         from google.genai import types as genai_types
-        config = genai_types.GenerateImagesConfig(number_of_images=1)
+        config_kw = {'number_of_images': max(1, min(4, number_of_images))}
+        if aspect_ratio and aspect_ratio in _IMAGEN_ASPECT_RATIOS:
+            config_kw['aspect_ratio'] = aspect_ratio
+        config = genai_types.GenerateImagesConfig(**config_kw)
         response = client.models.generate_images(
             model=model,
             prompt=prompt or 'A beautiful image',
@@ -226,8 +235,6 @@ def _imagen_generate_via_sdk(client, model: str, prompt: str) -> Dict[str, Any]:
                 media.append({'type': 'image', 'mimeType': 'image/png', 'data': base64.b64encode(raw).decode('ascii')})
             elif isinstance(raw, str):
                 media.append({'type': 'image', 'mimeType': 'image/png', 'data': raw})
-            if media:
-                break
         if media:
             return {'media': media, 'content': ''}
         return {'error': 'Imagen 未返回图像'}
@@ -236,7 +243,9 @@ def _imagen_generate_via_sdk(client, model: str, prompt: str) -> Dict[str, Any]:
         return {'error': str(e)}
 
 
-def _imagen_generate_via_rest(api_key: str, base_url: str, model: str, prompt: str) -> Dict[str, Any]:
+def _imagen_generate_via_rest(api_key: str, base_url: str, model: str, prompt: str,
+                              sample_count: int = 1,
+                              aspect_ratio: Optional[str] = None) -> Dict[str, Any]:
     """
     Imagen 通过 REST :predict 调用（与 Gemini generateContent 不同）。
     https://ai.google.dev/gemini-api/docs/imagen
@@ -247,9 +256,12 @@ def _imagen_generate_via_rest(api_key: str, base_url: str, model: str, prompt: s
             url = url[:-len(suffix)]
             break
     predict_url = f'{url}/v1beta/models/{model}:predict'
+    parameters = {'sampleCount': max(1, min(4, sample_count))}
+    if aspect_ratio and aspect_ratio in _IMAGEN_ASPECT_RATIOS:
+        parameters['aspectRatio'] = aspect_ratio
     payload = {
         'instances': [{'prompt': prompt or 'A beautiful image'}],
-        'parameters': {'sampleCount': 1},
+        'parameters': parameters,
     }
     headers = {'x-goog-api-key': api_key, 'Content-Type': 'application/json'}
     try:
@@ -267,7 +279,6 @@ def _imagen_generate_via_rest(api_key: str, base_url: str, model: str, prompt: s
             )
             if b64:
                 media.append({'type': 'image', 'mimeType': 'image/png', 'data': b64})
-                break
         if media:
             return {'media': media, 'content': ''}
         return {'error': 'Imagen 响应中无图像', 'raw': data}
@@ -275,12 +286,18 @@ def _imagen_generate_via_rest(api_key: str, base_url: str, model: str, prompt: s
         return {'error': str(e)}
 
 
-def gemini_image_generate(prompt: str, config_id: Optional[str] = None, model: Optional[str] = None) -> Dict[str, Any]:
+# Gemini 2.5 Flash Image 支持的宽高比（与官方文档一致）
+_GEMINI_IMAGE_ASPECT_RATIOS = frozenset({'1:1', '3:2', '2:3', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'})
+
+
+def gemini_image_generate(prompt: str, config_id: Optional[str] = None, model: Optional[str] = None,
+                          aspect_ratio: Optional[str] = None,
+                          count: Optional[int] = None) -> Dict[str, Any]:
     """
     文生图（Gemini / Imagen）。
-    - Gemini 图像模型（如 gemini-2.5-flash-image）：走 generateContent。
-    - Imagen 模型（imagen-3.x / imagen-4.x）：走 generate_images/:predict，不支持 generateContent。
-    Returns: {'media': [{'type':'image','mimeType':...,'data':base64}], 'content': str} or {'error': str}
+    - Gemini 图像模型（如 gemini-2.5-flash-image）：走 generateContent，支持 aspect_ratio、count。
+    - Imagen 模型（imagen-3.x / imagen-4.x）：走 generate_images/:predict，支持 aspect_ratio、count。
+    Returns: {'media': [{'type':'image','mimeType':...,'data':base64}, ...], 'content': str} or {'error': str}
     """
     try:
         svc = _get_llm_service()
@@ -294,23 +311,32 @@ def gemini_image_generate(prompt: str, config_id: Optional[str] = None, model: O
         if provider_type not in ('gemini', 'google'):
             return {'error': 'Config is not Gemini'}
         use_model = model or config.get('model') or 'gemini-2.5-flash-image'
+        num_images = max(1, min(4, count or 1))
+        # 归一化宽高比：Imagen 仅支持 1:1,3:4,4:3,9:16,16:9；Gemini 支持更多
+        ar_imagen = aspect_ratio if (aspect_ratio and aspect_ratio in _IMAGEN_ASPECT_RATIOS) else None
+        ar_gemini = aspect_ratio if (aspect_ratio and aspect_ratio in _GEMINI_IMAGE_ASPECT_RATIOS) else None
 
         # Imagen 系列：使用 generate_images API，不能用 generateContent
         if _is_imagen_model(use_model):
             client = _create_genai_client(config)
-            result = _imagen_generate_via_sdk(client, use_model, prompt or '请生成一张图')
+            result = _imagen_generate_via_sdk(
+                client, use_model, prompt or '请生成一张图',
+                number_of_images=num_images, aspect_ratio=ar_imagen
+            )
             err = (result.get('error') or '').lower()
-            # SDK 无 generate_images 或服务端返回 not supported/404 时回退 REST :predict
             if 'error' in result and any(
                 x in err for x in ('generate_content', 'not supported', 'not found', '404', 'generate_images', 'attribute')
             ):
                 base_url = (config.get('api_url') or '').rstrip('/') or 'https://generativelanguage.googleapis.com'
                 result = _imagen_generate_via_rest(
-                    config['api_key'], base_url, use_model, prompt or '请生成一张图'
+                    config['api_key'], base_url, use_model, prompt or '请生成一张图',
+                    sample_count=num_images, aspect_ratio=ar_imagen
                 )
+            if not result.get('error') and result.get('media'):
+                result['media'] = _ensure_media_json_serializable(result['media'])
             return result
 
-        # Gemini 图像模型：走 generateContent
+        # Gemini 图像模型：走 generateContent，传入 aspect_ratio 与 candidate_count
         provider = create_provider(
             provider_type=provider_type,
             api_key=config['api_key'],
@@ -322,11 +348,15 @@ def gemini_image_generate(prompt: str, config_id: Optional[str] = None, model: O
             LLMMessage(role='system', content='你是一个 AI 画师。根据用户的文字描述生成一张图片。只输出图像，不要输出多余文字。'),
             LLMMessage(role='user', content=prompt or '请生成一张图'),
         ]
-        resp = provider.chat(llm_messages)
+        resp = provider.chat(
+            llm_messages,
+            image_aspect_ratio=ar_gemini,
+            image_candidate_count=num_images,
+        )
         media = getattr(resp, 'media', None) or []
-        for item in media:
-            if (item or {}).get('type') == 'image' and (item or {}).get('data'):
-                return {'media': _ensure_media_json_serializable([item]), 'content': (resp.content or '').strip()}
+        image_items = [item for item in media if (item or {}).get('type') == 'image' and (item or {}).get('data')]
+        if image_items:
+            return {'media': _ensure_media_json_serializable(image_items), 'content': (resp.content or '').strip()}
         return {'error': '模型未返回图像', 'content': (resp.content or '').strip()}
     except Exception as e:
         return {'error': str(e)}
@@ -335,12 +365,14 @@ def gemini_image_generate(prompt: str, config_id: Optional[str] = None, model: O
 def gemini_image_edit(prompt: str, image_b64: Optional[str] = None,
                       images_b64: Optional[List[str]] = None,
                       config_id: Optional[str] = None,
-                      model: Optional[str] = None, thought_signature: Optional[str] = None) -> Dict[str, Any]:
+                      model: Optional[str] = None, thought_signature: Optional[str] = None,
+                      aspect_ratio: Optional[str] = None,
+                      count: Optional[int] = None) -> Dict[str, Any]:
     """
-    图生图（Gemini）：支持单张或多张参考图。
-    - image_b64: 单张兼容（向后兼容）
-    - images_b64: 多张参考图 base64 列表
-    - Imagen 系列仅支持文生图，不支持图生图；此处会返回友好错误并建议使用 Gemini 图像模型。
+    图生图（Gemini）：支持单张或多张参考图；支持指定输出宽高比与数量。
+    - image_b64 / images_b64: 参考图
+    - aspect_ratio: 输出宽高比（如 1:1, 16:9），图生图时也生效
+    - count: 生成张数（1–4）
     """
     try:
         svc = _get_llm_service()
@@ -360,6 +392,9 @@ def gemini_image_edit(prompt: str, image_b64: Optional[str] = None,
             return {
                 'error': '当前选择的 Imagen 模型仅支持「文生图」，不支持图生图或参考图编辑。请改用 Gemini 图像模型（如 gemini-2.5-flash-image）进行图生图，或使用「文生图」功能。',
             }
+
+        ar_gemini = aspect_ratio if (aspect_ratio and aspect_ratio in _GEMINI_IMAGE_ASPECT_RATIOS) else None
+        num_output = max(1, min(4, count or 1))
 
         provider = create_provider(
             provider_type=provider_type,
@@ -397,11 +432,15 @@ def gemini_image_edit(prompt: str, image_b64: Optional[str] = None,
             LLMMessage(role='system', content=sys_prompt),
             LLMMessage(role='user', content=prompt or '请根据上图生成', media=user_media or None),
         ]
-        resp = provider.chat(llm_messages)
+        resp = provider.chat(
+            llm_messages,
+            image_aspect_ratio=ar_gemini,
+            image_candidate_count=num_output,
+        )
         media = getattr(resp, 'media', None) or []
-        for item in media:
-            if (item or {}).get('type') == 'image' and (item or {}).get('data'):
-                return {'media': _ensure_media_json_serializable([item]), 'content': (resp.content or '').strip()}
+        image_items = [item for item in media if (item or {}).get('type') == 'image' and (item or {}).get('data')]
+        if image_items:
+            return {'media': _ensure_media_json_serializable(image_items), 'content': (resp.content or '').strip()}
         return {'error': '模型未返回图像', 'content': (resp.content or '').strip()}
     except Exception as e:
         return {'error': str(e)}

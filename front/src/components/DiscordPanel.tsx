@@ -218,7 +218,7 @@ const DiscordPanel: React.FC<DiscordPanelProps> = ({ embedded = true }) => {
   };
 
   const content = (
-    <div className="discord-panel max-w-2xl mx-auto flex flex-col gap-4 p-4 overflow-y-auto no-scrollbar h-full">
+    <div className="discord-panel max-w-4xl mx-auto flex flex-col gap-5 p-5 overflow-y-auto no-scrollbar h-full">
       <div className="flex items-center gap-2 mb-1">
         <DiscordIcon className="w-5 h-5 text-[#5865F2]" />
         <h2 className="text-base font-semibold text-gray-900 dark:text-white">Discord 管理</h2>

@@ -22,7 +22,6 @@ import { CapabilityIcons } from './ui/CapabilityIcons';
 import { ImageSizeSelector } from './ImageSizeSelector';
 import { mediaApi, type MediaProvider } from '../services/mediaApi';
 import { getSession } from '../services/sessionApi';
-import { fetchStylePresets } from '../services/stylePresetApi';
 import type { PersonaPreset } from '../services/roleApi';
 import {
   ImageIcon,
@@ -36,7 +35,6 @@ import {
   Wand2,
   Upload,
   Clipboard,
-  Tag,
   Plus,
   Save,
   Trash2,
@@ -44,8 +42,7 @@ import {
   PenLine,
   UserCircle,
   ChevronDown,
-  ChevronUp,
-  Copy,
+  MessageCircle,
 } from 'lucide-react';
 import { resolveMediaSrc } from '../utils/mediaSrc';
 
@@ -59,7 +56,7 @@ function safeImgSrc(url: string | undefined): string {
   return resolved.trim();
 }
 
-type CreateTab = 'image' | 'video';
+type CreateTab = 'chat' | 'image' | 'video';
 
 /* ─── MediaItem ─── */
 interface MediaItem {
@@ -75,6 +72,8 @@ interface MediaItem {
   created_at?: string;
   /** 本地生成任务ID（用于并发占位与回填） */
   job_id?: string;
+  /** 同一次点击生成的一批图片共享同一 batch_id，图库中用虚线框分组展示 */
+  batch_id?: string;
   /** 生成状态：pending=生成中，ready=完成，error=失败 */
   status?: 'pending' | 'ready' | 'error';
   error_message?: string;
@@ -135,34 +134,6 @@ const inputClass = `w-full px-3 py-2 text-sm rounded-md border
 const panelClass = `rounded-lg border
   bg-gray-50 dark:bg-[#111] border-gray-200 dark:border-[#333]`;
 
-/* ─── 系统提示词预设 ─── */
-interface PromptPreset {
-  id?: string;
-  label: string;
-  /** 追加到描述前的提示词 */
-  text: string;
-  /** 显示的标签颜色 CSS (accent / secondary / highlight) */
-  color?: 'accent' | 'secondary' | 'highlight';
-  /** 预设来源 (local/civitai/lexica) */
-  source?: 'local' | 'civitai' | 'lexica';
-  tags?: string[];
-  preview_url?: string;
-  metadata?: Record<string, any>;
-}
-
-const PROMPT_PRESETS: PromptPreset[] = [
-  { label: '动漫风格', text: '以高质量日式动漫风格绘制，线条清晰，色彩鲜艳，', color: 'secondary' },
-  { label: '赛博朋克', text: '赛博朋克风格，霓虹灯光效果，暗色调城市背景，未来科技感，', color: 'accent' },
-  { label: '水彩画', text: '水彩画风格，笔触柔和，色彩晕染过渡自然，纸质质感，', color: 'highlight' },
-  { label: '写实摄影', text: '专业摄影写实风格，高清 8K 画质，自然光照，浅景深，', color: 'accent' },
-  { label: '油画古典', text: '古典油画风格，丰富的笔触质感，温暖的色调，戏剧性光影，', color: 'highlight' },
-  { label: '像素画', text: '像素艺术风格，16-bit 复古游戏画风，清晰的像素边缘，', color: 'secondary' },
-  { label: '扁平插画', text: '现代扁平矢量插画风格，简洁几何形状，明亮纯色，无阴影，', color: 'accent' },
-  { label: '3D 渲染', text: '高质量 3D 渲染风格，柔和光照，细腻材质，Blender/C4D 质感，', color: 'secondary' },
-  { label: '素描线稿', text: '黑白铅笔素描风格，精细的线条与阴影，手绘质感，', color: 'highlight' },
-  { label: '中国水墨', text: '传统中国水墨画风格，留白意境，墨色浓淡变化，宣纸质感，', color: 'accent' },
-];
-
 /* ─── 自定义提示词 ─── */
 interface CustomPrompt {
   id: string;
@@ -201,7 +172,7 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
   /** 选中的 config_id（粒度到具体模型配置） */
   const [selectedConfigId, setSelectedConfigId] = useState('');
 
-  const [createTab, setCreateTab] = useState<CreateTab>(mode === 'video' ? 'video' : 'image');
+  const [createTab, setCreateTab] = useState<CreateTab>(mode === 'video' ? 'video' : mode === 'image' ? 'image' : 'chat');
   const [showModelDialog, setShowModelDialog] = useState(false);
 
   // 统一图像生成（无图=文生图，有图=二创）
@@ -226,7 +197,6 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
   const [chayaSystemPrompt, setChayaSystemPrompt] = useState('');
   const [chayaPersonaPresets, setChayaPersonaPresets] = useState<PersonaPreset[]>([]);
   const [chayaCurrentPersonaId, setChayaCurrentPersonaId] = useState<string | null>(null);
-  const [personaExpanded, setPersonaExpanded] = useState(false);
 
   // 自定义提示词
   const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>(() => loadCustomPrompts());
@@ -234,14 +204,6 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
   const [newPromptLabel, setNewPromptLabel] = useState('');
   const [newPromptText, setNewPromptText] = useState('');
   const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
-
-  // 动态风格预设（支持多源）
-  const [stylePresets, setStylePresets] = useState<PromptPreset[]>(PROMPT_PRESETS);
-  const [presetsLoading, setPresetsLoading] = useState(false);
-  const [presetsError, setPresetsError] = useState<string | null>(null);
-  const [selectedPresetSource, setSelectedPresetSource] = useState<'all' | 'local' | 'civitai' | 'lexica'>('all');
-  const [presetQuery, setPresetQuery] = useState('');
-  const presetsDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
   // 图像尺寸配置
   const [imageSize, setImageSize] = useState({
@@ -312,9 +274,22 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
   }, [createdMedia.length, galleryIndex]);
 
   const FULL_LOAD_LIMIT = 500;
-  /* ─── 持久化创作产出：全量加载 ─── */
+  const PENDING_STORAGE_KEY = 'media-creator-pending';
+
+  /* ─── 持久化创作产出：全量加载，并合并上次未完成的 pending 占位（先于下方 persist 执行，避免被清空） ─── */
   useEffect(() => {
     let cancelled = false;
+    const restorePending = (): MediaItem[] => {
+      try {
+        const raw = sessionStorage.getItem(PENDING_STORAGE_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw) as MediaItem[];
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    };
+    const pending = restorePending();
     mediaApi.listOutputs(FULL_LOAD_LIMIT, 0)
       .then((res) => {
         if (cancelled) return;
@@ -326,48 +301,27 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
           output_id: o.output_id,
           created_at: o.created_at,
         }));
-        setCreatedMedia(items);
+        setCreatedMedia([...pending, ...items]);
       })
-       .catch(() => { if (!cancelled) setCreatedMedia([]); })
-     return () => { cancelled = true; };
-   }, []);
+      .catch(() => {
+        if (!cancelled) setCreatedMedia(pending.length > 0 ? pending : []);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
+  /* ─── 离开页面时持久化「生成中」占位，回来时由上方 load 恢复 ─── */
   useEffect(() => {
-    if (!presetQuery.trim() && selectedPresetSource === 'all') {
-      setStylePresets(PROMPT_PRESETS);
-      return;
-    }
-
-    if (presetsDebounceRef.current) {
-      clearTimeout(presetsDebounceRef.current);
-    }
-
-    setPresetsLoading(true);
-    setPresetsError(null);
-
-    presetsDebounceRef.current = setTimeout(async () => {
+    const pending = createdMedia.filter((i) => i.status === 'pending');
+    if (pending.length > 0) {
       try {
-        const data = await fetchStylePresets({
-          source: selectedPresetSource,
-          query: presetQuery,
-          limit: 50,
-        });
-        setStylePresets(data.presets);
-      } catch (error) {
-        console.error('Failed to load style presets:', error);
-        setPresetsError('无法加载预设');
-        setStylePresets(PROMPT_PRESETS);
-      } finally {
-        setPresetsLoading(false);
+        sessionStorage.setItem(PENDING_STORAGE_KEY, JSON.stringify(pending));
+      } catch {
+        // sessionStorage 写满时忽略
       }
-    }, 300);
-
-    return () => {
-      if (presetsDebounceRef.current) {
-        clearTimeout(presetsDebounceRef.current);
-      }
-    };
-  }, [selectedPresetSource, presetQuery]);
+    } else {
+      sessionStorage.removeItem(PENDING_STORAGE_KEY);
+    }
+  }, [createdMedia]);
 
    /* ─── 自定义提示词 CRUD ─── */
   const addCustomPrompt = () => {
@@ -608,58 +562,28 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
     return item.url;
   };
 
-  /* ─── 统一图像生成（无图=文生图，有图=二创，支持多图） ─── */
-  const handleGenerate = async () => {
-    if (!imgPrompt.trim() || !activeConfig) return;
-    setImgError(null);
-
-    const isEdit = refImages.length > 0;
-    const jobId = `img-job-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-    // 先插入“生成中”占位，复用下方图库区域
-    addToCreated({
-      url: '',
-      mimeType: 'image/png',
-      source: 'generated',
-      created_at: new Date().toISOString(),
-      job_id: jobId,
-      status: 'pending',
-    });
-
+  /* ─── 图生图：单次请求，单张结果 ─── */
+  const runSingleGenerate = async (jobId: string, batchId: string) => {
+    if (!activeConfig) return;
+    const cfgId = activeConfig.config_id;
     try {
-      let result: any;
-      const cfgId = activeConfig.config_id;
-      if (isEdit) {
-        const images_b64 = refImages.map((img) => ({
-          data: getB64(img),
-          mime: img.mimeType || 'image/png',
-        }));
-        if (activeProviderId === 'gemini') {
-          result = await mediaApi.geminiImageEdit({
-            prompt: imgPrompt,
-            image_b64: images_b64[0].data,
-            images_b64: images_b64.map((i) => i.data),
-            config_id: cfgId,
-          });
-        } else {
-          throw new Error(`不支持的图像供应商: ${activeProviderId}`);
-        }
-      } else {
-        if (activeProviderId === 'gemini') {
-          result = await mediaApi.geminiImageGenerate({ prompt: imgPrompt, config_id: cfgId });
-        } else {
-          throw new Error(`不支持的图像供应商: ${activeProviderId}`);
-        }
-      }
-
+      const images_b64 = refImages.map((img) => ({ data: getB64(img), mime: img.mimeType || 'image/png' }));
+      if (activeProviderId !== 'gemini') throw new Error(`不支持的图像供应商: ${activeProviderId}`);
+      const result = await mediaApi.geminiImageEdit({
+        prompt: imgPrompt,
+        image_b64: images_b64[0].data,
+        images_b64: images_b64.map((i) => i.data),
+        config_id: cfgId,
+        model: activeConfig.model,
+        aspect_ratio: imageSize.aspectRatio || undefined,
+        count: 1,
+      });
       if (result.error) throw new Error(result.error);
-      const m = result.media?.[0];
+      const m = result.media?.[0] as { mimeType?: string; url?: string; data?: string } | undefined;
       if (!m) throw new Error('未返回图片');
-
       const mime = m.mimeType || 'image/png';
       const url = m.url || (m.data ? `data:${mime};base64,${m.data}` : '');
       if (!url) throw new Error('未返回可用图片URL');
-
       const finalItem: MediaItem = {
         url,
         mimeType: mime,
@@ -667,15 +591,77 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
         source: 'generated',
         created_at: new Date().toISOString(),
         job_id: jobId,
+        batch_id: batchId,
         status: 'ready',
       };
-
       setCreatedMedia((prev) => prev.map((p) => (p.job_id === jobId ? { ...p, ...finalItem } : p)));
       persistCreatedItem(finalItem);
     } catch (e: any) {
       const msg = e?.message || String(e);
-      setImgError(msg);
+      setImgError((prev) => (prev ? prev : msg));
       setCreatedMedia((prev) => prev.map((p) => (p.job_id === jobId ? { ...p, status: 'error', error_message: msg } : p)));
+    }
+  };
+
+  /* ─── 文生图：单张请求（Gemini 不支持多 candidate，多图时并行发起多请求） ─── */
+  const runSingleTextToImage = async (jobId: string, batchId: string) => {
+    if (!activeConfig) return;
+    const cfgId = activeConfig.config_id;
+    try {
+      const result = await mediaApi.geminiImageGenerate({
+        prompt: imgPrompt,
+        config_id: cfgId,
+        model: activeConfig.model,
+        aspect_ratio: imageSize.aspectRatio || undefined,
+        count: 1,
+      });
+      if (result.error) throw new Error(result.error);
+      type MediaEntry = { mimeType?: string; url?: string; data?: string };
+      const m = (result.media as MediaEntry[])?.[0];
+      if (!m) throw new Error('未返回图片');
+      const mime = m.mimeType || 'image/png';
+      const url = m.url || (m.data ? `data:${mime};base64,${m.data}` : '');
+      if (!url) throw new Error('图片数据无效');
+      const finalItem: MediaItem = {
+        url,
+        mimeType: mime,
+        rawB64: m.data,
+        source: 'generated',
+        created_at: new Date().toISOString(),
+        job_id: jobId,
+        batch_id: batchId,
+        status: 'ready',
+      };
+      setCreatedMedia((prev) => prev.map((p) => (p.job_id === jobId ? { ...p, ...finalItem } : p)));
+      persistCreatedItem(finalItem);
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      setImgError((prev) => (prev ?? msg));
+      setCreatedMedia((prev) => prev.map((p) => (p.job_id === jobId ? { ...p, status: 'error', error_message: msg } : p)));
+    }
+  };
+
+  const handleGenerate = () => {
+    if (!imgPrompt.trim() || !activeConfig) return;
+    setImgError(null);
+    const count = Math.max(1, Math.min(4, imageSize.count));
+    const batchId = `batch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    for (let i = 0; i < count; i++) {
+      addToCreated({
+        url: '',
+        mimeType: 'image/png',
+        source: 'generated',
+        created_at: new Date().toISOString(),
+        job_id: `${batchId}-${i}`,
+        batch_id: batchId,
+        status: 'pending',
+      });
+    }
+    if (refImages.length > 0) {
+      for (let i = 0; i < count; i++) runSingleGenerate(`${batchId}-${i}`, batchId);
+    } else {
+      for (let i = 0; i < count; i++) runSingleTextToImage(`${batchId}-${i}`, batchId);
     }
   };
 
@@ -779,11 +765,39 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
     setTimeout(go, 5000);
   };
 
-  /* ─── Download ─── */
+  /* ─── 下载：保存到本地，不新开标签 ─── */
   const dl = (url: string, name?: string) => {
-    const a = document.createElement('a');
-    a.href = url; a.download = name || 'media'; a.target = '_blank';
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    const filename = name || 'media';
+    if (url.startsWith('data:')) {
+      fetch(url)
+        .then((res) => res.blob())
+        .then((blob) => {
+          const u = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = u;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(u);
+        })
+        .catch(() => {
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        });
+    } else {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
   };
 
   /* ─── 隐藏 file input ─── */
@@ -802,14 +816,17 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
 
   const mainContent = (
     <>
-      <div className="chatu-page max-w-6xl mx-auto flex flex-col gap-4">
-        <div className="flex-1 min-w-0 space-y-6">
+      <div className="chatu-page chatu-page-one-screen h-full w-full flex flex-col min-h-0 px-3 py-2">
+        <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
         {/* ════════ 创作区 ════════ */}
-        <Card title="创作区" variant="persona" size="relaxed">
-          <div className="space-y-4">
+        <Card title="创作区" variant="persona" size="relaxed" className="media-create-card flex-1 min-h-0 flex flex-col overflow-hidden">
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden space-y-4">
             {/* Tab（仅 both 模式显示） */}
             {mode === 'both' && (
               <div className="flex gap-6 border-b border-gray-200 dark:border-[#333]">
+                <button type="button" className={createTab === 'chat' ? tabActive : tabInactive} onClick={() => setCreateTab('chat')}>
+                  <span className="flex items-center gap-1.5"><MessageCircle className="w-4 h-4" /> 聊天</span>
+                </button>
                 <button type="button" className={createTab === 'image' ? tabActive : tabInactive} onClick={() => setCreateTab('image')}>
                   <span className="flex items-center gap-1.5"><ImageIcon className="w-4 h-4" /> 图像</span>
                 </button>
@@ -819,410 +836,265 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
               </div>
             )}
 
-            {/* 模型选择 — 图像 Tab 时右侧放生成按钮 */}
-            {providerLoading ? (
-              <div className={`flex items-center gap-2 text-sm ${textMuted}`}><Loader2 className="w-4 h-4 animate-spin" /> 加载模型配置...</div>
-            ) : currentConfigs.length === 0 ? (
-              <div className={`text-sm ${textMuted} ${panelClass} p-3`}>
-                {createTab === 'image'
-                  ? '未配置图像模型 — 请在「大模型录入 → chatu 录入」中添加支持生图的模型'
-                  : '未配置视频模型 — 请在「大模型录入 → chatu 录入」中添加支持视频生成的模型'}
-              </div>
-            ) : (
-              <div className="flex items-center gap-3 flex-wrap">
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={`${btnSecondary} !text-xs gap-1.5`}
-                    onClick={() => setShowModelDialog(true)}
-                  >
-                    <Wand2 className="w-3.5 h-3.5" />
-                    {activeConfig
-                      ? <span className="truncate max-w-[200px]">{activeConfig.model || activeConfig.name}</span>
-                      : '选择模型'}
-                    <ChevronDown className="w-3 h-3 opacity-60" />
-                  </Button>
-                  {activeConfig && (
-                    <span className="flex items-center gap-1">
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded bg-white/5 ${textMuted}`}>{activeConfig.providerName}</span>
-                      {activeConfig.capabilities?.image && <span className="text-[9px] px-1 py-0 rounded bg-[var(--color-accent)]/10 text-[var(--color-accent)]">图</span>}
-                      {activeConfig.capabilities?.video && <span className="text-[9px] px-1 py-0 rounded bg-[var(--color-highlight)]/10 text-[var(--color-highlight)]">视</span>}
-                    </span>
-                  )}
+            {/* ── 聊天 Tab：引导至主聊天界面 ── */}
+            {createTab === 'chat' && (
+              <div className="media-create-layout flex-1 min-h-0 overflow-hidden">
+                <div className="media-create-left-col flex flex-col gap-4 min-w-0 min-h-0 overflow-y-auto no-scrollbar">
+                  <div className="prompt-and-ref-card rounded-2xl overflow-hidden flex flex-col flex-1 min-h-[200px] border border-[var(--border-default)] bg-[var(--surface-secondary)]">
+                    <div className="p-4 flex flex-col items-center justify-center flex-1 text-center">
+                      <MessageCircle className="w-12 h-12 text-[var(--color-accent)] opacity-80 mb-3" />
+                      <h3 className={`text-sm font-medium ${textPrimary} mb-1`}>聊天</h3>
+                      <p className={`text-xs ${textMuted} max-w-[280px]`}>请在左侧会话列表选择或创建会话，在对话界面与模型聊天。</p>
+                    </div>
+                  </div>
                 </div>
-                {createTab === 'image' && (
-                  <Button
-                    className={refImages.length > 0 ? btnPink : btnPrimary}
-                    size="sm"
-                    disabled={!imgPrompt.trim() || !activeConfig}
-                    onClick={handleGenerate}
-                  >
-                    {pendingImageJobs > 0
-                      ? <><Loader2 className="w-4 h-4 animate-spin mr-1" /> 生成中({pendingImageJobs})</>
-                      : refImages.length > 0
-                        ? <><Sparkles className="w-4 h-4 mr-1" /> 二创</>
-                        : <><Wand2 className="w-4 h-4 mr-1" /> 生成</>
-                    }
-                  </Button>
-                )}
+                <div className="min-w-0 min-h-0 flex flex-col" />
               </div>
             )}
 
-            {/* ── 图像 Tab — 统一创作 + 结果 ── */}
+            {/* ── 图像 Tab — Nano Banana 2 风格：上传区 + 描述 + 选项 + 结果 ── */}
             {createTab === 'image' && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* ═══ 左栏：统一输入区 ═══ */}
-                <div
-                  ref={dropZoneRef}
-                  className={`niho-card-2 ${panelClass} p-4 space-y-4 min-w-0 transition-colors ${dragOver ? '!border-[var(--color-accent)] bg-[var(--color-accent)]/5' : ''}`}
-                  onDragOver={onDragOver}
-                  onDragLeave={onDragLeave}
-                  onDrop={onDrop}
-                >
-                  {/* 标题 */}
-                  <div className="flex items-center justify-between">
-                    <h3 className={`text-sm font-medium ${textPrimary} flex items-center gap-1.5`}>
-                      <Wand2 className="w-4 h-4 text-[var(--color-accent)]" />
-                      {refImages.length > 0 ? `二创（${refImages.length}张参考图）` : '文生图'}
-                    </h3>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-                      refImages.length > 0
-                        ? 'bg-[var(--color-secondary)]/15 text-[var(--color-secondary)]'
-                        : 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
-                    }`}>
-                      {refImages.length > 0 ? '已挂载参考图' : '纯文字生图'}
-                    </span>
+              <div className="media-create-layout flex-1 min-h-0 overflow-hidden">
+                {/* 左栏：参考图+描述 合体 → 自定义提示词 → 图片尺寸 */}
+                <div className="media-create-left-col flex flex-col gap-4 min-w-0 min-h-0 overflow-y-auto no-scrollbar">
+                  {/* 参考图片 + 描述画面 合二为一：上 1/3 缩略图区，下为可编辑 prompt */}
+                  <div
+                    ref={dropZoneRef}
+                    className={`prompt-and-ref-card rounded-2xl overflow-hidden flex flex-col flex-1 min-h-[280px] ${dragOver ? 'ring-2 ring-[var(--color-accent)]/30' : ''}`}
+                    onDragOver={onDragOver}
+                    onDragLeave={onDragLeave}
+                    onDrop={onDrop}
+                  >
+                    {/* 上方：参考图上传 / 缩略图（紧凑，留更多空间给提示词） */}
+                    <div className="prompt-and-ref-card__images flex-shrink-0 min-h-0 py-2 px-3 border-b border-[var(--border-subtle)]">
+                      {refImages.length > 0 ? (
+                        <div className="space-y-2">
+                          <div className="flex gap-2 flex-wrap">
+                            {refImages.map((img, idx) => {
+                              const src = safeImgSrc(img.url);
+                              return (
+                                <div key={idx} className="relative flex-shrink-0 group/ri">
+                                  {src ? (
+                                    <img
+                                      src={src}
+                                      alt={`参考图 ${idx + 1}`}
+                                      className="rounded-md border border-[var(--color-accent)]/50 h-16 w-auto object-contain cursor-pointer"
+                                      onClick={() => setLightboxUrl(resolveMediaSrc(img.url ?? ''))}
+                                    />
+                                  ) : (
+                                    <div className="rounded-md border border-[var(--color-accent)]/50 h-16 w-16 flex items-center justify-center bg-black text-[var(--niho-skyblue-gray)]">
+                                      <ImageIcon className="w-6 h-6" />
+                                    </div>
+                                  )}
+                                  <button
+                                    className="absolute -top-1.5 -right-1.5 p-0.5 rounded-full bg-[var(--color-secondary)] text-white opacity-0 group-hover/ri:opacity-100 transition-opacity"
+                                    onClick={() => removeRefImage(idx)}
+                                  >
+                                    <X className="w-2.5 h-2.5" />
+                                  </button>
+                                  <span className="absolute bottom-0.5 left-0.5 text-[7px] px-0.5 py-0 rounded bg-black/60 text-white leading-tight">
+                                    {img.source === 'upload' ? '上传' : img.source === 'paste' ? '粘贴' : '生成'}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <div className="flex gap-1.5 flex-wrap items-center">
+                            <Button variant="outline" size="sm" className={`${btnSecondary} !text-[11px] !py-0.5 !px-2`} onClick={triggerFileInput}>
+                              <Plus className="w-3 h-3 mr-1" /> 添加更多
+                            </Button>
+                            <Button variant="outline" size="sm" className={`${btnSecondary} !text-[11px] !py-0.5 !px-2`} onClick={clearRefImages}>
+                              <X className="w-3 h-3 mr-1" /> 全部移除
+                            </Button>
+                            <span className={`text-[10px] ${textMuted} opacity-60`}>支持多图参考，Gemini 多图融合生成</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className={`
+                          flex items-center justify-between py-2.5 px-3 gap-3 rounded-lg border border-dashed transition-colors
+                          ${dragOver ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/5' : 'border-[var(--border-default)]'}
+                        `}>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <ImagePlus className={`w-5 h-5 ${textMuted} opacity-50 flex-shrink-0`} />
+                            <p className={`text-xs ${textMuted} truncate`}>粘贴或上传参考图 → 自动切换为二创</p>
+                          </div>
+                          <div className="flex gap-1.5 flex-shrink-0">
+                            <Button variant="outline" size="sm" className={`${btnSecondary} !text-[11px] !py-0.5 !px-2`} onClick={triggerFileInput}>
+                              <Upload className="w-3 h-3 mr-1" /> 上传
+                            </Button>
+                            <Button variant="outline" size="sm" className={`${btnSecondary} !text-[11px] !py-0.5 !px-2`}
+                              onClick={() => {
+                                navigator.clipboard.read?.().then(items => {
+                                  for (const ci of items) {
+                                    const imgType = ci.types.find(t => t.startsWith('image/'));
+                                    if (imgType) {
+                                      ci.getType(imgType).then(blob => {
+                                        const file = new File([blob], 'paste.png', { type: imgType });
+                                        fileToMediaItem(file).then(m => { m.source = 'paste'; pickRefImage(m); });
+                                      });
+                                      return;
+                                    }
+                                  }
+                                }).catch(() => {});
+                              }}
+                            >
+                              <Clipboard className="w-3 h-3 mr-1" /> 粘贴
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 下方：可编辑 prompt 区域（扩大） */}
+                    <div className="prompt-and-ref-card__prompt flex-1 min-h-0 flex flex-col p-3">
+                      <label className="media-create-prompt-label flex items-center gap-1.5 mb-1.5">
+                        <Wand2 className="w-4 h-4 text-[var(--color-accent)]" />
+                        描述你的画面
+                      </label>
+                      <textarea
+                        placeholder={refImages.length > 0 ? '描述你希望对图片进行的修改或风格变换...' : '描述你想要的画面...'}
+                        className={`${inputClass} resize-none rounded-xl flex-1 min-h-[160px]`}
+                        rows={5}
+                        value={imgPrompt}
+                        onChange={(e) => setImgPrompt(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleGenerate(); } }}
+                      />
+                      {imgError && <p className="text-xs text-[var(--color-secondary)] mt-1">{imgError}</p>}
+                      <div className="flex flex-wrap items-center justify-between gap-3 pt-2 flex-shrink-0">
+                        <div className="flex items-center gap-2 flex-wrap min-w-0">
+                          {providerLoading ? (
+                            <span className={`text-sm ${textMuted}`}><Loader2 className="w-4 h-4 inline animate-spin mr-1" /> 加载中...</span>
+                          ) : currentConfigs.length === 0 ? (
+                            <span className={`text-sm ${textMuted}`}>未配置图像模型，请至「大模型录入」添加</span>
+                          ) : (
+                            <>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className={`${btnSecondary} text-sm gap-1.5`}
+                                onClick={() => setShowModelDialog(true)}
+                              >
+                                <Wand2 className="w-4 h-4" />
+                                {activeConfig ? <span className="truncate max-w-[180px]">{activeConfig.model || activeConfig.name}</span> : '选择模型'}
+                                <ChevronDown className="w-3.5 h-3.5 opacity-60" />
+                              </Button>
+                              {activeConfig && (
+                                <span className="flex items-center gap-1.5">
+                                  <span className={`text-xs px-2 py-0.5 rounded bg-white/5 ${textMuted}`}>{activeConfig.providerName}</span>
+                                  {activeConfig.capabilities?.image && <span className="text-[10px] px-1.5 py-0 rounded bg-[var(--color-accent)]/10 text-[var(--color-accent)]">图</span>}
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </div>
+                        <Button
+                          className={`media-create-create-btn flex-shrink-0 ${refImages.length > 0 ? btnPink : btnPrimary}`}
+                          size="sm"
+                          disabled={!imgPrompt.trim() || !activeConfig}
+                          onClick={handleGenerate}
+                        >
+                          {pendingImageJobs > 0
+                            ? <><Loader2 className="w-4 h-4 animate-spin mr-1" /> 生成中({pendingImageJobs})</>
+                            : refImages.length > 0
+                              ? <><Sparkles className="w-4 h-4 mr-1" /> 二创</>
+                              : <><Wand2 className="w-4 h-4 mr-1" /> 生成</>
+                          }
+                        </Button>
+                      </div>
+                    </div>
                   </div>
 
-                  {/* 参考图区域（多图） */}
-                  {refImages.length > 0 ? (
-                    <div className="space-y-2">
-                      <div className="flex gap-2 flex-wrap">
-                        {refImages.map((img, idx) => {
-                          const src = safeImgSrc(img.url);
-                          return (
-                          <div key={idx} className="relative flex-shrink-0 group/ri">
-                            {src ? (
-                              <img
-                                src={src}
-                                alt={`参考图 ${idx + 1}`}
-                                className="rounded-md border border-[var(--color-accent)]/50 h-16 w-auto object-contain cursor-pointer"
-                                onClick={() => setLightboxUrl(resolveMediaSrc(img.url ?? ''))}
-                              />
-                            ) : (
-                              <div className="rounded-md border border-[var(--color-accent)]/50 h-16 w-16 flex items-center justify-center bg-black text-[var(--niho-skyblue-gray)]">
-                                <ImageIcon className="w-6 h-6" />
-                              </div>
-                            )}
-                            <button
-                              className="absolute -top-1.5 -right-1.5 p-0.5 rounded-full bg-[var(--color-secondary)] text-white
-                                opacity-0 group-hover/ri:opacity-100 transition-opacity"
-                              onClick={() => removeRefImage(idx)}
-                            >
-                              <X className="w-2.5 h-2.5" />
-                            </button>
-                            <span className="absolute bottom-0.5 left-0.5 text-[7px] px-0.5 py-0 rounded bg-black/60 text-white leading-tight">
-                              {img.source === 'upload' ? '上传' : img.source === 'paste' ? '粘贴' : '生成'}
+                  {/* 自定义提示词 — 紧贴上方区域下方，方便点选填充 */}
+                    <div className="my-prompts-block rounded-2xl p-3 space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-[var(--color-secondary)]/10">
+                            <Bookmark className="w-4 h-4 text-[var(--color-secondary)]" />
+                          </div>
+                          <div>
+                            <span className="text-sm font-semibold text-[var(--text-primary)]">
+                              自定义提示词
                             </span>
-                          </div>
-                          );
-                        })}
-                      </div>
-                      <div className="flex gap-1.5 flex-wrap items-center">
-                        <Button variant="outline" size="sm" className={`${btnSecondary} !text-[11px] !py-0.5 !px-2`} onClick={triggerFileInput}>
-                          <Plus className="w-3 h-3 mr-1" /> 添加更多
-                        </Button>
-                        <Button variant="outline" size="sm" className={`${btnSecondary} !text-[11px] !py-0.5 !px-2`} onClick={clearRefImages}>
-                          <X className="w-3 h-3 mr-1" /> 全部移除
-                        </Button>
-                        <span className={`text-[10px] ${textMuted} opacity-60`}>支持多图参考，Gemini 多图融合生成</span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className={`
-                      flex items-center justify-between py-2.5 px-3 gap-3
-                      border border-dashed rounded-lg transition-colors
-                      ${dragOver
-                        ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/5'
-                        : 'border-gray-300 dark:border-[#333]'
-                      }
-                    `}>
-                      <div className="flex items-center gap-2 min-w-0">
-                        <ImagePlus className={`w-5 h-5 ${textMuted} opacity-50 flex-shrink-0`} />
-                        <p className={`text-xs ${textMuted} truncate`}>添加参考图 → 自动切换为二创</p>
-                      </div>
-                      <div className="flex gap-1.5 flex-shrink-0">
-                        <Button variant="outline" size="sm" className={`${btnSecondary} !text-[11px] !py-0.5 !px-2`} onClick={triggerFileInput}>
-                          <Upload className="w-3 h-3 mr-1" /> 上传
-                        </Button>
-                        <Button variant="outline" size="sm" className={`${btnSecondary} !text-[11px] !py-0.5 !px-2`}
-                          onClick={() => {
-                            navigator.clipboard.read?.().then(items => {
-                              for (const ci of items) {
-                                const imgType = ci.types.find(t => t.startsWith('image/'));
-                                if (imgType) {
-                                  ci.getType(imgType).then(blob => {
-                                    const file = new File([blob], 'paste.png', { type: imgType });
-                                    fileToMediaItem(file).then(m => { m.source = 'paste'; pickRefImage(m); });
-                                  });
-                                  return;
-                                }
-                              }
-                            }).catch(() => {});
-                          }}
-                        >
-                          <Clipboard className="w-3 h-3 mr-1" /> 粘贴
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ── 提示词区域：系统预设 + 自定义 ── */}
-                  <div className="space-y-2.5">
-                     {/* 系统风格预设 */}
-                     <div className="space-y-1">
-                       <div className="flex items-center gap-1.5">
-                         <Tag className="w-3 h-3 text-[var(--color-highlight)]" />
-                         <span className={`text-[10px] font-medium ${textMuted}`}>风格预设</span>
-                       </div>
-
-                       <div className="flex gap-1 mb-1.5">
-                         <input
-                           type="text"
-                           placeholder="搜索风格..."
-                           value={presetQuery}
-                           onChange={(e) => setPresetQuery(e.target.value)}
-                           className={`${inputClass} flex-1 text-[10px] h-7 px-2`}
-                         />
-                         <select
-                           value={selectedPresetSource}
-                           onChange={(e) => setSelectedPresetSource(e.target.value as any)}
-                           className={`${inputClass} text-[10px] h-7 px-2`}
-                         >
-                           <option value="all">全部</option>
-                           <option value="local">本地</option>
-                           <option value="civitai">Civitai</option>
-                           <option value="lexica">Lexica</option>
-                         </select>
-                       </div>
-
-                       <div className="flex flex-wrap gap-1.5">
-                         {presetsLoading && (
-                           <div className="flex items-center gap-1 text-[10px] text-gray-500">
-                             <Loader2 className="w-3 h-3 animate-spin" />
-                             加载中...
-                           </div>
-                         )}
-
-                         {stylePresets.map((p) => {
-                           const colorVar = p.color === 'secondary' ? 'var(--color-secondary)'
-                             : p.color === 'highlight' ? 'var(--color-highlight)'
-                             : 'var(--color-accent)';
-                           return (
-                             <button
-                               key={p.id || p.label}
-                               type="button"
-                               className="text-[10px] px-2 py-0.5 rounded-full border transition-colors
-                                 hover:opacity-80 active:scale-95 cursor-pointer select-none"
-                               style={{
-                                 borderColor: colorVar,
-                                 color: colorVar,
-                                 backgroundColor: 'transparent',
-                                 opacity: p.source !== 'local' ? 0.7 : 1,
-                               }}
-                               onClick={() => applyPromptText(p.text)}
-                               title={`[${p.source}] ${p.text}`}
-                             >
-                               {p.label}
-                             </button>
-                           );
-                         })}
-
-                         {presetsError && (
-                           <div className="text-[10px] text-red-500">{presetsError}</div>
-                         )}
-                       </div>
-                     </div>
-
-                    {/* Chaya 人设提示词 */}
-                    {(chayaSystemPrompt || chayaPersonaPresets.length > 0) && (
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1.5">
-                            <UserCircle className="w-3 h-3 text-[var(--color-accent)]" />
-                            <span className={`text-[10px] font-medium ${textMuted}`}>
-                              Chaya 人设
-                              {chayaPersonaPresets.length > 0 && ` (${chayaPersonaPresets.length + 1})`}
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            className={`text-[10px] flex items-center gap-0.5 ${textMuted} hover:text-[var(--color-accent)] transition-colors`}
-                            onClick={() => setPersonaExpanded(!personaExpanded)}
-                          >
-                            {personaExpanded ? <><ChevronUp className="w-2.5 h-2.5" /> 收起</> : <><ChevronDown className="w-2.5 h-2.5" /> 展开</>}
-                          </button>
-                        </div>
-
-                        {/* 人设预设标签行 */}
-                        <div className="flex flex-wrap gap-1.5">
-                          {/* 当前主人设 */}
-                          {chayaSystemPrompt && (
-                            <button
-                              type="button"
-                              className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors
-                                hover:opacity-80 active:scale-95 cursor-pointer select-none
-                                border-[var(--color-accent)] text-[var(--color-accent)]
-                                ${!chayaCurrentPersonaId ? 'bg-[var(--color-accent)]/10' : 'bg-transparent'}`}
-                              onClick={() => applyPromptText(chayaSystemPrompt)}
-                              title="点击填充当前人设全文"
-                            >
-                              主人设{!chayaCurrentPersonaId && ' ●'}
-                            </button>
-                          )}
-                          {/* 人设预设列表 */}
-                          {chayaPersonaPresets.map((preset) => (
-                            <button
-                              key={preset.id}
-                              type="button"
-                              className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors
-                                hover:opacity-80 active:scale-95 cursor-pointer select-none
-                                border-[var(--color-accent)]/60 text-[var(--color-accent)]
-                                ${chayaCurrentPersonaId === preset.id ? 'bg-[var(--color-accent)]/10' : 'bg-transparent'}`}
-                              onClick={() => applyPromptText(preset.system_prompt)}
-                              title={`点击填充「${preset.nickname}」人设`}
-                            >
-                              {preset.nickname}{chayaCurrentPersonaId === preset.id && ' ●'}
-                            </button>
-                          ))}
-                        </div>
-
-                        {/* 展开后显示人设内容 */}
-                        {personaExpanded && (
-                          <div className="space-y-2 mt-1">
-                            {/* 当前主人设内容 */}
-                            {chayaSystemPrompt && (
-                              <div className={`niho-block-green ${panelClass} p-2 space-y-1 !bg-transparent`}>
-                                <div className="flex items-center justify-between">
-                                  <span className={`text-[9px] font-medium ${textMuted}`}>
-                                    主人设{!chayaCurrentPersonaId && <span className="text-[var(--color-accent)] ml-1">当前激活</span>}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    className={`text-[9px] flex items-center gap-0.5 ${textMuted} hover:text-[var(--color-accent)] transition-colors`}
-                                    onClick={() => applyPromptText(chayaSystemPrompt)}
-                                    title="填充到描述"
-                                  >
-                                    <Copy className="w-2.5 h-2.5" /> 填充
-                                  </button>
-                                </div>
-                                <p className={`text-[10px] leading-relaxed ${textMuted} whitespace-pre-wrap max-h-[100px] overflow-auto no-scrollbar`}>
-                                  {chayaSystemPrompt}
-                                </p>
-                              </div>
+                            {customPrompts.length > 0 && (
+                              <span className="ml-1.5 text-xs font-medium text-[var(--color-secondary)]">
+                                {customPrompts.length} 条
+                              </span>
                             )}
-                            {/* 各预设人设内容 */}
-                            {chayaPersonaPresets.map((preset) => (
-                              <div key={preset.id} className={`niho-block-green ${panelClass} p-2 space-y-1 !bg-transparent`}>
-                                <div className="flex items-center justify-between">
-                                  <span className={`text-[9px] font-medium ${textMuted}`}>
-                                    {preset.nickname}
-                                    {chayaCurrentPersonaId === preset.id && <span className="text-[var(--color-accent)] ml-1">当前激活</span>}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    className={`text-[9px] flex items-center gap-0.5 ${textMuted} hover:text-[var(--color-accent)] transition-colors`}
-                                    onClick={() => applyPromptText(preset.system_prompt)}
-                                    title="填充到描述"
-                                  >
-                                    <Copy className="w-2.5 h-2.5" /> 填充
-                                  </button>
-                                </div>
-                                <p className={`text-[10px] leading-relaxed ${textMuted} whitespace-pre-wrap max-h-[100px] overflow-auto no-scrollbar`}>
-                                  {preset.system_prompt}
-                                </p>
-                              </div>
-                            ))}
                           </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* 自定义提示词 */}
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5">
-                          <Bookmark className="w-3 h-3 text-[var(--color-secondary)]" />
-                          <span className={`text-[10px] font-medium ${textMuted}`}>
-                            我的提示词{customPrompts.length > 0 && ` (${customPrompts.length})`}
-                          </span>
                         </div>
                         <button
                           type="button"
-                          className={`text-[10px] flex items-center gap-0.5 transition-colors
-                            ${showAddPrompt ? 'text-[var(--color-secondary)]' : `${textMuted} hover:text-[var(--color-accent)]`}`}
+                          className={`
+                            inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all
+                            ${showAddPrompt
+                              ? 'bg-[var(--color-secondary)]/15 text-[var(--color-secondary)]'
+                              : 'bg-transparent text-[var(--color-secondary)] hover:bg-[var(--color-secondary)]/10'
+                            }
+                          `}
                           onClick={() => { if (showAddPrompt) cancelEditPrompt(); else setShowAddPrompt(true); }}
                         >
-                          {showAddPrompt ? <><X className="w-2.5 h-2.5" /> 取消</> : <><Plus className="w-2.5 h-2.5" /> 新建</>}
+                          {showAddPrompt ? <><X className="w-3.5 h-3.5" /> 取消</> : <><Plus className="w-3.5 h-3.5" /> 新建</>}
                         </button>
                       </div>
 
-                      {/* 自定义标签列表 */}
+                      {/* 提示词标签列表 — 大按钮便于点选 */}
                       {customPrompts.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5">
+                        <div className="flex flex-wrap gap-2">
                           {customPrompts.map((cp) => (
-                            <div key={cp.id} className="group/cp relative inline-flex items-center">
+                            <div key={cp.id} className="group/cp relative inline-flex flex-col items-center">
+                              {/* hover 时在 tag 上方显示编辑/删除，点击不触发选中 */}
+                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 flex gap-0.5 opacity-0 group-hover/cp:opacity-100 transition-opacity z-10 pointer-events-none group-hover/cp:pointer-events-auto">
+                                <button
+                                  type="button"
+                                  className="p-1 rounded-lg bg-black/90 text-[var(--color-accent)] hover:bg-[var(--color-accent)]/20 transition-colors shadow-md"
+                                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); startEditPrompt(cp); }}
+                                  title="编辑"
+                                >
+                                  <PenLine className="w-3 h-3" />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="p-1 rounded-lg bg-black/90 text-[var(--color-secondary)] hover:bg-[var(--color-secondary)]/20 transition-colors shadow-md"
+                                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); deleteCustomPrompt(cp.id); }}
+                                  title="删除"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </div>
                               <button
                                 type="button"
-                                className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors
-                                  hover:opacity-80 active:scale-95 cursor-pointer select-none
-                                  border-[var(--color-secondary)] text-[var(--color-secondary)]
-                                  ${editingPromptId === cp.id ? 'bg-[var(--color-secondary)]/15' : 'bg-transparent'}`}
+                                className={`
+                                  inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-medium transition-all cursor-pointer select-none
+                                  hover:scale-[1.02] active:scale-[0.98]
+                                  text-[var(--color-secondary)] bg-[var(--color-secondary)]/5
+                                  hover:bg-[var(--color-secondary)]/15
+                                  ${editingPromptId === cp.id ? 'bg-[var(--color-secondary)]/15 ring-1 ring-[var(--color-secondary)]/25' : ''}
+                                `}
                                 onClick={() => applyPromptText(cp.text)}
-                                title={`填充: ${cp.text}`}
+                                title={`点击填充: ${cp.text.slice(0, 80)}${cp.text.length > 80 ? '…' : ''}`}
                               >
                                 {cp.label}
                               </button>
-                              {/* hover 操作 */}
-                              <div className="absolute -top-1 -right-1 flex gap-0 opacity-0 group-hover/cp:opacity-100 transition-opacity z-10">
-                                <button
-                                  type="button"
-                                  className="p-0.5 rounded-full bg-[var(--niho-pure-black,#000)] border border-[var(--niho-text-border,#333)]
-                                    text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] transition-colors"
-                                  onClick={(e) => { e.stopPropagation(); startEditPrompt(cp); }}
-                                  title="编辑"
-                                >
-                                  <PenLine className="w-2 h-2" />
-                                </button>
-                                <button
-                                  type="button"
-                                  className="p-0.5 rounded-full bg-[var(--niho-pure-black,#000)] border border-[var(--niho-text-border,#333)]
-                                    text-[var(--color-secondary)] hover:text-[var(--niho-mist-pink)] transition-colors"
-                                  onClick={(e) => { e.stopPropagation(); deleteCustomPrompt(cp.id); }}
-                                  title="删除"
-                                >
-                                  <Trash2 className="w-2 h-2" />
-                                </button>
-                              </div>
                             </div>
                           ))}
                         </div>
                       )}
 
                       {customPrompts.length === 0 && !showAddPrompt && (
-                        <p className={`text-[10px] ${textMuted} opacity-50`}>点击「新建」保存常用提示词</p>
+                        <p className="text-xs text-[var(--text-muted)]">
+                          保存常用描述，一键填充到输入框。点击「新建」添加第一条。
+                        </p>
                       )}
 
                       {/* 新建 / 编辑表单 */}
                       {showAddPrompt && (
-                        <div className={`niho-block-pink ${panelClass} p-2.5 space-y-2 !bg-transparent`}>
-                          <div className="flex gap-2">
+                        <div className="rounded-xl bg-[var(--surface-secondary)] p-3 space-y-3">
+                          <div className="flex flex-col sm:flex-row gap-2">
                             <input
                               type="text"
                               placeholder="标签名（如「星空场景」）"
-                              className={`${inputClass} !py-1 !text-[11px] flex-shrink-0`}
-                              style={{ width: '120px' }}
+                              className={`${inputClass} !py-1.5 !text-xs flex-shrink-0`}
+                              style={{ width: '140px', maxWidth: '100%' }}
                               value={newPromptLabel}
                               onChange={(e) => setNewPromptLabel(e.target.value)}
                               maxLength={20}
@@ -1230,379 +1102,337 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
                             />
                             <input
                               type="text"
-                              placeholder="提示词内容（如「浩瀚星空背景，繁星点点，银河横跨画面，」）"
-                              className={`${inputClass} !py-1 !text-[11px] flex-1 min-w-0`}
+                              placeholder="提示词内容（如「浩瀚星空背景，繁星点点，银河横跨画面」）"
+                              className={`${inputClass} !py-1.5 !text-xs flex-1 min-w-0`}
                               value={newPromptText}
                               onChange={(e) => setNewPromptText(e.target.value)}
                               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCustomPrompt(); } }}
                             />
                           </div>
-                          <div className="flex gap-1.5 items-center">
-                            <Button size="sm" className={`${btnPrimary} !text-[10px] !py-0.5 !px-2`}
+                          <div className="flex flex-wrap gap-2 items-center">
+                            <Button
+                              size="sm"
+                              className="!bg-[var(--color-secondary)] !text-white hover:!bg-[var(--color-secondary-hover)] border-0 !text-xs !py-1.5 !px-3"
                               disabled={!newPromptLabel.trim() || !newPromptText.trim()}
                               onClick={addCustomPrompt}
                             >
-                              <Save className="w-3 h-3 mr-0.5" />
+                              <Save className="w-3.5 h-3.5 mr-1" />
                               {editingPromptId ? '更新' : '保存'}
                             </Button>
-                            <button type="button" className={`text-[10px] ${textMuted} hover:text-[var(--color-secondary)]`} onClick={cancelEditPrompt}>
+                            <button
+                              type="button"
+                              className="text-xs text-[var(--text-muted)] hover:text-[var(--color-secondary)] px-2 py-1"
+                              onClick={cancelEditPrompt}
+                            >
                               取消
                             </button>
                             {editingPromptId && (
                               <button
                                 type="button"
-                                className="text-[10px] text-[var(--color-secondary)] hover:text-[var(--niho-mist-pink)] ml-auto"
-                                onClick={() => { deleteCustomPrompt(editingPromptId); }}
+                                className="text-xs text-[var(--color-secondary)] hover:text-[var(--color-secondary-hover)] ml-auto inline-flex items-center gap-1 px-2 py-1"
+                                onClick={() => deleteCustomPrompt(editingPromptId)}
                               >
-                                <Trash2 className="w-3 h-3 inline mr-0.5" /> 删除
+                                <Trash2 className="w-3.5 h-3.5" /> 删除
                               </button>
                             )}
                           </div>
                         </div>
                       )}
                     </div>
+
+                  {/* 图片尺寸 block：分辨率、宽高比、数量统一管理 */}
+                  <div className="media-create-options-row">
+                    <ImageSizeSelector
+                      value={imageSize}
+                      onChange={setImageSize}
+                      disabled={!activeConfig}
+                    />
                   </div>
 
-                   {/* 文字描述 */}
-                   <div className="space-y-2">
-                     <label className={`text-xs font-semibold ${textPrimary} flex items-center gap-1.5`}>
-                       <Wand2 className="w-3 h-3" />
-                       创意描述
-                     </label>
-                     <textarea
-                       placeholder={refImages.length > 0 ? '描述你希望对图片进行的修改或风格变换...' : '描述你想要的画面...'}
-                       className={`${inputClass} resize-none`}
-                       rows={8}
-                       value={imgPrompt}
-                       onChange={(e) => setImgPrompt(e.target.value)}
-                       onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleGenerate(); } }}
-                     />
-                     {imgPrompt.trim() && (
-                       <button
-                         type="button"
-                         className={`text-[10px] ${textMuted} hover:text-[var(--color-secondary)] transition-colors`}
-                         onClick={() => setImgPrompt('')}
-                       >
-                         清空
-                       </button>
-                     )}
-                     {imgError && <p className="text-xs text-[var(--color-secondary)]">{imgError}</p>}
-                   </div>
+                  </div>
 
-                   {/* 图像生成选项 */}
-                   <ImageSizeSelector
-                     value={imageSize}
-                     onChange={setImageSize}
-                     disabled={!activeConfig}
-                   />
-                </div>
-
-                {/* ═══ 右栏：当前大图 + 图库列表（按时间分段） ═══ */}
-                <div className="space-y-3 min-w-0 flex flex-col">
-                  <div className={`niho-card-3 ${panelClass} p-3 space-y-3 flex-1 min-h-0 flex flex-col`}>
-                    {createdMedia.length === 0 ? (
-                      <div className={`chatu-empty-result ${panelClass} p-6 flex flex-col items-center justify-center min-h-[260px]`}>
-                        <ImageIcon className={`w-10 h-10 ${textMuted} opacity-30 mb-3`} />
-                        <p className={`text-xs ${textMuted}`}>生成结果将在这里展示</p>
-                        <p className={`text-[10px] ${textMuted} opacity-60 mt-1`}>左侧输入提示词后点击生成</p>
+                {/* 右栏：图库 — 展示所有创作，按 batch 虚线分组，主图区扩大 */}
+                <div className="media-create-results-card media-create-gallery min-w-0 min-h-0 flex flex-col overflow-hidden">
+                  <h3 className="media-create-results-title">图库</h3>
+                  {createdMedia.length === 0 ? (
+                    <div className="media-create-empty-state">
+                      <ImageIcon className="w-12 h-12 opacity-40 mb-2" />
+                      <p className="text-sm font-medium text-[var(--text-secondary)]">暂无图片</p>
+                      <p className="text-xs mt-1">按以下步骤开始创作</p>
+                      <div className="steps">
+                        <span>1. 上传图片或从空白开始</span>
+                        <span>2. 输入描述</span>
+                        <span>3. 点击生成（可选多张，同批用虚线框分组）</span>
                       </div>
-                    ) : (() => {
+                    </div>
+                  ) : (() => {
                       const main = createdMedia[galleryIndex] ?? createdMedia[0];
                       const mainIsVideo = !!main?.mimeType?.startsWith('video/');
                       const mainSrc = safeImgSrc(main?.url);
                       const mainPending = main?.status === 'pending';
                       const mainError = main?.status === 'error';
-                      const timeGroups = (() => {
-                        const withLabel = createdMedia.map((item, i) => ({ item, index: i, label: getDateLabel(item.created_at) }));
-                        const map = new Map<string, { item: MediaItem; index: number }[]>();
-                        withLabel.forEach(({ item, index, label }) => {
-                          if (!map.has(label)) map.set(label, []);
-                          map.get(label)!.push({ item, index });
-                        });
-                        const order = Array.from(map.keys()).sort((a, b) => dateSegmentSortKey(a) - dateSegmentSortKey(b));
-                        return order.map((label) => ({ label, items: map.get(label)! }));
-                      })();
+                      // 按天分段：今天 / 昨天 / N天前 / 更早
+                      const dayMap = new Map<string, number[]>();
+                      createdMedia.forEach((item, index) => {
+                        const label = getDateLabel(item.created_at);
+                        if (!dayMap.has(label)) dayMap.set(label, []);
+                        dayMap.get(label)!.push(index);
+                      });
+                      const dayOrder = Array.from(dayMap.keys()).sort((a, b) => dateSegmentSortKey(a) - dateSegmentSortKey(b));
                       return (
                         <>
-                          <div className="flex items-center justify-between">
-                            <p className={`text-xs font-medium ${textPrimary} flex items-center gap-1.5`}>
-                              <Sparkles className="w-3.5 h-3.5 text-[var(--color-secondary)]" /> 当前图片
+                          <div className="flex items-center justify-between flex-shrink-0">
+                            <p className={`text-sm font-medium ${textPrimary} flex items-center gap-1.5`}>
+                              <Sparkles className="w-4 h-4 text-[var(--color-secondary)]" /> 当前
                             </p>
-                            <span className={`text-[10px] ${textMuted}`}>{createdMedia.length} 项</span>
+                            <span className={`text-xs ${textMuted}`}>{createdMedia.length} 张</span>
                           </div>
-                          <div className="relative rounded-lg overflow-hidden border border-[var(--niho-text-border)] bg-black aspect-[4/3] max-h-[320px] min-h-[200px] group/main flex-shrink-0">
+                          <div className="flex flex-col flex-1 min-h-0 overflow-hidden gap-2">
+                          <div className="media-create-gallery-main group/main relative rounded-xl overflow-hidden border border-[var(--border-default)] bg-black min-h-0">
                             {mainPending ? (
                               <div className="chatu-generating-spectrum-strong w-full h-full flex flex-col items-center justify-center gap-2 text-[var(--niho-skyblue-gray)]">
-                                <span className="text-[11px] font-medium text-white/90">图片生成中...</span>
+                                <span className="relative z-10 text-sm font-medium text-white/90">生成中...</span>
                               </div>
                             ) : mainError ? (
                               <div className="w-full h-full flex flex-col items-center justify-center gap-1 text-[var(--color-secondary)] px-3">
-                                <X className="w-6 h-6" />
-                                <span className="text-[10px] text-center">{main?.error_message || '生成失败'}</span>
+                                <X className="w-8 h-8" />
+                                <span className="text-xs text-center">{main?.error_message || '生成失败'}</span>
                               </div>
                             ) : mainIsVideo ? (
                               <button type="button" className="w-full h-full flex items-center justify-center" onClick={() => main && window.open(main.url, '_blank')}>
-                                <Film className="w-10 h-10 text-[var(--color-secondary)]" />
+                                <Film className="w-12 h-12 text-[var(--color-secondary)]" />
                               </button>
                             ) : mainSrc ? (
-                              <img src={mainSrc} alt="当前图片" className="w-full h-full object-contain cursor-pointer" onClick={() => main && setLightboxUrl(resolveMediaSrc(main.url ?? ''))} />
+                              <img src={mainSrc} alt="当前" className="w-full h-full object-contain cursor-pointer" onClick={() => main && setLightboxUrl(resolveMediaSrc(main.url ?? ''))} />
                             ) : (
                               <div className="w-full h-full flex items-center justify-center text-[var(--niho-skyblue-gray)]">
-                                <ImageIcon className="w-8 h-8" />
+                                <ImageIcon className="w-10 h-10" />
                               </div>
                             )}
                             <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover/main:opacity-100 transition-opacity">
-                              <button type="button" className="p-1 rounded bg-black/60 text-white hover:bg-[var(--color-secondary)]/80" onClick={() => main && removeCreatedItem(main, galleryIndex)} title="删除">
-                                <Trash2 className="w-3.5 h-3.5" />
+                              <button type="button" className="p-1.5 rounded-lg bg-black/60 text-white hover:bg-[var(--color-secondary)]/80" onClick={() => main && removeCreatedItem(main, galleryIndex)} title="删除">
+                                <Trash2 className="w-4 h-4" />
                               </button>
-                              {!mainPending && !mainError && !mainIsVideo && mainSrc && (
-                                <button type="button" className="p-1 rounded bg-black/60 text-white hover:bg-black/80" onClick={() => dl(mainSrc, 'gen.png')} title="下载">
-                                  <Download className="w-3.5 h-3.5" />
-                                </button>
+                              {!mainPending && !mainError && !mainIsVideo && main && mainSrc && (
+                                <>
+                                  <button type="button" className="p-1.5 rounded-lg bg-black/60 text-white hover:bg-[var(--color-accent)]/80" onClick={() => setRefImages([{ url: main.url ?? '', mimeType: main.mimeType || 'image/png', rawB64: main.rawB64, source: 'generated' }])} title="二创（设为参考图）">
+                                    <Sparkles className="w-4 h-4" />
+                                  </button>
+                                  <button type="button" className="p-1.5 rounded-lg bg-black/60 text-white hover:bg-black/80" onClick={() => dl(mainSrc, 'gen.png')} title="保存到本地">
+                                    <Download className="w-4 h-4" />
+                                  </button>
+                                </>
                               )}
                             </div>
                           </div>
-                          <div className="flex flex-col gap-3 min-h-0 overflow-hidden">
-                            <p className={`text-[10px] font-medium ${textMuted} flex-shrink-0`}>图库（按时间）</p>
-                            <div className="flex flex-col gap-2 overflow-y-auto no-scrollbar min-h-0">
-                              {timeGroups.map(({ label, items }) => (
-                                <div key={label} className="flex-shrink-0">
-                                  <p className={`text-[10px] ${textMuted} mb-1.5`}>{label}</p>
-                                  <div className="flex flex-wrap gap-1.5">
-                                    {items.map(({ item, index }) => {
-                                      const src = safeImgSrc(item.url);
-                                      const isVideo = !!item.mimeType?.startsWith('video/');
-                                      const isPending = item.status === 'pending';
-                                      const isError = item.status === 'error';
-                                      const active = index === galleryIndex;
-                                      return (
-                                        <div key={`lib-${item.output_id || item.job_id || index}`} className="relative group/thumb">
-                                          <button
-                                            type="button"
-                                            className={`flex-shrink-0 w-12 h-12 rounded border overflow-hidden ${active ? 'border-[var(--color-secondary)] ring-1 ring-[var(--color-secondary)]/50' : 'border-[var(--niho-text-border)]'} bg-black`}
-                                            onClick={() => setGalleryIndex(index)}
-                                            title={isVideo ? '视频' : '图片'}
-                                          >
-                                            {isPending ? (
-                                              <div className="chatu-generating-spectrum w-full h-full" title="生成中" />
-                                            ) : isError ? (
-                                              <div className="w-full h-full flex items-center justify-center"><X className="w-3 h-3 text-[var(--color-secondary)]" /></div>
-                                            ) : isVideo ? (
-                                              <div className="w-full h-full flex items-center justify-center"><Film className="w-3 h-3 text-[var(--color-secondary)]" /></div>
-                                            ) : src ? (
-                                              <img src={src} alt="" className="w-full h-full object-cover" />
-                                            ) : (
-                                              <div className="w-full h-full flex items-center justify-center text-[var(--niho-skyblue-gray)]"><ImageIcon className="w-3 h-3" /></div>
-                                            )}
-                                          </button>
-                                          <button
-                                            type="button"
-                                            className="absolute -top-0.5 -right-0.5 p-0.5 rounded bg-black/80 text-white opacity-0 group-hover/thumb:opacity-100 transition-opacity"
-                                            onClick={(e) => { e.stopPropagation(); removeCreatedItem(item, index); }}
-                                            title="删除"
-                                          >
-                                            <X className="w-2.5 h-2.5" />
-                                          </button>
-                                        </div>
-                                      );
-                                    })}
+                          <div className="media-create-gallery-thumb-strip no-scrollbar flex flex-col flex-1 min-h-0 gap-2 overflow-hidden">
+                            <p className={`text-xs font-medium ${textMuted} flex-shrink-0`}>全部创作</p>
+                            <div className="flex flex-col gap-3 media-create-gallery-by-day flex-1 min-h-0 no-scrollbar">
+                              {dayOrder.map((dayLabel) => {
+                                const indices = dayMap.get(dayLabel)!;
+                                return (
+                                  <div key={dayLabel} className="media-create-day-segment flex-shrink-0">
+                                    <p className={`text-[11px] font-medium ${textMuted} mb-1`}>{dayLabel}</p>
+                                    <div className="grid grid-cols-6 gap-1 media-create-thumb-grid">
+                                      {indices.map((index) => {
+                                        const item = createdMedia[index];
+                                        const src = safeImgSrc(item.url);
+                                        const isVideo = !!item.mimeType?.startsWith('video/');
+                                        const isPending = item.status === 'pending';
+                                        const isError = item.status === 'error';
+                                        const active = index === galleryIndex;
+                                        return (
+                                          <div key={`lib-${item.output_id || item.job_id || index}`} className="relative group/thumb">
+                                            <button
+                                              type="button"
+                                              className={`w-full aspect-square rounded-md overflow-hidden ${active ? 'ring-2 ring-[var(--color-accent)] ring-offset-1 ring-offset-[var(--surface-secondary)]' : ''} bg-black`}
+                                              onClick={() => setGalleryIndex(index)}
+                                              title={isVideo ? '视频' : '图片'}
+                                            >
+                                              {isPending ? (
+                                                <div className="chatu-generating-spectrum w-full h-full" title="生成中" />
+                                              ) : isError ? (
+                                                <div className="w-full h-full flex items-center justify-center"><X className="w-4 h-4 text-[var(--color-secondary)]" /></div>
+                                              ) : isVideo ? (
+                                                <div className="w-full h-full flex items-center justify-center"><Film className="w-4 h-4 text-[var(--color-secondary)]" /></div>
+                                              ) : src ? (
+                                                <img src={src} alt="" className="w-full h-full object-cover" />
+                                              ) : (
+                                                <div className="w-full h-full flex items-center justify-center text-[var(--niho-skyblue-gray)]"><ImageIcon className="w-4 h-4" /></div>
+                                              )}
+                                            </button>
+                                            <button
+                                              type="button"
+                                              className="absolute top-0.5 right-0.5 p-0.5 rounded bg-black/70 text-white opacity-0 group-hover/thumb:opacity-100 transition-opacity"
+                                              onClick={(e) => { e.stopPropagation(); removeCreatedItem(item, index); }}
+                                              title="删除"
+                                            >
+                                              <X className="w-2.5 h-2.5" />
+                                            </button>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
                                   </div>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
+                          </div>
                           </div>
                         </>
                       );
                     })()}
-                  </div>
                 </div>
               </div>
             )}
 
-            {/* ── 视频 Tab ── */}
+            {/* ── 视频 Tab：与图片创作一致的双栏布局与卡片样式 ── */}
             {createTab === 'video' && (
-              <div className="space-y-4">
-                {/* 当前供应商提示 */}
-                {activeConfig && (
-                  <div className={`text-[10px] ${textMuted} space-y-1`}>
-                    <div className="flex items-center gap-1.5">
-                      <Film className="w-3 h-3" />
-                      <span>
-                        当前模型：<span className="text-[var(--color-accent)]">{activeConfig.providerName} / {activeConfig.model || activeConfig.name}</span>
-                        {activeProviderId === 'gemini' && <span className="ml-1 text-[var(--color-highlight)]">（Veo 视频生成，复用 Gemini API Key）</span>}
-                      </span>
-                    </div>
-                    {activeProviderId === 'gemini' && (activeConfig.model || '').toLowerCase().includes('veo-3.1') && (
-                      <div className="flex items-center gap-2 flex-wrap pl-5">
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--color-accent)]/10 text-[var(--color-accent)]">支持首帧图</span>
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--color-highlight)]/10 text-[var(--color-highlight)]">参考图(≤3)</span>
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--color-secondary)]/10 text-[var(--color-secondary)]">首末帧插值</span>
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--color-accent)]/10 text-[var(--color-accent)]">视频续写</span>
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--color-highlight)]/10 text-[var(--color-highlight)]">原生音频</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* 视频参考图 + 提示词 */}
-                <div className={`niho-card-2 ${panelClass} p-4 space-y-3`}>
-                  <h3 className={`text-sm font-medium ${textPrimary} flex items-center gap-1.5`}>
-                    <Video className="w-4 h-4 text-[var(--color-accent)]" /> 视频创作
-                  </h3>
-                  <p className={`text-xs ${textMuted}`}>输入描述生成视频；可选附加参考图作为首帧</p>
-
-                  {refImages.length > 0 && (() => {
-                    const firstFrameSrc = safeImgSrc(refImages[0]?.url);
-                    return (
-                    <div className="relative inline-block">
-                      {firstFrameSrc ? (
-                        <img src={firstFrameSrc} alt="首帧" className="rounded-md max-h-24 w-auto border border-[var(--color-accent)]/50" />
-                      ) : (
-                        <div className="rounded-md max-h-24 w-24 flex items-center justify-center border border-[var(--color-accent)]/50 bg-black text-[var(--niho-skyblue-gray)]">
-                          <ImageIcon className="w-6 h-6" />
-                        </div>
-                      )}
-                      <button className="absolute -top-1.5 -right-1.5 p-0.5 rounded-full bg-[var(--color-secondary)] text-white" onClick={() => removeRefImage(0)}>
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                    );
-                  })()}
-
-                  {refImages.length === 0 && (
-                    <div className="flex gap-2">
-                      <Button variant="outline" size="sm" className={btnSecondary} onClick={triggerFileInput}>
-                        <Upload className="w-3.5 h-3.5 mr-1" /> 上传首帧
+              <div className="media-create-layout flex-1 min-h-0 overflow-hidden">
+                {/* 左栏：模型 + 视频创作表单 */}
+                <div className="media-create-left-col flex flex-col gap-4 min-w-0 min-h-0 overflow-y-auto no-scrollbar">
+                  {providerLoading ? (
+                    <div className={`flex items-center gap-2 text-sm ${textMuted}`}><Loader2 className="w-4 h-4 animate-spin" /> 加载模型...</div>
+                  ) : currentConfigs.length === 0 ? (
+                    <div className={`text-sm ${textMuted} ${panelClass} p-3 rounded-xl`}>未配置视频模型，请至「大模型录入」添加支持视频的模型</div>
+                  ) : (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Button variant="outline" size="sm" className={`${btnSecondary} !text-xs gap-1.5`} onClick={() => setShowModelDialog(true)}>
+                        <Wand2 className="w-3.5 h-3.5" />
+                        {activeConfig ? <span className="truncate max-w-[180px]">{activeConfig.model || activeConfig.name}</span> : '选择模型'}
+                        <ChevronDown className="w-3 h-3 opacity-60" />
                       </Button>
-                      <span className={`text-xs self-center ${textMuted}`}>或拖拽/粘贴</span>
+                      {activeConfig && (
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded bg-white/5 ${textMuted}`}>{activeConfig.providerName}</span>
+                      )}
                     </div>
                   )}
-
-                  {/* 提示词预设（视频共用） */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-1.5">
-                      <Tag className="w-3 h-3 text-[var(--color-highlight)]" />
-                      <span className={`text-[10px] font-medium ${textMuted}`}>风格预设</span>
+                  {activeConfig && (
+                    <div className={`text-[10px] ${textMuted} space-y-1`}>
+                      <div className="flex items-center gap-1.5">
+                        <Film className="w-3 h-3" />
+                        <span>
+                          当前：<span className="text-[var(--color-accent)]">{activeConfig.model || activeConfig.name}</span>
+                          {activeProviderId === 'gemini' && <span className="ml-1 text-[var(--color-highlight)]">（Veo）</span>}
+                        </span>
+                      </div>
+                      {activeProviderId === 'gemini' && (activeConfig.model || '').toLowerCase().includes('veo-3.1') && (
+                        <div className="flex items-center gap-2 flex-wrap pl-5">
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--color-accent)]/10 text-[var(--color-accent)]">首帧图</span>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--color-highlight)]/10 text-[var(--color-highlight)]">参考图≤3</span>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--color-accent)]/10 text-[var(--color-accent)]">视频续写</span>
+                        </div>
+                      )}
                     </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {PROMPT_PRESETS.slice(0, 5).map((p) => {
-                        const colorVar = p.color === 'secondary' ? 'var(--color-secondary)'
-                          : p.color === 'highlight' ? 'var(--color-highlight)'
-                          : 'var(--color-accent)';
+                  )}
+                  <div className="prompt-and-ref-card rounded-2xl overflow-hidden flex flex-col flex-1 min-h-[240px] border border-[var(--border-default)] bg-[var(--surface-secondary)]">
+                    <h3 className={`text-sm font-medium ${textPrimary} flex items-center gap-1.5 px-3 pt-3 pb-1`}>
+                      <Video className="w-4 h-4 text-[var(--color-accent)]" /> 视频创作
+                    </h3>
+                    <p className={`text-xs ${textMuted} px-3 pb-2`}>输入描述生成视频；可选参考图作为首帧</p>
+                    <div className="px-3 space-y-2 flex-1 min-h-0">
+                      {refImages.length > 0 && (() => {
+                        const firstFrameSrc = safeImgSrc(refImages[0]?.url);
                         return (
-                          <button key={p.label} type="button"
-                            className="text-[10px] px-2 py-0.5 rounded-full border transition-colors
-                              hover:opacity-80 active:scale-95 cursor-pointer select-none"
-                            style={{ borderColor: colorVar, color: colorVar, backgroundColor: 'transparent' }}
-                            onClick={() => applyPromptText(p.text)}
-                            title={`填充: ${p.text}`}
-                          >
-                            {p.label}
-                          </button>
+                          <div className="relative inline-block">
+                            {firstFrameSrc ? (
+                              <img src={firstFrameSrc} alt="首帧" className="rounded-md max-h-20 w-auto border border-[var(--color-accent)]/50" />
+                            ) : (
+                              <div className="rounded-md h-20 w-20 flex items-center justify-center border border-[var(--color-accent)]/50 bg-black text-[var(--niho-skyblue-gray)]">
+                                <ImageIcon className="w-6 h-6" />
+                              </div>
+                            )}
+                            <button type="button" className="absolute -top-1 -right-1 p-0.5 rounded-full bg-[var(--color-secondary)] text-white" onClick={() => removeRefImage(0)}>
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
                         );
-                      })}
-                      {/* Chaya 人设 */}
-                      {(chayaSystemPrompt || chayaPersonaPresets.length > 0) && (
-                        <>
-                          <span className={`text-[9px] ${textMuted} opacity-40 self-center`}>|</span>
-                          {chayaSystemPrompt && (
-                            <button type="button"
-                              className="text-[10px] px-2 py-0.5 rounded-full border transition-colors
-                                hover:opacity-80 active:scale-95 cursor-pointer select-none
-                                border-[var(--color-accent)]/60 text-[var(--color-accent)] bg-transparent"
-                              onClick={() => applyPromptText(chayaSystemPrompt)}
-                              title="填充 Chaya 主人设"
-                            >
-                              <UserCircle className="w-2.5 h-2.5 inline mr-0.5 -mt-px" />主人设
-                            </button>
-                          )}
-                          {chayaPersonaPresets.map((preset) => (
-                            <button key={preset.id} type="button"
-                              className="text-[10px] px-2 py-0.5 rounded-full border transition-colors
-                                hover:opacity-80 active:scale-95 cursor-pointer select-none
-                                border-[var(--color-accent)]/60 text-[var(--color-accent)] bg-transparent"
-                              onClick={() => applyPromptText(preset.system_prompt)}
-                              title={`填充「${preset.nickname}」人设`}
-                            >
-                              {preset.nickname}
-                            </button>
-                          ))}
-                        </>
+                      })()}
+                      {refImages.length === 0 && (
+                        <div className="flex gap-2">
+                          <Button variant="outline" size="sm" className={btnSecondary} onClick={triggerFileInput}>
+                            <Upload className="w-3.5 h-3.5 mr-1" /> 上传首帧
+                          </Button>
+                          <span className={`text-xs self-center ${textMuted}`}>或拖拽/粘贴</span>
+                        </div>
                       )}
-                      {/* 自定义 */}
-                      {customPrompts.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {(chayaSystemPrompt || chayaPersonaPresets.length > 0) && (
+                          <>
+                            {chayaSystemPrompt && (
+                              <button type="button" className="text-[10px] px-2 py-0.5 rounded-full border border-[var(--color-accent)]/60 text-[var(--color-accent)] bg-transparent hover:opacity-80" onClick={() => applyPromptText(chayaSystemPrompt)} title="填充 Chaya 主人设">
+                                <UserCircle className="w-2.5 h-2.5 inline mr-0.5 -mt-px" />主人设
+                              </button>
+                            )}
+                            {chayaPersonaPresets.map((preset) => (
+                              <button key={preset.id} type="button" className="text-[10px] px-2 py-0.5 rounded-full border border-[var(--color-accent)]/60 text-[var(--color-accent)] bg-transparent hover:opacity-80" onClick={() => applyPromptText(preset.system_prompt)} title={`填充「${preset.nickname}」`}>
+                                {preset.nickname}
+                              </button>
+                            ))}
+                          </>
+                        )}
+                        {customPrompts.length > 0 && (
+                          <>
+                            {customPrompts.map((cp) => (
+                              <button key={cp.id} type="button" className="text-[10px] px-2 py-0.5 rounded-full border border-[var(--color-secondary)] text-[var(--color-secondary)] bg-transparent hover:opacity-80" onClick={() => applyPromptText(cp.text)} title={cp.label}>
+                                {cp.label}
+                              </button>
+                            ))}
+                          </>
+                        )}
+                      </div>
+                      <textarea placeholder="描述视频场景..." className={`${inputClass} resize-none w-full min-h-[80px]`} rows={3} value={videoPrompt} onChange={(e) => setVideoPrompt(e.target.value)} />
+                      <Button className={`w-full ${btnPrimary}`} size="sm"
+                        disabled={videoLoading || (!videoPrompt.trim() && refImages.length === 0) || !activeConfig}
+                        onClick={handleVideoSubmit}
+                      >
+                        {videoLoading ? <><Loader2 className="w-4 h-4 animate-spin mr-1" /> 提交中...</> : <><Film className="w-4 h-4 mr-1" /> 生成视频</>}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+                {/* 右栏：视频任务与输出（与图库卡片同风格） */}
+                <div className="media-create-results-card min-w-0 min-h-0 flex flex-col overflow-hidden border border-[var(--border-default)] bg-[var(--surface-secondary)] rounded-xl">
+                  <h3 className="media-create-results-title">视频任务</h3>
+                  {!videoTaskId && !videoError ? (
+                    <div className="media-create-empty-state flex-1 flex flex-col items-center justify-center py-8 text-[var(--text-muted)]">
+                      <Film className="w-10 h-10 opacity-40 mb-2" />
+                      <p className="text-sm font-medium text-[var(--text-secondary)]">暂无任务</p>
+                      <p className="text-xs mt-1">在左侧输入描述并提交生成视频</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-2 flex-1 min-h-0 overflow-y-auto no-scrollbar px-3 pb-3">
+                      {videoError && <p className="text-xs text-[var(--color-secondary)]">{videoError}</p>}
+                      {videoTaskId && (
                         <>
-                          <span className={`text-[9px] ${textMuted} opacity-40 self-center`}>|</span>
-                          {customPrompts.map((cp) => (
-                            <button key={cp.id} type="button"
-                              className="text-[10px] px-2 py-0.5 rounded-full border transition-colors
-                                hover:opacity-80 active:scale-95 cursor-pointer select-none
-                                border-[var(--color-secondary)] text-[var(--color-secondary)] bg-transparent"
-                              onClick={() => applyPromptText(cp.text)}
-                              title={`填充: ${cp.text}`}
-                            >
-                              {cp.label}
-                            </button>
-                          ))}
+                          <p className={`text-xs ${textMuted}`}>
+                            状态: <span className={`font-medium ${['SUCCEEDED','COMPLETED'].includes(videoStatus) ? 'text-[var(--color-accent)]' : ['FAILED','CANCELLED','ERROR'].includes(videoStatus) ? 'text-[var(--color-secondary)]' : 'text-[var(--color-highlight)]'}`}>{videoStatus || '...'}</span>
+                          </p>
+                          {videoStatus === 'PROCESSING' && (
+                            <div className="flex items-center gap-2">
+                              <Loader2 className="w-4 h-4 animate-spin text-[var(--color-highlight)]" />
+                              <span className="text-xs text-[var(--text-muted)]">视频生成中，请稍候...</span>
+                            </div>
+                          )}
+                          {videoStatus === 'DOWNLOADING' && (
+                            <div className="flex items-center gap-2">
+                              <Loader2 className="w-4 h-4 animate-spin text-[var(--color-accent)]" />
+                              <span className="text-xs text-[var(--text-muted)]">正在下载...</span>
+                            </div>
+                          )}
+                          {videoOutput && (
+                            <div className="mt-2 flex flex-col gap-2">
+                              <video src={videoOutput} controls className="rounded-lg w-full max-h-[50vh]" />
+                              <Button size="sm" className={btnSecondary} onClick={() => dl(videoOutput, 'video.mp4')}>
+                                <Download className="w-3.5 h-3.5 mr-1" /> 保存到本地
+                              </Button>
+                            </div>
+                          )}
                         </>
                       )}
                     </div>
-                  </div>
-
-                  <textarea
-                    placeholder="描述视频场景..."
-                    className={`${inputClass} resize-none`}
-                    rows={3}
-                    value={videoPrompt}
-                    onChange={(e) => setVideoPrompt(e.target.value)}
-                  />
-                  <Button className={btnPrimary} size="sm"
-                    disabled={videoLoading || (!videoPrompt.trim() && refImages.length === 0) || !activeConfig}
-                    onClick={handleVideoSubmit}
-                  >
-                    {videoLoading ? <><Loader2 className="w-4 h-4 animate-spin mr-1" /> 提交中...</> : <><Film className="w-4 h-4 mr-1" /> 生成视频</>}
-                  </Button>
+                  )}
                 </div>
-
-                {/* 视频状态 */}
-                {(videoTaskId || videoError) && (
-                  <div className={`niho-card-2 ${panelClass} p-4 space-y-2`}>
-                    <h4 className={`text-xs font-medium ${textPrimary}`}>视频任务</h4>
-                    {videoError && <p className="text-xs text-[var(--color-secondary)]">{videoError}</p>}
-                    {videoTaskId && (
-                      <>
-                        <p className={`text-xs ${textMuted}`}>
-                          任务: <code className="text-[var(--color-accent)] text-[10px]">{videoTaskId.length > 50 ? `...${videoTaskId.slice(-40)}` : videoTaskId}</code>
-                          {' '}状态: <span className={`font-medium ${
-                            ['SUCCEEDED','COMPLETED'].includes(videoStatus) ? 'text-[var(--color-accent)]'
-                            : ['FAILED','CANCELLED','ERROR'].includes(videoStatus) ? 'text-[var(--color-secondary)]'
-                            : 'text-[var(--color-highlight)]'
-                          }`}>{videoStatus || '...'}</span>
-                        </p>
-                        {videoStatus === 'PROCESSING' && (
-                          <div className="flex items-center gap-2">
-                            <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--color-highlight)]" />
-                            <span className={`text-xs ${textMuted}`}>视频生成中，请稍候...</span>
-                          </div>
-                        )}
-                        {videoStatus === 'DOWNLOADING' && (
-                          <div className="flex items-center gap-2">
-                            <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--color-accent)]" />
-                            <span className={`text-xs ${textMuted}`}>视频生成完成，正在下载...</span>
-                          </div>
-                        )}
-                        {videoOutput && (
-                          <div className="mt-2">
-                            <video src={videoOutput} controls className="rounded-md max-h-60 w-full" />
-                            <Button size="sm" className={`mt-2 ${btnSecondary}`} onClick={() => dl(videoOutput, 'video.mp4')}>
-                              <Download className="w-3.5 h-3.5 mr-1" /> 下载
-                            </Button>
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </div>
-                )}
               </div>
             )}
           </div>
@@ -1627,10 +1457,10 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Wand2 className="w-5 h-5 text-[var(--color-accent)]" />
-              选择{createTab === 'image' ? '图像' : '视频'}模型
+              选择{createTab === 'image' ? '图像' : createTab === 'video' ? '视频' : '图像'}模型
             </DialogTitle>
             <DialogDescription>
-              {createTab === 'image' ? '选择一个支持图像生成的模型' : '选择一个支持视频生成的模型'}
+              {createTab === 'image' ? '选择一个支持图像生成的模型' : createTab === 'video' ? '选择一个支持视频生成的模型' : '选择模型'}
             </DialogDescription>
           </DialogHeader>
           {(() => {

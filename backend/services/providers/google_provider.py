@@ -146,10 +146,21 @@ class GoogleProvider(BaseLLMProvider):
             if system_instruction:
                 config['system_instruction'] = system_instruction
             
-            # 图片生成模型配置
+            # 图片生成模型配置：宽高比与生成数量
             if self._is_image_generation_model():
                 config['response_modalities'] = ['TEXT', 'IMAGE']
                 self._log("Enabled response_modalities: ['TEXT', 'IMAGE']")
+                ar = kwargs.get('image_aspect_ratio')
+                if ar and self._types and hasattr(self._types, 'ImageConfig'):
+                    try:
+                        config['image_config'] = self._types.ImageConfig(aspect_ratio=ar)
+                        self._log(f"Image aspect_ratio: {ar}")
+                    except Exception as e:
+                        self._log(f"ImageConfig aspect_ratio skip: {e}")
+                cand = kwargs.get('image_candidate_count')
+                if cand is not None and isinstance(cand, int) and 1 <= cand <= 4:
+                    config['candidate_count'] = cand
+                    self._log(f"Image candidate_count: {cand}")
             elif self._enable_google_search and self._types:
                 # 联网搜索 (Google Search Grounding)，仅非图片模型
                 try:

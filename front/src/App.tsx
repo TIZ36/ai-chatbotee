@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
-import { Brain, Plug, Settings, MessageCircle, Globe, Bot, Users, BookOpen, Plus, FolderOpen, ImageIcon, Video } from 'lucide-react';
+import { Brain, Plug, Settings, MessageCircle, Globe, Bot, Users, BookOpen, Plus, FolderOpen, ImageIcon, Video, Sun, Moon } from 'lucide-react';
 import appLogoDark from '../assets/app_logo_dark.png';
 import appLogoLight from '../assets/app_logo_light.png';
 import { Button } from './components/ui/Button';
@@ -19,12 +19,10 @@ import SettingsPanel from './components/SettingsPanel';
 import LLMConfigPanel from './components/LLMConfig';
 import MCPConfig from './components/MCPConfig';
 import Workflow from './components/Workflow';
-import CrawlerConfigPage from './components/CrawlerConfigPage';
 import AgentsPage from './components/AgentsPage';
 import MediaCreatorPage from './components/MediaCreatorPage';
 import DiscordPanel, { DiscordIcon } from './components/DiscordPanel';
 // 新架构组件
-import StatusBar from './components/StatusBar';
 import { getAgents, getSessions, createSession, deleteSession, type Session } from './services/sessionApi';
 import { toast } from './components/ui/use-toast';
 import { ConfirmDialog } from './components/ui/ConfirmDialog';
@@ -35,18 +33,16 @@ interface NavItemProps {
   icon: React.ReactNode;
   title: string;
   isActive: boolean;
-  isNiho?: boolean;
   tooltipPlacement?: 'right' | 'bottom';
 }
 
-const NavItem: React.FC<NavItemProps> = ({ to, icon, title, isActive, isNiho, tooltipPlacement = 'bottom' }) => {
+const NavItem: React.FC<NavItemProps> = ({ to, icon, title, isActive, tooltipPlacement = 'bottom' }) => {
   const [showTooltip, setShowTooltip] = useState(false);
   const tooltipBottom = tooltipPlacement === 'bottom';
   const linkClass = [
-    'nav-item',
-    isActive && 'nav-item--active',
-    isNiho && 'nav-item--niho',
-    'w-8 h-8 flex items-center justify-center rounded-lg transition-all duration-200 ease-out relative',
+    'dashboard-nav-item',
+    isActive && 'dashboard-nav-item--active',
+    'w-12 h-12 flex items-center justify-center rounded-xl transition-all duration-200 ease-out relative',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-primary)]',
   ]
     .filter(Boolean)
@@ -65,19 +61,18 @@ const NavItem: React.FC<NavItemProps> = ({ to, icon, title, isActive, isNiho, to
           {icon}
         </div>
       </Link>
-      {/* Tooltip - 毛玻璃效果；顶部导航时显示在下方 */}
       {showTooltip && (
         <div
-          className={`nav-item-tooltip absolute px-2 py-1 glass-popup text-gray-800 dark:text-white text-xs z-50 whitespace-nowrap pointer-events-none ${
+          className={`dashboard-nav-tooltip absolute px-2.5 py-1.5 rounded-lg bg-[var(--surface-tertiary)] border border-[var(--border-default)] text-[var(--text-primary)] text-xs z-50 whitespace-nowrap pointer-events-none shadow-xl ${
             tooltipBottom ? 'left-1/2 -translate-x-1/2 top-full mt-2' : 'left-full ml-2 top-1/2 -translate-y-1/2'
           }`}
         >
           {title}
           <div
-            className={`nav-item-tooltip-arrow absolute w-0 h-0 border-transparent ${
+            className={`absolute w-0 h-0 border-transparent ${
               tooltipBottom
-                ? 'left-1/2 -translate-x-1/2 bottom-full border-b-[6px] border-b-white/85 dark:border-b-[#1e1e1e]/90 border-x-4 border-x-transparent'
-                : 'right-full top-1/2 -translate-y-1/2 border-t-4 border-b-4 border-r-4 border-r-white/85 dark:border-r-[#1e1e1e]/90'
+                ? 'left-1/2 -translate-x-1/2 bottom-full border-b-[6px] border-b-[var(--surface-tertiary)] border-x-4 border-x-transparent'
+                : 'right-full top-1/2 -translate-y-1/2 border-t-4 border-b-4 border-r-4 border-r-[var(--surface-tertiary)]'
             }`}
           />
         </div>
@@ -86,13 +81,11 @@ const NavItem: React.FC<NavItemProps> = ({ to, icon, title, isActive, isNiho, to
   );
 };
 
-export type SkinId = 'default' | 'niho';
+export type SkinId = 'light' | 'niho';
 
 export type FontId = 'default' | 'pixel' | 'terminal' | 'rounded' | 'dotgothic' | 'silkscreen';
 
 interface Settings {
-  theme: 'light' | 'dark' | 'system';
-  skin: SkinId;
   font: FontId;
   autoRefresh: boolean;
   refreshInterval: number;
@@ -125,12 +118,13 @@ const App: React.FC = () => {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        return { theme: 'system', skin: 'default', font: 'default', autoRefresh: false, refreshInterval: 60, videoColumns: 4, enableToolCalling: true, ...parsed };
+        const { theme, skin, ...rest } = parsed;
+        return { font: 'default', autoRefresh: false, refreshInterval: 60, videoColumns: 4, enableToolCalling: true, ...rest };
       } catch {
-        return { theme: 'system', skin: 'default', font: 'default', autoRefresh: false, refreshInterval: 60, videoColumns: 4, enableToolCalling: true };
+        return { font: 'default', autoRefresh: false, refreshInterval: 60, videoColumns: 4, enableToolCalling: true };
       }
     }
-    return { theme: 'system', skin: 'default', font: 'default', autoRefresh: false, refreshInterval: 60, videoColumns: 4, enableToolCalling: true };
+    return { font: 'default', autoRefresh: false, refreshInterval: 60, videoColumns: 4, enableToolCalling: true };
   });
 
   // Chaya 头像（用于左侧导航第一项）
@@ -160,63 +154,41 @@ const App: React.FC = () => {
     }
   }, [selectedSessionId]);
 
-  // 应用主题
-  const [isDarkMode, setIsDarkMode] = useState(() => {
-    const root = window.document.documentElement;
-    return root.classList.contains('dark');
+  // 皮肤：亮色（蓝白灰）/ Niho，持久化到 localStorage
+  const SKIN_STORAGE_KEY = 'chatee_skin';
+  const [skin, setSkin] = useState<SkinId>(() => {
+    try {
+      const s = localStorage.getItem(SKIN_STORAGE_KEY);
+      if (s === 'light' || s === 'niho') return s;
+    } catch { /* ignore */ }
+    return 'niho';
   });
 
-  // 应用主题（light/dark/niho）
   useEffect(() => {
     const root = window.document.documentElement;
-    const mobile = window.matchMedia('(max-width: 767px)').matches;
-    
-    // 获取当前主题（兼容旧的 theme + skin 组合）
-    const currentTheme = settings.theme === 'niho' || settings.skin === 'niho' 
-      ? 'niho' 
-      : settings.theme === 'dark' 
-      ? 'dark' 
-      : 'light';
-    
-    // 移动端强制使用霓虹主题
-    const effectiveTheme = mobile ? 'niho' : currentTheme;
-    
-    root.setAttribute('data-skin', effectiveTheme === 'niho' ? 'niho' : 'default');
-    root.setAttribute('data-mobile', mobile ? 'true' : 'false');
-
-    const isNiho = effectiveTheme === 'niho';
-    const isDark = isNiho || effectiveTheme === 'dark';
-
-    setIsDarkMode(isDark);
-    if (isDark) {
+    root.setAttribute('data-dashboard', 'true');
+    if (skin === 'niho') {
       root.classList.add('dark');
+      root.setAttribute('data-skin', 'niho');
     } else {
       root.classList.remove('dark');
+      root.setAttribute('data-skin', 'light');
     }
-  }, [settings.theme, settings.skin]);
+  }, [skin]);
 
-  // 同步 data-mobile 与移动端强制 niho（resize 时）
+  useEffect(() => {
+    try {
+      localStorage.setItem(SKIN_STORAGE_KEY, skin);
+    } catch { /* ignore */ }
+  }, [skin]);
+
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 767px)');
-    const sync = () => {
-      const root = document.documentElement;
-      const mobile = mq.matches;
-      root.setAttribute('data-mobile', mobile ? 'true' : 'false');
-      
-      // 获取当前主题
-      const currentTheme = settings.theme === 'niho' || settings.skin === 'niho' 
-        ? 'niho' 
-        : settings.theme === 'dark' 
-        ? 'dark' 
-        : 'light';
-      const effectiveTheme = mobile ? 'niho' : currentTheme;
-      
-      root.setAttribute('data-skin', effectiveTheme === 'niho' ? 'niho' : 'default');
-    };
+    const sync = () => document.documentElement.setAttribute('data-mobile', mq.matches ? 'true' : 'false');
     sync();
     mq.addEventListener('change', sync);
     return () => mq.removeEventListener('change', sync);
-  }, [settings.theme, settings.skin]);
+  }, []);
 
   // 应用字体
   useEffect(() => {
@@ -380,75 +352,89 @@ const App: React.FC = () => {
     return () => mq.removeEventListener('change', onChange);
   }, []);
 
-  const isNiho = isMobile || settings.theme === 'niho' || settings.skin === 'niho';
-
   return (
-    <div className={`app-root-bg h-screen bg-gradient-to-br from-gray-100 via-gray-50 to-gray-100 dark:from-[#0f0f0f] dark:via-[#141414] dark:to-[#0f0f0f] flex flex-col transition-colors duration-200 overflow-hidden ${isMobile ? 'mobile-no-status-bar' : ''}`}>
-      {/* macOS 专用小标题栏 - 仅用于红黄绿按钮拖拽区域 */}
-      
-      {/* 顶部导航栏 - 居中向两边扩散的图标 */}
-      <nav
-        className="glass-top-nav z-50 flex items-center justify-center gap-2 py-2 px-2 app-no-drag"
-        style={isMobile ? { paddingTop: 'calc(0.5rem + var(--safe-area-inset-top))' } : undefined}
+    <div className="app-root-bg dashboard-root h-screen bg-[var(--surface-primary)] flex overflow-hidden">
+      {/* 左侧边栏 - Dashboard 导航 */}
+      <aside
+        className="dashboard-sidebar z-40 flex flex-col flex-shrink-0 app-no-drag border-r border-[var(--border-default)]"
+        style={isMobile ? { paddingTop: 'var(--safe-area-inset-top)' } : undefined}
       >
-        <NavItem
-          to="/"
-          icon={
-            chayaAvatar ? (
-              <img src={chayaAvatar} alt="Chaya" className="w-[18px] h-[18px] rounded-full object-cover" />
-            ) : (
-              <img src={appLogoDark} alt="Chaya" className="w-[18px] h-[18px] object-contain" />
-            )
-          }
-          title="Chaya"
-          isActive={location.pathname === '/' || location.pathname === '/media-creator'}
-          isNiho={isNiho}
-          tooltipPlacement="bottom"
-        />
-        <NavItem
-          to="/agents"
-          icon={<Users className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-          title="Persona 管理"
-          isActive={location.pathname === '/agents'}
-          isNiho={isNiho}
-          tooltipPlacement="bottom"
-        />
-        <NavItem
-          to="/llm-config"
-          icon={<Brain className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-          title="大模型录入"
-          isActive={location.pathname === '/llm-config'}
-          isNiho={isNiho}
-          tooltipPlacement="bottom"
-        />
-        <NavItem
-          to="/mcp-config"
-          icon={<Plug className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-          title="mcp录入"
-          isActive={location.pathname === '/mcp-config'}
-          isNiho={isNiho}
-          tooltipPlacement="bottom"
-        />
-        <NavItem
-          to="/crawler-config"
-          icon={<Globe className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-          title="爬虫"
-          isActive={location.pathname === '/crawler-config'}
-          isNiho={isNiho}
-          tooltipPlacement="bottom"
-        />
-        <NavItem
-          to="/settings"
-          icon={<Settings className="w-[18px] h-[18px]" strokeWidth={1.5} />}
-          title="设置"
-          isActive={location.pathname === '/settings'}
-          isNiho={isNiho}
-          tooltipPlacement="bottom"
-        />
-      </nav>
+        <div className="flex-1 flex flex-col items-center justify-center gap-1 py-3 px-2">
+          <NavItem
+            to="/"
+            icon={
+              chayaAvatar ? (
+                <img src={chayaAvatar} alt="Chaya" className="w-10 h-10 rounded-full object-cover" />
+              ) : (
+                <img src={appLogoDark} alt="Chaya" className="w-10 h-10 object-contain" />
+              )
+            }
+            title="Chaya"
+            isActive={location.pathname === '/' || location.pathname === '/media-creator'}
+            tooltipPlacement="right"
+          />
+          <NavItem
+            to="/agents"
+            icon={<Users className="w-6 h-6" strokeWidth={1.5} />}
+            title="Persona 管理"
+            isActive={location.pathname === '/agents'}
+            tooltipPlacement="right"
+          />
+          <NavItem
+            to="/llm-config"
+            icon={<Brain className="w-6 h-6" strokeWidth={1.5} />}
+            title="大模型录入"
+            isActive={location.pathname === '/llm-config'}
+            tooltipPlacement="right"
+          />
+          <NavItem
+            to="/mcp-config"
+            icon={<Plug className="w-6 h-6" strokeWidth={1.5} />}
+            title="mcp录入"
+            isActive={location.pathname === '/mcp-config'}
+            tooltipPlacement="right"
+          />
+          <NavItem
+            to="/settings"
+            icon={<Settings className="w-6 h-6" strokeWidth={1.5} />}
+            title="设置"
+            isActive={location.pathname === '/settings'}
+            tooltipPlacement="right"
+          />
+        </div>
+        {/* 底部：亮色 / Niho 主题切换（分段式 Switcher） */}
+        <div className="skin-switcher-wrap w-full py-3 px-2 border-t border-[var(--border-default)]">
+          <div
+            className="skin-switcher flex w-full flex-col gap-1 rounded-xl p-1 bg-[var(--surface-tertiary)] border border-[var(--border-default)]"
+            role="group"
+            aria-label="主题切换"
+          >
+            <button
+              type="button"
+              onClick={() => setSkin('light')}
+              className={`skin-switcher-option ${skin === 'light' ? 'skin-switcher-option--active' : ''}`}
+              title="亮色（蓝白灰）"
+              aria-pressed={skin === 'light'}
+            >
+              <Sun className="w-5 h-5 flex-shrink-0" strokeWidth={1.8} />
+              <span className="truncate">亮色</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSkin('niho')}
+              className={`skin-switcher-option ${skin === 'niho' ? 'skin-switcher-option--active' : ''}`}
+              title="Niho"
+              aria-pressed={skin === 'niho'}
+            >
+              <Moon className="w-5 h-5 flex-shrink-0" strokeWidth={1.8} />
+              <span className="truncate">Niho</span>
+            </button>
+          </div>
+        </div>
+      </aside>
 
-      {/* 主要内容区域 - 无 header，直接为页面内容 */}
-      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+      {/* 主内容区 */}
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
         {/* 全局切换对话弹窗（Agent / Topic） */}
         <Dialog
           open={showConversationSwitcher}
@@ -608,14 +594,14 @@ const App: React.FC = () => {
           /* Chaya 主页面 — 含二级 Tab (对话 / 图片 / 视频 / Discord) */
           <div className="relative flex flex-col flex-1 min-h-0 min-w-0 p-0">
             {/* ─── 二级 Tab 切换栏（纯图标） ─── */}
-            <div className="chaya-sub-tabs flex items-center justify-center gap-1 py-1 px-2 flex-shrink-0">
+            <div className="chaya-sub-tabs flex items-center justify-center gap-1.5 py-2 px-3 flex-shrink-0">
               <button
                 type="button"
                 className={`chaya-sub-tab chaya-sub-tab--chat ${chayaSubTab === 'chat' ? 'chaya-sub-tab--active' : ''}`}
                 onClick={() => setChayaSubTab('chat')}
                 title="对话"
               >
-                <MessageCircle className="w-4 h-4" />
+                <MessageCircle className="w-5 h-5" />
               </button>
               <button
                 type="button"
@@ -623,7 +609,7 @@ const App: React.FC = () => {
                 onClick={() => setChayaSubTab('image')}
                 title="图片生成"
               >
-                <ImageIcon className="w-4 h-4" />
+                <ImageIcon className="w-5 h-5" />
               </button>
               <button
                 type="button"
@@ -631,7 +617,7 @@ const App: React.FC = () => {
                 onClick={() => setChayaSubTab('video')}
                 title="视频生成"
               >
-                <Video className="w-4 h-4" />
+                <Video className="w-5 h-5" />
               </button>
               <button
                 type="button"
@@ -639,7 +625,7 @@ const App: React.FC = () => {
                 onClick={() => setChayaSubTab('discord')}
                 title="Discord"
               >
-                <DiscordIcon className="w-4 h-4" />
+                <DiscordIcon className="w-5 h-5" />
               </button>
             </div>
 
@@ -673,9 +659,8 @@ const App: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="flex flex-1 min-h-0 min-w-0 p-1 gap-1">
-            {/* 主内容区域面板 - 毛玻璃效果 */}
-            <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden rounded-lg glass-panel">
+          <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden dashboard-main">
+            <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden rounded-lg dashboard-panel">
               <div className="flex-1 overflow-hidden min-w-0 flex flex-col relative">
                 <div className={`h-full flex flex-col`}>
                   <Routes>
@@ -700,8 +685,6 @@ const App: React.FC = () => {
                     {/* MCP配置页面 */}
                     <Route path="/mcp-config" element={<MCPConfig />} />
 
-                    {/* 爬虫配置页面 */}
-                    <Route path="/crawler-config" element={<CrawlerConfigPage />} />
 
                     {/* 设置页面 */}
                     <Route path="/settings" element={
@@ -736,8 +719,6 @@ const App: React.FC = () => {
         onConfirm={performDeleteSession}
       />
 
-      {/* 底部状态栏 - 移动端不显示 */}
-      {!isMobile && <StatusBar />}
     </div>
   );
 };

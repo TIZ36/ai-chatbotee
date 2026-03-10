@@ -96,6 +96,52 @@
   --safe-area-inset-right: env(safe-area-inset-right, 0px);
   --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
   --safe-area-inset-left: env(safe-area-inset-left, 0px);
+
+  /* 随分辨率变化的流体字号（基于视口） */
+  --text-fluid-xs: clamp(0.7rem, 0.65rem + 0.2vw, 0.8125rem);
+  --text-fluid-sm: clamp(0.8125rem, 0.75rem + 0.25vw, 0.9375rem);
+  --text-fluid-base: clamp(0.9375rem, 0.875rem + 0.3vw, 1.125rem);
+  --text-fluid-lg: clamp(1.0625rem, 1rem + 0.35vw, 1.25rem);
+  --text-fluid-xl: clamp(1.25rem, 1.1rem + 0.5vw, 1.5rem);
+}
+
+/* ========== 浅色风格（亮色）- 蓝白灰及深浅系 ========== */
+[data-skin="light"] {
+  color-scheme: light;
+  /* 背景：白与灰阶 */
+  --surface-primary: #ffffff;
+  --surface-secondary: #f8fafc;
+  --surface-tertiary: #f1f5f9;
+  /* 文本：深灰到浅灰 */
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  /* 边框：灰阶 */
+  --border-default: #e2e8f0;
+  --border-subtle: #f1f5f9;
+  /* 主色：蓝系 */
+  --color-accent: #2563eb;
+  --color-accent-hover: #1d4ed8;
+  --color-accent-light: #3b82f6;
+  --color-accent-bg: rgba(37, 99, 235, 0.08);
+  --color-accent-bg-hover: rgba(37, 99, 235, 0.12);
+  --color-selected: #2563eb;
+  --color-selected-hover: #1d4ed8;
+  --color-selected-bg: rgba(37, 99, 235, 0.06);
+  --color-selected-border: rgba(37, 99, 235, 0.22);
+  --color-active: #2563eb;
+  --color-active-hover: #1d4ed8;
+  --color-active-bg: rgba(37, 99, 235, 0.1);
+  --color-active-border: rgba(37, 99, 235, 0.3);
+  --color-info: #2563eb;
+  --color-info-bg: rgba(37, 99, 235, 0.08);
+  --color-hover-bg: rgba(15, 23, 42, 0.04);
+  --color-hover-border: rgba(15, 23, 42, 0.1);
+}
+
+/* 根字号随视口动态缩放（小屏不挤、大屏更易读） */
+html {
+  font-size: clamp(15px, 1rem + 0.25vw, 20px);
 }
 
 /* 移动端基础：触摸高亮、防止误触缩放 */
@@ -113,16 +159,11 @@
   }
 }
 
-/* 全平台：iPhone 安全区（刘海 / 底部横条） */
+/* 全平台：iPhone 安全区（刘海 / 底部横条），无底部 footer */
 .app-root-bg {
   padding-top: var(--safe-area-inset-top);
   padding-left: var(--safe-area-inset-left);
   padding-right: var(--safe-area-inset-right);
-  padding-bottom: calc(28px + var(--safe-area-inset-bottom));
-}
-
-/* 移动端无底部状态栏时，只留安全区 */
-.app-root-bg.mobile-no-status-bar {
   padding-bottom: var(--safe-area-inset-bottom);
 }
 
@@ -360,17 +401,18 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   --color-hover-border: rgba(0, 255, 136, 0.15);
 
   --surface-primary: #000000;
-  --surface-secondary: #0a0a0a;
-  --surface-tertiary: #111111;
+  --surface-secondary: #0c0c0c;   /* 与纯黑有可辨层次，避免整块遮盖 */
+  --surface-tertiary: #121212;
   --text-primary: #e8f5f0;
-  --text-secondary: var(--niho-skyblue-gray); /* 使用灰调天蓝作为次要文本 */
+  --text-secondary: var(--niho-skyblue-gray);
   --text-muted: #6b8a82;
-  --border-default: #1a1a1a;
-  --border-subtle: #111111;
+  --border-default: rgba(255, 255, 255, 0.14);   /* 模块分界可见 */
+  --border-subtle: rgba(255, 255, 255, 0.08);
 
-  /* 文本边框统一（Niho 深色下更柔和） */
-  --niho-text-border: rgba(255, 255, 255, 0.08);
-  --niho-text-border-strong: rgba(255, 255, 255, 0.14);
+  /* 文本/边框层级（体积与分界对比度） */
+  --niho-text-border: rgba(255, 255, 255, 0.12);
+  --niho-text-border-strong: rgba(255, 255, 255, 0.20);
+  --niho-module-border: rgba(255, 255, 255, 0.18);  /* 模块外框，强对比 */
   --niho-text-bg: rgba(255, 255, 255, 0.04);
 
   /* --- 卡片体积系统 (Card Elevation Tokens) --- */
@@ -378,17 +420,17 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   --niho-elevation-0-bg: #000000;
   --niho-elevation-0-border: transparent;
 
-  /* L1 基础卡片 — 最轻量的容器感 */
-  --niho-elevation-1-bg: #000000;
-  --niho-elevation-1-border: rgba(255, 255, 255, 0.07);
+  /* L1 基础卡片 — 轻量容器，有分界 */
+  --niho-elevation-1-bg: rgba(255, 255, 255, 0.02);
+  --niho-elevation-1-border: rgba(255, 255, 255, 0.12);
 
-  /* L2 提升卡片 — 可感知的"浮出"，用于重要区域 */
-  --niho-elevation-2-bg: rgba(255, 255, 255, 0.02);
-  --niho-elevation-2-border: rgba(255, 255, 255, 0.13);
+  /* L2 提升卡片 — 明显浮出，重要区域 */
+  --niho-elevation-2-bg: rgba(255, 255, 255, 0.04);
+  --niho-elevation-2-border: rgba(255, 255, 255, 0.18);
 
-  /* L3 焦点卡片 — 当前任务 / 主操作区，带色彩倾向 */
-  --niho-elevation-3-bg: rgba(0, 255, 136, 0.025);
-  --niho-elevation-3-border: rgba(0, 255, 136, 0.20);
+  /* L3 焦点卡片 — 主操作区，带色彩 */
+  --niho-elevation-3-bg: rgba(0, 255, 136, 0.04);
+  --niho-elevation-3-border: rgba(0, 255, 136, 0.28);
 
   /* L3 变体：粉色焦点 */
   --niho-elevation-3-pink-bg: rgba(255, 107, 157, 0.025);
@@ -439,19 +481,23 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 /* ========== Chaya 二级 Tab 切换栏（纯图标） ========== */
 .chaya-sub-tabs {
   background: transparent;
+  padding: 0.5rem 0.75rem;
+  gap: 0.375rem;
 }
 
 .chaya-sub-tab {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 5px;
-  border-radius: 6px;
+  padding: 10px;
+  border-radius: 10px;
   border: 1px solid transparent;
   cursor: pointer;
   transition: all 0.2s ease;
   color: #9ca3af;
   background: transparent;
+  min-width: 44px;
+  min-height: 44px;
 }
 
 .chaya-sub-tab:hover {
@@ -600,6 +646,364 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   border-color: rgba(88, 101, 242, 0.2);
 }
 
+/* ========== Dashboard 布局 ========== */
+[data-skin="niho"] .dashboard-root {
+  color-scheme: dark;
+}
+[data-skin="light"] .dashboard-root {
+  color-scheme: light;
+}
+
+.dashboard-sidebar {
+  width: 88px;
+  min-width: 88px;
+  background: var(--surface-secondary);
+}
+@media (max-width: 767px) {
+  .dashboard-sidebar {
+    width: 64px;
+    min-width: 64px;
+  }
+}
+
+.dashboard-nav-item {
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  min-width: 48px;
+  min-height: 48px;
+}
+.dashboard-nav-item:hover {
+  background: var(--color-hover-bg);
+  color: var(--text-primary);
+  border-color: var(--border-default);
+}
+.dashboard-nav-item--active {
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
+  border-color: rgba(0, 255, 136, 0.25);
+}
+[data-skin="light"] .dashboard-nav-item--active {
+  border-color: rgba(37, 99, 235, 0.3);
+}
+
+/* 主题切换器（生产级 Segmented Switcher） */
+.skin-switcher-wrap {
+  display: flex;
+  justify-content: center;
+}
+.skin-switcher {
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.08);
+  background: linear-gradient(180deg, var(--surface-tertiary) 0%, var(--surface-secondary) 100%);
+}
+.skin-switcher-option {
+  outline: none;
+  min-height: 44px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.625rem 0.5rem;
+  font-size: 16px;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  font-family: var(--font-display);
+  color: var(--text-muted);
+  transition: all 180ms ease;
+}
+.skin-switcher-option:hover {
+  color: var(--text-secondary);
+  background: var(--color-hover-bg);
+}
+.skin-switcher-option:focus-visible {
+  box-shadow: 0 0 0 2px var(--color-accent);
+}
+.skin-switcher-option--active {
+  color: var(--color-accent);
+  background: var(--surface-primary);
+  border-color: var(--border-default);
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.12);
+  transform: translateY(-1px);
+}
+[data-skin="light"] .skin-switcher-option--active {
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.15);
+}
+[data-skin="niho"] .skin-switcher {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.03) 100%);
+  border-color: var(--niho-text-border);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+[data-skin="niho"] .skin-switcher-option {
+  color: var(--niho-skyblue-gray);
+}
+[data-skin="niho"] .skin-switcher-option:hover {
+  color: var(--text-primary);
+  background: rgba(0, 255, 136, 0.08);
+}
+[data-skin="niho"] .skin-switcher-option--active {
+  border-color: rgba(0, 255, 136, 0.35);
+  color: var(--color-accent);
+  background: rgba(0, 255, 136, 0.1);
+  box-shadow: 0 0 12px rgba(0, 255, 136, 0.18);
+}
+
+.dashboard-main {
+  background: var(--surface-primary);
+  font-size: var(--text-fluid-base);
+}
+.dashboard-panel {
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-default);
+  margin: 10px;
+  margin-left: 0;
+  padding: 12px;
+}
+
+/* ========== 生图/生视频 Nano Banana 2 风格布局 ========== */
+/* 创作区卡片：收紧内边距，扩大创作+图库显示区域 */
+.media-create-card > div:last-child {
+  padding: 0.5rem 0.75rem 0.25rem !important;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+.media-create-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem 1.5rem;
+  max-width: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0.5rem 1rem 0.25rem;
+  min-height: 100%;
+  min-height: max(100%, 78vh);
+}
+
+/* 一屏显示：创作区全宽 + 高度受控，左右栏在视口内各自滚动 */
+.chatu-page-one-screen .media-create-layout {
+  min-height: 0;
+  height: 100%;
+  align-content: stretch;
+}
+.chatu-page-one-screen .media-create-layout > * {
+  min-height: 0;
+}
+@media (max-width: 900px) {
+  .media-create-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.media-create-upload-zone {
+  border: 2px dashed var(--border-default);
+  border-radius: 14px;
+  background: var(--surface-secondary);
+  transition: border-color 0.2s, background 0.2s;
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  text-align: center;
+}
+.media-create-upload-zone:hover,
+.media-create-upload-zone.drag-over {
+  border-color: var(--color-accent);
+  background: var(--color-accent-bg);
+}
+
+.media-create-prompt-label {
+  font-size: var(--text-fluid-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 0.5rem;
+}
+
+.media-create-options-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.media-create-results-card {
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: 14px;
+  padding: 0.75rem 1rem 0.25rem;
+  min-height: 360px;
+  display: flex;
+  flex-direction: column;
+}
+.chatu-page-one-screen .media-create-results-card {
+  min-height: 0;
+}
+/* 图库卡片：扩大高度与显示区域，内部滚动，小图完整显示 */
+.media-create-results-card.media-create-gallery {
+  max-height: 94vh;
+  min-height: 460px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.chatu-page-one-screen .media-create-results-card.media-create-gallery {
+  height: 100%;
+  max-height: none;
+  min-height: 0;
+}
+
+.media-create-gallery .media-create-gallery-main {
+  min-height: 320px;
+  flex: 1 1 0;
+  width: 100%;
+  aspect-ratio: 4/3;
+  max-height: min(75vh, 620px);
+}
+/* 图库缩略图列表：占满剩余高度，每行 6 个，有角方形紧密排列，按天分段，内部纵向滚动 */
+.media-create-gallery-thumb-strip {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  -webkit-overflow-scrolling: touch;
+}
+.media-create-gallery-thumb-strip .media-create-gallery-by-day {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+}
+.media-create-day-segment {
+  min-width: 0;
+}
+.media-create-thumb-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+}
+.media-create-thumb-grid .relative {
+  min-width: 0;
+  min-height: 0;
+}
+.media-create-thumb-grid button.aspect-square {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.media-create-batch-group {
+  background: rgba(0, 255, 136, 0.03);
+}
+
+.media-create-results-title {
+  font-size: var(--text-fluid-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.4rem;
+}
+
+.media-create-empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem 2rem 0.5rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+.media-create-empty-state .steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  font-size: var(--text-fluid-sm);
+  color: var(--text-secondary);
+}
+
+.media-create-create-btn {
+  min-width: 120px;
+}
+
+/* ========== 创作区：减框线、以留白与背景区分层次 ========== */
+.chatu-page .prompt-and-ref-card {
+  border: none;
+  background: var(--surface-secondary);
+  box-shadow: none;
+}
+.chatu-page .prompt-and-ref-card__images {
+  border-bottom: 1px solid var(--border-subtle);
+}
+.chatu-page .prompt-and-ref-card__images .border-dashed {
+  border-width: 1px;
+  border-color: var(--border-subtle);
+}
+.chatu-page .prompt-and-ref-card__images .border-dashed.drag-over,
+.chatu-page .prompt-and-ref-card__images .border-dashed:hover {
+  border-color: var(--color-accent);
+  background: var(--color-accent-bg);
+}
+
+.chatu-page .my-prompts-block {
+  border: none;
+  background: color-mix(in srgb, var(--color-secondary) 8%, transparent);
+}
+.chatu-page .my-prompts-block .rounded-lg.border {
+  border-color: transparent;
+  background: var(--surface-secondary);
+}
+
+.chatu-page .image-size-block {
+  border: 1px solid var(--border-default);
+  background: var(--surface-secondary);
+}
+.chatu-page .media-create-results-card.media-create-gallery {
+  border: none;
+  background: var(--surface-secondary);
+}
+.chatu-page .media-create-gallery-main {
+  border: none !important;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.chatu-page .media-create-gallery-thumb-strip {
+  scrollbar-width: thin;
+}
+.chatu-page .media-create-gallery-thumb-strip.no-scrollbar {
+  scrollbar-width: none;
+}
+.chatu-page .media-create-gallery-thumb-strip.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.chatu-page .media-create-batch-group {
+  border: none !important;
+  border-left: 3px solid rgba(0, 255, 136, 0.35);
+  border-radius: 6px;
+  background: rgba(0, 255, 136, 0.04);
+}
+/* 缩略图：有角方形紧密排列，仅选中时显框 */
+.chatu-page .media-create-gallery .media-create-gallery-thumb-strip button.aspect-square,
+.chatu-page .media-create-gallery .media-create-thumb-grid button.aspect-square {
+  border: 1px solid transparent;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  min-width: 0;
+}
+.chatu-page .media-create-gallery .media-create-gallery-thumb-strip button.aspect-square:hover,
+.chatu-page .media-create-gallery .media-create-thumb-grid button.aspect-square:hover {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
 /* ========== Niho 卡片体积系统 (Card Elevation System) ========== */
 /*
  * 设计原理：纯黑主题下，"深度"不能靠灰度堆叠（禁止灰色）。
@@ -887,17 +1291,17 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   background: #000 !important;
 }
 
-/* 面板 / 卡片容器 — 排除 niho-card-* 元素，让体积系统接管 */
+/* 面板 / 卡片 — 体积与分界清晰，无遮盖感 */
 [data-skin="niho"] .chatu-page .rounded-lg.border:not(.niho-card-1):not(.niho-card-2):not(.niho-card-3):not(.niho-card-3-pink):not(.niho-card-3-gold) {
-  background: #000 !important;
-  border-color: var(--niho-text-border) !important;
+  background: var(--niho-elevation-1-bg) !important;
+  border-color: var(--niho-module-border) !important;
+  border-width: 1px !important;
   box-shadow: none !important;
 }
 
-/* 单独的 rounded 面板（含 border-gray / bg-gray）也覆盖 — 排除 niho-card */
 [data-skin="niho"] .chatu-page .rounded-md.border:not(.niho-card-1):not(.niho-card-2):not(.niho-card-3) {
-  background: #000 !important;
-  border-color: var(--niho-text-border) !important;
+  background: var(--niho-elevation-1-bg) !important;
+  border-color: var(--niho-module-border) !important;
 }
 
 /* ── Chatu 卡片体积：仅用虚线边框区分层级，禁止单侧色条/顶线 ── */
@@ -913,38 +1317,38 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   overflow: visible;
 }
 
-/* L1 — 素材库、空白占位：纯黑 + 虚线弱边 */
+/* L1 — 素材库、空白占位：轻量体积 + 可见虚线 */
 [data-skin="niho"] .chatu-page .niho-card-1 {
-  background: #000 !important;
-  border: 1px dashed rgba(255, 255, 255, 0.08) !important;
+  background: var(--niho-elevation-1-bg) !important;
+  border: 1px dashed var(--niho-elevation-1-border) !important;
   box-shadow: none !important;
 }
 [data-skin="niho"] .chatu-page .niho-card-1:hover {
-  border-color: rgba(255, 255, 255, 0.14) !important;
+  border-color: var(--niho-text-border-strong) !important;
 }
 
-/* L2 — 创作输入区、视频面板：微亮底 + 虚线中强边 */
+/* L2 — 创作输入区、视频面板：明显体积 + 强虚线 */
 [data-skin="niho"] .chatu-page .niho-card-2 {
-  background: rgba(255, 255, 255, 0.02) !important;
-  border: 1px dashed rgba(255, 255, 255, 0.14) !important;
+  background: var(--niho-elevation-2-bg) !important;
+  border: 1px dashed var(--niho-elevation-2-border) !important;
   box-shadow: none !important;
 }
 [data-skin="niho"] .chatu-page .niho-card-2:hover {
-  border-color: rgba(255, 255, 255, 0.22) !important;
-  background: rgba(255, 255, 255, 0.03) !important;
+  border-color: rgba(255, 255, 255, 0.28) !important;
+  background: rgba(255, 255, 255, 0.06) !important;
 }
 
-/* L3 — 生成结果区：绿染底 + 虚线绿边（四边统一） */
+/* L3 — 生成结果区：绿染底 + 清晰绿边 */
 [data-skin="niho"] .chatu-page .niho-card-3 {
-  background: rgba(0, 255, 136, 0.03) !important;
-  border: 1px dashed rgba(0, 255, 136, 0.32) !important;
-  box-shadow: 0 0 12px rgba(0, 255, 136, 0.04) !important;
+  background: var(--niho-elevation-3-bg) !important;
+  border: 1px dashed var(--niho-elevation-3-border) !important;
+  box-shadow: 0 0 12px rgba(0, 255, 136, 0.06) !important;
 }
 
-/* 创作区 Card 外壳：虚线弱边 */
+/* 创作区 Card 外壳：有分界、无遮盖 */
 [data-skin="niho"] .chatu-page .agents-page-card {
-  background: rgba(255, 255, 255, 0.01) !important;
-  border: 1px dashed rgba(255, 255, 255, 0.10) !important;
+  background: var(--niho-elevation-1-bg) !important;
+  border: 1px dashed var(--niho-elevation-1-border) !important;
   box-shadow: none !important;
 }
 
@@ -1038,17 +1442,52 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   color: var(--color-accent) !important;
 }
 
-/* dark 模式下的灰色背景值 → 纯黑 */
+/* dark 类下的背景 → 用层级色，避免整块遮盖 */
 [data-skin="niho"] .chatu-page .dark\:bg-\[\#111\],
 [data-skin="niho"] .chatu-page .dark\:bg-\[\#1a1a1a\],
 [data-skin="niho"] .chatu-page .dark\:bg-\[\#2d2d2d\] {
-  background: #000 !important;
+  background: var(--niho-elevation-1-bg) !important;
 }
 
-/* dark 模式下的灰色边框值 → niho 边框 */
 [data-skin="niho"] .chatu-page .dark\:border-\[\#333\],
 [data-skin="niho"] .chatu-page .dark\:border-\[\#404040\] {
-  border-color: var(--niho-text-border) !important;
+  border-color: var(--niho-module-border) !important;
+}
+
+/* 创作区子模块：减框线，以背景区分 */
+[data-skin="niho"] .chatu-page .media-create-results-card,
+[data-skin="niho"] .chatu-page .media-create-gallery {
+  background: var(--niho-elevation-2-bg) !important;
+  border: none !important;
+}
+
+[data-skin="niho"] .chatu-page .media-create-upload-zone {
+  background: var(--niho-elevation-1-bg) !important;
+  border-color: var(--niho-elevation-1-border) !important;
+}
+
+[data-skin="niho"] .chatu-page .media-create-upload-zone:hover,
+[data-skin="niho"] .chatu-page .media-create-upload-zone.drag-over {
+  border-color: rgba(0, 255, 136, 0.35) !important;
+  background: rgba(0, 255, 136, 0.06) !important;
+}
+
+/* 参考图 + 描述 合体卡片：上 1/3 缩略图区，下为 prompt */
+.prompt-and-ref-card__images {
+  flex: 0 0 auto;
+}
+.prompt-and-ref-card__prompt {
+  min-height: 180px;
+}
+[data-skin="niho"] .chatu-page .prompt-and-ref-card {
+  background: var(--niho-elevation-2-bg) !important;
+  border: none !important;
+}
+
+/* 我的提示词块：轻量背景，无框线 */
+[data-skin="niho"] .chatu-page .my-prompts-block {
+  background: rgba(255, 107, 157, 0.04) !important;
+  border: none !important;
 }
 
 /* Chatu Lightbox — niho 下去光晕 */
@@ -1421,213 +1860,6 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 
 [data-skin="niho"] .llm-config-page .text-xs.text-gray-500 {
   color: var(--niho-skyblue-gray) !important;
-}
-
-/* ========== 爬虫配置页 Niho ========== */
-[data-skin="niho"] .crawler-config-page {
-  background: #000 !important;
-}
-
-[data-skin="niho"] .crawler-config-section-title {
-  color: var(--text-primary) !important;
-}
-
-[data-skin="niho"] .crawler-config-section-icon,
-[data-skin="niho"] .crawler-config-module-icon {
-  color: var(--color-accent) !important;
-}
-
-[data-skin="niho"] .crawler-config-loading .animate-spin {
-  border-color: var(--niho-text-border) !important;
-  border-top-color: var(--color-accent) !important;
-}
-
-[data-skin="niho"] .crawler-config-loading .text-gray-500 {
-  color: var(--niho-skyblue-gray) !important;
-}
-
-[data-skin="niho"] .crawler-config-card {
-  background: var(--niho-pure-black) !important;
-  border: 1px solid var(--niho-text-border) !important;
-  box-shadow: none !important;
-}
-
-[data-skin="niho"] .crawler-config-module-header {
-  border-color: transparent !important;
-}
-
-[data-skin="niho"] .crawler-config-module-header:hover {
-  background: var(--niho-text-bg) !important;
-}
-
-[data-skin="niho"] .crawler-config-chevron {
-  color: var(--niho-skyblue-gray) !important;
-}
-
-[data-skin="niho"] .crawler-config-module-name {
-  color: var(--text-primary) !important;
-}
-
-[data-skin="niho"] .crawler-config-module-desc,
-[data-skin="niho"] .crawler-config-batch-count,
-[data-skin="niho"] .crawler-config-muted,
-[data-skin="niho"] .crawler-config-empty-batch,
-[data-skin="niho"] .crawler-config-batch-meta {
-  color: var(--niho-skyblue-gray) !important;
-}
-
-[data-skin="niho"] .crawler-config-btn-delete:hover {
-  color: var(--color-secondary) !important;
-}
-
-[data-skin="niho"] .crawler-config-btn-action:hover {
-  color: var(--color-accent) !important;
-}
-
-[data-skin="niho"] .crawler-config-batch-list {
-  border-top-color: var(--niho-text-border) !important;
-}
-
-[data-skin="niho"] .crawler-config-batch-row:hover {
-  background: var(--niho-text-bg) !important;
-}
-
-[data-skin="niho"] .crawler-config-batch-name {
-  color: var(--text-primary) !important;
-}
-
-[data-skin="niho"] .crawler-config-batch-icon {
-  color: var(--color-accent) !important;
-}
-
-[data-skin="niho"] .crawler-config-batch-error {
-  color: var(--color-secondary) !important;
-}
-
-[data-skin="niho"] .crawler-config-spinner {
-  color: var(--color-accent) !important;
-}
-
-[data-skin="niho"] .crawler-config-header-cta {
-  background: var(--color-accent) !important;
-  color: #000 !important;
-  box-shadow: none !important;
-}
-
-[data-skin="niho"] .crawler-config-header-cta:hover {
-  background: var(--color-accent-hover) !important;
-  box-shadow: none !important;
-}
-
-[data-skin="niho"] .crawler-config-page .divide-y > * {
-  border-color: var(--niho-text-border) !important;
-}
-
-/* ========== 爬虫测试页（弹层）Niho ========== */
-[data-skin="niho"] .crawler-test-panel {
-  background: var(--niho-pure-black) !important;
-  border: 1px solid var(--niho-text-border) !important;
-  box-shadow: none !important;
-}
-
-[data-skin="niho"] .crawler-test-header {
-  background: var(--niho-pure-black) !important;
-  border-bottom-color: var(--niho-text-border) !important;
-}
-
-[data-skin="niho"] .crawler-test-header-icon {
-  color: var(--color-accent) !important;
-}
-
-[data-skin="niho"] .crawler-test-title {
-  color: var(--text-primary) !important;
-}
-
-[data-skin="niho"] .crawler-test-close:hover {
-  background: var(--niho-text-bg) !important;
-  color: var(--text-primary) !important;
-}
-
-[data-skin="niho"] .crawler-test-content {
-  background: var(--niho-pure-black) !important;
-}
-
-[data-skin="niho"] .crawler-test-label {
-  color: var(--niho-skyblue-gray) !important;
-}
-
-[data-skin="niho"] .crawler-test-panel .input-field {
-  background: var(--niho-pure-black) !important;
-  border: 1px solid var(--niho-text-border) !important;
-  color: var(--text-primary) !important;
-}
-
-[data-skin="niho"] .crawler-test-panel .input-field::placeholder {
-  color: var(--niho-skyblue-gray) !important;
-}
-
-[data-skin="niho"] .crawler-test-btn-primary {
-  background: var(--color-accent) !important;
-  color: #000 !important;
-  box-shadow: none !important;
-}
-
-[data-skin="niho"] .crawler-test-btn-primary:hover:not(:disabled) {
-  background: var(--color-accent-hover) !important;
-  box-shadow: none !important;
-}
-
-[data-skin="niho"] .crawler-test-error {
-  background: rgba(255, 107, 157, 0.08) !important;
-  border-color: rgba(255, 107, 157, 0.35) !important;
-}
-
-[data-skin="niho"] .crawler-test-error .text-red-500 {
-  color: var(--color-secondary) !important;
-}
-
-[data-skin="niho"] .crawler-test-error .text-red-700,
-[data-skin="niho"] .crawler-test-error .text-red-400,
-[data-skin="niho"] .crawler-test-error p {
-  color: var(--color-secondary) !important;
-}
-
-[data-skin="niho"] .crawler-test-block {
-  background: var(--niho-pure-black) !important;
-  border: 1px solid var(--niho-text-border) !important;
-}
-
-[data-skin="niho"] .crawler-test-block-toggle {
-  color: var(--text-primary) !important;
-}
-
-[data-skin="niho"] .crawler-test-block-toggle:hover {
-  background: var(--niho-text-bg) !important;
-}
-
-[data-skin="niho"] .crawler-test-block-body {
-  border-top-color: var(--niho-text-border) !important;
-}
-
-[data-skin="niho"] .crawler-test-panel .font-medium {
-  color: var(--text-primary) !important;
-}
-
-[data-skin="niho"] .crawler-test-panel .border-t {
-  border-top-color: var(--niho-text-border) !important;
-}
-
-[data-skin="niho"] .crawler-test-panel .bg-gray-50,
-[data-skin="niho"] .crawler-test-panel .dark\:bg-gray-900,
-[data-skin="niho"] .crawler-test-panel .bg-white,
-[data-skin="niho"] .crawler-test-panel .dark\:bg-gray-800 {
-  background: var(--niho-pure-black) !important;
-}
-
-[data-skin="niho"] .crawler-test-panel textarea.input-field {
-  background: var(--niho-pure-black) !important;
-  border: 1px solid var(--niho-text-border) !important;
-  color: var(--text-primary) !important;
 }
 
 /* ========== 设置页 Niho ========== */
@@ -2486,7 +2718,7 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   /* 基础毛玻璃 - 轻度模糊 */
   .glass {
     @apply bg-white/60 backdrop-blur-md border border-white/30;
-    @apply dark:bg-[#1a1a1a]/70 dark:border-white/5;
+    @apply dark:bg-[#1a1a1a]/60 dark:border-white/10;
     box-shadow: 
       0 1px 2px rgba(0, 0, 0, 0.04),
       inset 0 1px 0 rgba(255, 255, 255, 0.1);
@@ -2501,7 +2733,7 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   /* 面板毛玻璃 - 中度模糊 */
   .glass-panel {
     @apply bg-white/70 backdrop-blur-xl border border-gray-200/40;
-    @apply dark:bg-[#1e1e1e]/80 dark:border-white/5;
+    @apply dark:bg-[#1e1e1e]/70 dark:border-white/10;
     box-shadow: 
       0 2px 8px rgba(0, 0, 0, 0.04),
       0 4px 16px rgba(0, 0, 0, 0.02),
@@ -2518,7 +2750,7 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   /* 侧边栏毛玻璃 - 更强模糊 */
   .glass-sidebar {
     @apply bg-white/75 backdrop-blur-2xl border-r border-gray-200/50;
-    @apply dark:bg-[#1a1a1a]/85 dark:border-white/5;
+    @apply dark:bg-[#1a1a1a]/75 dark:border-white/10;
     box-shadow: 
       1px 0 4px rgba(0, 0, 0, 0.02),
       inset -1px 0 0 rgba(255, 255, 255, 0.1);
@@ -2533,7 +2765,7 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   /* 顶部导航栏毛玻璃 */
   .glass-top-nav {
     @apply bg-white/75 backdrop-blur-2xl border-b border-gray-200/50;
-    @apply dark:bg-[#1a1a1a]/85 dark:border-white/5;
+    @apply dark:bg-[#1a1a1a]/75 dark:border-white/10;
     box-shadow: 
       0 1px 4px rgba(0, 0, 0, 0.02),
       inset 0 -1px 0 rgba(255, 255, 255, 0.1);
@@ -2576,7 +2808,7 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   /* 头部毛玻璃 - 带底部高光 */
   .glass-header {
     @apply bg-white/80 backdrop-blur-xl border-b border-gray-200/40;
-    @apply dark:bg-[#1e1e1e]/85 dark:border-white/5;
+    @apply dark:bg-[#1e1e1e]/75 dark:border-white/10;
     box-shadow: 
       0 1px 3px rgba(0, 0, 0, 0.02),
       inset 0 -1px 0 rgba(0, 0, 0, 0.03),
@@ -2593,7 +2825,7 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   /* 卡片毛玻璃 - 悬浮效果 */
   .glass-card {
     @apply bg-white/65 backdrop-blur-lg border border-white/40 rounded-xl;
-    @apply dark:bg-[#242424]/75 dark:border-white/10;
+    @apply dark:bg-[#242424]/65 dark:border-white/20;
     box-shadow: 
       0 2px 4px rgba(0, 0, 0, 0.02),
       0 4px 8px rgba(0, 0, 0, 0.03),
@@ -2630,7 +2862,7 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   /* 弹出层毛玻璃 - 高模糊度 */
   .glass-popup {
     @apply bg-white/85 backdrop-blur-2xl border border-white/50 rounded-xl;
-    @apply dark:bg-[#1e1e1e]/90 dark:border-white/10;
+    @apply dark:bg-[#1e1e1e]/80 dark:border-white/10;
     box-shadow: 
       0 4px 16px rgba(0, 0, 0, 0.08),
       0 8px 32px rgba(0, 0, 0, 0.06),
@@ -2649,7 +2881,7 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   /* 输入区域毛玻璃 */
   .glass-input-area {
     @apply bg-white/50 backdrop-blur-md border border-gray-200/30 rounded-lg;
-    @apply dark:bg-[#262626]/60 dark:border-white/5;
+    @apply dark:bg-[#262626]/50 dark:border-white/10;
     box-shadow: 
       inset 0 1px 2px rgba(0, 0, 0, 0.03),
       0 1px 0 rgba(255, 255, 255, 0.8);
@@ -2992,41 +3224,70 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
     }
   }
 
-  /* 图库生成中：光谱流动动画 */
-  @keyframes chatu-spectrum-flow {
+  /* 图库生成中：彩图 blur 闪动（类 ChatGPT 生图动画） */
+  @keyframes chatu-blur-flicker {
+    0%, 100% {
+      filter: blur(28px);
+      opacity: 0.85;
+    }
+    50% {
+      filter: blur(18px);
+      opacity: 1;
+    }
+  }
+
+  @keyframes chatu-blur-shift {
     0% {
       background-position: 0% 50%;
     }
+    50% {
+      background-position: 100% 50%;
+    }
     100% {
-      background-position: 200% 50%;
+      background-position: 0% 50%;
     }
   }
 
   .chatu-generating-spectrum {
-    background: linear-gradient(
-      90deg,
-      rgba(0, 255, 136, 0.12) 0%,
-      rgba(255, 107, 157, 0.14) 20%,
-      rgba(255, 215, 0, 0.12) 40%,
-      rgba(0, 255, 136, 0.14) 60%,
-      rgba(100, 200, 255, 0.12) 80%,
-      rgba(0, 255, 136, 0.12) 100%
-    );
-    background-size: 200% 100%;
-    animation: chatu-spectrum-flow 2.2s linear infinite;
+    position: relative;
+    overflow: hidden;
+    background: radial-gradient(ellipse 80% 80% at 30% 30%, rgba(0, 255, 136, 0.35), transparent 50%),
+                radial-gradient(ellipse 70% 70% at 70% 60%, rgba(255, 107, 157, 0.3), transparent 50%),
+                radial-gradient(ellipse 60% 60% at 50% 80%, rgba(255, 215, 0, 0.25), transparent 45%),
+                radial-gradient(ellipse 80% 80% at 80% 20%, rgba(100, 200, 255, 0.28), transparent 50%);
+    background-size: 200% 200%;
+    animation: chatu-blur-shift 4s ease-in-out infinite;
+  }
+
+  .chatu-generating-spectrum::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: inherit;
+    filter: blur(24px);
+    animation: chatu-blur-flicker 2.5s ease-in-out infinite;
+    pointer-events: none;
   }
 
   .chatu-generating-spectrum-strong {
-    background: linear-gradient(
-      90deg,
-      rgba(0, 255, 136, 0.2) 0%,
-      rgba(255, 107, 157, 0.25) 25%,
-      rgba(255, 215, 0, 0.2) 50%,
-      rgba(0, 255, 136, 0.25) 75%,
-      rgba(0, 255, 136, 0.2) 100%
-    );
-    background-size: 200% 100%;
-    animation: chatu-spectrum-flow 2s linear infinite;
+    position: relative;
+    overflow: hidden;
+    background: radial-gradient(ellipse 85% 85% at 20% 25%, rgba(0, 255, 136, 0.4), transparent 45%),
+                radial-gradient(ellipse 75% 75% at 75% 70%, rgba(255, 107, 157, 0.35), transparent 45%),
+                radial-gradient(ellipse 65% 65% at 45% 85%, rgba(255, 215, 0, 0.3), transparent 40%),
+                radial-gradient(ellipse 80% 80% at 85% 15%, rgba(100, 200, 255, 0.32), transparent 45%);
+    background-size: 220% 220%;
+    animation: chatu-blur-shift 3.5s ease-in-out infinite;
+  }
+
+  .chatu-generating-spectrum-strong::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: inherit;
+    filter: blur(32px);
+    animation: chatu-blur-flicker 2s ease-in-out infinite;
+    pointer-events: none;
   }
 
   /* 列表项交错进入动画 */

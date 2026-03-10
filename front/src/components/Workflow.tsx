@@ -19,9 +19,6 @@ import type { PersonaPreset } from '../services/roleApi';
 import { createSkillPack, saveSkillPack, optimizeSkillPackSummary, getSkillPacks, getSessionSkillPacks, createSopSkillPack, setCurrentSop, getCurrentSop, SkillPack, SessionSkillPack, SkillPackCreationResult, SkillPackProcessInfo } from '../services/skillPackApi';
 import { getBackendUrl } from '../utils/backendUrl';
 import { estimate_messages_tokens, get_model_max_tokens, estimate_tokens } from '../services/tokenCounter';
-import { getBatch } from '../services/crawlerApi';
-import CrawlerModuleSelector from './CrawlerModuleSelector';
-import CrawlerBatchItemSelector from './CrawlerBatchItemSelector';
 import AttachmentMenu from './AttachmentMenu';
 import { Button } from './ui/Button';
 import { Checkbox } from './ui/Checkbox';
@@ -222,7 +219,6 @@ const Workflow: React.FC<WorkflowProps> = ({
   
   // @ 符号选择器状态
   const [showAtSelector, setShowAtSelector] = useState(false); // 是否显示 @ 选择器
-  const [showModuleSelector, setShowModuleSelector] = useState(false); // 是否显示模块选择器（/ 命令）
   const [atSelectorQuery, setAtSelectorQuery] = useState(''); // @ 选择器的查询字符串
   const [selectedComponentIndex, setSelectedComponentIndex] = useState(0); // 当前选中的组件索引（用于键盘导航）
   const [selectedComponents, setSelectedComponents] = useState<Array<{ type: 'mcp' | 'skillpack' | 'agent'; id: string; name: string }>>([]); // 已选定的组件（tag）
@@ -230,18 +226,7 @@ const Workflow: React.FC<WorkflowProps> = ({
   const editingMessageIdRef = useRef<string | null>(null);
   const selectorRef = useRef<HTMLDivElement>(null);
   const blurTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  
-  // 批次数据项选择器状态
-  const [showBatchItemSelector, setShowBatchItemSelector] = useState(false);
-  const [batchItemSelectorPosition, setBatchItemSelectorPosition] = useState({ top: 0, left: 0, maxHeight: 400 });
-  const [selectedBatch, setSelectedBatch] = useState<any>(null);
-  
-  // 选定的批次数据项（作为系统提示词）
-  const [selectedBatchItem, setSelectedBatchItem] = useState<{ item: any; batchName: string } | null>(null);
-  
-  // 批次数据项选择后的操作选择（临时状态）
-  const [pendingBatchItem, setPendingBatchItem] = useState<{ item: any; batchName: string } | null>(null);
-  
+
   // 会话管理
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSessionMeta, setCurrentSessionMeta] = useState<Session | null>(null);
@@ -1590,59 +1575,6 @@ const Workflow: React.FC<WorkflowProps> = ({
     }
   }, [showAtSelector, atSelectorQuery, mcpServers]);
   
-  // 监听点击外部关闭模块选择器
-  useEffect(() => {
-    if (!showModuleSelector) return;
-    
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as HTMLElement;
-      
-      // 检查点击是否在选择器外部（不包括输入框和选择器本身）
-      const isClickInsideSelector = target.closest('.at-selector-container');
-      const isClickInsideInput = inputRef.current?.contains(target);
-      
-      if (!isClickInsideSelector && !isClickInsideInput) {
-        console.log('[Workflow] 点击外部，关闭模块选择器');
-        setShowModuleSelector(false);
-        setModuleSelectorIndex(-1);
-      }
-    };
-    
-    // 延迟添加监听器，避免立即触发
-    const timerId = setTimeout(() => {
-      document.addEventListener('mousedown', handleClickOutside);
-    }, 100);
-    
-    return () => {
-      clearTimeout(timerId);
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [showModuleSelector]);
-  
-  // 监听ESC键关闭模块选择器
-  useEffect(() => {
-    if (!showModuleSelector) return;
-    
-    const handleEscKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        console.log('[Workflow] 按下ESC，关闭模块选择器');
-        setShowModuleSelector(false);
-        setModuleSelectorIndex(-1);
-        
-        // 重新聚焦输入框
-        if (inputRef.current) {
-          inputRef.current.focus();
-        }
-      }
-    };
-    
-    document.addEventListener('keydown', handleEscKey);
-    
-    return () => {
-      document.removeEventListener('keydown', handleEscKey);
-    };
-  }, [showModuleSelector]);
-  
   // 加载会话消息
   const loadSessionMessages = async (session_id: string, page: number = 1) => {
     // 统一走 useConversation
@@ -2424,21 +2356,6 @@ const Workflow: React.FC<WorkflowProps> = ({
       if (summaries.length > 0 ) {
         const summaryTexts = summaries.map(s => s.summary_content).join('\n\n');
         systemPrompt += `\n\n以下是之前对话的总结，请参考这些上下文：\n\n${summaryTexts}\n\n`;
-      }
-      
-      // 添加选定的批次数据项（如果有）
-      if (selectedBatchItem) {
-        const { item, batchName } = selectedBatchItem;
-        systemPrompt += `\n\n【参考资料 - ${batchName}】\n`;
-        if (item.title) {
-          systemPrompt += `标题: ${item.title}\n`;
-        }
-        if (item.content) {
-          systemPrompt += `内容:\n${item.content}\n`;
-        }
-        systemPrompt += '\n请基于以上参考资料回答用户的问题。';
-        
-        console.log('[Workflow] 添加批次数据项到系统提示词:', { item, batchName });
       }
       
       // 添加技能包信息（如果有）
@@ -3987,7 +3904,7 @@ const Workflow: React.FC<WorkflowProps> = ({
     });
   };
   
-  // 处理输入框变化，检测 @ 符号和 /模块 命令
+  // 处理输入框变化，检测 @ 符号
   const getSelectableComponents = React.useCallback(() => {
     const mcpList = mcpServers
       .filter(s => s.name.toLowerCase().includes(atSelectorQuery.toLowerCase()))
@@ -4000,279 +3917,6 @@ const Workflow: React.FC<WorkflowProps> = ({
     
     return [...agentList, ...mcpList];
   }, [mcpServers, atSelectorQuery, topicParticipants]);
-  
-  // 处理模块选择（/模块命令）
-  const handleModuleSelect = async (moduleId: string, batchId: string, batchName: string) => {
-    try {
-      // 获取批次数据
-      const batch = await getBatch(moduleId, batchId);
-      
-      // 检查数据是否存在
-      if (!batch || !batch.crawled_data) {
-        alert('该批次没有数据');
-        return;
-      }
-      
-      // 优先使用 parsed_data（用户标记后生成的解析数据），如果没有则使用 crawled_data.normalized
-      // parsed_data 现在是一个简单的数组，每个元素包含 title 和 content
-      let normalizedData: any = null;
-      
-      if (batch.parsed_data && Array.isArray(batch.parsed_data)) {
-        // parsed_data 是数组格式，转换为对象格式
-        normalizedData = {
-          items: batch.parsed_data.map((item, index) => ({
-            id: `item_${index + 1}`,
-            title: item.title || '',
-            content: item.content || ''
-          })),
-          total_count: batch.parsed_data.length,
-          format: 'list'
-        };
-      } else if (batch.parsed_data && typeof batch.parsed_data === 'object') {
-        // parsed_data 是对象格式（兼容旧数据）
-        normalizedData = batch.parsed_data;
-      } else if (batch.crawled_data?.normalized) {
-        // 使用 crawled_data.normalized
-        normalizedData = batch.crawled_data.normalized;
-      }
-      
-      if (!normalizedData || !normalizedData.items || normalizedData.items.length === 0) {
-        alert('该批次没有解析数据，请先在爬虫配置页面标记并生成解析数据');
-        return;
-      }
-      
-      // 如果有多个数据项，显示选择器让用户选择
-      if (normalizedData.items.length > 1) {
-        setSelectedBatch(batch);
-        setShowModuleSelector(false);
-        
-        // 计算批次数据项选择器的位置（使用相同的位置计算逻辑）
-        if (inputRef.current && moduleSelectorIndex !== -1) {
-          const textarea = inputRef.current;
-          const textareaRect = textarea.getBoundingClientRect();
-          const styles = window.getComputedStyle(textarea);
-          const cursorPosition = moduleSelectorIndex + 1 + moduleSelectorQuery.length;
-          const textBeforeCursor = input.substring(0, cursorPosition);
-          
-          // 使用与模块选择器相同的位置计算逻辑
-          const mirror = document.createElement('div');
-          mirror.style.position = 'absolute';
-          mirror.style.visibility = 'hidden';
-          mirror.style.whiteSpace = styles.whiteSpace || 'pre-wrap';
-          mirror.style.wordWrap = styles.wordWrap || 'break-word';
-          mirror.style.overflowWrap = styles.overflowWrap || 'break-word';
-          mirror.style.font = styles.font;
-          mirror.style.fontSize = styles.fontSize;
-          mirror.style.fontFamily = styles.fontFamily;
-          mirror.style.fontWeight = styles.fontWeight;
-          mirror.style.fontStyle = styles.fontStyle;
-          mirror.style.letterSpacing = styles.letterSpacing;
-          mirror.style.padding = styles.padding;
-          mirror.style.border = styles.border;
-          mirror.style.width = `${textarea.offsetWidth}px`;
-          mirror.style.boxSizing = styles.boxSizing;
-          mirror.style.lineHeight = styles.lineHeight;
-          mirror.style.wordSpacing = styles.wordSpacing;
-          mirror.style.top = `${textareaRect.top}px`;
-          mirror.style.left = `${textareaRect.left}px`;
-          mirror.textContent = textBeforeCursor;
-          document.body.appendChild(mirror);
-          
-          let cursorX: number;
-          let cursorY: number;
-          
-          try {
-            const range = document.createRange();
-            const mirrorTextNode = mirror.firstChild;
-            if (mirrorTextNode && mirrorTextNode.nodeType === Node.TEXT_NODE) {
-              const textLength = mirrorTextNode.textContent?.length || 0;
-              range.setStart(mirrorTextNode, textLength);
-              range.setEnd(mirrorTextNode, textLength);
-              const rangeRect = range.getBoundingClientRect();
-              cursorX = rangeRect.right;
-              cursorY = rangeRect.top;
-            } else {
-              throw new Error('No text node found');
-            }
-          } catch (e) {
-            const mirrorRect = mirror.getBoundingClientRect();
-            const lines = textBeforeCursor.split('\n');
-            const lineIndex = lines.length - 1;
-            const lineText = lines[lineIndex] || '';
-            const lineMeasure = document.createElement('span');
-            lineMeasure.style.font = styles.font;
-            lineMeasure.style.fontSize = styles.fontSize;
-            lineMeasure.style.fontFamily = styles.fontFamily;
-            lineMeasure.style.fontWeight = styles.fontWeight;
-            lineMeasure.style.fontStyle = styles.fontStyle;
-            lineMeasure.style.letterSpacing = styles.letterSpacing;
-            lineMeasure.style.whiteSpace = 'pre';
-            lineMeasure.textContent = lineText;
-            lineMeasure.style.position = 'absolute';
-            lineMeasure.style.visibility = 'hidden';
-            document.body.appendChild(lineMeasure);
-            const lineWidth = lineMeasure.offsetWidth;
-            document.body.removeChild(lineMeasure);
-            const lineHeight = parseFloat(styles.lineHeight) || parseFloat(styles.fontSize) * 1.2;
-            const paddingTop = parseFloat(styles.paddingTop) || 0;
-            const paddingLeft = parseFloat(styles.paddingLeft) || 0;
-            cursorX = mirrorRect.left + paddingLeft + lineWidth;
-            cursorY = mirrorRect.top + paddingTop + (lineIndex * lineHeight);
-          }
-          
-          document.body.removeChild(mirror);
-          
-          const selectorMaxHeight = 400;
-          const selectorWidth = 500;
-          const viewportWidth = window.innerWidth;
-          const idealHeight = selectorMaxHeight;
-          let top = cursorY - idealHeight;
-          let left = cursorX + 8;
-          
-          if (top < 10) {
-            top = 10;
-          }
-          
-          if (left + selectorWidth > viewportWidth - 10) {
-            left = cursorX - selectorWidth - 8;
-            if (left < 10) {
-              left = cursorX + 8;
-            }
-          }
-          
-          if (left < 10) {
-            left = 10;
-          }
-          
-          const maxAvailableHeight = cursorY - top - 8;
-          const actualMaxHeight = Math.min(selectorMaxHeight, maxAvailableHeight);
-          
-          setBatchItemSelectorPosition({
-            top,
-            left,
-            maxHeight: actualMaxHeight
-          });
-          setShowBatchItemSelector(true);
-        }
-      } else {
-        // 只有一个数据项，直接插入
-        const item = normalizedData.items[0];
-        handleBatchItemSelect(item, batchName);
-      }
-    } catch (error: any) {
-      console.error('[Workflow] Failed to select module:', error);
-      alert(`获取模块数据失败: ${error.message || '未知错误'}`);
-    }
-  };
-  
-  // 处理批次数据项选择（显示操作选择界面）
-  const handleBatchItemSelect = (item: any, batchName: string) => {
-    console.log('[Workflow] 选定批次数据项，等待用户选择操作:', { item, batchName });
-    
-    // 保存待处理的批次数据项
-    setPendingBatchItem({ item, batchName });
-    
-    // 关闭选择器
-    setShowBatchItemSelector(false);
-    setShowModuleSelector(false);
-    setModuleSelectorIndex(-1);
-    setModuleSelectorQuery('');
-    setSelectedBatch(null);
-    
-    // 如果还在输入框中保留了 /模块 文本，清除它
-    if (inputRef.current && moduleSelectorIndex !== -1) {
-      const textBefore = input.substring(0, moduleSelectorIndex);
-      const textAfter = input.substring(moduleSelectorIndex + 1 + moduleSelectorQuery.length);
-      const newText = textBefore + textAfter;
-      setInput(newText);
-      
-      // 设置光标位置
-      setTimeout(() => {
-        if (inputRef.current) {
-          inputRef.current.setSelectionRange(textBefore.length, textBefore.length);
-          inputRef.current.focus();
-        }
-      }, 0);
-    }
-  };
-  
-  // 将批次数据项设置为系统提示词（人设）
-  const handleSetAsSystemPrompt = async () => {
-    if (!pendingBatchItem) return;
-    
-    const { item, batchName } = pendingBatchItem;
-    console.log('[Workflow] 设置批次数据项为人设:', { item, batchName });
-    
-    // 构建人设内容
-    let systemPromptContent = '';
-    if (item.title) {
-      systemPromptContent += `【${batchName}】${item.title}\n\n`;
-    }
-    if (item.content) {
-      systemPromptContent += item.content;
-    }
-    
-    // 保存选定的批次数据项（用于显示）
-    setSelectedBatchItem({ item, batchName });
-    setPendingBatchItem(null);
-    
-    // 更新会话的人设属性
-    if (currentSessionId) {
-      try {
-        await updateSessionSystemPrompt(currentSessionId, systemPromptContent);
-        setCurrentSystemPrompt(systemPromptContent);
-        // 更新 sessions 列表
-        setSessions(prev => prev.map(s => 
-          s.session_id === currentSessionId ? { ...s, system_prompt: systemPromptContent } : s
-        ));
-        console.log('[Workflow] 人设已更新');
-      } catch (error) {
-        console.error('[Workflow] Failed to update system prompt:', error);
-      }
-    } else {
-      // 没有会话时，只更新本地状态
-      setCurrentSystemPrompt(systemPromptContent);
-    }
-  };
-  
-  // 将批次数据项作为对话内容插入
-  const handleInsertAsMessage = () => {
-    if (!pendingBatchItem) return;
-    
-    const { item, batchName } = pendingBatchItem;
-    console.log('[Workflow] 将批次数据项插入为对话内容:', { item, batchName });
-    
-    // 构建插入的文本
-    let insertText = `[引用: ${batchName}]\n`;
-    if (item.title) {
-      insertText += `标题: ${item.title}\n`;
-    }
-    if (item.content) {
-      insertText += `内容: ${item.content}\n`;
-    }
-    insertText += '\n';
-    
-    // 插入到输入框
-    if (inputRef.current) {
-      const currentValue = input;
-      const cursorPosition = inputRef.current.selectionStart || currentValue.length;
-      const textBefore = currentValue.substring(0, cursorPosition);
-      const textAfter = currentValue.substring(cursorPosition);
-      const newText = textBefore + insertText + textAfter;
-      
-      setInput(newText);
-      setPendingBatchItem(null);
-      
-      // 设置光标位置
-      setTimeout(() => {
-        if (inputRef.current) {
-          const newCursorPos = textBefore.length + insertText.length;
-          inputRef.current.setSelectionRange(newCursorPos, newCursorPos);
-          inputRef.current.focus();
-        }
-      }, 0);
-    }
-  };
   
   // 选择感知组件（添加为 tag）
   const handleSelectComponent = async (component: { type: 'mcp' | 'skillpack' | 'agent'; id: string; name: string }) => {
@@ -5052,11 +4696,6 @@ const Workflow: React.FC<WorkflowProps> = ({
 
 
   const {
-    moduleSelectorIndex,
-    setModuleSelectorIndex,
-    moduleSelectorQuery,
-    setModuleSelectorQuery,
-    moduleSelectorPosition,
     atSelectorIndex,
     setAtSelectorIndex,
     atSelectorPosition,
@@ -5074,9 +4713,6 @@ const Workflow: React.FC<WorkflowProps> = ({
     setInput,
     inputRef,
     handleSend,
-    showBatchItemSelector,
-    showModuleSelector,
-    setShowModuleSelector,
     showAtSelector,
     setShowAtSelector,
     atSelectorQuery,
@@ -5090,16 +4726,16 @@ const Workflow: React.FC<WorkflowProps> = ({
   return (
     <>
     <div className="workflow-chat-outer h-full flex flex-col bg-gray-50 dark:bg-[#1a1a1a]">
-      <div className="flex-1 flex min-h-0 p-2 justify-center">
-        <div className="w-full max-w-6xl flex-1 flex flex-col min-h-0 min-w-0">
+      <div className="flex-1 flex min-h-0 p-3 justify-center">
+        <div className="w-full max-w-[1400px] flex-1 flex flex-col min-h-0 min-w-0">
         <div className="workflow-chat-panel flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-[#2d2d2d] overflow-hidden rounded-lg">
           {/* Chaya 主界面不显示顶部 header（头像框与栏目），直接显示对话；SOP 入口移至输入框插件弹框 */}
           {currentSessionId !== 'agent_chaya' && (
-          <div className="workflow-chat-header border-b border-gray-200 dark:border-[#404040] px-3 py-0.5 bg-gradient-to-r from-gray-50 to-white dark:from-gray-800 dark:to-gray-900 flex-shrink-0">
-          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 min-h-9">
+          <div className="workflow-chat-header border-b border-gray-200 dark:border-[#404040] px-4 py-2 bg-gradient-to-r from-gray-50 to-white dark:from-gray-800 dark:to-gray-900 flex-shrink-0">
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 min-h-11">
             {/* 左区：头像 */}
             <div className="flex items-center justify-start min-w-0">
-                  <div className="w-7 h-7 flex-shrink-0 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary-400 hover:ring-offset-1 transition-all overflow-hidden" onClick={async () => {
+                  <div className="w-8 h-8 flex-shrink-0 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary-400 hover:ring-offset-1 transition-all overflow-hidden" onClick={async () => {
                   if (currentSessionId ) {
                     // 从当前会话获取数据
                     let currentSession =
@@ -5155,14 +4791,14 @@ const Workflow: React.FC<WorkflowProps> = ({
                 {currentSessionAvatar ? (
                   <img src={currentSessionAvatar} alt="Avatar" className="w-full h-full object-cover" />
                 ) : (
-                  <Bot className="w-4 h-4 text-primary-600 dark:text-primary-400" />
+                  <Bot className="w-5 h-5 text-primary-600 dark:text-primary-400" />
                 )}
               </div>
             </div>
             {/* 中区：标题居中 */}
             <div className="flex flex-col items-center justify-center min-w-0 max-w-full px-2">
                 <span 
-                  className="text-xs font-semibold text-gray-900 dark:text-[#ffffff] leading-tight truncate max-w-full text-center block"
+                  className="text-sm font-semibold text-gray-900 dark:text-[#ffffff] leading-tight truncate max-w-full text-center block"
                 >
                   {(() => {
                     const currentSession =
@@ -5591,7 +5227,7 @@ const Workflow: React.FC<WorkflowProps> = ({
             onClick={(e) => {
               // 点击输入框区域外部时关闭选择器（但不包括选择器本身）
               const target = e.target as HTMLElement;
-              if ((showAtSelector || showModuleSelector) && !target.closest('.at-selector-container') && !target.closest('textarea')) {
+              if (showAtSelector && !target.closest('.at-selector-container') && !target.closest('textarea')) {
                 setShowAtSelector(false);
               }
             }}
@@ -5607,119 +5243,6 @@ const Workflow: React.FC<WorkflowProps> = ({
             )}
           {/* 已选定的组件 tag - 已移除，组件选择通过工具tag直接显示 */}
           
-          {/* 显示待处理的批次数据项（选择操作） */}
-          {pendingBatchItem && (
-            <div className="mb-2 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center space-x-2 mb-1">
-                    <Database className="w-4 h-4 text-yellow-600 dark:text-yellow-400 flex-shrink-0" />
-                    <span className="text-sm font-medium text-yellow-900 dark:text-yellow-100">
-                      📋 已选择: {pendingBatchItem.batchName}
-                    </span>
-                  </div>
-                  {pendingBatchItem.item.title && (
-                    <div className="text-sm text-gray-800 dark:text-gray-200 font-medium truncate">
-                      {pendingBatchItem.item.title}
-                    </div>
-                  )}
-                  {pendingBatchItem.item.content && (
-                    <div className="text-xs text-gray-600 dark:text-[#b0b0b0] line-clamp-2 mt-1">
-                      {pendingBatchItem.item.content.length > 150 
-                        ? pendingBatchItem.item.content.substring(0, 150) + '...' 
-                        : pendingBatchItem.item.content}
-                    </div>
-                  )}
-                </div>
-                <button
-                  onClick={() => setPendingBatchItem(null)}
-                  className="ml-2 p-1 text-yellow-400 hover:text-yellow-600 dark:hover:text-yellow-300 transition-colors flex-shrink-0"
-                  title="取消"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={handleSetAsSystemPrompt}
-                  className="flex-1 px-3 py-2 bg-primary-500 hover:bg-primary-600 text-white text-sm font-medium rounded-lg transition-colors flex items-center justify-center space-x-2"
-                >
-                  <Brain className="w-4 h-4" />
-                  <span>🤖 设置为系统提示词</span>
-                </button>
-                <button
-                  onClick={handleInsertAsMessage}
-                  className="flex-1 px-3 py-2 bg-green-500 hover:bg-green-600 text-white text-sm font-medium rounded-lg transition-colors flex items-center justify-center space-x-2"
-                >
-                  <MessageCircle className="w-4 h-4" />
-                  <span>💬 作为对话内容</span>
-                </button>
-              </div>
-            </div>
-          )}
-          
-          {/* 显示选定的批次数据项（系统提示词） */}
-          {selectedBatchItem && (
-            <div className="mb-2 p-3 bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 rounded-lg">
-              <div className="flex items-start justify-between">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center space-x-2 mb-1">
-                    <Database className="w-4 h-4 text-primary-600 dark:text-primary-400 flex-shrink-0" />
-                    <span className="text-sm font-medium text-primary-900 dark:text-primary-100">
-                      🤖 机器人人设: {selectedBatchItem.batchName}
-                    </span>
-                  </div>
-                  {selectedBatchItem.item.title && (
-                    <div className="text-sm text-gray-800 dark:text-gray-200 font-medium truncate">
-                      {selectedBatchItem.item.title}
-                    </div>
-                  )}
-                  {selectedBatchItem.item.content && (
-                    <div className="text-xs text-gray-600 dark:text-[#b0b0b0] line-clamp-2 mt-1">
-                      {selectedBatchItem.item.content.length > 150 
-                        ? selectedBatchItem.item.content.substring(0, 150) + '...' 
-                        : selectedBatchItem.item.content}
-                    </div>
-                  )}
-                </div>
-                <button
-                  onClick={async () => {
-                    // 清除选定的批次数据项
-                    setSelectedBatchItem(null);
-                    
-                    // 如果有会话，删除系统提示词消息
-                    if (currentSessionId) {
-                      const systemPromptMessage = messages.find(m => 
-                        m.role === 'system' && 
-                        m.toolCalls && 
-                        typeof m.toolCalls === 'object' &&
-                        (m.toolCalls as any).isSystemPrompt === true
-                      );
-                      
-                      if (systemPromptMessage) {
-                        try {
-                          await deleteMessage(currentSessionId, systemPromptMessage.id);
-                          setMessages(prev => prev.filter(m => m.id !== systemPromptMessage.id));
-                          console.log('[Workflow] Deleted system prompt message');
-                        } catch (error) {
-                          console.error('[Workflow] Failed to delete system prompt message:', error);
-                        }
-                      }
-                    }
-                  }}
-                  className="ml-2 p-1 text-primary-400 hover:text-primary-600 dark:hover:text-primary-300 transition-colors flex-shrink-0"
-                  title="取消选择"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-              <div className="mt-2 text-xs text-primary-600 dark:text-primary-400">
-                💡 此数据已保存为系统提示词，将作为机器人人设持续生效
-              </div>
-            </div>
-          )}
-          
-
           {/* 引用消息显示 */}
           {quotedMessageId && (() => {
             const quotedMsg = quotedMessageSnapshot || messages.find(m => m.id === quotedMessageId);
@@ -6219,16 +5742,6 @@ const Workflow: React.FC<WorkflowProps> = ({
                   // relatedTarget 存在但不在浮岛内，关闭浮岛
                   setIsInputFocused(false);
                   
-                  // 如果批次数据项选择器显示，不处理blur（由组件自己处理）
-                  if (showBatchItemSelector) {
-                    return;
-                  }
-                  
-                  // 如果模块选择器显示，不处理blur（由组件自己处理）
-                  if (showModuleSelector) {
-                    return;
-                  }
-                  
                   // 如果 @ 选择器显示，检查是否点击了选择器
                   if (showAtSelector) {
                     // 检查 relatedTarget 是否在选择器内
@@ -6348,40 +5861,6 @@ const Workflow: React.FC<WorkflowProps> = ({
             )}
           </div>
               
-          {/* /模块 选择器 */}
-          {showModuleSelector && (
-            <CrawlerModuleSelector
-              query={moduleSelectorQuery}
-              position={moduleSelectorPosition}
-              onSelect={handleModuleSelect}
-              onClose={() => {
-                setShowModuleSelector(false);
-                setModuleSelectorIndex(-1);
-                setModuleSelectorQuery('');
-              }}
-            />
-          )}
-          
-          {/* 批次数据项选择器 */}
-          {showBatchItemSelector && selectedBatch && (
-            <CrawlerBatchItemSelector
-              batch={selectedBatch}
-              position={batchItemSelectorPosition}
-              onSelect={(item) => {
-                const batchName = selectedBatch.batch_name;
-                handleBatchItemSelect(item, batchName);
-              }}
-              onClose={() => {
-                setShowBatchItemSelector(false);
-                setSelectedBatch(null);
-                // 重新显示模块选择器
-                if (moduleSelectorIndex !== -1) {
-                  setShowModuleSelector(true);
-                }
-              }}
-            />
-          )}
-          
           {/* @ 符号选择器 - 相对于输入框容器定位 */}
           {showAtSelector && (
             <div

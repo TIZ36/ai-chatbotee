@@ -101,55 +101,50 @@ const ActorPoolDialog: React.FC<ActorPoolDialogProps> = ({ open, onOpenChange })
             暂无已激活的 Actor
           </div>
         ) : (
-          <div className="overflow-auto flex-1 border border-borderToken rounded-md">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-muted/50 sticky top-0">
-                <tr>
-                  <th className="px-3 py-2 font-medium">Agent / 会话</th>
-                  <th className="px-3 py-2 font-medium">上下文</th>
-                  <th className="px-3 py-2 font-medium">Persona</th>
-                  <th className="px-3 py-2 font-medium">错误率</th>
-                  <th className="px-3 py-2 font-medium">默认模型</th>
-                </tr>
-              </thead>
-              <tbody>
-                {actors.map((a) => (
-                  <tr key={a.agent_id + a.topic_id} className="border-t border-borderToken">
-                    <td className="px-3 py-2">
-                      <div className="font-medium">{a.persona?.name || a.agent_id}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {a.topic_id || '-'}
+          <div className="overflow-auto flex-1 no-scrollbar">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {actors.map((a) => (
+                <div
+                  key={a.agent_id + a.topic_id}
+                  className="rounded-lg border border-[var(--border-default)] bg-[var(--surface-secondary)] p-3 flex flex-col gap-2 text-sm"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    {a.persona?.avatar ? (
+                      <img
+                        src={a.persona.avatar}
+                        alt=""
+                        className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                      />
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-[var(--color-accent-bg)] flex items-center justify-center flex-shrink-0">
+                        <Users className="w-4 h-4 text-[var(--color-accent)]" />
                       </div>
-                    </td>
-                    <td className="px-3 py-2">
-                      <span title={`${a.context_messages} 条消息`}>
-                        {a.context_size.toLocaleString()} tokens
-                      </span>
-                      <div className="text-xs text-muted-foreground">
-                        {a.context_messages} 条
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 max-w-[180px]">
-                      <div className="truncate text-xs" title={a.persona?.system_prompt}>
-                        {a.persona?.system_prompt || '-'}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2">
-                      <span className={a.error_rate > 0 ? 'text-amber-600' : ''}>
-                        {(a.error_rate * 100).toFixed(2)}%
-                      </span>
-                      <div className="text-xs text-muted-foreground">
-                        {a.errors}/{a.messages_processed}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2">
-                      <div>{a.default_model}</div>
-                      <div className="text-xs text-muted-foreground">{a.default_provider}</div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium truncate">{a.persona?.name || a.agent_id}</div>
+                      <div className="text-xs text-[var(--text-muted)] truncate">{a.topic_id || '-'}</div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                    <span className="text-[var(--text-muted)]">上下文</span>
+                    <span title={`${a.context_messages} 条消息`}>
+                      {a.context_size.toLocaleString()} / {a.context_messages} 条
+                    </span>
+                    <span className="text-[var(--text-muted)]">错误率</span>
+                    <span className={a.error_rate > 0 ? 'text-amber-500' : ''}>
+                      {(a.error_rate * 100).toFixed(2)}% ({a.errors}/{a.messages_processed})
+                    </span>
+                    <span className="text-[var(--text-muted)] col-span-2">模型</span>
+                    <span className="col-span-2 truncate">{a.default_model} · {a.default_provider}</span>
+                  </div>
+                  {a.persona?.system_prompt ? (
+                    <p className="text-xs text-[var(--text-muted)] line-clamp-2 mt-0.5" title={a.persona.system_prompt}>
+                      {a.persona.system_prompt}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </DialogContent>

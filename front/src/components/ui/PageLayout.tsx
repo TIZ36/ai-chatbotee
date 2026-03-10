@@ -61,13 +61,13 @@ const PageLayout: React.FC<PageLayoutProps> = ({
               : 'px-3 py-2 glass-header'
             }
           `}>
-            <div className={isPersona ? 'max-w-3xl w-full mx-auto px-6' : ''}>
-              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 min-h-9">
+            <div className={isPersona ? 'max-w-5xl w-full mx-auto px-6' : ''}>
+              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 min-h-11">
                 <div className="flex items-center justify-start min-w-0" />
                 <div className="flex flex-col items-center justify-center min-w-0 max-w-full px-2 text-center">
                   <h1 className={`
                     font-bold text-gray-900 dark:text-white [data-skin="niho"]:text-[var(--text-primary)]
-                    ${isPersona ? 'text-xl agents-page-title' : 'text-sm font-semibold'}
+                    ${isPersona ? 'text-2xl agents-page-title' : 'text-base font-semibold'}
                   `}>
                     {title}
                   </h1>
@@ -90,7 +90,7 @@ const PageLayout: React.FC<PageLayoutProps> = ({
           ${contentClassName}
         `}>
           {constrainContent ? (
-            <div className="max-w-3xl mx-auto space-y-8">
+            <div className="max-w-5xl mx-auto space-y-8">
               {children}
             </div>
           ) : (

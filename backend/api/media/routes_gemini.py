@@ -9,13 +9,23 @@ from services import media_service as svc
 
 @media_bp.route('/gemini/image/generate', methods=['POST'])
 def gemini_image_generate():
-    """文生图。Body: { "prompt": str, "config_id": str?, "model": str? }"""
+    """文生图。Body: { "prompt": str, "config_id": str?, "model": str?, "aspect_ratio": str?, "count": int? }"""
     try:
         body = request.get_json(silent=True) or {}
         prompt = body.get('prompt') or ''
         config_id = body.get('config_id')
         model = body.get('model')
-        result = svc.gemini_image_generate(prompt=prompt, config_id=config_id, model=model)
+        aspect_ratio = body.get('aspect_ratio')
+        count = body.get('count')
+        if count is not None:
+            try:
+                count = int(count)
+            except (TypeError, ValueError):
+                count = 1
+        result = svc.gemini_image_generate(
+            prompt=prompt, config_id=config_id, model=model,
+            aspect_ratio=aspect_ratio, count=count
+        )
         if result.get('error'):
             return jsonify(result), 400
         return jsonify(result), 200
@@ -25,19 +35,27 @@ def gemini_image_generate():
 
 @media_bp.route('/gemini/image/edit', methods=['POST'])
 def gemini_image_edit():
-    """图生图。Body: { "prompt": str, "image_b64": str?, "thought_signature": str?, "config_id": str?, "model": str? }"""
+    """图生图。Body: { "prompt": str, "image_b64": str?, "images_b64": str[]?, "thought_signature": str?, "config_id": str?, "model": str?, "aspect_ratio": str?, "count": int? }"""
     try:
         body = request.get_json(silent=True) or {}
         prompt = body.get('prompt') or ''
         image_b64 = body.get('image_b64')
-        images_b64 = body.get('images_b64')  # 多图支持
+        images_b64 = body.get('images_b64')
         thought_signature = body.get('thought_signature')
         config_id = body.get('config_id')
         model = body.get('model')
+        aspect_ratio = body.get('aspect_ratio')
+        count = body.get('count')
+        if count is not None:
+            try:
+                count = int(count)
+            except (TypeError, ValueError):
+                count = 1
         result = svc.gemini_image_edit(
             prompt=prompt, image_b64=image_b64, images_b64=images_b64,
             config_id=config_id, model=model,
-            thought_signature=thought_signature
+            thought_signature=thought_signature,
+            aspect_ratio=aspect_ratio, count=count
         )
         if result.get('error'):
             return jsonify(result), 400

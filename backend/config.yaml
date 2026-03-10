@@ -40,10 +40,6 @@ research:
   max_form_memory_mb: 64
   max_form_parts: 20000
 
-crawler:
-  default_timeout: 30
-  default_user_agent: ""
-
 # 媒体生成按供应商配置（API Key 等）
 media:
   runway:

@@ -72,7 +72,13 @@ export const mediaApi = {
 
   // ─── Gemini 图像 ───
 
-  geminiImageGenerate: (body: { prompt: string; config_id?: string; model?: string }) =>
+  geminiImageGenerate: (body: {
+    prompt: string;
+    config_id?: string;
+    model?: string;
+    aspect_ratio?: string;
+    count?: number;
+  }) =>
     req<{ media?: unknown[]; content?: string; error?: string }>('/gemini/image/generate', {
       method: 'POST',
       body: JSON.stringify(body),
@@ -85,6 +91,8 @@ export const mediaApi = {
     thought_signature?: string;
     config_id?: string;
     model?: string;
+    aspect_ratio?: string;
+    count?: number;
   }) =>
     req<{ media?: unknown[]; content?: string; error?: string }>('/gemini/image/edit', {
       method: 'POST',

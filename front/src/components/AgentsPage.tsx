@@ -213,7 +213,7 @@ const AgentsPage: React.FC = () => {
               </p>
             </div>
           ) : (
-            <div className="max-w-3xl mx-auto space-y-8">
+            <div className="max-w-5xl mx-auto space-y-8">
               {/* 可添加部分 */}
               <section className="space-y-3">
                 <h2 className="agents-page-section-title text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">

@@ -6,9 +6,6 @@ export interface ChatInputProps {
   setInput: (value: string) => void;
   inputRef: React.RefObject<HTMLTextAreaElement>;
   handleSend: () => void;
-  showBatchItemSelector: boolean;
-  showModuleSelector: boolean;
-  setShowModuleSelector: (show: boolean) => void;
   showAtSelector: boolean;
   setShowAtSelector: (show: boolean) => void;
   atSelectorQuery: string;
@@ -24,9 +21,6 @@ export const useChatInput = ({
   setInput,
   inputRef,
   handleSend,
-  showBatchItemSelector,
-  showModuleSelector,
-  setShowModuleSelector,
   showAtSelector,
   setShowAtSelector,
   atSelectorQuery,
@@ -36,10 +30,6 @@ export const useChatInput = ({
   selectedComponentIndex,
   setSelectedComponentIndex,
 }: ChatInputProps) => {
-  const [moduleSelectorIndex, setModuleSelectorIndex] = useState(-1);
-  const [moduleSelectorQuery, setModuleSelectorQuery] = useState('');
-  const [moduleSelectorPosition, setModuleSelectorPosition] = useState({ bottom: 0, left: 0, maxHeight: 0 });
-  
   const [atSelectorIndex, setAtSelectorIndex] = useState(-1);
   const [atSelectorPosition, setAtSelectorPosition] = useState({ bottom: 0, left: 0, maxHeight: 0 });
   
@@ -73,65 +63,16 @@ export const useChatInput = ({
     const textBeforeCursor = value.substring(0, cursorPosition);
 
     // 只有 DOM 状态变化时才继续（避免 onChange+onKeyUp 等重复触发造成卡顿）
-    const snap = `${cursorPosition}|${el.scrollTop}|${el.scrollLeft}|${showAtSelector ? 1 : 0}|${showModuleSelector ? 1 : 0}|${value.length}`;
+    const snap = `${cursorPosition}|${el.scrollTop}|${el.scrollLeft}|${showAtSelector ? 1 : 0}|${value.length}`;
     if (snap === lastDomSnapshotRef.current) return;
     lastDomSnapshotRef.current = snap;
-    
-    // Detect / command
-    const lastSlashIndex = textBeforeCursor.lastIndexOf('/');
-    if (lastSlashIndex !== -1) {
-      const textAfterSlash = textBeforeCursor.substring(lastSlashIndex + 1);
-      const hasSpaceOrNewline = textAfterSlash.includes(' ') || textAfterSlash.includes('\n');
-      const textBeforeSlash = textBeforeCursor.substring(0, lastSlashIndex);
-      const isAtLineStart = textBeforeSlash.length === 0 || textBeforeSlash.endsWith('\n') || textBeforeSlash.endsWith(' ');
-      
-      if (!hasSpaceOrNewline && isAtLineStart) {
-        const query = textAfterSlash.toLowerCase();
-        setModuleSelectorIndex(lastSlashIndex);
-        setModuleSelectorQuery(query);
-        setShowAtSelector(false);
-        
-        const { x, y } = calculateCursorPosition(el, textBeforeCursor);
-        const selectorMaxHeight = 256;
-        const selectorMinHeight = 120;
-        const selectorWidth = 320;
-        const viewportWidth = window.innerWidth;
-        
-        let left = x + 8;
-        if (left + selectorWidth > viewportWidth - 10) {
-          left = x - selectorWidth - 8;
-          if (left < 10) left = x + 8;
-        }
-        if (left < 10) left = 10;
-        
-        const rawBottom = window.innerHeight - y + 5;
-        // 保证弹框至少能显示出一部分：限制 bottom 让 top 不会跑到屏幕外
-        const bottom = Math.max(10, Math.min(rawBottom, window.innerHeight - selectorMinHeight - 10));
-        const availableHeightAbove = y - 20;
-        const actualMaxHeight = Math.max(
-          selectorMinHeight,
-          Math.min(selectorMaxHeight, availableHeightAbove)
-        );
-        
-        setModuleSelectorPosition({ bottom, left, maxHeight: actualMaxHeight });
-        setShowModuleSelector(true);
-        return;
-      } else {
-        setShowModuleSelector(false);
-        setModuleSelectorIndex(-1);
-      }
-    } else if (showModuleSelector) {
-      setShowModuleSelector(false);
-      setModuleSelectorIndex(-1);
-    }
-    
+
     // Detect @ token（基于 caret 的 token 上下文）
     const atCtx = getAtTriggerContext(value, cursorPosition);
     if (atCtx) {
       atCtxMissRef.current = 0;
       setAtSelectorIndex(atCtx.start);
       setAtSelectorQuery(atCtx.query.toLowerCase());
-      setShowModuleSelector(false);
 
       const { x, y } = calculateCursorPosition(el, textBeforeCursor);
       const selectorMaxHeight = 256;
@@ -176,9 +117,7 @@ export const useChatInput = ({
     setAtSelectorQuery,
     setSelectedComponentIndex,
     setShowAtSelector,
-    setShowModuleSelector,
     showAtSelector,
-    showModuleSelector,
   ]);
 
   const scheduleUpdateSelectors = useCallback(() => {
@@ -200,11 +139,11 @@ export const useChatInput = ({
 
   // 当下拉显示时，窗口尺寸变化也需要重算位置
   useEffect(() => {
-    if (!showAtSelector && !showModuleSelector) return;
+    if (!showAtSelector) return;
     const onResize = () => scheduleUpdateSelectors();
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
-  }, [scheduleUpdateSelectors, showAtSelector, showModuleSelector]);
+  }, [scheduleUpdateSelectors, showAtSelector]);
 
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
@@ -216,9 +155,9 @@ export const useChatInput = ({
   // 光标移动/选区变化：不一定触发 onChange，需要单独刷新（但尽量做得很轻）
   const handleInputSelect = useCallback(() => {
     if (isComposingRef.current) return;
-    if (!showAtSelector && !showModuleSelector) return;
+    if (!showAtSelector) return;
     scheduleUpdateSelectors();
-  }, [scheduleUpdateSelectors, showAtSelector, showModuleSelector]);
+  }, [scheduleUpdateSelectors, showAtSelector]);
 
   const handleInputClick = handleInputSelect;
   const handleInputMouseUp = handleInputSelect;
@@ -244,26 +183,24 @@ export const useChatInput = ({
   );
 
   const handleInputScroll = useCallback(() => {
-    if (!showAtSelector && !showModuleSelector) return;
+    if (!showAtSelector) return;
     scheduleUpdateSelectors();
-  }, [scheduleUpdateSelectors, showAtSelector, showModuleSelector]);
+  }, [scheduleUpdateSelectors, showAtSelector]);
 
   const handleKeyPress = useCallback((e: React.KeyboardEvent) => {
     if (e.key !== 'Enter') return;
     if (isComposingRef.current || (e.nativeEvent as any)?.isComposing) return;
-    if (showBatchItemSelector || showModuleSelector || showAtSelector) return;
+    if (showAtSelector) return;
     if (e.shiftKey) return;
     
     e.preventDefault();
     handleSend();
-  }, [handleSend, showAtSelector, showBatchItemSelector, showModuleSelector]);
+  }, [handleSend, showAtSelector]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     handleKeyPress(e);
     if (e.defaultPrevented) return;
-    
-    if (showBatchItemSelector || showModuleSelector) return;
-    
+
     if (showAtSelector) {
       const selectableComponentsList = getSelectableComponents();
       
@@ -285,14 +222,9 @@ export const useChatInput = ({
         setShowAtSelector(false);
       }
     }
-  }, [getSelectableComponents, handleKeyPress, handleSelectComponent, selectedComponentIndex, setSelectedComponentIndex, setShowAtSelector, showAtSelector, showBatchItemSelector, showModuleSelector]);
+  }, [getSelectableComponents, handleKeyPress, handleSelectComponent, selectedComponentIndex, setSelectedComponentIndex, setShowAtSelector, showAtSelector]);
 
   return {
-    moduleSelectorIndex,
-    setModuleSelectorIndex,
-    moduleSelectorQuery,
-    setModuleSelectorQuery,
-    moduleSelectorPosition,
     atSelectorIndex,
     setAtSelectorIndex,
     atSelectorPosition,
