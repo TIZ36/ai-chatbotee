@@ -221,6 +221,9 @@ mcp_server_cache: LRUCache[dict] = LRUCache(maxsize=50, ttl=120)
 # 工具列表缓存（缓存60秒，平衡实时性和性能）
 tools_list_cache: LRUCache[dict] = LRUCache(maxsize=50, ttl=60)
 
+# 风格预设缓存（Civitai/Lexica 预设，缓存1-2小时）
+style_preset_cache: LRUCache[dict] = LRUCache(maxsize=200, ttl=3600)
+
 
 def get_llm_config_cached(
     config_id: str,

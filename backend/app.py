@@ -7422,6 +7422,291 @@ def update_session_media_output_path(session_id):
         return jsonify({"error": str(e)}), 500
 
 
+# ==================== 样式预设 API ====================
+
+@app.route("/api/media/style-presets", methods=["GET", "OPTIONS"])
+def get_style_presets():
+    """获取作图风格预设（支持多源）
+    
+    Query Parameters:
+      - source: 'all' | 'local' | 'civitai' | 'lexica' (default: 'all')
+      - query: 搜索关键词 (default: '')
+      - limit: 返回数量 (default: 20, max: 50)
+      - page: 分页号 (default: 1)
+    
+    Response:
+    {
+      "presets": [
+        {
+          "id": "local_1",
+          "label": "动漫风格",
+          "text": "以高质量日式动漫风格绘制...",
+          "source": "local",
+          "color": "secondary",
+          "tags": []
+        }
+      ],
+      "total": 123,
+      "page": 1,
+      "has_more": true
+    }
+    """
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+
+    try:
+        source = request.args.get('source', 'all')
+        query = request.args.get('query', '')
+        limit = min(int(request.args.get('limit', 20)), 50)
+        page = max(int(request.args.get('page', 1)), 1)
+
+        presets = []
+
+        # 1. 本地预设
+        if source in ('all', 'local'):
+            presets.extend(_get_local_style_presets())
+
+        # 2. Civitai 预设（可选，需要 API key）
+        if source in ('all', 'civitai'):
+            try:
+                civitai_presets = _fetch_civitai_style_presets(query, limit)
+                presets.extend(civitai_presets)
+            except Exception as e:
+                print(f"[Style Presets] Warning: Failed to fetch Civitai presets: {e}")
+
+        # 3. Lexica 预设
+        if source in ('all', 'lexica'):
+            try:
+                lexica_presets = _fetch_lexica_style_presets(query, limit)
+                presets.extend(lexica_presets)
+            except Exception as e:
+                print(f"[Style Presets] Warning: Failed to fetch Lexica presets: {e}")
+
+        # 分页处理
+        start_idx = (page - 1) * limit
+        end_idx = start_idx + limit
+        page_presets = presets[start_idx:end_idx]
+
+        return jsonify({
+            "presets": page_presets,
+            "total": len(presets),
+            "page": page,
+            "has_more": end_idx < len(presets),
+            "source": source
+        }), 200
+
+    except Exception as e:
+        print(f"[Style Presets] Error: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+def _get_local_style_presets():
+    """获取本地硬编码的风格预设"""
+    return [
+        {
+            "id": "local_1",
+            "label": "动漫风格",
+            "text": "以高质量日式动漫风格绘制，线条清晰，色彩鲜艳，",
+            "source": "local",
+            "color": "secondary",
+            "tags": ["anime", "manga", "japanese"]
+        },
+        {
+            "id": "local_2",
+            "label": "赛博朋克",
+            "text": "赛博朋克风格，霓虹灯光效果，暗色调城市背景，未来科技感，",
+            "source": "local",
+            "color": "accent",
+            "tags": ["cyberpunk", "neon", "scifi"]
+        },
+        {
+            "id": "local_3",
+            "label": "水彩画",
+            "text": "水彩画风格，笔触柔和，色彩晕染过渡自然，纸质质感，",
+            "source": "local",
+            "color": "highlight",
+            "tags": ["watercolor", "painting", "art"]
+        },
+        {
+            "id": "local_4",
+            "label": "写实摄影",
+            "text": "专业摄影写实风格，高清 8K 画质，自然光照，浅景深，",
+            "source": "local",
+            "color": "accent",
+            "tags": ["photography", "realistic", "portrait"]
+        },
+        {
+            "id": "local_5",
+            "label": "油画古典",
+            "text": "古典油画风格，丰富的笔触质感，温暖的色调，戏剧性光影，",
+            "source": "local",
+            "color": "highlight",
+            "tags": ["oil painting", "classical", "art"]
+        },
+        {
+            "id": "local_6",
+            "label": "像素画",
+            "text": "像素艺术风格，16-bit 复古游戏画风，清晰的像素边缘，",
+            "source": "local",
+            "color": "secondary",
+            "tags": ["pixel art", "retro", "8bit"]
+        },
+        {
+            "id": "local_7",
+            "label": "扁平插画",
+            "text": "现代扁平矢量插画风格，简洁几何形状，明亮纯色，无阴影，",
+            "source": "local",
+            "color": "accent",
+            "tags": ["flat design", "illustration", "vector"]
+        },
+        {
+            "id": "local_8",
+            "label": "3D 渲染",
+            "text": "高质量 3D 渲染风格，柔和光照，细腻材质，Blender/C4D 质感，",
+            "source": "local",
+            "color": "secondary",
+            "tags": ["3d", "rendering", "cgi"]
+        },
+        {
+            "id": "local_9",
+            "label": "素描线稿",
+            "text": "黑白铅笔素描风格，精细的线条与阴影，手绘质感，",
+            "source": "local",
+            "color": "highlight",
+            "tags": ["sketch", "drawing", "pencil"]
+        },
+        {
+            "id": "local_10",
+            "label": "中国水墨",
+            "text": "传统中国水墨画风格，留白意境，墨色浓淡变化，宣纸质感，",
+            "source": "local",
+            "color": "accent",
+            "tags": ["chinese art", "ink", "traditional"]
+        },
+    ]
+
+
+def _fetch_civitai_style_presets(query, limit):
+    """从 Civitai API 获取风格预设
+    
+    需要环境变量: CIVITAI_API_KEY
+    """
+    import os
+    api_key = os.getenv('CIVITAI_API_KEY', '')
+    if not api_key:
+        return []
+
+    try:
+        cache_key = f"civitai_presets:{query}:{limit}"
+        cache = get_service_cache()
+        cached = cache.get(cache_key) if cache else None
+        if cached:
+            return json.loads(cached) if isinstance(cached, str) else cached
+
+        url = "https://civitai.com/api/v1/images"
+        params = {
+            "limit": min(limit, 20),
+            "nsfw": False,
+            "sort": "trending",
+        }
+        if query and query.strip():
+            params["query"] = query
+
+        resp = requests.get(
+            url,
+            params=params,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=10
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        presets = []
+        for img in data.get("items", [])[:limit]:
+            preset = {
+                "id": f"civitai_{img.get('id', '')}",
+                "label": (img.get("prompt") or "Untitled")[:60],
+                "text": img.get("prompt", ""),
+                "source": "civitai",
+                "color": "accent",
+                "tags": img.get("tags", []),
+                "preview_url": img.get("url"),
+                "metadata": img.get("meta", {}),
+            }
+            if preset["text"]:  # 只保留有 prompt 的
+                presets.append(preset)
+
+        # 1 小时缓存
+        if cache:
+            cache.set(cache_key, json.dumps(presets, default=str), ttl=3600)
+
+        return presets
+
+    except Exception as e:
+        print(f"[Civitai] Error: {e}")
+        return []
+
+
+def _fetch_lexica_style_presets(query, limit):
+    """从 Lexica API 获取风格预设（完全免费，无需认证）"""
+    try:
+        cache_key = f"lexica_presets:{query}:{limit}"
+        cache = get_service_cache()
+        cached = cache.get(cache_key) if cache else None
+        if cached:
+            return json.loads(cached) if isinstance(cached, str) else cached
+
+        url = "https://lexica.art/api/v1/search"
+        search_query = query or "beautiful art style"
+
+        resp = requests.get(
+            url,
+            params={"q": search_query},
+            timeout=10
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        presets = []
+        for img in data.get("images", [])[:limit]:
+            preset = {
+                "id": f"lexica_{img.get('id', img.get('prompt', '')[:20])}",
+                "label": (img.get("prompt") or "Untitled")[:60],
+                "text": img.get("prompt", ""),
+                "source": "lexica",
+                "color": "highlight",
+                "tags": ["stable-diffusion"],
+                "metadata": {
+                    "seed": img.get("seed"),
+                    "guidance": img.get("guidance"),
+                    "width": img.get("width"),
+                    "height": img.get("height"),
+                },
+            }
+            if preset["text"]:
+                presets.append(preset)
+
+        # 2 小时缓存（Lexica 更新慢）
+        if cache:
+            cache.set(cache_key, json.dumps(presets, default=str), ttl=7200)
+
+        return presets
+
+    except Exception as e:
+        print(f"[Lexica] Error: {e}")
+        return []
+
+
+def get_service_cache():
+    """获取服务层缓存实例"""
+    try:
+        from services.cache import style_preset_cache
+        return style_preset_cache
+    except ImportError:
+        return None
+
+
 @app.route("/api/sessions/<session_id>/llm-config", methods=["PUT", "OPTIONS"])
 def update_session_llm_config(session_id):
     """更新会话/智能体的默认 LLM 配置"""
@@ -7924,6 +8209,10 @@ def save_role_dimension_option():
 @app.route("/api/agents/<role_id>/profile", methods=["PUT", "OPTIONS"])
 def update_agent_profile(role_id):
     """批量更新角色档案（避免多次更新导致版本噪音）"""
+
+    # Handle CORS preflight request
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
 
     try:
         data = request.get_json() or {}

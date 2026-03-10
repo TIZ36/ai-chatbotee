@@ -19,8 +19,10 @@ import {
   DialogDescription,
 } from './ui/Dialog';
 import { CapabilityIcons } from './ui/CapabilityIcons';
+import { ImageSizeSelector } from './ImageSizeSelector';
 import { mediaApi, type MediaProvider } from '../services/mediaApi';
 import { getSession } from '../services/sessionApi';
+import { fetchStylePresets } from '../services/stylePresetApi';
 import type { PersonaPreset } from '../services/roleApi';
 import {
   ImageIcon,
@@ -135,11 +137,17 @@ const panelClass = `rounded-lg border
 
 /* ─── 系统提示词预设 ─── */
 interface PromptPreset {
+  id?: string;
   label: string;
   /** 追加到描述前的提示词 */
   text: string;
   /** 显示的标签颜色 CSS (accent / secondary / highlight) */
   color?: 'accent' | 'secondary' | 'highlight';
+  /** 预设来源 (local/civitai/lexica) */
+  source?: 'local' | 'civitai' | 'lexica';
+  tags?: string[];
+  preview_url?: string;
+  metadata?: Record<string, any>;
 }
 
 const PROMPT_PRESETS: PromptPreset[] = [
@@ -227,6 +235,22 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
   const [newPromptText, setNewPromptText] = useState('');
   const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
 
+  // 动态风格预设（支持多源）
+  const [stylePresets, setStylePresets] = useState<PromptPreset[]>(PROMPT_PRESETS);
+  const [presetsLoading, setPresetsLoading] = useState(false);
+  const [presetsError, setPresetsError] = useState<string | null>(null);
+  const [selectedPresetSource, setSelectedPresetSource] = useState<'all' | 'local' | 'civitai' | 'lexica'>('all');
+  const [presetQuery, setPresetQuery] = useState('');
+  const presetsDebounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 图像尺寸配置
+  const [imageSize, setImageSize] = useState({
+    width: 1024,
+    height: 1024,
+    aspectRatio: '1:1',
+    count: 1,
+  });
+
   // Lightbox
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   // 紧凑图库滑动索引
@@ -304,11 +328,48 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
         }));
         setCreatedMedia(items);
       })
-      .catch(() => { if (!cancelled) setCreatedMedia([]); })
-    return () => { cancelled = true; };
-  }, []);
+       .catch(() => { if (!cancelled) setCreatedMedia([]); })
+     return () => { cancelled = true; };
+   }, []);
 
-  /* ─── 自定义提示词 CRUD ─── */
+  useEffect(() => {
+    if (!presetQuery.trim() && selectedPresetSource === 'all') {
+      setStylePresets(PROMPT_PRESETS);
+      return;
+    }
+
+    if (presetsDebounceRef.current) {
+      clearTimeout(presetsDebounceRef.current);
+    }
+
+    setPresetsLoading(true);
+    setPresetsError(null);
+
+    presetsDebounceRef.current = setTimeout(async () => {
+      try {
+        const data = await fetchStylePresets({
+          source: selectedPresetSource,
+          query: presetQuery,
+          limit: 50,
+        });
+        setStylePresets(data.presets);
+      } catch (error) {
+        console.error('Failed to load style presets:', error);
+        setPresetsError('无法加载预设');
+        setStylePresets(PROMPT_PRESETS);
+      } finally {
+        setPresetsLoading(false);
+      }
+    }, 300);
+
+    return () => {
+      if (presetsDebounceRef.current) {
+        clearTimeout(presetsDebounceRef.current);
+      }
+    };
+  }, [selectedPresetSource, presetQuery]);
+
+   /* ─── 自定义提示词 CRUD ─── */
   const addCustomPrompt = () => {
     const label = newPromptLabel.trim();
     const text = newPromptText.trim();
@@ -919,37 +980,70 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
 
                   {/* ── 提示词区域：系统预设 + 自定义 ── */}
                   <div className="space-y-2.5">
-                    {/* 系统风格预设 */}
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-1.5">
-                        <Tag className="w-3 h-3 text-[var(--color-highlight)]" />
-                        <span className={`text-[10px] font-medium ${textMuted}`}>风格预设</span>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {PROMPT_PRESETS.map((p) => {
-                          const colorVar = p.color === 'secondary' ? 'var(--color-secondary)'
-                            : p.color === 'highlight' ? 'var(--color-highlight)'
-                            : 'var(--color-accent)';
-                          return (
-                            <button
-                              key={p.label}
-                              type="button"
-                              className="text-[10px] px-2 py-0.5 rounded-full border transition-colors
-                                hover:opacity-80 active:scale-95 cursor-pointer select-none"
-                              style={{
-                                borderColor: colorVar,
-                                color: colorVar,
-                                backgroundColor: 'transparent',
-                              }}
-                              onClick={() => applyPromptText(p.text)}
-                              title={`填充: ${p.text}`}
-                            >
-                              {p.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
+                     {/* 系统风格预设 */}
+                     <div className="space-y-1">
+                       <div className="flex items-center gap-1.5">
+                         <Tag className="w-3 h-3 text-[var(--color-highlight)]" />
+                         <span className={`text-[10px] font-medium ${textMuted}`}>风格预设</span>
+                       </div>
+
+                       <div className="flex gap-1 mb-1.5">
+                         <input
+                           type="text"
+                           placeholder="搜索风格..."
+                           value={presetQuery}
+                           onChange={(e) => setPresetQuery(e.target.value)}
+                           className={`${inputClass} flex-1 text-[10px] h-7 px-2`}
+                         />
+                         <select
+                           value={selectedPresetSource}
+                           onChange={(e) => setSelectedPresetSource(e.target.value as any)}
+                           className={`${inputClass} text-[10px] h-7 px-2`}
+                         >
+                           <option value="all">全部</option>
+                           <option value="local">本地</option>
+                           <option value="civitai">Civitai</option>
+                           <option value="lexica">Lexica</option>
+                         </select>
+                       </div>
+
+                       <div className="flex flex-wrap gap-1.5">
+                         {presetsLoading && (
+                           <div className="flex items-center gap-1 text-[10px] text-gray-500">
+                             <Loader2 className="w-3 h-3 animate-spin" />
+                             加载中...
+                           </div>
+                         )}
+
+                         {stylePresets.map((p) => {
+                           const colorVar = p.color === 'secondary' ? 'var(--color-secondary)'
+                             : p.color === 'highlight' ? 'var(--color-highlight)'
+                             : 'var(--color-accent)';
+                           return (
+                             <button
+                               key={p.id || p.label}
+                               type="button"
+                               className="text-[10px] px-2 py-0.5 rounded-full border transition-colors
+                                 hover:opacity-80 active:scale-95 cursor-pointer select-none"
+                               style={{
+                                 borderColor: colorVar,
+                                 color: colorVar,
+                                 backgroundColor: 'transparent',
+                                 opacity: p.source !== 'local' ? 0.7 : 1,
+                               }}
+                               onClick={() => applyPromptText(p.text)}
+                               title={`[${p.source}] ${p.text}`}
+                             >
+                               {p.label}
+                             </button>
+                           );
+                         })}
+
+                         {presetsError && (
+                           <div className="text-[10px] text-red-500">{presetsError}</div>
+                         )}
+                       </div>
+                     </div>
 
                     {/* Chaya 人设提示词 */}
                     {(chayaSystemPrompt || chayaPersonaPresets.length > 0) && (
@@ -1169,30 +1263,38 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
                     </div>
                   </div>
 
-                  {/* 文字描述 */}
-                  <textarea
-                    placeholder={refImages.length > 0 ? '描述你希望对图片进行的修改或风格变换...' : '描述你想要的画面...'}
-                    className={`${inputClass} resize-none`}
-                    rows={4}
-                    value={imgPrompt}
-                    onChange={(e) => setImgPrompt(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleGenerate(); } }}
-                  />
+                   {/* 文字描述 */}
+                   <div className="space-y-2">
+                     <label className={`text-xs font-semibold ${textPrimary} flex items-center gap-1.5`}>
+                       <Wand2 className="w-3 h-3" />
+                       创意描述
+                     </label>
+                     <textarea
+                       placeholder={refImages.length > 0 ? '描述你希望对图片进行的修改或风格变换...' : '描述你想要的画面...'}
+                       className={`${inputClass} resize-none`}
+                       rows={8}
+                       value={imgPrompt}
+                       onChange={(e) => setImgPrompt(e.target.value)}
+                       onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleGenerate(); } }}
+                     />
+                     {imgPrompt.trim() && (
+                       <button
+                         type="button"
+                         className={`text-[10px] ${textMuted} hover:text-[var(--color-secondary)] transition-colors`}
+                         onClick={() => setImgPrompt('')}
+                       >
+                         清空
+                       </button>
+                     )}
+                     {imgError && <p className="text-xs text-[var(--color-secondary)]">{imgError}</p>}
+                   </div>
 
-                  {/* 操作栏：清空描述等，生成按钮已移至模型选择右侧 */}
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {imgPrompt.trim() && (
-                      <button
-                        type="button"
-                        className={`text-[10px] ${textMuted} hover:text-[var(--color-secondary)] transition-colors`}
-                        onClick={() => setImgPrompt('')}
-                      >
-                        清空描述
-                      </button>
-                    )}
-                    <span className={`text-[10px] ${textMuted} opacity-50 ml-auto`}>Enter 发送 · Shift+Enter 换行</span>
-                  </div>
-                  {imgError && <p className="text-xs text-[var(--color-secondary)]">{imgError}</p>}
+                   {/* 图像生成选项 */}
+                   <ImageSizeSelector
+                     value={imageSize}
+                     onChange={setImageSize}
+                     disabled={!activeConfig}
+                   />
                 </div>
 
                 {/* ═══ 右栏：当前大图 + 图库列表（按时间分段） ═══ */}
