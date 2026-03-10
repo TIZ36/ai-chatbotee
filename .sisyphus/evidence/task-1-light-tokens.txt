@@ -1,0 +1,27 @@
+206
+  --accent-primary: #4f46e5;
+  --accent-primary-hover: #4338ca;
+  --primary: var(--accent-primary);
+  --accent: var(--accent-primary);
+  --color-accent: var(--accent-primary);
+  --color-accent-hover: var(--accent-primary-hover);
+  --accent-primary: #00ff88;
+  --accent-primary-hover: #39ff14;
+  --primary: var(--accent-primary);
+  --accent: var(--accent-primary);
+  --color-accent: var(--accent-primary);
+  --color-accent-hover: var(--accent-primary-hover);
+    color: var(--accent-primary);
+    color: var(--accent-primary-hover);
+    background: color-mix(in srgb, var(--accent-primary) 55%, transparent);
+    box-shadow: 0 0 10px color-mix(in srgb, var(--accent-primary) 35%, transparent);
+    background: var(--accent-primary);
+    background: var(--accent-primary);
+    background: var(--accent-primary-hover);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 18%, transparent);
+    color: var(--accent-primary-hover);
+    background: var(--accent-primary);
+    border-color: color-mix(in srgb, var(--accent-primary) 35%, transparent);
+    color: var(--accent-primary);
+    color: var(--accent-primary);
+No .dark blocks found (PASS)

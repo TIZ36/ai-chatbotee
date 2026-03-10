@@ -2,6 +2,54 @@
  * Utility functions for Workflow component
  */
 
+// ==================== processSteps / processMessages 合并工具 ====================
+
+interface HasTimestampAndType {
+  timestamp?: number;
+  type?: string;
+  [key: string]: any;
+}
+
+/**
+ * 追加模式合并：保留已有项，追加新项（按 timestamp+type 去重）
+ */
+export function mergeByAppend<T extends HasTimestampAndType>(existing: T[], incoming: T[]): T[] {
+  const merged = [...existing];
+  for (const item of incoming) {
+    if (!merged.some(m => m.timestamp === item.timestamp && m.type === item.type)) {
+      merged.push(item);
+    }
+  }
+  return merged;
+}
+
+/**
+ * Upsert 模式合并：已有项更新，新项追加（按 timestamp+type 匹配）
+ */
+export function mergeByUpsert<T extends HasTimestampAndType>(existing: T[], incoming: T[]): T[] {
+  const merged = [...existing];
+  for (const item of incoming) {
+    const idx = merged.findIndex(m => m.timestamp === item.timestamp && m.type === item.type);
+    if (idx >= 0) {
+      merged[idx] = { ...merged[idx], ...item };
+    } else {
+      merged.push(item);
+    }
+  }
+  return merged;
+}
+
+/**
+ * 清理 avatar 字段：过滤 data URI 和过长字符串
+ */
+export function sanitizeAvatar(a?: string): string | undefined {
+  if (!a) return undefined;
+  if (typeof a !== 'string') return undefined;
+  if (a.startsWith('data:image/')) return undefined;
+  if (a.length > 1024) return undefined;
+  return a;
+}
+
 type CursorMirrorCtx = {
   mirror: HTMLDivElement;
   beforeNode: Text;

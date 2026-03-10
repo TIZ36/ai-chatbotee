@@ -1,0 +1,48 @@
+[data-skin="niho"] {
+  color-scheme: dark;
+
+  --font-sans: "Sora", "Manrope", "Avenir Next", "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", "JetBrains Mono", "SFMono-Regular", monospace;
+  --font-display: "Sora", "Manrope", "Avenir Next", sans-serif;
+
+  --bg-primary: #000000;
+  --bg-secondary: #000000;
+  --bg-tertiary: #000000;
+  --bg-elevated: #000000;
+  --bg-overlay: rgba(0, 0, 0, 0.86);
+
+  --surface-primary: #000000;
+  --surface-card: #000000;
+  --surface-dialog: #000000;
+  --surface-nav: #000000;
+  --surface-sidebar: #000000;
+  --surface-popup: #000000;
+  --surface-muted: rgba(255, 255, 255, 0.02);
+  --surface-input: #000000;
+
+  --text-primary: #e8f5f0;
+  --text-secondary: #b8d8cc;
+  --text-tertiary: #8fb7c9;
+  --text-muted: #8fb7c9;
+  --text-inverse: #000000;
+
+  --border-primary: rgba(255, 255, 255, 0.08);
+  --border-secondary: rgba(255, 255, 255, 0.06);
+  --border-focus: rgba(0, 255, 136, 0.4);
+--
+  [data-skin="niho"] .glass-panel,
+  [data-skin="niho"] .glass-popup,
+  [data-skin="niho"] .glass-top-nav,
+  [data-skin="niho"] .glass-header,
+  [data-skin="niho"] .glass-sidebar,
+  [data-skin="niho"] .glass-card,
+  [data-skin="niho"] .glass-section,
+  [data-skin="niho"] .glass-toolbar,
+  [data-skin="niho"] .niho-card-1 {
+  [data-skin="niho"] .niho-card-1:hover {
+  [data-skin="niho"] .niho-card-2 {
+  [data-skin="niho"] .niho-card-2:hover {
+  [data-skin="niho"] .niho-card-3 {
+  [data-skin="niho"] .niho-card-3-pink {
+  [data-skin="niho"] .niho-card-3-gold {
+0

@@ -1,0 +1,4 @@
+-rw-r--r--@ 1 lilithgames  staff   5.3K Mar  9 18:50 /Users/lilithgames/aiproj/ai-chatbotee/front/src/styles/animations.css
+@import './styles/animations.css';
+ * All animations respect prefers-reduced-motion accessibility setting
+@media (prefers-reduced-motion: reduce) {

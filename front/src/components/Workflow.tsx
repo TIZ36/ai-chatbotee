@@ -46,7 +46,7 @@ import { emitSessionsChanged, SESSIONS_CHANGED_EVENT } from '../utils/sessionEve
 import { getDimensionOptions } from '../services/roleDimensionApi';
 import { SplitViewMessage } from './SplitViewMessage';
 import { MediaGallery, MediaItem } from './ui/MediaGallery';
-import type { SessionMediaItem } from './ui/SessionMediaPanel';
+import { SessionMediaPanel, type SessionMediaItem } from './ui/SessionMediaPanel';
 import { IconButton } from './ui/IconButton';
 import { MediaPreviewDialog } from './ui/MediaPreviewDialog';
 import { ensureDataUrlFromMaybeBase64, normalizeBase64ForInlineData } from '../utils/dataUrl';
@@ -92,29 +92,24 @@ import { ProviderIcon } from './ui/ProviderIcon';
 import { CapabilityIcons } from './ui/CapabilityIcons';
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from './ui/Select';
 import { defaultPersonaConfig } from './AgentPersonaConfig';
+import { mergeByAppend, mergeByUpsert, sanitizeAvatar } from './workflow/utils';
 
-// 支持的厂商类型（用于 ProviderIcon，未支持时回退 emoji）
-const PROVIDER_ICONS: Record<string, { icon: string; color: string }> = {
-  openai: { icon: '🤖', color: '#10A37F' },
-  anthropic: { icon: '🧠', color: '#D4A574' },
-  gemini: { icon: '✨', color: '#4285F4' },
-  google: { icon: '✨', color: '#4285F4' },
-  deepseek: { icon: '🐋', color: '#4D6BFE' },
-  ollama: { icon: '🦙', color: '#1D4ED8' },
-  local: { icon: '💻', color: '#6B7280' },
-  custom: { icon: '⚙️', color: '#8B5CF6' },
+// 厂商 emoji 回退表（ProviderIcon 不支持时使用）
+const PROVIDER_ICONS: Record<string, string> = {
+  openai: '🤖', anthropic: '🧠', gemini: '✨', google: '✨',
+  deepseek: '🐋', ollama: '🦙', local: '💻', custom: '⚙️',
 };
 
-// 根据 LLM 配置获取提供商图标（统一用 ProviderIcon / emoji，不再使用自定义 logo 图片）
+// 根据 LLM 配置获取提供商图标 emoji
 const getProviderIcon = (config: LLMConfigFromDB | null, _providers: LLMProvider[] = []): { icon: string; color: string } => {
   if (!config) return { icon: '🤖', color: '#6B7280' };
   const apiUrl = config.api_url?.toLowerCase() || '';
-  if (apiUrl.includes('deepseek')) return PROVIDER_ICONS.deepseek;
-  if (apiUrl.includes('anthropic')) return PROVIDER_ICONS.anthropic;
-  if (apiUrl.includes('googleapis') || apiUrl.includes('gemini')) return PROVIDER_ICONS.gemini;
-  if (apiUrl.includes('nvidia') || config.supplier?.toLowerCase() === 'nvidia') return PROVIDER_ICONS.openai;
-  const providerType = config.provider?.toLowerCase() || 'openai';
-  return PROVIDER_ICONS[providerType] || PROVIDER_ICONS.openai;
+  if (apiUrl.includes('deepseek')) return { icon: PROVIDER_ICONS.deepseek, color: '#4D6BFE' };
+  if (apiUrl.includes('anthropic')) return { icon: PROVIDER_ICONS.anthropic, color: '#D4A574' };
+  if (apiUrl.includes('googleapis') || apiUrl.includes('gemini')) return { icon: PROVIDER_ICONS.gemini, color: '#4285F4' };
+  if (apiUrl.includes('nvidia') || config.supplier?.toLowerCase() === 'nvidia') return { icon: PROVIDER_ICONS.openai, color: '#10A37F' };
+  const pt = config.provider?.toLowerCase() || 'openai';
+  return { icon: PROVIDER_ICONS[pt] || '🤖', color: '#6B7280' };
 };
 
 /** 单个过程步骤（用于记录多轮思考和MCP调用） */
@@ -183,17 +178,21 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [attachedMedia, setAttachedMedia] = useState<Array<{
     type: 'image' | 'video' | 'audio';
     mimeType: string;
-    data: string; // base64 编码的数据
-    preview?: string; // 预览 URL（用于显示）
+    data: string;
+    preview?: string;
   }>>([]);
-
-  // 生图：是否在上下文中回灌“模型生成图片的 thoughtSignature”（用于图生图/基于上次修改继续）
-  // 关闭时：仍会发送当前用户上传图片，但不再自动携带历史生成图片进入上下文（更适合“全新生图”）。
   const [useThoughtSignature, setUseThoughtSignature] = useState(true);
-  
-  // 媒体预览（弹窗）
   const [mediaPreviewOpen, setMediaPreviewOpen] = useState(false);
   const [mediaPreviewItem, setMediaPreviewItem] = useState<SessionMediaItem | null>(null);
+  const [sessionMediaPanelOpen, setSessionMediaPanelOpen] = useState(false);
+  const [sessionMediaPanelIndex, setSessionMediaPanelIndex] = useState(0);
+  const [sessionMediaItems, setSessionMediaItems] = useState<SessionMediaItem[]>([]);
+
+  const openSingleMediaPanelAt = useCallback((targetIndex: number) => {
+    if (targetIndex < 0) return;
+    setSessionMediaPanelIndex(targetIndex);
+    setSessionMediaPanelOpen(true);
+  }, []);
 
   const openSingleMediaViewer = useCallback((item: SessionMediaItem) => {
     setMediaPreviewItem(item);
@@ -906,15 +905,6 @@ const Workflow: React.FC<WorkflowProps> = ({
               }
 
               // 提取 sender 信息，优先从顶层获取，然后从 ext 中获取
-              const sanitizeAvatar = (a?: string) => {
-                if (!a) return undefined;
-                if (typeof a !== 'string') return undefined;
-                // 不在每条消息里携带 data URI（base64），改为依赖 topicParticipants 的 avatar
-                if (a.startsWith('data:image/')) return undefined;
-                // 过长的字段也直接丢弃，避免撑爆消息体
-                if (a.length > 1024) return undefined;
-                return a;
-              };
               const senderAvatar = sanitizeAvatar(msg.sender_avatar || msg.ext?.sender_avatar);
               const senderName = msg.sender_name || msg.ext?.sender_name;
               
@@ -999,23 +989,8 @@ const Workflow: React.FC<WorkflowProps> = ({
             setAgentDecidingStates((prev) => {
               const next = new Map(prev);
               const current = next.get(data.agent_id);
-              const existingSteps = current?.processSteps || [];
-              const incomingSteps = normalizeIncomingProcessSteps(data.processSteps) || [];
-              // 合并步骤：保留已有步骤，追加新步骤（去重）
-              const mergedSteps = [...existingSteps];
-              for (const step of incomingSteps) {
-                if (!mergedSteps.some(s => s.timestamp === step.timestamp && s.type === step.type)) {
-                  mergedSteps.push(step);
-                }
-              }
-              // 合并 processMessages
-              const existingMessages = current?.processMessages || [];
-              const mergedMessages = [...existingMessages];
-              for (const msg of (incomingProcessMessages || [])) {
-                if (!mergedMessages.some(m => m.timestamp === msg.timestamp && m.type === msg.type)) {
-                  mergedMessages.push(msg);
-                }
-              }
+              const mergedSteps = mergeByAppend(current?.processSteps || [], normalizeIncomingProcessSteps(data.processSteps) || []);
+              const mergedMessages = mergeByAppend(current?.processMessages || [], incomingProcessMessages || []);
               next.set(data.agent_id, {
                 agentName: data.agent_name,
                 agentAvatar: data.agent_avatar,
@@ -1038,29 +1013,8 @@ const Workflow: React.FC<WorkflowProps> = ({
               const next = new Map(prev);
               const current = next.get(data.agent_id);
               if (current) {
-                const existingSteps = current.processSteps || [];
-                const incomingSteps = normalizeIncomingProcessSteps(data.processSteps) || [];
-                // 合并步骤
-                const mergedSteps = [...existingSteps];
-                for (const step of incomingSteps) {
-                  const existingIdx = mergedSteps.findIndex(s => s.timestamp === step.timestamp && s.type === step.type);
-                  if (existingIdx >= 0) {
-                    mergedSteps[existingIdx] = { ...mergedSteps[existingIdx], ...step };
-                  } else {
-                    mergedSteps.push(step);
-                  }
-                }
-                // 合并 processMessages
-                const existingMessages = current.processMessages || [];
-                const mergedMessages = [...existingMessages];
-                for (const msg of (incomingProcessMessages || [])) {
-                  const existingIdx = mergedMessages.findIndex(m => m.timestamp === msg.timestamp && m.type === msg.type);
-                  if (existingIdx >= 0) {
-                    mergedMessages[existingIdx] = { ...mergedMessages[existingIdx], ...msg };
-                  } else {
-                    mergedMessages.push(msg);
-                  }
-                }
+                const mergedSteps = mergeByUpsert(current.processSteps || [], normalizeIncomingProcessSteps(data.processSteps) || []);
+                const mergedMessages = mergeByUpsert(current.processMessages || [], incomingProcessMessages || []);
                 next.set(data.agent_id, {
                   ...current,
                   status: 'decided',
@@ -1384,15 +1338,7 @@ const Workflow: React.FC<WorkflowProps> = ({
             setAgentDecidingStates((prev) => {
               const next = new Map(prev);
               const current = next.get(data.agent_id);
-              const existingSteps = current?.processSteps || [];
-              const incomingSteps = normalizeIncomingProcessSteps(data.processSteps) || [];
-              // 合并步骤：保留已有步骤，追加新步骤（去重）
-              const mergedSteps = [...existingSteps];
-              for (const step of incomingSteps) {
-                if (!mergedSteps.some(s => s.timestamp === step.timestamp && s.type === step.type)) {
-                  mergedSteps.push(step);
-                }
-              }
+              const mergedSteps = mergeByAppend(current?.processSteps || [], normalizeIncomingProcessSteps(data.processSteps) || []);
               next.set(data.agent_id, {
                 agentName: data.agent_name,
                 agentAvatar: data.agent_avatar,
@@ -1415,19 +1361,7 @@ const Workflow: React.FC<WorkflowProps> = ({
               const next = new Map(prev);
               const current = next.get(data.agent_id);
               if (current) {
-                const existingSteps = current.processSteps || [];
-                const incomingSteps = normalizeIncomingProcessSteps(data.processSteps) || [];
-                // 合并步骤：保留已有，更新同类型同时间戳的步骤状态
-                const mergedSteps = [...existingSteps];
-                for (const step of incomingSteps) {
-                  const existingIdx = mergedSteps.findIndex(s => s.timestamp === step.timestamp && s.type === step.type);
-                  if (existingIdx >= 0) {
-                    // 更新已有步骤（可能状态变化）
-                    mergedSteps[existingIdx] = { ...mergedSteps[existingIdx], ...step };
-                  } else {
-                    mergedSteps.push(step);
-                  }
-                }
+                const mergedSteps = mergeByUpsert(current.processSteps || [], normalizeIncomingProcessSteps(data.processSteps) || []);
                 next.set(data.agent_id, {
                   ...current,
                   timestamp: data.timestamp || Date.now() / 1000,
@@ -7381,17 +7315,6 @@ const Workflow: React.FC<WorkflowProps> = ({
         />
       );
     })()}
-
-    {/* MCP 详情遮罩层 */}
-    {showMCPDetailOverlay && selectedMCPDetail && (
-      <MCPDetailOverlay
-        mcpDetail={selectedMCPDetail}
-        onClose={() => {
-          setShowMCPDetailOverlay(false);
-          setSelectedMCPDetail(null);
-        }}
-      />
-    )}
 
     {/* Agent Persona 配置对话框 */}
     <AgentPersonaDialog

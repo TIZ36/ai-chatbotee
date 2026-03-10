@@ -1,0 +1,11 @@
+.animate-press {
+.animate-press:active {
+.animate-hover-lift {
+.animate-hover-lift:hover {
+.animate-fade-in {
+.animate-page-enter {
+  .animate-press,
+  .animate-hover-lift,
+  .animate-fade-in,
+  .animate-page-enter,
+      10 /Users/lilithgames/aiproj/ai-chatbotee/.sisyphus/evidence/task-3-classes.txt

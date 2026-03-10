@@ -1,0 +1,26 @@
+
+> chatee-frontend@1.0.0 build
+> vite build
+
+vite v7.3.1 building client environment for production...
+transforming...
+✓ 2487 modules transformed.
+[plugin vite:reporter] 
+(!) /Users/lilithgames/aiproj/ai-chatbotee/front/src/utils/backendUrl.ts is dynamically imported by /Users/lilithgames/aiproj/ai-chatbotee/front/src/services/modelListService.ts, /Users/lilithgames/aiproj/ai-chatbotee/front/src/services/modelListService.ts, /Users/lilithgames/aiproj/ai-chatbotee/front/src/services/modelListService.ts, /Users/lilithgames/aiproj/ai-chatbotee/front/src/services/ollamaService.ts but also statically imported by /Users/lilithgames/aiproj/ai-chatbotee/front/src/components/ActorPoolDialog.tsx, /Users/lilithgames/aiproj/ai-chatbotee/front/src/components/DiscordPanel.tsx, /Users/lilithgames/aiproj/ai-chatbotee/front/src/components/MCPConfig.tsx, /Users/lilithgames/aiproj/ai-chatbotee/front/src/components/SettingsPanel.tsx, /Users/lilithgames/aiproj/ai-chatbotee/front/src/components/StatusBar.tsx, /Users/lilithgames/aiproj/ai-chatbotee/front/src/components/Workflow.tsx, /Users/lilithgames/aiproj/ai-chatbotee/front/src/services/api/index.ts, /Users/lilithgames/aiproj/ai-chatbotee/front/src/services/crawlerApi.ts, /Users/lilithgames/aiproj/ai-chatbotee/front/src/services/discordApi.ts, /Users/lilithgames/aiproj/ai-chatbotee/front/src/services/llmApi.ts, /Users/lilithgames/aiproj/ai-chatbotee/front/src/services/llmClient.ts, /Users/lilithgames/aiproj/ai-chatbotee/front/src/services/mcpApi.ts, /Users/lilithgames/aiproj/ai-chatbotee/front/src/services/mcpClient.ts, /Users/lilithgames/aiproj/ai-chatbotee/front/src/services/mediaApi.ts, /Users/lilithgames/aiproj/ai-chatbotee/front/src/services/roleApi.ts, /Users/lilithgames/aiproj/ai-chatbotee/front/src/services/roleDimensionApi.ts, /Users/lilithgames/aiproj/ai-chatbotee/front/src/services/sessionApi.ts, /Users/lilithgames/aiproj/ai-chatbotee/front/src/services/skillPackApi.ts, /Users/lilithgames/aiproj/ai-chatbotee/front/src/utils/mediaSrc.ts, dynamic import will not move module into another chunk.
+
+[plugin vite:reporter] 
+(!) /Users/lilithgames/aiproj/ai-chatbotee/front/src/services/crawlerApi.ts is dynamically imported by /Users/lilithgames/aiproj/ai-chatbotee/front/src/components/CrawlerTestPage.tsx, /Users/lilithgames/aiproj/ai-chatbotee/front/src/components/CrawlerTestPage.tsx, /Users/lilithgames/aiproj/ai-chatbotee/front/src/components/CrawlerTestPage.tsx but also statically imported by /Users/lilithgames/aiproj/ai-chatbotee/front/src/components/CrawlerConfigPage.tsx, /Users/lilithgames/aiproj/ai-chatbotee/front/src/components/CrawlerModuleSelector.tsx, /Users/lilithgames/aiproj/ai-chatbotee/front/src/components/CrawlerTestPage.tsx, /Users/lilithgames/aiproj/ai-chatbotee/front/src/components/Workflow.tsx, dynamic import will not move module into another chunk.
+
+rendering chunks...
+computing gzip size...
+dist/index.html                             1.14 kB │ gzip:   0.64 kB
+dist/assets/app_logo_dark-DHx7jJoe.png    111.27 kB
+dist/assets/index-D-cP-3aJ.css            113.20 kB │ gzip:  18.42 kB
+dist/assets/index-VcW0Ox9n.js           1,897.59 kB │ gzip: 517.30 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 4.02s
+Build exit code: 0
