@@ -42,7 +42,7 @@ const NavItem: React.FC<NavItemProps> = ({ to, icon, title, isActive, tooltipPla
   const linkClass = [
     'dashboard-nav-item',
     isActive && 'dashboard-nav-item--active',
-    'w-12 h-12 flex items-center justify-center rounded-xl transition-all duration-200 ease-out relative',
+    'w-10 h-10 flex items-center justify-center rounded-xl transition-all duration-200 ease-out relative',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-primary)]',
   ]
     .filter(Boolean)
@@ -353,82 +353,85 @@ const App: React.FC = () => {
   }, []);
 
   return (
-    <div className="app-root-bg dashboard-root h-screen bg-[var(--surface-primary)] flex overflow-hidden">
-      {/* 左侧边栏 - Dashboard 导航 */}
+    <div className="app-root-bg dashboard-root h-screen bg-[var(--surface-primary)] flex flex-col overflow-hidden">
+      {/* 顶部导航栏 - Dashboard 导航 */}
       <aside
-        className="dashboard-sidebar z-40 flex flex-col flex-shrink-0 app-no-drag border-r border-[var(--border-default)]"
+        className="dashboard-sidebar z-40 flex flex-row flex-shrink-0 app-no-drag border-b border-[var(--border-default)]"
         style={isMobile ? { paddingTop: 'var(--safe-area-inset-top)' } : undefined}
       >
-        <div className="flex-1 flex flex-col items-center justify-center gap-1 py-3 px-2">
+        <div className="flex-1 flex flex-row items-center justify-center gap-1 py-2 px-3">
           <NavItem
             to="/"
             icon={
               chayaAvatar ? (
-                <img src={chayaAvatar} alt="Chaya" className="w-10 h-10 rounded-full object-cover" />
+                <img src={chayaAvatar} alt="Chaya" className="w-9 h-9 rounded-full object-cover" />
               ) : (
-                <img src={appLogoDark} alt="Chaya" className="w-10 h-10 object-contain" />
+                <img src={appLogoDark} alt="Chaya" className="w-9 h-9 object-contain" />
               )
             }
             title="Chaya"
             isActive={location.pathname === '/' || location.pathname === '/media-creator'}
-            tooltipPlacement="right"
+            tooltipPlacement="bottom"
           />
           <NavItem
             to="/agents"
-            icon={<Users className="w-6 h-6" strokeWidth={1.5} />}
+            icon={<Users className="w-5 h-5" strokeWidth={1.5} />}
             title="Persona 管理"
             isActive={location.pathname === '/agents'}
-            tooltipPlacement="right"
+            tooltipPlacement="bottom"
           />
           <NavItem
             to="/llm-config"
-            icon={<Brain className="w-6 h-6" strokeWidth={1.5} />}
+            icon={<Brain className="w-5 h-5" strokeWidth={1.5} />}
             title="大模型录入"
             isActive={location.pathname === '/llm-config'}
-            tooltipPlacement="right"
+            tooltipPlacement="bottom"
           />
           <NavItem
             to="/mcp-config"
-            icon={<Plug className="w-6 h-6" strokeWidth={1.5} />}
+            icon={<Plug className="w-5 h-5" strokeWidth={1.5} />}
             title="mcp录入"
             isActive={location.pathname === '/mcp-config'}
-            tooltipPlacement="right"
+            tooltipPlacement="bottom"
           />
           <NavItem
             to="/settings"
-            icon={<Settings className="w-6 h-6" strokeWidth={1.5} />}
+            icon={<Settings className="w-5 h-5" strokeWidth={1.5} />}
             title="设置"
             isActive={location.pathname === '/settings'}
-            tooltipPlacement="right"
+            tooltipPlacement="bottom"
           />
         </div>
-        {/* 底部：亮色 / Niho 主题切换（分段式 Switcher） */}
-        <div className="skin-switcher-wrap w-full py-3 px-2 border-t border-[var(--border-default)]">
+        {/* 右侧：亮色 / Niho 主题切换 */}
+        <div className="skin-switcher-wrap flex-shrink-0 py-2 pl-3 pr-2 border-l border-[var(--border-default)]">
           <div
-            className="skin-switcher flex w-full flex-col gap-1 rounded-xl p-1 bg-[var(--surface-tertiary)] border border-[var(--border-default)]"
+            className="skin-switcher relative flex flex-row rounded-full p-0.5 bg-[var(--surface-tertiary)]/80"
             role="group"
             aria-label="主题切换"
           >
             <button
               type="button"
               onClick={() => setSkin('light')}
-              className={`skin-switcher-option ${skin === 'light' ? 'skin-switcher-option--active' : ''}`}
-              title="亮色（蓝白灰）"
+              className={`skin-switcher-option relative z-10 w-9 h-9 rounded-full flex items-center justify-center transition-colors duration-200 ${skin === 'light' ? 'text-[var(--color-accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'}`}
+              title="亮色"
               aria-pressed={skin === 'light'}
             >
-              <Sun className="w-5 h-5 flex-shrink-0" strokeWidth={1.8} />
-              <span className="truncate">亮色</span>
+              <Sun className="w-4 h-4" strokeWidth={2} />
             </button>
             <button
               type="button"
               onClick={() => setSkin('niho')}
-              className={`skin-switcher-option ${skin === 'niho' ? 'skin-switcher-option--active' : ''}`}
+              className={`skin-switcher-option relative z-10 w-9 h-9 rounded-full flex items-center justify-center transition-colors duration-200 ${skin === 'niho' ? 'text-[var(--color-accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'}`}
               title="Niho"
               aria-pressed={skin === 'niho'}
             >
-              <Moon className="w-5 h-5 flex-shrink-0" strokeWidth={1.8} />
-              <span className="truncate">Niho</span>
+              <Moon className="w-4 h-4" strokeWidth={2} />
             </button>
+            {/* 滑动指示器 */}
+            <div
+              className="skin-switcher-indicator absolute top-0.5 bottom-0.5 w-9 rounded-full bg-[var(--surface-primary)] shadow-sm transition-all duration-200 ease-out z-0"
+              style={{ left: skin === 'light' ? '2px' : '38px' }}
+            />
           </div>
         </div>
       </aside>

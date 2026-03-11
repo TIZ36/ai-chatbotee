@@ -17,6 +17,8 @@ interface ImageSizeSelectorProps {
   value: ImageSizeConfig;
   onChange: (config: ImageSizeConfig) => void;
   disabled?: boolean;
+  /** 隐藏标题（由父级提供标题时使用） */
+  hideTitle?: boolean;
 }
 
 const ASPECT_RATIOS: { label: string; ratio: number; w: number; h: number }[] = [
@@ -29,7 +31,7 @@ const ASPECT_RATIOS: { label: string; ratio: number; w: number; h: number }[] = 
 
 const DEFAULT_SIZE = 1024;
 
-export const ImageSizeSelector: React.FC<ImageSizeSelectorProps> = ({ value, onChange, disabled }) => {
+export const ImageSizeSelector: React.FC<ImageSizeSelectorProps> = ({ value, onChange, disabled, hideTitle }) => {
   const handleAspectRatioChange = (label: string) => {
     const aspectItem = ASPECT_RATIOS.find(a => a.label === label);
     if (!aspectItem) return;
@@ -43,17 +45,19 @@ export const ImageSizeSelector: React.FC<ImageSizeSelectorProps> = ({ value, onC
   };
 
   return (
-    <div className="image-size-block rounded-2xl p-4 border border-[var(--border-default)]">
-      <div className="flex items-center gap-2 mb-4">
-        <Maximize2 className="w-5 h-5 text-[var(--color-accent)]" />
-        <span className="text-sm font-semibold text-[var(--text-primary)]">图片尺寸</span>
-      </div>
+    <div className="image-size-block">
+      {!hideTitle && (
+        <div className="flex items-center gap-2 mb-3 sm:mb-4">
+          <Maximize2 className="w-5 h-5 text-[var(--color-accent)]" />
+          <span className="text-sm font-semibold text-[var(--text-primary)]">图片规格设置</span>
+        </div>
+      )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-start">
+      <div className="grid grid-cols-2 gap-4 sm:gap-6 items-start">
         {/* 宽高比：图示在上、文字置底 */}
         <div className="min-w-0">
           <div className="text-xs font-medium text-[var(--text-muted)] mb-2 h-5 flex items-center">宽高比</div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-1.5 sm:gap-2">
             {ASPECT_RATIOS.map((aspect) => {
               const isSelected = value.aspectRatio === aspect.label;
               return (
@@ -62,17 +66,17 @@ export const ImageSizeSelector: React.FC<ImageSizeSelectorProps> = ({ value, onC
                   disabled={disabled}
                   onClick={() => handleAspectRatioChange(aspect.label)}
                   className={`
-                    flex flex-col items-center min-h-[100px] rounded-xl px-2 py-2 transition-all border w-[88px]
+                    flex flex-col items-center min-h-[80px] sm:min-h-[100px] rounded-xl px-1.5 sm:px-2 py-2 transition-all border w-14 sm:w-20 lg:w-[88px]
                     ${isSelected ? 'border-[var(--color-accent)] bg-[var(--color-accent-bg)] text-[var(--color-accent)]' : 'border-[var(--border-default)] bg-[var(--surface-primary)] text-[var(--text-secondary)] hover:border-[var(--color-accent)]/50'}
                     ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
                   `}
                   title={aspect.label}
                 >
                   <div className="flex-1 flex items-center justify-center min-h-0">
-                    <div
-                      className="rounded-md border-2 border-current opacity-70 bg-current/10 flex-shrink-0"
-                      style={{ width: aspect.w, height: aspect.h }}
-                    />
+                  <div
+                    className="rounded-md border-2 border-current opacity-70 bg-current/10 flex-shrink-0 scale-75 sm:scale-90 lg:scale-100 origin-center"
+                    style={{ width: aspect.w, height: aspect.h }}
+                  />
                   </div>
                   <span className="text-[11px] font-medium leading-tight pt-1">{aspect.label}</span>
                 </button>
