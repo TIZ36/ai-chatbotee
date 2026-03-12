@@ -4,10 +4,10 @@
  * Chaya 自有能力：人格模式、自驱思考、记忆锚点。
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Volume2, Brain, Sparkles, Plus, Trash2, 
-  Clock, Tag, AlertCircle, MessageSquare, Zap
+  Clock, Tag, AlertCircle, MessageSquare, Zap, Upload, Loader
 } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from './ui/Select';
 import { toast } from './ui/use-toast';
+import { fetchVoices, uploadCustomVoice, Voice } from '../services/ttsApi';
 
 // ============================================================================
 // 类型定义
@@ -169,8 +170,92 @@ interface VoiceConfigPanelProps {
 }
 
 const VoiceConfigPanel: React.FC<VoiceConfigPanelProps> = ({ config, onChange }) => {
+  const [elevenLabsVoices, setElevenLabsVoices] = useState<Voice[]>([]);
+  const [loadingVoices, setLoadingVoices] = useState(false);
+  const [uploadingVoice, setUploadingVoice] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [voiceName, setVoiceName] = useState('');
+  const [showUploadForm, setShowUploadForm] = useState(false);
+
+  useEffect(() => {
+    if (config.provider === 'elevenlabs' && elevenLabsVoices.length === 0) {
+      loadElevenLabsVoices();
+    }
+  }, [config.provider]);
+
+  const loadElevenLabsVoices = async () => {
+    try {
+      setLoadingVoices(true);
+      const voices = await fetchVoices();
+      setElevenLabsVoices(voices);
+      
+      if (voices.length > 0 && !config.voiceId) {
+        onChange({
+          ...config,
+          voiceId: voices[0].voice_id,
+          voiceName: voices[0].name,
+        });
+      }
+    } catch (error) {
+      toast({
+        title: '加载语音失败',
+        description: error instanceof Error ? error.message : '获取 ElevenLabs 语音列表失败',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoadingVoices(false);
+    }
+  };
+
+  const handleUploadCustomVoice = async () => {
+    if (!selectedFile || !voiceName.trim()) {
+      toast({
+        title: '缺少信息',
+        description: '请选择文件和输入语音名称',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      setUploadingVoice(true);
+      const result = await uploadCustomVoice(selectedFile, voiceName.trim());
+      toast({
+        title: '语音上传成功',
+        description: result.message,
+      });
+      
+      onChange({
+        ...config,
+        voiceId: result.voice_id,
+        voiceName: result.name,
+      });
+      
+      setSelectedFile(null);
+      setVoiceName('');
+      setShowUploadForm(false);
+      
+      await loadElevenLabsVoices();
+    } catch (error) {
+      toast({
+        title: '上传失败',
+        description: error instanceof Error ? error.message : '无法上传语音',
+        variant: 'destructive',
+      });
+    } finally {
+      setUploadingVoice(false);
+    }
+  };
+
   const currentProvider = VOICE_PROVIDERS.find(p => p.value === config.provider);
-  const voices = currentProvider?.voices || [];
+  let voices = currentProvider?.voices || [];
+  
+  if (config.provider === 'elevenlabs') {
+    voices = elevenLabsVoices.map(v => ({
+      id: v.voice_id,
+      name: `${v.name}${v.gender ? ` (${v.gender})` : ''}`,
+    }));
+  }
 
   return (
     <div className="border border-[var(--color-border)] rounded-lg overflow-hidden [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-[var(--niho-pure-black-elevated)]">
@@ -186,7 +271,6 @@ const VoiceConfigPanel: React.FC<VoiceConfigPanelProps> = ({ config, onChange })
       </div>
       {config.enabled && (
         <div className="space-y-4 p-3 [data-skin='niho']:bg-[#000000]">
-          {/* TTS 提供者 */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label className="[data-skin='niho']:text-[var(--text-primary)]">TTS 提供者</Label>
@@ -194,12 +278,16 @@ const VoiceConfigPanel: React.FC<VoiceConfigPanelProps> = ({ config, onChange })
                 value={config.provider}
                 onValueChange={(provider: any) => {
                   const newProvider = VOICE_PROVIDERS.find(p => p.value === provider);
-                  const defaultVoice = newProvider?.voices[0];
+                  const defaultVoice = provider === 'elevenlabs' 
+                    ? (elevenLabsVoices[0]?.voice_id || '') 
+                    : (newProvider?.voices[0]?.id || '');
                   onChange({
                     ...config,
                     provider,
-                    voiceId: defaultVoice?.id || '',
-                    voiceName: defaultVoice?.name || '',
+                    voiceId: defaultVoice,
+                    voiceName: provider === 'elevenlabs'
+                      ? (elevenLabsVoices[0]?.name || '')
+                      : (newProvider?.voices[0]?.name || ''),
                   });
                 }}
               >
@@ -220,7 +308,12 @@ const VoiceConfigPanel: React.FC<VoiceConfigPanelProps> = ({ config, onChange })
               </Select>
             </div>
             <div>
-              <Label className="[data-skin='niho']:text-[var(--text-primary)]">语音角色</Label>
+              <Label className="[data-skin='niho']:text-[var(--text-primary)]">
+                语音角色
+                {config.provider === 'elevenlabs' && loadingVoices && (
+                  <Loader className="w-3 h-3 inline ml-2 animate-spin" />
+                )}
+              </Label>
               <Select
                 value={config.voiceId}
                 onValueChange={(voiceId) => {
@@ -250,7 +343,71 @@ const VoiceConfigPanel: React.FC<VoiceConfigPanelProps> = ({ config, onChange })
             </div>
           </div>
 
-          {/* 语言和速度 */}
+          {config.provider === 'elevenlabs' && (
+            <div className="flex gap-2">
+              <Button 
+                size="sm" 
+                variant="outline"
+                onClick={() => setShowUploadForm(!showUploadForm)}
+                className="[data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--niho-text-bg)]"
+              >
+                <Upload className="w-4 h-4 mr-2" />
+                上传自定义语音
+              </Button>
+            </div>
+          )}
+
+          {showUploadForm && config.provider === 'elevenlabs' && (
+            <div className="space-y-3 p-3 bg-[var(--color-bg-secondary)] rounded [data-skin='niho']:bg-[var(--niho-text-bg)]">
+              <div>
+                <Label className="[data-skin='niho']:text-[var(--text-primary)]">语音文件</Label>
+                <input
+                  type="file"
+                  accept=".mp3,.wav,.m4a,.webm"
+                  onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                  disabled={uploadingVoice}
+                  className="w-full px-2 py-2 border border-[var(--color-border)] rounded text-sm [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-[#000000] [data-skin='niho']:text-[var(--text-primary)]"
+                />
+                <p className="text-xs text-gray-500 mt-1 [data-skin='niho']:text-[var(--text-secondary)]">
+                  支持格式: mp3, wav, m4a, webm
+                </p>
+              </div>
+              <div>
+                <Label className="[data-skin='niho']:text-[var(--text-primary)]">语音名称</Label>
+                <Input
+                  value={voiceName}
+                  onChange={(e) => setVoiceName(e.target.value)}
+                  placeholder="输入自定义语音名称"
+                  disabled={uploadingVoice}
+                  className="[data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)]"
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button 
+                  size="sm"
+                  onClick={handleUploadCustomVoice}
+                  disabled={uploadingVoice || !selectedFile || !voiceName.trim()}
+                  className="[data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:text-[#000000]"
+                >
+                  {uploadingVoice ? '上传中...' : '上传'}
+                </Button>
+                <Button 
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setShowUploadForm(false);
+                    setSelectedFile(null);
+                    setVoiceName('');
+                  }}
+                  disabled={uploadingVoice}
+                  className="[data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)]"
+                >
+                  取消
+                </Button>
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-3 gap-4">
             <div>
               <Label className="[data-skin='niho']:text-[var(--text-primary)]">语言</Label>

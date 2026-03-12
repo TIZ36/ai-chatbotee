@@ -15,6 +15,7 @@ from .health import health_bp
 from .actor_pool import actor_pool_bp
 from .media import media_bp
 from .discord import discord_bp
+from .tts import tts_bp, init_tts_routes
 
 
 def register_api_routes(app, get_connection=None, config=None):
@@ -50,6 +51,13 @@ def register_api_routes(app, get_connection=None, config=None):
         from services.media_output_service import init_media_output_service
         init_media_output_service(get_connection)
     
+    # 初始化 TTS 服务
+    if config:
+        try:
+            init_tts_routes(app, config)
+        except Exception as e:
+            print(f"[API] Warning: Failed to initialize TTS routes: {e}")
+    
     # 注册 Blueprint
     app.register_blueprint(llm_bp, url_prefix='/api/llm')
     app.register_blueprint(mcp_bp, url_prefix='/api/mcp')
@@ -60,5 +68,6 @@ def register_api_routes(app, get_connection=None, config=None):
     app.register_blueprint(actor_pool_bp, url_prefix='/api/actor-pool')
     app.register_blueprint(media_bp)
     app.register_blueprint(discord_bp, url_prefix='/api/discord')
+    app.register_blueprint(tts_bp, url_prefix='/api/tts')
 
     print("[API] All API routes registered successfully")
