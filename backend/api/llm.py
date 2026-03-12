@@ -66,13 +66,13 @@ def infer_model_capabilities(model_id: str, provider: str = None) -> dict:
     # 生图能力：包含 image-generation, dalle, midjourney, stable-diffusion, flux
     image_gen_keywords = ['image-generation', 'dalle', 'midjourney', 'stable-diffusion',
                          'flux', 'imagen', 'gemini-2.0-flash-image', 'gemini-2.5-flash-image',
-                         'gemini-3-pro-image', 'image-gen', 'text-to-image']
+                         'gemini-3-pro-image', 'image-gen', 'text-to-image', 'grok-imagine']
     if any(kw in model_lower for kw in image_gen_keywords):
         capabilities['image_gen'] = True
 
     # 生视频能力：包含 video, video-generation, runway, pika, sora, veo
     video_gen_keywords = ['video-generation', 'runway', 'pika', 'sora', 'veo',
-                         'video-gen', 'text-to-video', 'gemini-2.0-flash-video']
+                         'video-gen', 'text-to-video', 'gemini-2.0-flash-video', 'grok-imagine-1.0-video']
     if any(kw in model_lower for kw in video_gen_keywords):
         capabilities['video_gen'] = True
 

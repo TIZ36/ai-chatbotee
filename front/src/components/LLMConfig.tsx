@@ -83,7 +83,15 @@ const renderProviderIcon = (
   );
 };
 
-// Helper to convert file to base64
+const inferMediaCapabilitiesFromModelId = (modelId: string, capabilities?: { image_gen?: boolean; video_gen?: boolean } | null) => {
+  if (capabilities?.image_gen || capabilities?.video_gen) return capabilities;
+  const lower = (modelId || '').toLowerCase();
+  return {
+    image_gen: lower.includes('grok-imagine') || lower.includes('dall-e') || lower.includes('gpt-image'),
+    video_gen: lower.includes('grok-imagine-1.0-video'),
+  };
+};
+
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1228,7 +1236,7 @@ const LLMConfigPanel: React.FC = () => {
                         <Plus className="w-4 h-4 mr-2" />
                         录入 Token
                       </Button>
-                      {['gemini'].includes(selectedProvider?.provider_type || '') && (
+                      {['gemini', 'openai'].includes(selectedProvider?.provider_type || '') && (
                         <Button
                           variant="secondary"
                           size="sm"
@@ -2731,7 +2739,8 @@ const LLMConfigPanel: React.FC = () => {
                   ? (item as ModelWithCapabilities).capabilities : null;
                 const isCallable = typeof item === 'object' && item && 'isCallable' in item
                   ? (item as ModelWithCapabilities).isCallable !== false : true;
-                const hasMedia = !!(cap?.image_gen || cap?.video_gen);
+                const inferredCap = inferMediaCapabilitiesFromModelId(typeof item === 'string' ? item : item.id, cap);
+                const hasMedia = !!(inferredCap?.image_gen || inferredCap?.video_gen);
                 if (isCallable) agentItems.push(item);
                 if (hasMedia) mediaItems.push(item);
               }
@@ -2743,7 +2752,8 @@ const LLMConfigPanel: React.FC = () => {
                   ? (item as ModelWithCapabilities).capabilities : null;
                 const isCallable = typeof item === 'object' && item && 'isCallable' in item
                   ? (item as ModelWithCapabilities).isCallable !== false : true;
-                const hasMedia = !!(capabilities?.image_gen || capabilities?.video_gen);
+                const inferredCap = inferMediaCapabilitiesFromModelId(modelId, capabilities);
+                const hasMedia = !!(inferredCap?.image_gen || inferredCap?.video_gen);
                 const existingConfig = selectedTokenConfigs.find(c => {
                   const matched = (c.model || c.name) === modelId;
                   if (!matched) return false;
@@ -3188,7 +3198,7 @@ const LLMConfigPanel: React.FC = () => {
                     const mediaIds = models
                       .filter((m) => {
                         if (typeof m === 'string') return false;
-                        const cap = m.capabilities;
+                        const cap = inferMediaCapabilitiesFromModelId(m.id, m.capabilities);
                         return (cap?.image_gen || cap?.video_gen) && !existingMediaNames.has(m.id);
                       })
                       .map((m) => (typeof m === 'string' ? m : m.id));
@@ -3222,7 +3232,7 @@ const LLMConfigPanel: React.FC = () => {
                         const mediaIds = mediaTokenModels
                           .filter((m) => {
                             if (typeof m === 'string') return false;
-                            const cap = m.capabilities;
+                            const cap = inferMediaCapabilitiesFromModelId(m.id, m.capabilities);
                             return cap?.image_gen || cap?.video_gen;
                           })
                           .map((m) => (typeof m === 'string' ? m : m.id));
@@ -3244,7 +3254,8 @@ const LLMConfigPanel: React.FC = () => {
                   {mediaTokenModels.map((model) => {
                     const modelId = typeof model === 'string' ? model : model.id;
                     const capabilities = typeof model === 'object' && 'capabilities' in model ? model.capabilities : null;
-                    const hasMediaCap = !!(capabilities?.image_gen || capabilities?.video_gen);
+                    const inferredCap = inferMediaCapabilitiesFromModelId(modelId, capabilities);
+                    const hasMediaCap = !!(inferredCap?.image_gen || inferredCap?.video_gen);
                     const isSelected = selectedMediaModels.has(modelId);
                     // 检查该 Token 下是否已有同名媒体配置
                     const alreadyExists = hasMediaCap && providerConfigs.some(c =>

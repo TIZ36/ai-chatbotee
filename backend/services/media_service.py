@@ -665,6 +665,8 @@ def openai_image_generations(prompt: str, config_id: Optional[str] = None,
             base_url = base_url + '/v1'
         url = f"{base_url}/images/generations"
         use_model = model or 'dall-e-3'
+        if use_model.lower().startswith('grok-imagine') and use_model.lower().endswith('-edit'):
+            use_model = 'grok-imagine-1.0'
         payload = {
             'model': use_model,
             'prompt': prompt or 'a cute cat',
@@ -682,14 +684,54 @@ def openai_image_generations(prompt: str, config_id: Optional[str] = None,
         if r.status_code != 200:
             return {'error': r.text or f'HTTP {r.status_code}'}
         data = r.json()
+        def infer_image_mime(b64: Optional[str], url_val: Optional[str]) -> str:
+            lower_url = (url_val or '').lower()
+            if '.jpg' in lower_url or '.jpeg' in lower_url:
+                return 'image/jpeg'
+            if '.webp' in lower_url:
+                return 'image/webp'
+            if '.gif' in lower_url:
+                return 'image/gif'
+            if b64:
+                sample = b64[:32]
+                if sample.startswith('/9j/'):
+                    return 'image/jpeg'
+                if sample.startswith('iVBOR'):
+                    return 'image/png'
+                if sample.startswith('UklGR'):
+                    return 'image/webp'
+                if sample.startswith('R0lGOD'):
+                    return 'image/gif'
+            return 'image/png'
+
+        def fetch_remote_image_as_media(url_val: str, mime_type: str) -> Optional[Dict[str, Any]]:
+            try:
+                dl_headers = {'Authorization': f'Bearer {api_key}'} if api_key else {}
+                dl = requests.get(url_val, headers=dl_headers, timeout=120, allow_redirects=True)
+                if dl.status_code != 200:
+                    return None
+                content_type = (dl.headers.get('Content-Type') or '').split(';', 1)[0].strip() or mime_type
+                return {
+                    'type': 'image',
+                    'mimeType': content_type,
+                    'data': base64.b64encode(dl.content).decode('ascii'),
+                }
+            except Exception:
+                return None
+
         out_media = []
         for item in data.get('data', []):
             b64 = item.get('b64_json')
             url_val = item.get('url')
+            mime_type = infer_image_mime(b64, url_val)
             if b64:
-                out_media.append({'type': 'image', 'mimeType': 'image/png', 'data': b64})
+                out_media.append({'type': 'image', 'mimeType': mime_type, 'data': b64})
             elif url_val:
-                out_media.append({'type': 'image', 'mimeType': 'image/png', 'url': url_val})
+                fetched = fetch_remote_image_as_media(url_val, mime_type)
+                if fetched:
+                    out_media.append(fetched)
+                else:
+                    return {'error': 'Failed to proxy generated image from upstream', 'raw': data}
         if not out_media:
             return {'error': 'No image in response', 'raw': data}
         return {'media': out_media, 'raw': data}
@@ -777,7 +819,55 @@ def list_media_providers() -> Dict[str, Any]:
                 'configs': gemini_configs,
             })
 
-        # OpenAI 媒体创作已移除（仅保留 Gemini）
+        openai_configs = []
+        has_openai_image = False
+        has_openai_video = False
+        seen_ids = set()
+        for c in configs:
+            provider = (c.get('provider') or '').lower()
+            if provider != 'openai':
+                continue
+            if c['config_id'] in seen_ids:
+                continue
+            seen_ids.add(c['config_id'])
+            model = c.get('model') or ''
+            meta = c.get('metadata') or {}
+            meta_caps = meta.get('capabilities') or {}
+            inferred = {
+                'image': False,
+                'video': False,
+            }
+            model_lower = model.lower()
+            if any(keyword in model_lower for keyword in ('dall-e', 'gpt-image', 'grok-imagine')):
+                inferred['image'] = True
+            if 'grok-imagine' in model_lower and 'video' in model_lower:
+                inferred['video'] = True
+            caps = {
+                'image': bool(meta_caps.get('image_gen')) or inferred['image'],
+                'video': bool(meta_caps.get('video_gen')) or inferred['video'],
+            }
+            if not caps['image'] and not caps['video'] and not bool(meta.get('media_purpose')):
+                continue
+            openai_configs.append({
+                'config_id': c['config_id'],
+                'name': c.get('name', ''),
+                'model': model,
+                'provider': c.get('provider', ''),
+                'capabilities': caps,
+                'media_purpose': bool(meta.get('media_purpose')),
+            })
+            if caps['image']:
+                has_openai_image = True
+            if caps['video']:
+                has_openai_video = True
+        if openai_configs:
+            providers.append({
+                'id': 'openai',
+                'name': 'OpenAI Compatible',
+                'image': {'generate': has_openai_image, 'edit': has_openai_image} if has_openai_image else {},
+                'video': {'submit': has_openai_video, 'status': has_openai_video} if has_openai_video else {},
+                'configs': openai_configs,
+            })
     except Exception:
         pass
 
@@ -927,6 +1017,8 @@ def openai_image_edits(prompt: str, image_b64: Optional[str] = None, image_mime:
             base_url = base_url + '/v1'
         url = f"{base_url}/images/edits"
         use_model = model or 'gpt-image-1.5'
+        if use_model.lower().startswith('grok-imagine') and not use_model.lower().endswith('-edit'):
+            use_model = 'grok-imagine-1.0-edit'
         if not image_b64:
             return {'error': 'image_b64 or image file required'}
         # OpenAI edits 通常要求 multipart: image=file, prompt=text
@@ -946,20 +1038,64 @@ def openai_image_edits(prompt: str, image_b64: Optional[str] = None, image_mime:
         try:
             with open(path, 'rb') as f:
                 files = {'image': (f'image.{ext}', f, image_mime or f'image/{ext}')}
-                payload = {'prompt': prompt or 'edit this image', 'model': use_model}
+                payload = {
+                    'prompt': prompt or 'edit this image',
+                    'model': use_model,
+                    'response_format': 'b64_json',
+                }
                 headers = {'Authorization': f'Bearer {api_key}'}
-                r = requests.post(url, data=payload, files=files, timeout=120)
+                r = requests.post(url, data=payload, files=files, headers=headers, timeout=120)
             if r.status_code != 200:
                 return {'error': r.text or f'HTTP {r.status_code}'}
             data = r.json()
+            def infer_image_mime(b64: Optional[str], url_val: Optional[str]) -> str:
+                lower_url = (url_val or '').lower()
+                if '.jpg' in lower_url or '.jpeg' in lower_url:
+                    return 'image/jpeg'
+                if '.webp' in lower_url:
+                    return 'image/webp'
+                if '.gif' in lower_url:
+                    return 'image/gif'
+                if b64:
+                    sample = b64[:32]
+                    if sample.startswith('/9j/'):
+                        return 'image/jpeg'
+                    if sample.startswith('iVBOR'):
+                        return 'image/png'
+                    if sample.startswith('UklGR'):
+                        return 'image/webp'
+                    if sample.startswith('R0lGOD'):
+                        return 'image/gif'
+                return 'image/png'
+
+            def fetch_remote_image_as_media(url_val: str, mime_type: str) -> Optional[Dict[str, Any]]:
+                try:
+                    dl_headers = {'Authorization': f'Bearer {api_key}'} if api_key else {}
+                    dl = requests.get(url_val, headers=dl_headers, timeout=120, allow_redirects=True)
+                    if dl.status_code != 200:
+                        return None
+                    content_type = (dl.headers.get('Content-Type') or '').split(';', 1)[0].strip() or mime_type
+                    return {
+                        'type': 'image',
+                        'mimeType': content_type,
+                        'data': base64.b64encode(dl.content).decode('ascii'),
+                    }
+                except Exception:
+                    return None
+
             out_media = []
             for item in data.get('data', []):
                 b64 = item.get('b64_json')
                 url_val = item.get('url')
+                mime_type = infer_image_mime(b64, url_val)
                 if b64:
-                    out_media.append({'type': 'image', 'mimeType': 'image/png', 'data': b64})
+                    out_media.append({'type': 'image', 'mimeType': mime_type, 'data': b64})
                 elif url_val:
-                    out_media.append({'type': 'image', 'mimeType': 'image/png', 'url': url_val})
+                    fetched = fetch_remote_image_as_media(url_val, mime_type)
+                    if fetched:
+                        out_media.append(fetched)
+                    else:
+                        return {'error': 'Failed to proxy edited image from upstream', 'raw': data}
             if not out_media:
                 return {'error': 'No image in response', 'raw': data}
             return {'media': out_media, 'raw': data}

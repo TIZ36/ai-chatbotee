@@ -1586,10 +1586,9 @@ const Workflow: React.FC<WorkflowProps> = ({
       setIsLoadingMessages(true);
 
       if (page === 1) {
-        setSelectedBatchItem(null);
-        setShowNewMessagePrompt(false);
-        setUnreadMessageCount(0);
-        await loadPersistedInitial({ force: true });
+      setShowNewMessagePrompt(false);
+      setUnreadMessageCount(0);
+      await loadPersistedInitial({ force: true });
         setVirtuosoFirstItemIndex(VIRTUOSO_BASE_INDEX);
         historyAutoFiredInNearTopRef.current = false;
         historyCooldownUntilRef.current = 0;

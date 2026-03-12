@@ -12,9 +12,9 @@ export function inferCapabilitiesFromModelName(modelName: string): ModelCapabili
   const cap: ModelCapabilities = {};
   const visionKw = ['vision', 'multimodal', 'image', 'gpt-4o', 'claude-3', 'gemini', 'o1', 'o3'];
   if (visionKw.some(kw => m.includes(kw))) cap.vision = true;
-  const imageGenKw = ['image-generation', 'dalle', 'flux', 'imagen', 'image-gen'];
+  const imageGenKw = ['image-generation', 'dalle', 'flux', 'imagen', 'image-gen', 'grok-imagine', 'gpt-image'];
   if (imageGenKw.some(kw => m.includes(kw))) cap.image_gen = true;
-  const videoGenKw = ['video-generation', 'runway', 'sora', 'veo', 'video-gen'];
+  const videoGenKw = ['video-generation', 'runway', 'sora', 'veo', 'video-gen', 'grok-imagine-1.0-video'];
   if (videoGenKw.some(kw => m.includes(kw))) cap.video_gen = true;
   const speechKw = ['tts', 'speech', 'voice', 'whisper'];
   if (speechKw.some(kw => m.includes(kw))) cap.speech_gen = true;

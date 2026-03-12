@@ -79,6 +79,24 @@ interface MediaItem {
   error_message?: string;
 }
 
+function inferMediaConfigCaps(model: string | undefined, caps?: { image: boolean; video: boolean }) {
+  if (caps?.image || caps?.video) return caps;
+  const lower = (model || '').toLowerCase();
+  return {
+    image: lower.includes('grok-imagine') || lower.includes('dall-e') || lower.includes('gpt-image'),
+    video: lower.includes('grok-imagine') && lower.includes('video'),
+  };
+}
+
+function normalizeGeneratedImageMedia(media?: { mimeType?: string; url?: string; data?: string }) {
+  if (!media) return null;
+  const mime = media.mimeType || 'image/png';
+  const rawB64 = media.data || undefined;
+  const url = rawB64 ? `data:${mime};base64,${rawB64}` : (media.url || '');
+  if (!url) return null;
+  return { mime, rawB64, url };
+}
+
 /** 按 created_at 得到时间分段标签（今天/昨天/N天前/更早），用于图库列表展示顺序 */
 function getDateLabel(iso: string | undefined): string {
   if (!iso) return '更早';
@@ -405,7 +423,7 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
     }> = [];
     for (const p of providers) {
       for (const c of p.configs || []) {
-        const caps = (c as any).capabilities as { image: boolean; video: boolean } | undefined;
+        const caps = inferMediaConfigCaps(c.model, (c as any).capabilities as { image: boolean; video: boolean } | undefined);
         const isMediaPurpose = !!(c as any).media_purpose;
         const isImage = caps ? caps.image : !!(p.image?.generate || p.image?.edit);
         const isVideo = caps ? caps.video : !!p.video?.submit;
@@ -452,6 +470,7 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
       return Promise.resolve(item.url.split(';base64,')[1] ?? null);
     }
     if (item.url.startsWith('data:')) return Promise.resolve(item.url.split(',')[1] ?? null);
+    if (item.source === 'generated') return Promise.resolve(null);
     return fetch(item.url)
       .then((r) => r.blob())
       .then((blob) => new Promise<string>((resolve, reject) => {
@@ -590,32 +609,58 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
     return item.url;
   };
 
+  const toOpenAIImageSize = (): string | undefined => {
+    const ratio = imageSize.aspectRatio || '1:1';
+    switch (ratio) {
+      case '16:9':
+        return '1792x1024';
+      case '9:16':
+        return '1024x1792';
+      case '3:2':
+      case '4:3':
+      case '4:5':
+      case '5:4':
+      case '3:4':
+      case '2:3':
+      case '21:9':
+      case '1:1':
+      default:
+        return '1024x1024';
+    }
+  };
+
   /* ─── 图生图：单次请求，单张结果 ─── */
   const runSingleGenerate = async (jobId: string, batchId: string) => {
     if (!activeConfig) return;
     const cfgId = activeConfig.config_id;
     try {
       const images_b64 = refImages.map((img) => ({ data: getB64(img), mime: img.mimeType || 'image/png' }));
-      if (activeProviderId !== 'gemini') throw new Error(`不支持的图像供应商: ${activeProviderId}`);
-      const result = await mediaApi.geminiImageEdit({
-        prompt: imgPrompt,
-        image_b64: images_b64[0].data,
-        images_b64: images_b64.map((i) => i.data),
-        config_id: cfgId,
-        model: activeConfig.model,
-        aspect_ratio: imageSize.aspectRatio || undefined,
-        count: 1,
-      });
+      const result = activeProviderId === 'openai'
+        ? await mediaApi.openaiImageEdits({
+            prompt: imgPrompt,
+            image_b64: images_b64[0]?.data,
+            image_mime: images_b64[0]?.mime,
+            config_id: cfgId,
+            model: activeConfig.model,
+          })
+        : activeProviderId === 'gemini'
+          ? await mediaApi.geminiImageEdit({
+              prompt: imgPrompt,
+              image_b64: images_b64[0].data,
+              images_b64: images_b64.map((i) => i.data),
+              config_id: cfgId,
+              model: activeConfig.model,
+              aspect_ratio: imageSize.aspectRatio || undefined,
+              count: 1,
+            })
+          : await Promise.reject(new Error(`不支持的图像供应商: ${activeProviderId}`));
       if (result.error) throw new Error(result.error);
-      const m = result.media?.[0] as { mimeType?: string; url?: string; data?: string } | undefined;
-      if (!m) throw new Error('未返回图片');
-      const mime = m.mimeType || 'image/png';
-      const url = m.url || (m.data ? `data:${mime};base64,${m.data}` : '');
-      if (!url) throw new Error('未返回可用图片URL');
+      const normalized = normalizeGeneratedImageMedia(result.media?.[0] as { mimeType?: string; url?: string; data?: string } | undefined);
+      if (!normalized) throw new Error('未返回可用图片URL');
       const finalItem: MediaItem = {
-        url,
-        mimeType: mime,
-        rawB64: m.data,
+        url: normalized.url,
+        mimeType: normalized.mime,
+        rawB64: normalized.rawB64,
         source: 'generated',
         created_at: new Date().toISOString(),
         job_id: jobId,
@@ -636,24 +681,31 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
     if (!activeConfig) return;
     const cfgId = activeConfig.config_id;
     try {
-      const result = await mediaApi.geminiImageGenerate({
-        prompt: imgPrompt,
-        config_id: cfgId,
-        model: activeConfig.model,
-        aspect_ratio: imageSize.aspectRatio || undefined,
-        count: 1,
-      });
+      const result = activeProviderId === 'openai'
+        ? await mediaApi.openaiImageGenerations({
+            prompt: imgPrompt,
+            config_id: cfgId,
+            model: activeConfig.model,
+            size: toOpenAIImageSize(),
+            response_format: 'b64_json',
+          })
+        : activeProviderId === 'gemini'
+          ? await mediaApi.geminiImageGenerate({
+              prompt: imgPrompt,
+              config_id: cfgId,
+              model: activeConfig.model,
+              aspect_ratio: imageSize.aspectRatio || undefined,
+              count: 1,
+            })
+          : await Promise.reject(new Error(`不支持的图像供应商: ${activeProviderId}`));
       if (result.error) throw new Error(result.error);
       type MediaEntry = { mimeType?: string; url?: string; data?: string };
-      const m = (result.media as MediaEntry[])?.[0];
-      if (!m) throw new Error('未返回图片');
-      const mime = m.mimeType || 'image/png';
-      const url = m.url || (m.data ? `data:${mime};base64,${m.data}` : '');
-      if (!url) throw new Error('图片数据无效');
+      const normalized = normalizeGeneratedImageMedia((result.media as MediaEntry[])?.[0]);
+      if (!normalized) throw new Error('图片数据无效');
       const finalItem: MediaItem = {
-        url,
-        mimeType: mime,
-        rawB64: m.data,
+        url: normalized.url,
+        mimeType: normalized.mime,
+        rawB64: normalized.rawB64,
         source: 'generated',
         created_at: new Date().toISOString(),
         job_id: jobId,
