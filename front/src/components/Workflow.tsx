@@ -4690,7 +4690,76 @@ const Workflow: React.FC<WorkflowProps> = ({
     return () => {
       canceled = true;
     };
-  }, [messages, avatarCacheTick]);
+   }, [messages, avatarCacheTick]);
+
+  const ttsGeneratedMessagesRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    if (!currentSessionMeta || !currentSessionMeta?.ext?.tts?.enabled || !currentSessionMeta?.ext?.tts?.voiceId) {
+      return;
+    }
+
+    const generateTTSForNewMessages = async () => {
+      if (!currentSessionMeta) {
+        return;
+      }
+      const ext = currentSessionMeta.ext;
+      if (!ext?.tts?.enabled || !ext?.tts?.voiceId) {
+        return;
+      }
+
+      const voiceId = ext.tts.voiceId;
+      const ttsSettings = ext.tts.settings;
+      const elevenLabsToken = ext.tts.elevenLabsToken;
+
+      for (const message of messages) {
+        if (ttsGeneratedMessagesRef.current.has(message.id)) {
+          continue;
+        }
+
+        if (
+          message.role === 'assistant' &&
+          message.content &&
+          !message.isStreaming &&
+          !message.isThinking
+        ) {
+          ttsGeneratedMessagesRef.current.add(message.id);
+
+          try {
+            const { synthesizeText } = await import('../services/ttsApi');
+            const audioBlob = await synthesizeText(message.content, voiceId, ttsSettings, elevenLabsToken);
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+              const audioData = e.target?.result as string;
+              setMessages(prev =>
+                prev.map(m =>
+                  m.id === message.id
+                    ? {
+                        ...m,
+                        media: [
+                          ...(m.media || []),
+                          {
+                            type: 'audio' as const,
+                            mimeType: 'audio/mpeg',
+                            data: audioData,
+                          },
+                        ],
+                      }
+                    : m
+                )
+              );
+            };
+            reader.readAsDataURL(audioBlob);
+          } catch (err) {
+            console.error(`Failed to generate TTS for message ${message.id}:`, err);
+          }
+        }
+      }
+    };
+
+    generateTTSForNewMessages();
+  }, [messages, currentSessionMeta?.ext?.tts?.enabled, currentSessionMeta?.ext?.tts?.voiceId, currentSessionMeta?.ext?.tts?.settings, setMessages]);
 
 
 

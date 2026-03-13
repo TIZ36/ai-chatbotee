@@ -37,6 +37,7 @@ export interface VoicePersonaConfig {
   language: string;
   speed?: number;
   pitch?: number;
+  elevenLabsToken?: string;
 }
 
 /** 自驱思考配置 */
@@ -186,7 +187,7 @@ const VoiceConfigPanel: React.FC<VoiceConfigPanelProps> = ({ config, onChange })
   const loadElevenLabsVoices = async () => {
     try {
       setLoadingVoices(true);
-      const voices = await fetchVoices();
+      const voices = await fetchVoices(config.elevenLabsToken);
       setElevenLabsVoices(voices);
       
       if (voices.length > 0 && !config.voiceId) {
@@ -219,7 +220,7 @@ const VoiceConfigPanel: React.FC<VoiceConfigPanelProps> = ({ config, onChange })
 
     try {
       setUploadingVoice(true);
-      const result = await uploadCustomVoice(selectedFile, voiceName.trim());
+      const result = await uploadCustomVoice(selectedFile, voiceName.trim(), undefined, config.elevenLabsToken);
       toast({
         title: '语音上传成功',
         description: result.message,
@@ -344,18 +345,33 @@ const VoiceConfigPanel: React.FC<VoiceConfigPanelProps> = ({ config, onChange })
           </div>
 
           {config.provider === 'elevenlabs' && (
-            <div className="flex gap-2">
-              <Button 
-                size="sm" 
-                variant="outline"
-                onClick={() => setShowUploadForm(!showUploadForm)}
-                className="[data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--niho-text-bg)]"
-              >
-                <Upload className="w-4 h-4 mr-2" />
-                上传自定义语音
-              </Button>
+            <div className="space-y-3">
+              <div>
+                <Label className="[data-skin='niho']:text-[var(--text-primary)]">ElevenLabs API Key</Label>
+                <Input
+                  type="password"
+                  value={config.elevenLabsToken || ''}
+                  onChange={(e) => onChange({ ...config, elevenLabsToken: e.target.value })}
+                  placeholder="sk_..."
+                  className="[data-skin='niho']:bg-[#000000] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)]"
+                />
+                <p className="text-xs text-gray-500 mt-1 [data-skin='niho']:text-[var(--text-secondary)]">
+                  获取 token: <a href="https://elevenlabs.io/api" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">elevenlabs.io/api</a>
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  onClick={() => setShowUploadForm(!showUploadForm)}
+                  className="[data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--niho-text-bg)]"
+                >
+                  <Upload className="w-4 h-4 mr-2" />
+                  上传自定义语音
+                </Button>
+              </div>
             </div>
-          )}
+           )}
 
           {showUploadForm && config.provider === 'elevenlabs' && (
             <div className="space-y-3 p-3 bg-[var(--color-bg-secondary)] rounded [data-skin='niho']:bg-[var(--niho-text-bg)]">

@@ -9,21 +9,26 @@ logger = logging.getLogger(__name__)
 tts_bp = Blueprint('tts', __name__, url_prefix='/api/tts')
 
 _tts_client: Optional[ElevenLabsClient] = None
+_tts_config: dict = {}
 
 
 def init_tts_routes(app, config):
     """Initialize TTS routes with config."""
-    global _tts_client
+    global _tts_client, _tts_config
+    _tts_config = config
     _tts_client = get_tts_client(config)
 
 
 @tts_bp.route('/voices', methods=['GET'])
 def get_voices():
     """Get list of available voices."""
-    if not _tts_client:
+    custom_api_token = request.args.get('api_token')
+    tts_client = get_tts_client(_tts_config, custom_api_token)
+    
+    if not tts_client:
         return jsonify({"error": "TTS service not configured"}), 503
 
-    voices = _tts_client.list_voices(use_cache=True)
+    voices = tts_client.list_voices(use_cache=True)
     
     return jsonify({
         "voices": [
@@ -68,9 +73,6 @@ def get_voice_details(voice_id: str):
 @tts_bp.route('/speak', methods=['POST'])
 def speak():
     """Convert text to speech."""
-    if not _tts_client:
-        return jsonify({"error": "TTS service not configured"}), 503
-
     data = request.get_json()
     
     if not data or "text" not in data:
@@ -86,6 +88,12 @@ def speak():
     if len(text) > 5000:
         return jsonify({"error": "Text too long (max 5000 characters)"}), 400
 
+    custom_api_token = data.get("api_token")
+    tts_client = get_tts_client(_tts_config, custom_api_token)
+    
+    if not tts_client:
+        return jsonify({"error": "TTS service not configured"}), 503
+
     voice_id = data.get("voice_id")
     model_id = data.get("model_id", "eleven_multilingual_v2")
     stability = float(data.get("stability", 0.5))
@@ -93,7 +101,7 @@ def speak():
     output_format = data.get("output_format", "mp3_44100_128")
     optimize_streaming_latency = int(data.get("optimize_streaming_latency", 0))
 
-    audio_bytes, error = _tts_client.text_to_speech(
+    audio_bytes, error = tts_client.text_to_speech(
         text=text,
         voice_id=voice_id,
         model_id=model_id,
@@ -118,7 +126,10 @@ def speak():
 @tts_bp.route('/upload-voice', methods=['POST'])
 def upload_custom_voice():
     """Upload and create a custom voice clone."""
-    if not _tts_client:
+    custom_api_token = request.form.get('api_token')
+    tts_client = get_tts_client(_tts_config, custom_api_token)
+    
+    if not tts_client:
         return jsonify({"error": "TTS service not configured"}), 503
 
     if "file" not in request.files:
@@ -134,17 +145,18 @@ def upload_custom_voice():
     if not voice_name:
         return jsonify({"error": "Voice name cannot be empty"}), 400
 
-    if audio_file.filename == "":
+    if not audio_file.filename or audio_file.filename == "":
         return jsonify({"error": "No file selected"}), 400
 
     allowed_extensions = {"mp3", "wav", "m4a", "webm"}
-    file_ext = audio_file.filename.rsplit(".", 1)[1].lower() if "." in audio_file.filename else ""
+    filename = audio_file.filename or ""
+    file_ext = filename.rsplit(".", 1)[1].lower() if "." in filename else ""
     
     if file_ext not in allowed_extensions:
         return jsonify({"error": f"Unsupported audio format. Allowed: {', '.join(allowed_extensions)}"}), 400
 
     try:
-        voice_id, error = _tts_client.create_voice_clone(
+        voice_id, error = tts_client.create_voice_clone(
             name=voice_name,
             audio_file=audio_file.stream,
             description=description
@@ -167,10 +179,13 @@ def upload_custom_voice():
 @tts_bp.route('/delete-voice/<voice_id>', methods=['DELETE'])
 def delete_custom_voice(voice_id: str):
     """Delete a custom voice clone."""
-    if not _tts_client:
+    custom_api_token = request.args.get('api_token') or request.get_json().get('api_token') if request.is_json else None
+    tts_client = get_tts_client(_tts_config, custom_api_token)
+    
+    if not tts_client:
         return jsonify({"error": "TTS service not configured"}), 503
 
-    success, error = _tts_client.delete_voice(voice_id)
+    success, error = tts_client.delete_voice(voice_id)
 
     if not success:
         return jsonify({"error": error}), 400
@@ -181,10 +196,13 @@ def delete_custom_voice(voice_id: str):
 @tts_bp.route('/user-info', methods=['GET'])
 def get_user_info():
     """Get ElevenLabs user account information."""
-    if not _tts_client:
+    custom_api_token = request.args.get('api_token')
+    tts_client = get_tts_client(_tts_config, custom_api_token)
+    
+    if not tts_client:
         return jsonify({"error": "TTS service not configured"}), 503
 
-    user_info, error = _tts_client.get_user_info()
+    user_info, error = tts_client.get_user_info()
 
     if error:
         return jsonify({"error": error}), 400

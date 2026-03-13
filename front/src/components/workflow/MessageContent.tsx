@@ -28,6 +28,7 @@ import {
 import { MediaGallery, MediaItem } from '../ui/MediaGallery';
 import { MCPExecutionCard } from '../MCPExecutionCard';
 import { Button } from '../ui/Button';
+import { AudioPlayer } from '../AudioPlayer';
 import { truncateBase64Strings } from '../../utils/textUtils';
 import { parseMCPContentBlocks, renderMCPBlocks, renderMCPMedia } from './mcpRender';
 import type { SessionMediaItem } from '../ui/SessionMediaPanel';
@@ -264,6 +265,57 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
       </div>
     );
   };
+
+  // Render audio players for TTS-generated audio
+  const renderAudioPlayers = () => {
+    if (!galleryMedia || message.role !== 'assistant') {
+      return null;
+    }
+
+    const audioItems = galleryMedia.filter(m => m.type === 'audio');
+    if (audioItems.length === 0) {
+      return null;
+    }
+
+    return (
+      <div className="mb-3 flex flex-col gap-2">
+        {audioItems.map((item, idx) => {
+          // Convert data URL or base64 to Blob
+          let audioBlob: Blob;
+          try {
+            if (item.data.startsWith('data:')) {
+              const [header, data] = item.data.split(',');
+              const binaryString = atob(data);
+              const bytes = new Uint8Array(binaryString.length);
+              for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+              }
+              audioBlob = new Blob([bytes], { type: item.mimeType });
+            } else {
+              const binaryString = atob(item.data);
+              const bytes = new Uint8Array(binaryString.length);
+              for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+              }
+              audioBlob = new Blob([bytes], { type: item.mimeType });
+            }
+          } catch (err) {
+            console.error('Failed to decode audio data:', err);
+            return null;
+          }
+
+          return (
+            <AudioPlayer 
+              key={`audio-${message.id}-${idx}`}
+              audioBlob={audioBlob}
+              autoPlay={false}
+              className="mb-2"
+            />
+          );
+        })}
+      </div>
+    );
+  };
   
   // Tool message (perception component)
   if (message.role === 'tool' && message.toolType) {
@@ -360,6 +412,9 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
     <div>
       {/* Multimodal content display */}
       {renderMedia()}
+
+      {/* Audio players for TTS-generated speech */}
+      {renderAudioPlayers()}
 
       {/* Reactions (decorations) - e.g. likes */}
       {(() => {

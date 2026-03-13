@@ -166,7 +166,7 @@ class ElevenLabsClient:
     def create_voice_clone(
         self,
         name: str,
-        audio_file: BinaryIO,
+        audio_file,
         description: str = ""
     ) -> Tuple[Optional[str], Optional[str]]:
         """
@@ -273,26 +273,37 @@ class ElevenLabsClient:
 _client: Optional[ElevenLabsClient] = None
 
 
-def get_tts_client(config: Dict) -> Optional[ElevenLabsClient]:
+def get_tts_client(config: Dict, api_key: Optional[str] = None) -> Optional[ElevenLabsClient]:
     """
     Get or create ElevenLabs TTS client.
-    Returns None if API key is not configured.
+    
+    Args:
+        config: Flask config dictionary
+        api_key: Optional API key to use instead of config (for per-persona tokens)
+    
+    Returns:
+        ElevenLabsClient or None if API key is not configured.
     """
     global _client
+
+    # If custom api_key provided, create a new client for this request
+    if api_key and api_key.strip():
+        api_base = config.get("tts", {}).get("elevenlabs", {}).get("api_base", "https://api.elevenlabs.io/v1")
+        return ElevenLabsClient(api_key, api_base)
 
     if _client is not None:
         return _client
 
     tts_config = config.get("tts", {})
     elevenlabs_config = tts_config.get("elevenlabs", {})
-    api_key = elevenlabs_config.get("api_key", "").strip()
+    default_api_key = elevenlabs_config.get("api_key", "").strip()
 
-    if not api_key:
+    if not default_api_key:
         logger.warning("ElevenLabs API key not configured in config.yaml")
         return None
 
     api_base = elevenlabs_config.get("api_base", "https://api.elevenlabs.io/v1")
-    _client = ElevenLabsClient(api_key, api_base)
+    _client = ElevenLabsClient(default_api_key, api_base)
 
     return _client
 

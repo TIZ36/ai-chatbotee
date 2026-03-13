@@ -33,8 +33,13 @@ export interface UserInfo {
   subscription_tier: string;
 }
 
-export async function fetchVoices(): Promise<Voice[]> {
-  const res = await fetch(`${API_BASE}/voices`);
+export async function fetchVoices(apiToken?: string): Promise<Voice[]> {
+  const url = new URL(`${API_BASE}/voices`, window.location.origin);
+  if (apiToken) {
+    url.searchParams.append('api_token', apiToken);
+  }
+
+  const res = await fetch(url.toString());
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err?.error || res.statusText || 'Failed to fetch voices');
@@ -55,13 +60,18 @@ export async function getVoiceDetails(voiceId: string): Promise<Voice> {
 export async function synthesizeText(
   text: string,
   voiceId: string,
-  settings: TTSSettings = {}
+  settings: TTSSettings = {},
+  apiToken?: string
 ): Promise<Blob> {
-  const payload = {
+  const payload: any = {
     text,
     voice_id: voiceId,
     ...settings,
   };
+  
+  if (apiToken) {
+    payload.api_token = apiToken;
+  }
 
   const res = await fetch(`${API_BASE}/speak`, {
     method: 'POST',
@@ -80,13 +90,17 @@ export async function synthesizeText(
 export async function uploadCustomVoice(
   file: File,
   name: string,
-  description?: string
+  description?: string,
+  apiToken?: string
 ): Promise<{ voice_id: string; name: string; message: string }> {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('name', name);
   if (description) {
     formData.append('description', description);
+  }
+  if (apiToken) {
+    formData.append('api_token', apiToken);
   }
 
   const res = await fetch(`${API_BASE}/upload-voice`, {
@@ -102,8 +116,13 @@ export async function uploadCustomVoice(
   return res.json();
 }
 
-export async function deleteCustomVoice(voiceId: string): Promise<{ message: string }> {
-  const res = await fetch(`${API_BASE}/delete-voice/${encodeURIComponent(voiceId)}`, {
+export async function deleteCustomVoice(voiceId: string, apiToken?: string): Promise<{ message: string }> {
+  const url = new URL(`${API_BASE}/delete-voice/${encodeURIComponent(voiceId)}`, window.location.origin);
+  if (apiToken) {
+    url.searchParams.append('api_token', apiToken);
+  }
+
+  const res = await fetch(url.toString(), {
     method: 'DELETE',
   });
 
@@ -115,8 +134,13 @@ export async function deleteCustomVoice(voiceId: string): Promise<{ message: str
   return res.json();
 }
 
-export async function getUserInfo(): Promise<UserInfo> {
-  const res = await fetch(`${API_BASE}/user-info`);
+export async function getUserInfo(apiToken?: string): Promise<UserInfo> {
+  const url = new URL(`${API_BASE}/user-info`, window.location.origin);
+  if (apiToken) {
+    url.searchParams.append('api_token', apiToken);
+  }
+
+  const res = await fetch(url.toString());
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err?.error || res.statusText || 'Failed to fetch user info');
