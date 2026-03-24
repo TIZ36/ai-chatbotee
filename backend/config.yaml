@@ -21,7 +21,7 @@ redis:
   enabled: true
   host: localhost
   port: 6379
-  password: "chatee_redis"
+  password: "123456"
   db: 0
 
 owner:
@@ -48,6 +48,15 @@ media:
   veo:
     api_key: ""
     api_base: ""
+
+# Google Drive 集成（用于把生成图片/视频上传到用户自己的 Drive）
+google_drive:
+  client_id: "1061411180296-c1doqeur6u7aboi5dkosic42o9m402td.apps.googleusercontent.com"
+  client_secret: ""
+  # 需与 Google Cloud Console 中配置的 OAuth 回调地址一致
+  redirect_uri: "http://localhost:3001/api/media/google-drive/auth/callback"
+  # 上传/展示统一使用的目录名（不存在会自动创建）
+  folder_name: "chaya"
 
 # TTS (Text-to-Speech) 配置
 tts:

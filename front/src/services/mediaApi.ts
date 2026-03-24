@@ -66,6 +66,18 @@ export interface MediaOutputItem {
   created_at?: string;
 }
 
+export interface GoogleDriveItem {
+  id: string;
+  name?: string;
+  mime_type?: string;
+  created_at?: string;
+  size?: string;
+  web_view_link?: string;
+  thumbnail_link?: string;
+  preview_url?: string;
+  thumb_url?: string;
+}
+
 export const mediaApi = {
   getProviders: () =>
     req<{ providers: MediaProvider[]; model_registry?: ModelRegistryEntry[] }>('/providers'),
@@ -221,4 +233,39 @@ export const mediaApi = {
   /** 产出文件访问 URL（用于预览/下载） */
   getOutputFileUrl: (outputId: string) =>
     `${BASE()}/outputs/${encodeURIComponent(outputId)}/file`,
+
+  // ─── Google Drive 联动 ───
+
+  googleDriveAuthStart: () =>
+    req<{ auth_url: string; state: string; error?: string }>('/google-drive/auth/start', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+
+  googleDriveAuthStatus: () =>
+    req<{ connected: boolean }>('/google-drive/auth/status'),
+
+  uploadOutputToGoogleDrive: (outputId: string, body?: { folder_id?: string }) =>
+    req<{ ok?: boolean; drive_file_id?: string; name?: string; web_view_link?: string; error?: string }>(
+      `/outputs/${encodeURIComponent(outputId)}/upload-drive`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body || {}),
+      },
+    ),
+
+  listGoogleDriveFiles: (pageSize = 40, pageToken?: string) => {
+    const params = new URLSearchParams();
+    params.set('page_size', String(pageSize));
+    if (pageToken) params.set('page_token', pageToken);
+    return req<{ items: GoogleDriveItem[]; next_page_token?: string; folder_id?: string; folder_name?: string }>(
+      `/google-drive/files?${params.toString()}`,
+    );
+  },
+
+  getGoogleDriveFilePreviewUrl: (fileId: string) =>
+    `${BASE()}/google-drive/files/${encodeURIComponent(fileId)}/content`,
+
+  getGoogleDriveFileThumbUrl: (fileId: string) =>
+    `${BASE()}/google-drive/files/${encodeURIComponent(fileId)}/thumb`,
 };

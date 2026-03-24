@@ -14,3 +14,4 @@ from . import routes_runway
 from . import routes_veo
 from . import routes_providers
 from . import routes_outputs
+from . import routes_drive

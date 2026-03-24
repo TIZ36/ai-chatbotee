@@ -20,7 +20,7 @@ import {
 } from './ui/Dialog';
 import { CapabilityIcons } from './ui/CapabilityIcons';
 import { ImageSizeSelector } from './ImageSizeSelector';
-import { mediaApi, type MediaProvider } from '../services/mediaApi';
+import { mediaApi, type MediaProvider, type GoogleDriveItem } from '../services/mediaApi';
 import { getSession } from '../services/sessionApi';
 import type { PersonaPreset } from '../services/roleApi';
 import {
@@ -43,10 +43,23 @@ import {
   ChevronDown,
   MessageCircle,
   Maximize2,
+  FolderOpen,
+  RefreshCw,
 } from 'lucide-react';
 import { resolveMediaSrc } from '../utils/mediaSrc';
 
 const CHAYA_SESSION_ID = 'agent_chaya';
+
+function GoogleDriveIcon({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+      <path d="M7.78 3h8.44l4.22 7.31h-4.22L12 3.97 7.78 3z" fill="#0F9D58" />
+      <path d="M3.56 10.31L7.78 3l2.11 3.66-4.22 7.31-2.11-3.66z" fill="#4285F4" />
+      <path d="M16.22 21H7.78l-2.11-3.66h12.66L16.22 21z" fill="#F4B400" />
+      <path d="M18.33 17.34H5.67l4.22-7.31h12.66l-4.22 7.31z" fill="#2A56C6" opacity="0.18" />
+    </svg>
+  );
+}
 
 /** 解析为可用于 img 的 URL，空或无效时返回空字符串（避免 net::ERR_INVALID_URL） */
 function safeImgSrc(url: string | undefined): string {
@@ -238,6 +251,13 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
   // 移动端图库/视频抽屉（< 768px）
   const [mobileGalleryOpen, setMobileGalleryOpen] = useState(false);
   const [mobileVideoDrawerOpen, setMobileVideoDrawerOpen] = useState(false);
+  const [driveUploadingOutputId, setDriveUploadingOutputId] = useState<string | null>(null);
+  const [showDriveDialog, setShowDriveDialog] = useState(false);
+  const [driveFiles, setDriveFiles] = useState<GoogleDriveItem[]>([]);
+  const [driveLoading, setDriveLoading] = useState(false);
+  const [driveError, setDriveError] = useState<string | null>(null);
+  const [driveNextPageToken, setDriveNextPageToken] = useState<string | null>(null);
+  const [driveLoadingMore, setDriveLoadingMore] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
@@ -880,6 +900,81 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
     }
   };
 
+  const ensureGoogleDriveConnected = useCallback(async (): Promise<boolean> => {
+    try {
+      const status = await mediaApi.googleDriveAuthStatus();
+      if (status.connected) return true;
+      const started = await mediaApi.googleDriveAuthStart();
+      if (!started.auth_url) throw new Error('未获取到 Google 授权链接');
+      window.open(started.auth_url, '_blank', 'noopener,noreferrer,width=520,height=720');
+      for (let i = 0; i < 30; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        const next = await mediaApi.googleDriveAuthStatus();
+        if (next.connected) return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const uploadToGoogleDrive = useCallback(async (item: MediaItem | undefined | null) => {
+    if (!item?.output_id) {
+      window.alert('该图片尚未落盘，暂不可上传到 Drive');
+      return;
+    }
+    if (driveUploadingOutputId) return;
+    setDriveUploadingOutputId(item.output_id);
+    try {
+      const connected = await ensureGoogleDriveConnected();
+      if (!connected) {
+        throw new Error('Google 授权未完成，请重试');
+      }
+      const res = await mediaApi.uploadOutputToGoogleDrive(item.output_id);
+      if (res.error || !res.ok) {
+        throw new Error(res.error || '上传失败');
+      }
+      if (res.web_view_link) {
+        window.open(res.web_view_link, '_blank', 'noopener,noreferrer');
+      }
+    } catch (e: any) {
+      window.alert(e?.message || '上传 Google Drive 失败');
+    } finally {
+      setDriveUploadingOutputId(null);
+    }
+  }, [driveUploadingOutputId, ensureGoogleDriveConnected]);
+
+  const loadGoogleDriveFiles = useCallback(async () => {
+    setDriveLoading(true);
+    setDriveError(null);
+    try {
+      const connected = await ensureGoogleDriveConnected();
+      if (!connected) throw new Error('Google 授权未完成');
+      const res = await mediaApi.listGoogleDriveFiles(12);
+      setDriveFiles(res.items || []);
+      setDriveNextPageToken(res.next_page_token || null);
+    } catch (e: any) {
+      setDriveError(e?.message || '读取 Google Drive 图库失败');
+      setDriveFiles([]);
+    } finally {
+      setDriveLoading(false);
+    }
+  }, [ensureGoogleDriveConnected]);
+
+  const loadMoreGoogleDriveFiles = useCallback(async () => {
+    if (!driveNextPageToken || driveLoadingMore) return;
+    setDriveLoadingMore(true);
+    try {
+      const res = await mediaApi.listGoogleDriveFiles(24, driveNextPageToken);
+      setDriveFiles((prev) => [...prev, ...(res.items || [])]);
+      setDriveNextPageToken(res.next_page_token || null);
+    } catch {
+      // ignore
+    } finally {
+      setDriveLoadingMore(false);
+    }
+  }, [driveLoadingMore, driveNextPageToken]);
+
   /* ─── 隐藏 file input ─── */
   const triggerFileInput = () => fileInputRef.current?.click();
 
@@ -961,6 +1056,14 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
                   </button>
                   <button type="button" className="p-1.5 rounded-lg bg-black/60 text-white hover:bg-black/80" onClick={() => dl(mainSrc, 'gen.png')} title="保存到本地">
                     <Download className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    className="p-1.5 rounded-lg bg-black/60 text-white hover:bg-[#4285F4]/80"
+                    onClick={() => uploadToGoogleDrive(main)}
+                    title="保存到 Google Drive"
+                  >
+                    {driveUploadingOutputId === main.output_id ? <Loader2 className="w-4 h-4 animate-spin" /> : <GoogleDriveIcon className="w-4 h-4" />}
                   </button>
                 </>
               )}
@@ -1252,7 +1355,21 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
 
                 {/* 右栏：图库 — 桌面端 md+ 显示，移动端用底部抽屉 */}
                 <div className="media-create-results-card media-create-gallery min-w-0 min-h-0 flex flex-col overflow-hidden hidden md:flex">
-                  <h3 className="media-create-results-title"><ImageIcon className="w-4 h-4" /> 图库</h3>
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="media-create-results-title"><ImageIcon className="w-4 h-4" /> 图库</h3>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className={`${btnSecondary} !text-[11px] !py-1 !px-2`}
+                      onClick={() => {
+                        setShowDriveDialog(true);
+                        loadGoogleDriveFiles();
+                      }}
+                    >
+                      <FolderOpen className="w-3.5 h-3.5 mr-1" />
+                      Drive 图库
+                    </Button>
+                  </div>
                   {renderGalleryBody()}
                 </div>
               </div>
@@ -1666,6 +1783,88 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
         </DialogContent>
       </Dialog>
 
+      <Dialog open={showDriveDialog} onOpenChange={setShowDriveDialog}>
+        <DialogContent className="chatee-dialog-standard max-w-4xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <GoogleDriveIcon className="w-5 h-5" />
+              Google Drive 图库（chaya）
+            </DialogTitle>
+            <DialogDescription>点击图片可加入参考图，或在新窗口打开 Drive 预览</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[70vh] overflow-auto no-scrollbar">
+            <div className="flex items-center justify-end mb-2">
+              <Button size="sm" variant="outline" className={btnSecondary} onClick={loadGoogleDriveFiles}>
+                <RefreshCw className={`w-3.5 h-3.5 mr-1 ${driveLoading ? 'animate-spin' : ''}`} />
+                刷新
+              </Button>
+            </div>
+            {driveLoading ? (
+              <div className={`text-sm ${textMuted} py-8 text-center`}>
+                <Loader2 className="w-4 h-4 animate-spin inline mr-1" />
+                加载中...
+              </div>
+            ) : driveError ? (
+              <div className="text-sm text-[var(--color-secondary)] py-6 text-center">{driveError}</div>
+            ) : driveFiles.length === 0 ? (
+              <div className={`text-sm ${textMuted} py-6 text-center`}>目录里还没有可展示的图片/视频</div>
+            ) : (
+              <>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                {driveFiles.map((f) => {
+                  const isVideo = (f.mime_type || '').startsWith('video/');
+                  const thumbSrc = f.thumb_url ? mediaApi.getGoogleDriveFileThumbUrl(f.id) : '';
+                  const fullSrc = f.preview_url ? mediaApi.getGoogleDriveFilePreviewUrl(f.id) : '';
+                  return (
+                    <div key={f.id} className="rounded-lg border border-[var(--border-default)] p-1.5 bg-black/20">
+                      <button
+                        type="button"
+                        className="w-full aspect-square rounded overflow-hidden bg-black/60 flex items-center justify-center"
+                        onClick={() => {
+                          if (!isVideo && fullSrc) {
+                            pickRefImage({ url: fullSrc, mimeType: f.mime_type || 'image/png', source: 'generated' });
+                            setShowDriveDialog(false);
+                          } else if (f.web_view_link) {
+                            window.open(f.web_view_link, '_blank', 'noopener,noreferrer');
+                          }
+                        }}
+                        title={f.name || ''}
+                      >
+                        {!isVideo && (thumbSrc || fullSrc) ? (
+                          <img src={thumbSrc || fullSrc} alt={f.name || ''} className="w-full h-full object-cover" loading="lazy" />
+                        ) : (
+                          <Film className="w-6 h-6 text-[var(--color-highlight)]" />
+                        )}
+                      </button>
+                      <div className="mt-1 flex items-center justify-between gap-1">
+                        <p className="text-[10px] truncate text-[var(--text-muted)]" title={f.name || ''}>{f.name || '未命名'}</p>
+                        {f.web_view_link && (
+                          <button
+                            type="button"
+                            className="text-[10px] text-[var(--color-accent)] hover:underline"
+                            onClick={() => window.open(f.web_view_link, '_blank', 'noopener,noreferrer')}
+                          >
+                            打开
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {driveNextPageToken && (
+                <div className="mt-3 flex justify-center">
+                  <Button size="sm" variant="outline" className={btnSecondary} onClick={loadMoreGoogleDriveFiles} disabled={driveLoadingMore}>
+                    {driveLoadingMore ? <><Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> 加载中...</> : '加载更多'}
+                  </Button>
+                </div>
+              )}
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* ════════ Lightbox ════════ */}
       {lightboxUrl && (() => {
         const lbSrc = safeImgSrc(lightboxUrl);
@@ -1685,6 +1884,16 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
             <div className="absolute bottom-2 left-1/2 -translate-x-1/2 sm:left-auto sm:right-2 sm:translate-x-0 flex gap-3 sm:gap-2">
               <button className="p-2.5 sm:p-1.5 rounded-full bg-black/60 text-white hover:bg-black/80 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 flex items-center justify-center" onClick={() => lbSrc && dl(lbSrc, 'image.png')} aria-label="保存到本地">
                 <Download className="w-5 h-5 sm:w-4 sm:h-4" />
+              </button>
+              <button
+                className="p-2.5 sm:p-1.5 rounded-full bg-[#4285F4]/80 text-white hover:bg-[#4285F4] min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 flex items-center justify-center"
+                onClick={() => {
+                  const target = createdMedia.find((m) => resolveMediaSrc(m.url ?? '') === resolveMediaSrc(lightboxUrl ?? ''));
+                  uploadToGoogleDrive(target);
+                }}
+                aria-label="保存到 Google Drive"
+              >
+                {driveUploadingOutputId ? <Loader2 className="w-5 h-5 sm:w-4 sm:h-4 animate-spin" /> : <GoogleDriveIcon className="w-5 h-5 sm:w-4 sm:h-4" />}
               </button>
               <button
                 className="p-2.5 sm:p-1.5 rounded-full bg-[var(--color-secondary)]/80 text-white hover:bg-[var(--color-secondary)] min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 flex items-center justify-center"
