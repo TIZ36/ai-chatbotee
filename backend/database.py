@@ -341,6 +341,51 @@ def create_tables():
         except Exception as e:
             print(f"  ⚠️ Warning: Failed to backfill supplier in llm_providers: {e}")
 
+        _ensure_column(
+            'llm_providers',
+            'sort_order',
+            """
+                ALTER TABLE `llm_providers`
+                ADD COLUMN `sort_order` INT NOT NULL DEFAULT 0 COMMENT '列表显示顺序（越小越靠前，Chaya 选模型 Tab 同序）'
+                AFTER `metadata`
+            """,
+            'sort_order',
+        )
+        try:
+            cursor.execute(
+                "SELECT COUNT(*) AS c, COUNT(DISTINCT sort_order) AS d FROM llm_providers"
+            )
+            row = cursor.fetchone()
+            if row and row[0] and row[0] > 0 and row[1] == 1:
+                cursor.execute(
+                    """
+                    UPDATE llm_providers p
+                    INNER JOIN (
+                        SELECT provider_id, ROW_NUMBER() OVER (ORDER BY is_system DESC, name ASC) AS rn
+                        FROM llm_providers
+                    ) x ON p.provider_id = x.provider_id
+                    SET p.sort_order = x.rn
+                    """
+                )
+                conn.commit()
+                print("  ✓ Backfilled llm_providers.sort_order (ROW_NUMBER)")
+        except Exception as e:
+            print(f"  ⚠️ Warning: ROW_NUMBER backfill for sort_order failed ({e}), trying sequential update...")
+            try:
+                cursor.execute(
+                    "SELECT provider_id FROM llm_providers ORDER BY is_system DESC, name ASC"
+                )
+                ids = [r[0] for r in cursor.fetchall()]
+                for i, pid in enumerate(ids):
+                    cursor.execute(
+                        "UPDATE llm_providers SET sort_order = %s WHERE provider_id = %s",
+                        (i, pid),
+                    )
+                conn.commit()
+                print(f"  ✓ Backfilled llm_providers.sort_order (sequential, {len(ids)} rows)")
+            except Exception as e2:
+                print(f"  ⚠️ Warning: Failed to backfill sort_order: {e2}")
+
         # 初始化系统内置供应商（如果不存在）
         try:
             system_providers = [
@@ -375,14 +420,14 @@ def create_tables():
                     'default_api_url': 'http://localhost:11434',
                 },
             ]
-            for provider in system_providers:
+            for idx, provider in enumerate(system_providers, start=1):
                 cursor.execute("SELECT COUNT(*) FROM llm_providers WHERE provider_id = %s", (provider['provider_id'],))
                 exists = cursor.fetchone()[0] > 0
                 if not exists:
                     cursor.execute("""
                         INSERT INTO llm_providers
-                        (provider_id, supplier, name, provider_type, is_system, override_url, default_api_url, logo_theme, metadata)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        (provider_id, supplier, name, provider_type, is_system, override_url, default_api_url, logo_theme, metadata, sort_order)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """, (
                         provider['provider_id'],
                         provider['provider_id'],
@@ -393,6 +438,7 @@ def create_tables():
                         provider['default_api_url'],
                         'auto',
                         None,
+                        idx,
                     ))
                     conn.commit()
                     print(f"  ✓ Inserted system provider: {provider['name']}")

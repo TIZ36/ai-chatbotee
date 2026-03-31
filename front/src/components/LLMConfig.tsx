@@ -4,12 +4,12 @@
  */
 
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { Plus, Trash2, CheckCircle, XCircle, Edit2, Brain, Save, X, Loader2, Eye, EyeOff, Type, Image as ImageIcon, Video, Music, Mic, Download, Upload, ChevronDown, ChevronRight, Camera, Search, Check, RefreshCw } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, XCircle, Edit2, Brain, Save, X, Loader2, Eye, EyeOff, Type, Image as ImageIcon, Video, Music, Mic, Download, Upload, ChevronDown, ChevronRight, Camera, Search, Check, RefreshCw, GripVertical } from 'lucide-react';
 import { 
   getLLMConfigs, getLLMConfig, createLLMConfig, updateLLMConfig, deleteLLMConfig, getLLMConfigApiKey, 
   LLMConfigFromDB, CreateLLMConfigRequest,
   downloadLLMConfigAsJson, downloadAllLLMConfigsAsJson, importLLMConfigsFromFile, importLLMConfigs,
-  getProviders, getProvider, createProvider, updateProvider, deleteProvider,
+  getProviders, getProvider, createProvider, updateProvider, deleteProvider, reorderProviders,
   getSupportedProviders,
   LLMProvider, CreateProviderRequest, UpdateProviderRequest, SupportedProvider
 } from '../services/llmApi';
@@ -316,6 +316,10 @@ const LLMConfigPanel: React.FC = () => {
   const [showEditProviderDialog, setShowEditProviderDialog] = useState(false);
   const [editingProvider, setEditingProvider] = useState<LLMProvider | null>(null);
   const [deleteProviderTarget, setDeleteProviderTarget] = useState<LLMProvider | null>(null);
+  /** 供应商拖拽：源下标 / 插入位置（0=第一项前 … n=最后一项后） */
+  const [providerDragFrom, setProviderDragFrom] = useState<number | null>(null);
+  const [providerInsertBefore, setProviderInsertBefore] = useState<number | null>(null);
+  const providerDragFromRef = useRef<number | null>(null);
   // Logo 相关状态已移除，现在直接使用 @lobehub/icons 组件
   const [newProvider, setNewProvider] = useState<CreateProviderRequest>({
     name: '',
@@ -460,6 +464,78 @@ const LLMConfigPanel: React.FC = () => {
       });
     } finally {
       setIsLoadingProviders(false);
+    }
+  };
+
+  const reorderProviderListByInsertBefore = <T,>(list: T[], from: number, insertBefore: number): T[] => {
+    const n = list.length;
+    if (from < 0 || from >= n || insertBefore < 0 || insertBefore > n) return [...list];
+    if (from === insertBefore) return [...list];
+    const next = [...list];
+    const [item] = next.splice(from, 1);
+    let insertAt = insertBefore;
+    if (from < insertBefore) insertAt--;
+    next.splice(insertAt, 0, item);
+    return next;
+  };
+
+  const computeInsertBeforeFromRowEvent = (e: React.DragEvent, rowIndex: number, rowCount: number) => {
+    const el = e.currentTarget as HTMLElement;
+    const rect = el.getBoundingClientRect();
+    const mid = rect.top + rect.height / 2;
+    const after = e.clientY >= mid;
+    return after ? Math.min(rowIndex + 1, rowCount) : rowIndex;
+  };
+
+  const onProviderDragStart = (e: React.DragEvent, index: number) => {
+    e.dataTransfer.setData('text/plain', String(index));
+    e.dataTransfer.effectAllowed = 'move';
+    providerDragFromRef.current = index;
+    setProviderDragFrom(index);
+    setProviderInsertBefore(null);
+  };
+  const onProviderDragEnd = () => {
+    providerDragFromRef.current = null;
+    setProviderDragFrom(null);
+    setProviderInsertBefore(null);
+  };
+  const onProviderDragOverRow = (e: React.DragEvent, rowIndex: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (providerDragFromRef.current === null) return;
+    setProviderInsertBefore(computeInsertBeforeFromRowEvent(e, rowIndex, providers.length));
+  };
+  const onProviderDropRow = async (e: React.DragEvent, rowIndex: number) => {
+    e.preventDefault();
+    const fromFromEvent = parseInt(e.dataTransfer.getData('text/plain'), 10);
+    const from = Number.isNaN(fromFromEvent) ? providerDragFromRef.current ?? -1 : fromFromEvent;
+    if (Number.isNaN(from) || from < 0 || from >= providers.length) {
+      onProviderDragEnd();
+      return;
+    }
+    // 优先使用 dragover 时已计算的插入位置，避免 drop 时二次计算导致错位
+    const insertBefore = providerInsertBefore ?? computeInsertBeforeFromRowEvent(e, rowIndex, providers.length);
+    const next = reorderProviderListByInsertBefore(providers, from, insertBefore);
+    const same =
+      next.length === providers.length &&
+      next.every((p, i) => p.provider_id === providers[i].provider_id);
+    if (same) {
+      onProviderDragEnd();
+      return;
+    }
+    const prev = [...providers];
+    setProviders(next);
+    onProviderDragEnd();
+    try {
+      await reorderProviders(next.map((p) => p.provider_id));
+      toast({ title: '供应商顺序已保存', description: 'Chaya 聊天中「选择模型」Tab 顺序已同步', variant: 'success' });
+    } catch (err) {
+      setProviders(prev);
+      toast({
+        title: '保存顺序失败',
+        description: err instanceof Error ? err.message : String(err),
+        variant: 'destructive',
+      });
     }
   };
 
@@ -942,6 +1018,7 @@ const LLMConfigPanel: React.FC = () => {
         icon={Brain}
         variant="persona"
         personaConstrainContent={true}
+        showHeader={false}
       >
         <div className="llm-config-loading flex items-center justify-center py-12">
           <div className="w-6 h-6 border-2 border-gray-300 dark:border-gray-600 border-t-[#7c3aed] rounded-full animate-spin" />
@@ -963,7 +1040,7 @@ const LLMConfigPanel: React.FC = () => {
         className={`
           llm-config-tab ${showAddProviderContent ? 'llm-config-tab--active' : ''}
           flex items-center gap-2 text-sm font-medium whitespace-nowrap transition-colors
-          ${vertical ? 'w-full px-3 py-2.5 rounded-lg text-left border' : 'px-4 py-2.5 border-b-2'}
+          ${vertical ? 'app-list-item w-full px-3 py-2.5 text-left border' : 'px-4 py-2.5 border-b-2'}
           ${showAddProviderContent
             ? vertical
               ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
@@ -977,23 +1054,45 @@ const LLMConfigPanel: React.FC = () => {
         <Plus className="w-4 h-4 flex-shrink-0" />
         添加供应商
       </button>
-      {providers.map(provider => {
+      {vertical && providerDragFrom !== null && providerInsertBefore === 0 && (
+        <div className="relative h-0 pointer-events-none flex items-center justify-center py-0.5 -my-px" aria-hidden>
+          <div className="h-0.5 w-full rounded-full bg-[var(--color-accent)] shadow-[0_0_8px_rgba(0,255,136,0.4)] [data-skin='niho']:shadow-[0_0_10px_rgba(0,255,136,0.5)]" />
+        </div>
+      )}
+      {providers.map((provider, providerIndex) => {
         const isActive = selectedProviderId === provider.provider_id;
         const providerModelCount = configs.filter(c =>
           (c.supplier || c.provider) === provider.provider_id && c.enabled
         ).length;
+        const isDraggingRow = vertical && providerDragFrom === providerIndex;
         return (
+          <React.Fragment key={provider.provider_id}>
           <div
-            key={provider.provider_id}
-            className={vertical ? 'group/item' : 'group flex items-center gap-1 flex-shrink-0'}
+            className={`${vertical ? 'group/item' : 'group flex items-center gap-1 flex-shrink-0'} ${isDraggingRow ? 'opacity-50' : ''} transition-opacity`}
+            draggable={vertical}
+            onDragStart={vertical ? (e) => onProviderDragStart(e, providerIndex) : undefined}
+            onDragEnd={vertical ? onProviderDragEnd : undefined}
+            onDragOver={vertical ? (e) => onProviderDragOverRow(e, providerIndex) : undefined}
+            onDrop={vertical ? (e) => void onProviderDropRow(e, providerIndex) : undefined}
           >
+            <div className={vertical ? 'flex items-center gap-1 w-full min-w-0' : 'contents'}>
+            {vertical && (
+              <span
+                className="cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 [data-skin='niho']:text-[var(--niho-skyblue-gray)] flex-shrink-0 p-0.5 -ml-0.5"
+                title="拖动排序"
+                onClick={(e) => e.stopPropagation()}
+                role="presentation"
+              >
+                <GripVertical className="w-3.5 h-3.5" />
+              </span>
+            )}
             <button
               type="button"
               onClick={() => setSelectedProviderId(provider.provider_id)}
               className={`
                 llm-config-tab ${isActive ? 'llm-config-tab--active' : ''}
                 flex items-center gap-2 text-sm font-medium whitespace-nowrap transition-colors
-                ${vertical ? 'w-full px-3 py-2.5 rounded-lg text-left border' : 'px-4 py-2.5 border-b-2'}
+                ${vertical ? 'app-list-item flex-1 min-w-0 px-3 py-2.5 text-left border' : 'px-4 py-2.5 border-b-2'}
                 ${isActive
                   ? vertical
                     ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
@@ -1012,6 +1111,7 @@ const LLMConfigPanel: React.FC = () => {
                 <span className="text-xs opacity-70 flex-shrink-0">({providerModelCount})</span>
               )}
             </button>
+            </div>
             {vertical && isActive && isCustomProvider(provider) && (
               <div className="flex items-center gap-0.5 mt-1.5 pl-7 opacity-0 group-hover/item:opacity-100 transition-opacity">
                 <Button
@@ -1052,6 +1152,12 @@ const LLMConfigPanel: React.FC = () => {
               </div>
             )}
           </div>
+          {vertical && providerDragFrom !== null && providerInsertBefore === providerIndex + 1 && (
+            <div className="relative h-0 pointer-events-none flex items-center justify-center py-0.5 -my-px" aria-hidden>
+              <div className="h-0.5 w-full rounded-full bg-[var(--color-accent)] shadow-[0_0_8px_rgba(0,255,136,0.4)] [data-skin='niho']:shadow-[0_0_10px_rgba(0,255,136,0.5)]" />
+            </div>
+          )}
+          </React.Fragment>
         );
       })}
     </>
@@ -1064,12 +1170,16 @@ const LLMConfigPanel: React.FC = () => {
       icon={Brain}
       variant="persona"
       personaConstrainContent={false}
+      showHeader={false}
     >
       {/* 整体居中：供应商列表 + Token/内容区 作为一块，两侧留白 */}
-      <div className="llm-config-page flex-1 min-h-0 overflow-auto flex justify-center p-4 lg:px-6">
-        <div className="flex flex-col lg:flex-row h-full min-h-0 w-full max-w-4xl">
+      <div className="llm-config-page flex-1 min-h-0 overflow-auto flex justify-center app-pane-pad">
+        <div className="llm-two-pane flex flex-col lg:flex-row h-full min-h-0 w-full max-w-4xl">
           {/* 左侧：供应商列表（紧挨内容区） */}
-          <div className="flex-shrink-0 flex flex-col border-b lg:border-b-0 lg:border-r border-gray-200 dark:border-[#404040]  lg:w-52 xl:w-56">
+          <div className="llm-two-pane-nav flex-shrink-0 flex flex-col border-b lg:border-b-0 lg:border-r border-gray-200 dark:border-[#404040]  lg:w-52 xl:w-56">
+            <div className="llm-two-pane-nav-title hidden lg:block">
+              模型录入菜单
+            </div>
             {/* 小屏：顶部横向 Tab */}
             <div className="lg:hidden overflow-x-auto no-scrollbar min-h-10">
               <div className="flex gap-0">
@@ -1083,7 +1193,7 @@ const LLMConfigPanel: React.FC = () => {
           </div>
 
           {/* 右侧：Token 录入 / 模型内容区 */}
-          <div className="flex-1 min-w-0 overflow-auto pl-4 pr-0 lg:pl-5 lg:pr-0 pt-4 lg:pt-4">
+          <div className="flex-1 min-w-0 overflow-auto app-pane-pad-left pr-0 lg:pr-0">
             <div className="w-full max-w-2xl">
       {showAddProviderContent ? (
         <div className="space-y-6">
@@ -1139,7 +1249,7 @@ const LLMConfigPanel: React.FC = () => {
                               });
                             }
                           }}
-                          className="llm-config-provider-card flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] hover:bg-gray-50 dark:hover:bg-[#363636] text-left transition-colors"
+                          className="llm-config-provider-card app-card-item app-card-pad-sm flex items-center gap-3 text-left transition-colors"
                         >
                           <span className="w-8 h-8 rounded flex items-center justify-center flex-shrink-0 text-lg">
                             {supportedProvider.icon}
@@ -1178,35 +1288,7 @@ const LLMConfigPanel: React.FC = () => {
       ) : (
         <div className="space-y-6">
             <div className="space-y-4">
-              {/* 供应商切换提示 - 增强视觉反馈 */}
-              <div 
-                className={`
-                  llm-config-provider-header p-4 rounded-lg border-2 transition-all duration-300
-                  ${selectedProvider && ['openai', 'anthropic', 'gemini', 'deepseek'].includes(selectedProvider.provider_type)
-                    ? 'border-primary-300 dark:border-primary-700 bg-primary-50/50 dark:bg-primary-900/20'
-                    : 'border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/30'
-                  }
-                `}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg flex items-center justify-center overflow-hidden border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
-                    {renderProviderIcon(selectedProvider.provider_type, 'w-full h-full', 40)}
-                  </div>
-                  <div className="flex-1">
-                    <div className="font-semibold text-gray-900 dark:text-gray-100">
-                      {getProviderDisplayName(selectedProvider)}
-                    </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 ">
-                      {selectedProvider && ['openai', 'anthropic', 'gemini', 'deepseek'].includes(selectedProvider.provider_type)
-                        ? '请在下方录入 API Token 以开始使用'
-                        : `${providerConfigs.length} 个模型配置`
-                      }
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Token 管理界面（仅主流供应商：openai, anthropic, gemini, deepseek）- 替代供应商信息卡片 */}
+              {/* Token 管理界面（仅主流供应商：openai, anthropic, gemini, deepseek） */}
               {selectedProvider && ['openai', 'anthropic', 'gemini', 'deepseek'].includes(selectedProvider.provider_type) && (
                 <Card 
                   className="llm-config-token-card-wrap"
@@ -1292,6 +1374,54 @@ const LLMConfigPanel: React.FC = () => {
                 </Card>
               )}
 
+              {/* 已有 Token 时，展示当前已开启模型（内部滚动） */}
+              {selectedProvider && ['openai', 'anthropic', 'gemini', 'deepseek'].includes(selectedProvider.provider_type) && providerConfigs.length > 0 && (
+                <Card
+                  title={`已开启模型 (${providerConfigs.filter(c => c.enabled).length})`}
+                  description="仅显示当前已启用模型，列表区域支持内部滚动"
+                  size="compact"
+                  variant="persona"
+                >
+                  <div className="max-h-[320px] overflow-y-auto no-scrollbar pr-1 space-y-2">
+                    {providerConfigs.filter(c => c.enabled).length === 0 ? (
+                      <div className="text-sm text-gray-500 dark:text-gray-400 py-2 px-1">
+                        当前 Token 下暂无已开启模型
+                      </div>
+                    ) : (
+                      providerConfigs
+                        .filter(c => c.enabled)
+                        .map(config => (
+                          <div
+                            key={config.config_id}
+                            className="llm-config-model-row app-list-item flex items-center justify-between p-3 transition-colors"
+                          >
+                            <div className="flex items-center space-x-3 flex-1 min-w-0">
+                              <div className="w-8 h-8 rounded flex items-center justify-center overflow-hidden border border-gray-200 dark:border-[#404040]">
+                                {renderProviderIcon(config.supplier || config.provider, 'w-full h-full', 24)}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="font-medium text-sm text-gray-900 dark:text-gray-100 truncate">
+                                  {config.name}
+                                </div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1 truncate">
+                                  <span className="truncate">{config.model || '未设置模型'}</span>
+                                  {config.supplier && config.supplier !== config.provider && (
+                                    <span className="text-gray-400 shrink-0">(兼容: {config.provider})</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 ml-3 flex-shrink-0">
+                              <span className="ui-badge-success text-xs">已启用</span>
+                              <CapabilityIcons capabilities={config.metadata?.capabilities} modelName={config.model} className="w-3.5 h-3.5" />
+                            </div>
+                          </div>
+                        ))
+                    )}
+                  </div>
+                </Card>
+              )}
+
               {/* 已有模型列表（非主流供应商或传统视图） */}
               {(!selectedProvider || !['openai', 'anthropic', 'gemini', 'deepseek'].includes(selectedProvider.provider_type)) && (
               <Card 
@@ -1356,7 +1486,7 @@ const LLMConfigPanel: React.FC = () => {
                     {providerConfigs.map(config => (
                       <div
                         key={config.config_id}
-                        className="llm-config-model-row flex items-center justify-between p-3 rounded-lg border border-gray-200 dark:border-[#404040] hover:bg-gray-50 dark:hover:bg-[#363636] transition-colors"
+                        className="llm-config-model-row app-list-item flex items-center justify-between p-3 transition-colors"
                       >
                         <div className="flex items-center space-x-3 flex-1">
                           <div className="w-8 h-8 rounded flex items-center justify-center overflow-hidden border border-gray-200 dark:border-[#404040]">
@@ -2957,7 +3087,7 @@ const LLMConfigPanel: React.FC = () => {
                 return (
                   <div
                     key={config.config_id}
-                    className="flex items-center justify-between p-3 rounded-lg border border-gray-200 dark:border-[#404040] hover:bg-gray-50 dark:hover:bg-[#363636]"
+                    className="app-list-item flex items-center justify-between p-3"
                   >
                     <div className="flex items-center gap-3 flex-1 min-w-0">
                       <Switch

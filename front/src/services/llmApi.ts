@@ -23,6 +23,8 @@ export interface LLMProvider {
   logo_dark?: string;
   logo_theme?: 'auto' | 'light' | 'dark';
   metadata?: Record<string, any>;
+  /** 列表显示顺序（越小越靠前；Chaya 选模型 Tab 与此一致） */
+  sort_order?: number;
   created_at: string;
   updated_at: string;
 }
@@ -373,7 +375,7 @@ export async function getProviders(): Promise<LLMProvider[]> {
  * 获取单个供应商
  */
 export async function getProvider(providerId: string): Promise<LLMProvider> {
-  const response = await fetch(`${API_BASE_URL}/providers/${providerId}`);
+  const response = await fetch(`${API_BASE_URL}/providers/${encodeURIComponent(providerId)}`);
   if (!response.ok) {
     throw new Error(`Failed to fetch provider: ${response.statusText}`);
   }
@@ -402,7 +404,7 @@ export async function createProvider(provider: CreateProviderRequest): Promise<{
  * 更新供应商
  */
 export async function updateProvider(providerId: string, updates: UpdateProviderRequest): Promise<{ message: string }> {
-  const response = await fetch(`${API_BASE_URL}/providers/${providerId}`, {
+  const response = await fetch(`${API_BASE_URL}/providers/${encodeURIComponent(providerId)}`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
@@ -420,7 +422,7 @@ export async function updateProvider(providerId: string, updates: UpdateProvider
  * 删除供应商
  */
 export async function deleteProvider(providerId: string): Promise<{ message: string }> {
-  const response = await fetch(`${API_BASE_URL}/providers/${providerId}`, {
+  const response = await fetch(`${API_BASE_URL}/providers/${encodeURIComponent(providerId)}`, {
     method: 'DELETE',
   });
   if (!response.ok) {
@@ -428,6 +430,43 @@ export async function deleteProvider(providerId: string): Promise<{ message: str
     throw new Error(`Failed to delete provider: ${error.error || response.statusText}`);
   }
   return response.json();
+}
+
+/**
+ * 保存供应商列表顺序（左侧拖拽后调用）
+ */
+export async function reorderProviders(providerIds: string[]): Promise<{ message: string; updated: number }> {
+  const response = await fetch(`${API_BASE_URL}/providers/reorder`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider_ids: providerIds }),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(error.error || `Failed to reorder providers: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+/**
+ * 按供应商 sort_order 排列模型配置（用于 Chaya 等场景）
+ */
+export function sortLLMConfigsByProviderOrder(
+  configs: LLMConfigFromDB[],
+  providers: LLMProvider[]
+): LLMConfigFromDB[] {
+  const order = new Map<string, number>();
+  providers.forEach((p) => {
+    order.set(p.provider_id, typeof p.sort_order === 'number' ? p.sort_order : 9999);
+  });
+  return [...configs].sort((a, b) => {
+    const sa = a.supplier || a.provider || '';
+    const sb = b.supplier || b.provider || '';
+    const oa = order.get(sa) ?? 9999;
+    const ob = order.get(sb) ?? 9999;
+    if (oa !== ob) return oa - ob;
+    return (a.name || '').localeCompare(b.name || '', 'zh-CN');
+  });
 }
 
 /**

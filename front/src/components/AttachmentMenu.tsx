@@ -4,11 +4,9 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Plug, Package, Paperclip, FileText, ImageIcon, Loader2, Film, Check } from 'lucide-react';
+import { Plug, Package, Paperclip, ImageIcon, Loader2, Film, Check } from 'lucide-react';
 import { mediaApi, type MediaOutputItem } from '../services/mediaApi';
 import { Button } from './ui/Button';
-import { Switch } from './ui/Switch';
-import { Label } from './ui/Label';
 import {
   Dialog,
   DialogContent,
@@ -40,14 +38,9 @@ interface AttachmentMenuProps {
   /** 直接添加媒体（不需要 FileList，用于从画廊选取） */
   onAttachMediaDirect?: (item: { type: 'image' | 'video' | 'audio'; mimeType: string; data: string; preview?: string }) => void;
   attachedCount?: number;
-  toolCallingEnabled?: boolean;
-  onToggleToolCalling?: (enabled: boolean) => void;
-  /** Chaya 主界面：在插件弹框中显示 SOP 入口 */
-  showSopPlugin?: boolean;
-  onOpenAddSop?: () => void;
 }
 
-type PluginTab = 'mcp' | 'skillPack' | 'media' | 'settings' | 'sop';
+type PluginTab = 'mcp' | 'skillPack' | 'media';
 
 const AttachmentMenu: React.FC<AttachmentMenuProps> = ({
   mcpServers,
@@ -64,10 +57,6 @@ const AttachmentMenu: React.FC<AttachmentMenuProps> = ({
   onAttachFile,
   onAttachMediaDirect,
   attachedCount = 0,
-  toolCallingEnabled = false,
-  onToggleToolCalling,
-  showSopPlugin = false,
-  onOpenAddSop,
 }) => {
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<PluginTab>('mcp');
@@ -139,7 +128,7 @@ const AttachmentMenu: React.FC<AttachmentMenuProps> = ({
         size="sm"
         onClick={() => setOpen(true)}
         className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground"
-        title="插件：MCP / 技能包 / 媒体"
+        title="插件：MCP / Skill / 媒体附件"
       >
         <Plug className="w-3.5 h-3.5" />
         <span>插件</span>
@@ -162,7 +151,7 @@ const AttachmentMenu: React.FC<AttachmentMenuProps> = ({
               插件
             </DialogTitle>
             <DialogDescription>
-              选择 MCP 工具、技能包、媒体或功能开关
+              选择 MCP、Skill 与媒体附件
             </DialogDescription>
           </DialogHeader>
 
@@ -170,11 +159,9 @@ const AttachmentMenu: React.FC<AttachmentMenuProps> = ({
           <div className="flex flex-col min-h-0 flex-1">
             <div className="flex border-b border-gray-200 dark:border-[#404040] overflow-x-auto no-scrollbar flex-shrink-0">
               {[
-                { id: 'mcp' as const, label: '工具 / MCP', count: mcpServers.length, show: true },
-                { id: 'skillPack' as const, label: '技能包', count: skillPacks.length, show: true },
-                { id: 'sop' as const, label: 'SOP', count: 0, show: showSopPlugin },
-                { id: 'media' as const, label: '媒体', count: attachedCount, show: true },
-                { id: 'settings' as const, label: '功能开关', count: onToggleToolCalling ? 1 : 0, show: !!onToggleToolCalling },
+                { id: 'mcp' as const, label: 'MCP', count: mcpServers.length, show: true },
+                { id: 'skillPack' as const, label: 'Skill', count: skillPacks.length, show: true },
+                { id: 'media' as const, label: '媒体附件', count: attachedCount, show: true },
               ]
                 .filter(({ show }) => show)
                 .map(({ id, label, count }) => {
@@ -194,19 +181,17 @@ const AttachmentMenu: React.FC<AttachmentMenuProps> = ({
                       `}
                     >
                       <span>{label}</span>
-                      {id === 'settings' ? null : (
-                        <span
-                          className={`
-                            text-xs px-1.5 py-0.5 rounded-full
-                            ${isActive
-                              ? 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300'
-                              : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
-                            }
-                          `}
-                        >
-                          {id === 'mcp' ? `${connectedCount}/${count}` : count}
-                        </span>
-                      )}
+                      <span
+                        className={`
+                          text-xs px-1.5 py-0.5 rounded-full
+                          ${isActive
+                            ? 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300'
+                            : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+                          }
+                        `}
+                      >
+                        {id === 'mcp' ? `${connectedCount}/${count}` : count}
+                      </span>
                     </button>
                   );
                 })}
@@ -366,29 +351,6 @@ const AttachmentMenu: React.FC<AttachmentMenuProps> = ({
               </div>
             )}
 
-            {activeTab === 'sop' && showSopPlugin && onOpenAddSop && (
-              <div className="space-y-2 py-2">
-                <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-[#888] mb-2">
-                  <FileText className="w-3.5 h-3.5 text-emerald-600 dark:text-[#00d4aa]" />
-                  <span>SOP（标准作业流程）</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onOpenAddSop();
-                    setOpen(false);
-                  }}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm bg-muted/50 text-gray-700 dark:text-[#d0d0d0] hover:bg-muted/70 border border-transparent hover:border-border/40 transition-colors text-left"
-                >
-                  <Package className="w-4 h-4 flex-shrink-0 text-emerald-600 dark:text-[#00d4aa]" />
-                  <span>设置 SOP</span>
-                </button>
-                <p className="text-[11px] text-gray-500 dark:text-[#888] px-1">
-                  创建或编辑 SOP 技能包，用于指导对话流程。
-                </p>
-              </div>
-            )}
-
             {activeTab === 'media' && (
               <div className="space-y-3">
                 {/* 上传区 */}
@@ -485,26 +447,6 @@ const AttachmentMenu: React.FC<AttachmentMenuProps> = ({
               </div>
             )}
 
-            {activeTab === 'settings' && onToggleToolCalling && (
-              <div className="space-y-1">
-                <div className="flex items-center justify-between p-3 rounded-md bg-muted/30 dark:bg-muted/20 border border-border/40">
-                  <div className="flex flex-col gap-0.5 min-w-0">
-                    <Label htmlFor="plugin-toolcall-toggle" className="text-sm font-medium text-foreground cursor-pointer">
-                      ToolCall
-                    </Label>
-                    <span className="text-xs text-muted-foreground">
-                      允许模型调用 MCP 等工具
-                    </span>
-                  </div>
-                  <Switch
-                    id="plugin-toolcall-toggle"
-                    checked={toolCallingEnabled}
-                    onCheckedChange={checked => onToggleToolCalling(Boolean(checked))}
-                    className="flex-shrink-0"
-                  />
-                </div>
-              </div>
-            )}
           </div>
           </div>
 

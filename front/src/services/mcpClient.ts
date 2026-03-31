@@ -19,7 +19,7 @@ export interface MCPServer {
   id: string;
   name: string;
   url: string;
-  type: 'http-stream' | 'http-post' | 'stdio';
+  type: 'http-stream' | 'http-post' | 'stdio' | 'http-oauth';
   enabled: boolean;
   description?: string;
   metadata?: Record<string, any>;

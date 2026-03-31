@@ -6,6 +6,8 @@ server:
   cors_origins:
     - http://localhost:5177
     - http://localhost:3000
+    # Electron file:// 等场景下 fetch 可能携带 Origin: null
+    - "null"
 
 mysql:
   enabled: true

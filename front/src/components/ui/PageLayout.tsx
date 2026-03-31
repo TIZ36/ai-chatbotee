@@ -85,7 +85,7 @@ const PageLayout: React.FC<PageLayoutProps> = ({
 
         <div className={`
           flex-1 overflow-auto
-          ${isPersona ? 'agents-page-list p-6 no-scrollbar' : ''}
+          ${isPersona ? 'agents-page-list app-page-content no-scrollbar' : ''}
           ${!isPersona && (fullWidth ? '' : compact ? 'p-2' : 'p-3')}
           ${contentClassName}
         `}>
@@ -139,7 +139,7 @@ export const Card: React.FC<CardProps> = ({
 
   const isPersona = variant === 'persona';
   const cardClass = isPersona
-    ? 'agents-page-card rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d]'
+    ? 'app-card-item agents-page-card rounded-lg'
     : 'glass-card';
   const headerBorderClass = isPersona
     ? 'border-b border-gray-200 dark:border-[#404040] [data-skin="niho"]:border-[var(--niho-text-border)]'
@@ -235,11 +235,8 @@ export const ListItem: React.FC<ListItemProps> = ({
     <div
       onClick={!disabled ? onClick : undefined}
       className={`
-        px-2 py-1.5 rounded-md transition-all duration-150
-        ${active 
-          ? 'bg-primary-100/80 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300' 
-          : 'hover:bg-gray-100/60 dark:hover:bg-white/5'
-        }
+        app-list-item px-2 py-1.5 rounded-md transition-all duration-150
+        ${active ? 'is-active' : ''}
         ${disabled ? 'opacity-50 cursor-not-allowed' : onClick ? 'cursor-pointer' : ''}
         ${className}
       `}

@@ -12,12 +12,18 @@ export interface MCPServerConfig {
   server_id?: string;
   name: string;
   url: string;
-  type: 'http-stream' | 'http-post' | 'stdio';
+  /**
+   * 传输类型；`http-oauth` 仅用于前端表单，落库为 `http-stream` + ext.server_type=http_oauth
+   */
+  type: 'http-stream' | 'http-post' | 'stdio' | 'http-oauth';
   enabled: boolean;
   use_proxy?: boolean;
   description?: string;
   metadata?: Record<string, any>;
-  ext?: Record<string, any>; // 扩展配置（如Notion的Integration Secret等）
+  ext?: Record<string, any> & {
+    server_type?: 'notion' | 'http_oauth' | string;
+    oauth_client_id?: string;
+  };
   display_name?: string; // 显示名称（用于 Notion 等，使用 client_name）
   client_name?: string; // Notion 注册的 client_name
 }
@@ -144,95 +150,6 @@ export async function getMCPServer(serverId: string): Promise<MCPServerConfig | 
   }
 }
 
-// ==================== MCP 市场（Market）API ====================
-
-export interface MCPMarketSource {
-  source_id: string;
-  display_name: string;
-  type: 'github_repo' | 'http_json' | 'html_scrape';
-  enabled: boolean;
-  config: Record<string, any>;
-  sync_interval_seconds?: number;
-  last_sync_at?: number | null;
-}
-
-export interface MCPMarketItemSummary {
-  item_id: string;
-  source_id: string;
-  name: string;
-  description: string;
-  runtime_type: 'local_stdio' | 'remote_http';
-  homepage?: string;
-  tags?: string[];
-}
-
-export interface MCPMarketSearchResult {
-  items: MCPMarketItemSummary[];
-  total: number;
-}
-
-export async function getMCPMarketSources(): Promise<MCPMarketSource[]> {
-  const backendUrl = getBackendUrl();
-  const response = await fetch(`${backendUrl}/api/mcp/market/sources`);
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error || `HTTP ${response.status}: ${response.statusText}`);
-  }
-  const data = await response.json();
-  return data.sources || [];
-}
-
-export async function syncMCPMarketSource(sourceId: string, force: boolean = false): Promise<any> {
-  const backendUrl = getBackendUrl();
-  const response = await fetch(`${backendUrl}/api/mcp/market/sources/${encodeURIComponent(sourceId)}/sync`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ force }),
-  });
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error || `HTTP ${response.status}: ${response.statusText}`);
-  }
-  return await response.json();
-}
-
-export async function searchMCPMarket(params: {
-  q?: string;
-  runtime_type?: 'local_stdio' | 'remote_http';
-  source_id?: string;
-  limit?: number;
-  offset?: number;
-}): Promise<MCPMarketSearchResult> {
-  const backendUrl = getBackendUrl();
-  const url = new URL(`${backendUrl}/api/mcp/market/search`);
-  if (params.q) url.searchParams.set('q', params.q);
-  if (params.runtime_type) url.searchParams.set('runtime_type', params.runtime_type);
-  if (params.source_id) url.searchParams.set('source_id', params.source_id);
-  if (params.limit != null) url.searchParams.set('limit', String(params.limit));
-  if (params.offset != null) url.searchParams.set('offset', String(params.offset));
-
-  const response = await fetch(url.toString());
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error || `HTTP ${response.status}: ${response.statusText}`);
-  }
-  return await response.json();
-}
-
-export async function installMCPMarketItem(itemId: string, overrides?: Record<string, any>): Promise<{ server_id: string; message: string }> {
-  const backendUrl = getBackendUrl();
-  const response = await fetch(`${backendUrl}/api/mcp/market/install`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ item_id: itemId, overrides: overrides || {} }),
-  });
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error || `HTTP ${response.status}: ${response.statusText}`);
-  }
-  return await response.json();
-}
-
 // ==================== 通用 OAuth MCP 服务器配置 API ====================
 
 export interface OAuthProtectedResource {
@@ -247,11 +164,13 @@ export interface OAuthAuthorizationServer {
   issuer: string;
   authorization_endpoint: string;
   token_endpoint: string;
+  /** 存在时后端可 RFC7591 动态注册，用户无需填写 Client ID（如飞书项目 MCP） */
   registration_endpoint?: string;
   response_types_supported: string[];
-  response_modes_supported: string[];
+  response_modes_supported?: string[];
   grant_types_supported: string[];
-  token_endpoint_auth_methods_supported: string[];
+  /** 部分 AS（如飞书）元数据可能省略，由后端按 client_secret 回退处理 */
+  token_endpoint_auth_methods_supported?: string[];
   revocation_endpoint?: string;
   code_challenge_methods_supported?: string[];
 }
@@ -305,7 +224,10 @@ export async function discoverMCPOAuth(mcpUrl: string): Promise<OAuthDiscoveryRe
  */
 export async function authorizeMCPOAuth(params: {
   authorization_endpoint: string;
-  client_id: string;
+  /** 可选；缺省时后端用 registration_endpoint 动态注册，或复用 Redis 中已注册客户端 */
+  client_id?: string;
+  /** 若 AS 元数据含 registration_endpoint（如飞书项目 MCP），后端可自动动态注册，无需用户填写 Client ID */
+  registration_endpoint?: string;
   resource?: string;
   code_challenge_methods_supported?: string[];
   token_endpoint?: string;  // 用于保存到 Redis
@@ -328,6 +250,21 @@ export async function authorizeMCPOAuth(params: {
   }
   
   return await response.json();
+}
+
+/**
+ * 查询指定 MCP URL 是否已有 OAuth access token（授权完成后轮询）
+ */
+export async function getMCPOAuthTokenStatus(mcpUrl: string): Promise<{ has_token: boolean; mcp_url: string }> {
+  const backendUrl = getBackendUrl();
+  const u = new URL(`${backendUrl}/api/mcp/oauth/token-status`);
+  u.searchParams.set('mcp_url', mcpUrl);
+  const response = await fetch(u.toString());
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${response.status}: ${response.statusText}`);
+  }
+  return response.json();
 }
 
 /**

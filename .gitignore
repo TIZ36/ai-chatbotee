@@ -91,6 +91,7 @@ out/
 front/dist/
 front/build/
 front/out/
+front/release/
 
 # Electron 构建产物（已在下面单独列出，这里保持）
 

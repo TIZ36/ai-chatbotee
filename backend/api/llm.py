@@ -1140,10 +1140,11 @@ def get_providers():
                 logo_dark,
                 logo_theme,
                 metadata,
+                sort_order,
                 created_at,
                 updated_at
             FROM llm_providers
-            ORDER BY is_system DESC, name ASC
+            ORDER BY sort_order ASC, name ASC
         """)
         providers = cursor.fetchall()
         
@@ -1220,11 +1221,14 @@ def create_provider():
         if cursor.fetchone()[0] > 0:
             return jsonify({'error': f'供应商名称 "{name}" 已存在，请使用其他名称'}), 400
         
+        cursor.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM llm_providers")
+        next_sort = cursor.fetchone()[0]
+
         # 插入新供应商
         cursor.execute("""
             INSERT INTO llm_providers 
-            (provider_id, supplier, name, provider_type, is_system, override_url, default_api_url, logo_theme, metadata)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (provider_id, supplier, name, provider_type, is_system, override_url, default_api_url, logo_theme, metadata, sort_order)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             provider_id,
             supplier,
@@ -1234,7 +1238,8 @@ def create_provider():
             override_url,
             default_api_url,
             data.get('logo_theme', 'auto'),
-            json.dumps(data.get('metadata', {}))
+            json.dumps(data.get('metadata', {})),
+            next_sort,
         ))
         
         conn.commit()
@@ -1248,6 +1253,40 @@ def create_provider():
         
     except Exception as e:
         print(f"[Create Provider] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@llm_bp.route('/providers/reorder', methods=['PUT', 'OPTIONS'])
+def reorder_providers():
+    """批量更新供应商显示顺序（与 Chaya 选模型 Tab 顺序一致）"""
+    if request.method == 'OPTIONS':
+        response = Response(status=200)
+        response.headers.update(get_cors_headers())
+        return response
+    try:
+        data = request.get_json() or {}
+        ids = data.get('provider_ids')
+        if not isinstance(ids, list) or len(ids) == 0:
+            return jsonify({'error': 'provider_ids must be a non-empty array'}), 400
+
+        conn = get_mysql_connection()
+        if not conn:
+            return jsonify({'error': 'Database not available'}), 503
+
+        cursor = conn.cursor()
+        for idx, pid in enumerate(ids):
+            cursor.execute(
+                "UPDATE llm_providers SET sort_order = %s WHERE provider_id = %s",
+                (idx, pid),
+            )
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return jsonify({'message': 'Provider order updated', 'updated': len(ids)})
+    except Exception as e:
+        print(f"[Reorder Providers] Error: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
@@ -1280,6 +1319,7 @@ def get_provider(provider_id):
                 logo_dark,
                 logo_theme,
                 metadata,
+                sort_order,
                 created_at,
                 updated_at
             FROM llm_providers
@@ -1406,7 +1446,7 @@ def update_provider(provider_id):
 
 @llm_bp.route('/providers/<provider_id>', methods=['DELETE', 'OPTIONS'])
 def delete_provider(provider_id):
-    """删除供应商（仅限自定义供应商）"""
+    """删除自定义供应商（级联删除该 supplier 下的所有 llm_configs，并解除会话引用）"""
     if request.method == 'OPTIONS':
         response = Response(status=200)
         response.headers.update(get_cors_headers())
@@ -1427,15 +1467,41 @@ def delete_provider(provider_id):
             conn.close()
             return jsonify({'error': 'Provider not found'}), 404
         
-        # 检查是否有配置使用此供应商（按 supplier 列归属）
-        cursor.execute("SELECT COUNT(*) FROM llm_configs WHERE supplier = %s", (provider_id,))
-        config_count = cursor.fetchone()[0]
-        if config_count > 0:
+        if result[0]:
             cursor.close()
             conn.close()
-            return jsonify({'error': f'Cannot delete provider: {config_count} config(s) are using it'}), 400
-        
-        # 删除供应商
+            return jsonify({'error': 'Cannot delete system provider'}), 400
+
+        # 按 supplier 归属收集待删配置（与前端创建模型时 supplier=provider_id 一致）
+        cursor.execute("SELECT config_id FROM llm_configs WHERE supplier = %s", (provider_id,))
+        config_ids = [row[0] for row in cursor.fetchall()]
+
+        if config_ids:
+            placeholders = ",".join(["%s"] * len(config_ids))
+
+            # 解除会话与角色版本上的引用，避免悬空 llm_config_id
+            cursor.execute(
+                f"UPDATE sessions SET llm_config_id = NULL WHERE llm_config_id IN ({placeholders})",
+                config_ids,
+            )
+            try:
+                cursor.execute(
+                    f"UPDATE role_versions SET llm_config_id = NULL WHERE llm_config_id IN ({placeholders})",
+                    config_ids,
+                )
+            except Exception as ex:
+                print(f"[Delete Provider] role_versions cleanup skipped: {ex}")
+
+            try:
+                cursor.execute(
+                    f"UPDATE discord_app_config SET default_llm_config_id = NULL WHERE default_llm_config_id IN ({placeholders})",
+                    config_ids,
+                )
+            except Exception as ex:
+                print(f"[Delete Provider] discord_app_config cleanup skipped: {ex}")
+
+            cursor.execute("DELETE FROM llm_configs WHERE supplier = %s", (provider_id,))
+
         cursor.execute("DELETE FROM llm_providers WHERE provider_id = %s", (provider_id,))
         conn.commit()
         cursor.close()

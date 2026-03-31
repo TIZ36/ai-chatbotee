@@ -290,7 +290,9 @@ def get_mcp_server_config(target_url: str) -> Optional[Dict[str, Any]]:
     Returns:
         dict: { "metadata": dict|None, "ext": dict|None, "found": bool }
     """
-    normalized_target_url = target_url.rstrip('/')
+    raw_target_url = target_url or ''
+    stripped_target_url = raw_target_url.strip()
+    normalized_target_url = stripped_target_url.rstrip('/')
     cache_key = f"server_config:{normalized_target_url}"
     cached = _get_cached_server_config(cache_key)
     if cached is not None:
@@ -303,13 +305,27 @@ def get_mcp_server_config(target_url: str) -> Optional[Dict[str, Any]]:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT metadata, ext FROM mcp_servers WHERE url = %s AND enabled = 1 LIMIT 1",
-                (target_url,)
+                (raw_target_url,)
             )
             server_row = cursor.fetchone()
-            # 如果使用原始 URL 未命中且存在末尾斜杠差异，尝试规范化 URL
-            if not server_row and target_url != normalized_target_url:
+            # 兼容：URL 前后空白
+            if not server_row and stripped_target_url and stripped_target_url != raw_target_url:
                 cursor.execute(
                     "SELECT metadata, ext FROM mcp_servers WHERE url = %s AND enabled = 1 LIMIT 1",
+                    (stripped_target_url,)
+                )
+                server_row = cursor.fetchone()
+            # 兼容：末尾斜杠差异
+            if not server_row and stripped_target_url and stripped_target_url != normalized_target_url:
+                cursor.execute(
+                    "SELECT metadata, ext FROM mcp_servers WHERE url = %s AND enabled = 1 LIMIT 1",
+                    (normalized_target_url,)
+                )
+                server_row = cursor.fetchone()
+            # 兼容：历史脏数据（数据库中 URL 含首尾空白）
+            if not server_row and normalized_target_url:
+                cursor.execute(
+                    "SELECT metadata, ext FROM mcp_servers WHERE TRIM(url) = %s AND enabled = 1 LIMIT 1",
                     (normalized_target_url,)
                 )
                 server_row = cursor.fetchone()
@@ -370,7 +386,7 @@ def prepare_mcp_headers(target_url: str, request_headers: Dict[str, str], base_h
 
     # 如果调用方没带 session-id，但我们曾经协商过，优先复用最近一次的 session-id
     try:
-        normalized_target_url = target_url.rstrip('/')
+        normalized_target_url = (target_url or '').strip().rstrip('/')
         if 'mcp-session-id' not in headers and normalized_target_url in _mcp_session_ids:
             headers['mcp-session-id'] = _mcp_session_ids[normalized_target_url]
             print(f"[MCP Common] Reusing cached mcp-session-id for {normalized_target_url[:40]}...")
@@ -383,13 +399,13 @@ def prepare_mcp_headers(target_url: str, request_headers: Dict[str, str], base_h
         ext = server_config.get("ext") or {}
 
         # 检查是否需要 OAuth token
-        normalized_target_url = target_url.rstrip('/')
+        normalized_target_url = (target_url or '').strip().rstrip('/')
         server_type = ext.get('server_type')
-        if server_type in ['notion']:  # 可以扩展其他需要 OAuth 的服务器
+        if server_type in ('notion', 'http_oauth'):  # Notion / 通用 HTTP OAuth MCP（MCP OAuth 2.1）
             print(f"[MCP Common] Checking OAuth token for {server_type} server...")
 
             # 获取 OAuth token
-            token_info = get_oauth_token_for_server(normalized_target_url, target_url)
+            token_info = get_oauth_token_for_server(normalized_target_url, (target_url or '').strip())
 
             if token_info:
                 access_token = token_info.get('access_token')
@@ -450,6 +466,9 @@ def get_oauth_token_for_server(normalized_url: str, original_url: str) -> Option
     Returns:
         Token 信息字典，如果不存在则返回 None
     """
+    normalized_url = (normalized_url or '').strip().rstrip('/')
+    original_url = (original_url or '').strip()
+
     # 从 Redis 获取 token
     token_info = get_oauth_token(normalized_url)
     

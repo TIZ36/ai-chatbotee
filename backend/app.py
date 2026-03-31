@@ -587,7 +587,7 @@ def mcp_proxy_inspector():
                 ), 200
             return jsonify({"error": "Missing url parameter"}), 400
 
-        target_url = unquote(target_url)
+        target_url = unquote(target_url).strip()
         transport_type = request.args.get("transportType", "streamable-http")
 
         print(
@@ -1281,7 +1281,7 @@ def mcp_health_proxy():
         if not target_url:
             return jsonify({"error": "Missing url parameter"}), 400
 
-        target_url = unquote(target_url)
+        target_url = unquote(target_url).strip()
         print(f"[MCP Health Proxy] Checking health of: {target_url}")
 
         # 设置较短的超时时间（5秒）
@@ -1445,12 +1445,14 @@ def mcp_proxy():
     仅在浏览器环境中遇到 CORS 问题时使用
     直接转发请求到 MCP 服务器以解决跨域问题
     """
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
     try:
         data = request.get_json()
         if not data or "url" not in data:
             return jsonify({"error": "Missing url parameter"}), 400
 
-        target_url = data["url"]
+        target_url = str(data["url"]).strip()
         method = data.get("method", "tools/list")
         params = data.get("params", {})
 
@@ -1491,6 +1493,8 @@ def mcp_proxy():
 @app.route("/api/mcp/oauth/notion/config", methods=["GET", "OPTIONS"])
 def get_notion_oauth_config():
     """获取 Notion OAuth 配置（client_id等）"""
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
 
     try:
         notion_config = config.get("notion", {})
@@ -1508,95 +1512,113 @@ def get_notion_oauth_config():
         return jsonify({"error": str(e)}), 500
 
 
+def _fetch_oauth_json(url: str):
+    """GET JSON（带 Accept），忽略非 JSON/HTML 页面"""
+    import requests
+
+    try:
+        r = requests.get(
+            url,
+            timeout=12,
+            headers={"Accept": "application/json"},
+        )
+        if not r.ok:
+            return None
+        ct = (r.headers.get("content-type") or "").lower()
+        if "application/json" not in ct and not r.text.strip().startswith("{"):
+            return None
+        return r.json()
+    except Exception as e:
+        print(f"[MCP OAuth Discovery] fetch failed {url}: {e}")
+        return None
+
+
 @app.route("/api/mcp/oauth/discover", methods=["POST", "OPTIONS"])
 def mcp_oauth_discover():
-    """发现 MCP 服务器的 OAuth 配置"""
+    """发现 MCP 服务器的 OAuth 配置
+
+    兼容「受保护资源元数据挂在站点根」的部署（如飞书项目：
+    resource 为 https://project.feishu.cn/mcp_server/v1，元数据在
+    https://project.feishu.cn/.well-known/oauth-protected-resource）。
+    授权服务器元数据也可能在 issuer 根而非 authorization_servers[0] 子路径下。
+    """
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
     try:
-        import requests
+        from urllib.parse import urlparse
 
         data = request.get_json()
-        mcp_url = data.get("mcp_url")
+        mcp_url = (data.get("mcp_url") or "").strip()
 
         if not mcp_url:
             return jsonify({"error": "Missing mcp_url parameter"}), 400
 
         print(f"[MCP OAuth Discovery] Discovering OAuth config for: {mcp_url}")
 
-        # 1. 获取 OAuth protected resource 信息
-        protected_resource_url = (
-            f"{mcp_url.rstrip('/')}/.well-known/oauth-protected-resource"
-        )
-        print(
-            f"[MCP OAuth Discovery] Fetching protected resource: {protected_resource_url}"
-        )
+        parsed = urlparse(mcp_url.rstrip("/"))
+        origin = f"{parsed.scheme}://{parsed.netloc}"
 
-        try:
-            protected_resource_response = requests.get(
-                protected_resource_url, timeout=10
-            )
-            protected_resource_data = (
-                protected_resource_response.json()
-                if protected_resource_response.ok
-                else None
-            )
+        # 1. OAuth protected resource：先 MCP 路径，再站点根（飞书）
+        pr_candidates = [
+            f"{mcp_url.rstrip('/')}/.well-known/oauth-protected-resource",
+            f"{origin}/.well-known/oauth-protected-resource",
+        ]
+        protected_resource_data = None
+        for pr_url in pr_candidates:
+            print(f"[MCP OAuth Discovery] Fetching protected resource: {pr_url}")
+            protected_resource_data = _fetch_oauth_json(pr_url)
+            if protected_resource_data:
+                break
+
+        if protected_resource_data:
             print(
-                f"[MCP OAuth Discovery] Protected resource response: {protected_resource_data}"
+                f"[MCP OAuth Discovery] Protected resource: {protected_resource_data}"
             )
-        except Exception as e:
-            print(f"[MCP OAuth Discovery] Failed to fetch protected resource: {e}")
-            protected_resource_data = None
 
-        # 2. 获取 OAuth authorization server 信息
+        # 2. authorization server URL（来自 PR 或回退为 MCP URL）
         auth_server_url = None
         if protected_resource_data and protected_resource_data.get(
             "authorization_servers"
         ):
-            auth_server_url = protected_resource_data["authorization_servers"][0]
+            auth_server_url = str(
+                protected_resource_data["authorization_servers"][0]
+            ).rstrip("/")
         else:
-            # 如果没有 protected resource，尝试使用 MCP URL 作为 authorization server
             auth_server_url = mcp_url.rstrip("/")
 
-        auth_server_metadata_url = (
-            f"{auth_server_url}/.well-known/oauth-authorization-server"
-        )
-        print(
-            f"[MCP OAuth Discovery] Fetching authorization server metadata: {auth_server_metadata_url}"
-        )
-
-        try:
-            auth_server_response = requests.get(auth_server_metadata_url, timeout=10)
-            auth_server_data = (
-                auth_server_response.json() if auth_server_response.ok else None
-            )
-            print(
-                f"[MCP OAuth Discovery] Authorization server response: {auth_server_data}"
-            )
-        except Exception as e:
-            print(
-                f"[MCP OAuth Discovery] Failed to fetch authorization server metadata: {e}"
-            )
-            return jsonify(
-                {
-                    "error": "OAuth discovery failed",
-                    "message": f"Failed to fetch OAuth configuration: {str(e)}",
-                }
-            ), 400
+        # 3. Authorization server metadata：先试 authorization server 路径，再试站点根（飞书 issuer 根）
+        as_candidates = [
+            f"{auth_server_url}/.well-known/oauth-authorization-server",
+            f"{origin}/.well-known/oauth-authorization-server",
+        ]
+        auth_server_data = None
+        for as_url in as_candidates:
+            print(f"[MCP OAuth Discovery] Fetching AS metadata: {as_url}")
+            auth_server_data = _fetch_oauth_json(as_url)
+            if auth_server_data:
+                break
 
         if not auth_server_data:
             return jsonify(
                 {
                     "error": "OAuth not supported",
-                    "message": "This MCP server does not support OAuth authentication",
+                    "message": "无法拉取 oauth-authorization-server 元数据（请确认 MCP URL 或网络）",
                 }
             ), 400
+
+        print(f"[MCP OAuth Discovery] Authorization server: {auth_server_data}")
+
+        resource_val = (
+            protected_resource_data.get("resource")
+            if protected_resource_data
+            else mcp_url
+        )
 
         return jsonify(
             {
                 "protected_resource": protected_resource_data,
                 "authorization_server": auth_server_data,
-                "resource": protected_resource_data.get("resource")
-                if protected_resource_data
-                else mcp_url,
+                "resource": resource_val,
             }
         )
 
@@ -1606,29 +1628,134 @@ def mcp_oauth_discover():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/mcp/oauth/token-status", methods=["GET", "OPTIONS"])
+def mcp_oauth_token_status():
+    """
+    查询指定 MCP URL 是否已有 OAuth access token（用于前端轮询授权完成）
+    """
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+    try:
+        mcp_url = (request.args.get("mcp_url") or "").strip()
+        if not mcp_url:
+            return jsonify({"error": "mcp_url is required"}), 400
+        from database import get_oauth_token
+
+        normalized = mcp_url.rstrip("/")
+        token_info = get_oauth_token(normalized) or (
+            get_oauth_token(mcp_url) if mcp_url != normalized else None
+        )
+        has_token = bool(token_info and token_info.get("access_token"))
+        return jsonify({"has_token": has_token, "mcp_url": mcp_url})
+    except Exception as e:
+        print(f"[MCP OAuth] token-status error: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/mcp/oauth/authorize", methods=["POST", "OPTIONS"])
 def mcp_oauth_authorize():
     """生成 OAuth 授权 URL（通用，支持所有 MCP 服务器）"""
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
     try:
         import secrets
         import hashlib
         import base64
         from urllib.parse import urlencode
 
+        import requests
+
+        from database import get_oauth_config, save_oauth_config
+
         data = request.get_json()
         authorization_endpoint = data.get("authorization_endpoint")
-        client_id = data.get("client_id")
+        client_id = (data.get("client_id") or "").strip()
+        registration_endpoint = (data.get("registration_endpoint") or "").strip()
         resource = data.get("resource")
         code_challenge_methods = data.get(
             "code_challenge_methods_supported", ["S256", "plain"]
         )
-        mcp_url = data.get("mcp_url")  # MCP 服务器 URL
+        mcp_url = (data.get("mcp_url") or "").strip()
 
-        if not authorization_endpoint or not client_id:
+        if not authorization_endpoint:
             return jsonify(
                 {
                     "error": "Missing required parameters",
-                    "message": "authorization_endpoint and client_id are required",
+                    "message": "authorization_endpoint is required",
+                }
+            ), 400
+
+        backend_url = config.get("server", {}).get("url", "http://localhost:3001")
+        default_redirect = f"{backend_url}/mcp/oauth/callback"
+        normalized_mcp_url = mcp_url.rstrip("/") if mcp_url else ""
+
+        # client_id：请求显式传入 / Redis 已注册 / 动态客户端注册（如飞书 project.feishu.cn）
+        client_secret = (data.get("client_secret") or "").strip()
+
+        if not client_id:
+            if normalized_mcp_url:
+                reg = get_oauth_config(f"registered_client:{normalized_mcp_url}")
+                if reg and reg.get("client_id"):
+                    client_id = str(reg["client_id"]).strip()
+                    client_secret = (reg.get("client_secret") or "").strip()
+                    print(
+                        f"[MCP OAuth] Using registered client from Redis for {normalized_mcp_url}"
+                    )
+        if not client_id and registration_endpoint:
+            print(f"[MCP OAuth] Dynamic client registration: {registration_endpoint}")
+            reg_resp = requests.post(
+                registration_endpoint,
+                json={
+                    "client_name": "Chatee MCP",
+                    "redirect_uris": [default_redirect],
+                    "grant_types": ["authorization_code", "refresh_token"],
+                    "response_types": ["code"],
+                    "token_endpoint_auth_method": "none",
+                },
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                },
+                timeout=25,
+            )
+            if not reg_resp.ok:
+                err = {}
+                try:
+                    err = reg_resp.json()
+                except Exception:
+                    err = {"detail": (reg_resp.text or "")[:500]}
+                return jsonify(
+                    {
+                        "error": "dynamic_registration_failed",
+                        "message": err.get("error_description")
+                        or err.get("error")
+                        or err.get("message")
+                        or f"HTTP {reg_resp.status_code}",
+                    }
+                ), 400
+            body = reg_resp.json()
+            client_id = (body.get("client_id") or "").strip()
+            client_secret = (body.get("client_secret") or "").strip()
+            if not client_id:
+                return jsonify(
+                    {
+                        "error": "dynamic_registration_failed",
+                        "message": "registration did not return client_id",
+                    }
+                ), 500
+            if normalized_mcp_url:
+                save_oauth_config(
+                    f"registered_client:{normalized_mcp_url}",
+                    {"client_id": client_id, "client_secret": client_secret},
+                    ttl=None,
+                )
+
+        if not client_id:
+            return jsonify(
+                {
+                    "error": "Missing client_id",
+                    "message": "请提供 client_id，或确保 discovery 含 registration_endpoint 以自动动态注册",
                 }
             ), 400
 
@@ -1656,8 +1783,7 @@ def mcp_oauth_authorize():
                     f"[MCP OAuth] ⚠️ No Notion registration in DB, using redirect_uri from config.yaml"
                 )
         else:
-            backend_url = config.get("server", {}).get("url", "http://localhost:3001")
-            redirect_uri = f"{backend_url}/mcp/oauth/callback"
+            redirect_uri = default_redirect
 
         print(f"[MCP OAuth] Using Client ID: {client_id[:10]}...")
         print(f"[MCP OAuth] Redirect URI: {redirect_uri}")
@@ -1716,12 +1842,8 @@ def mcp_oauth_authorize():
         )
 
         # 保存 OAuth 配置到 Redis（使用 state 作为 key）
-        # 只保存 client_id，其他信息从 MySQL 获取
-        from database import save_oauth_config
-
         # 获取 token_endpoint 和其他配置
         token_endpoint = data.get("token_endpoint")
-        client_secret = data.get("client_secret", "")
         token_endpoint_auth_methods_supported = data.get(
             "token_endpoint_auth_methods_supported", ["none"]
         )
@@ -2222,7 +2344,13 @@ Headers: {dict(request.headers)}
                     payload["client_secret"] = client_secret
                     print(f"[MCP OAuth] Using client_secret_post authentication")
                 else:
-                    print(f"[MCP OAuth] Using no authentication (public client)")
+                    if client_secret:
+                        payload["client_secret"] = client_secret
+                        print(
+                            f"[MCP OAuth] Using client_secret in body (metadata default none)"
+                        )
+                    else:
+                        print(f"[MCP OAuth] Using no authentication (public client)")
 
                 if resource:
                     payload["resource"] = resource
@@ -2346,6 +2474,20 @@ Headers: {dict(request.headers)}
             print(
                 f"[MCP OAuth] ✅ Refresh config saved with client_id: refresh_client:{config_client_id[:10]}..."
             )
+
+            # 非 Notion：持久化动态注册的 client_id/secret，供下次「重新授权」复用
+            if normalized_mcp_url and not is_notion and config_client_id:
+                save_oauth_config(
+                    f"registered_client:{normalized_mcp_url}",
+                    {
+                        "client_id": config_client_id,
+                        "client_secret": client_secret or "",
+                    },
+                    ttl=None,
+                )
+                print(
+                    f"[MCP OAuth] ✅ registered_client saved for re-auth: {normalized_mcp_url}"
+                )
 
             # 更新服务器配置的 ext 字段，确保包含 response_format
             if normalized_mcp_url:
@@ -2604,7 +2746,13 @@ Headers: {dict(request.headers)}
                 payload["client_secret"] = client_secret
                 print(f"[MCP OAuth] Using client_secret_post authentication")
             else:
-                print(f"[MCP OAuth] Using no authentication (public client)")
+                if client_secret:
+                    payload["client_secret"] = client_secret
+                    print(
+                        f"[MCP OAuth] Using client_secret in body (metadata default none)"
+                    )
+                else:
+                    print(f"[MCP OAuth] Using no authentication (public client)")
 
             if resource:
                 payload["resource"] = resource
@@ -2714,6 +2862,19 @@ Headers: {dict(request.headers)}
         print(
             f"[MCP OAuth POST] ✅ Refresh config saved with client_id: refresh_client:{config_client_id[:10]}..."
         )
+
+        if normalized_mcp_url and not is_notion and config_client_id:
+            save_oauth_config(
+                f"registered_client:{normalized_mcp_url}",
+                {
+                    "client_id": config_client_id,
+                    "client_secret": client_secret or "",
+                },
+                ttl=None,
+            )
+            print(
+                f"[MCP OAuth POST] ✅ registered_client saved for re-auth: {normalized_mcp_url}"
+            )
 
         # 更新服务器配置的 ext 字段，确保包含 response_format
         if normalized_mcp_url:
@@ -3255,6 +3416,8 @@ def get_notion_registration(client_id):
 @app.route("/api/mcp/servers", methods=["GET", "OPTIONS"])
 def list_mcp_servers():
     """获取所有MCP服务器配置列表"""
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
     try:
         conn = get_mysql_connection()
         if not conn:
@@ -3373,6 +3536,8 @@ def list_mcp_servers():
 @app.route("/api/mcp/servers", methods=["POST", "OPTIONS"])
 def create_mcp_server():
     """创建MCP服务器配置"""
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
     try:
         data = request.get_json()
         if not data:
@@ -3435,6 +3600,8 @@ def create_mcp_server():
 @app.route("/api/mcp/servers/<server_id>/test", methods=["POST", "OPTIONS"])
 def test_mcp_server(server_id):
     """测试 MCP 服务器连接并获取工具列表"""
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
     try:
         from mcp_server.mcp_common_logic import (
             prepare_mcp_headers,
@@ -3581,6 +3748,8 @@ def test_mcp_server(server_id):
 @app.route("/api/mcp/servers/<server_id>", methods=["PUT", "OPTIONS"])
 def update_mcp_server(server_id):
     """更新MCP服务器配置"""
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
     try:
         data = request.get_json()
         if not data:
@@ -3656,6 +3825,8 @@ def update_mcp_server(server_id):
 @app.route("/api/mcp/servers/<server_id>", methods=["DELETE", "OPTIONS"])
 def delete_mcp_server(server_id):
     """删除MCP服务器配置"""
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
     try:
         conn = get_mysql_connection()
         if not conn:
@@ -3694,6 +3865,8 @@ def delete_mcp_server(server_id):
 @app.route("/api/mcp/market/sources", methods=["GET", "POST", "OPTIONS"])
 def mcp_market_sources():
     """列出/创建 MCP 市场源"""
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
     try:
         from services.mcp_market_service import MCPMarketService
 
@@ -3745,6 +3918,8 @@ def mcp_market_sources():
 @app.route("/api/mcp/market/sources/<source_id>", methods=["PUT", "OPTIONS"])
 def mcp_market_update_source(source_id):
     """更新 MCP 市场源"""
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
     try:
         from services.mcp_market_service import MCPMarketService
 
@@ -3774,6 +3949,8 @@ def mcp_market_update_source(source_id):
 @app.route("/api/mcp/market/sources/<source_id>/sync", methods=["POST", "OPTIONS"])
 def mcp_market_sync_source(source_id):
     """同步指定市场源"""
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
     try:
         from services.mcp_market_service import MCPMarketService
 
@@ -3792,6 +3969,8 @@ def mcp_market_sync_source(source_id):
 @app.route("/api/mcp/market/search", methods=["GET", "OPTIONS"])
 def mcp_market_search():
     """搜索市场条目（从缓存表搜索）"""
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
     try:
         from services.mcp_market_service import MCPMarketService
 
@@ -3818,6 +3997,8 @@ def mcp_market_search():
 @app.route("/api/mcp/market/items/<item_id>", methods=["GET", "OPTIONS"])
 def mcp_market_item_detail(item_id):
     """获取市场条目详情"""
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
     try:
         from services.mcp_market_service import MCPMarketService
 
@@ -3834,6 +4015,8 @@ def mcp_market_item_detail(item_id):
 @app.route("/api/mcp/market/install", methods=["POST", "OPTIONS"])
 def mcp_market_install():
     """一键安装市场条目：转换为 mcp_servers 记录"""
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
     try:
         data = request.get_json() or {}
         item_id = data.get("item_id")

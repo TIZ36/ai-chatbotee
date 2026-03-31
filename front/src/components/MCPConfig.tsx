@@ -4,13 +4,12 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Edit2, Save, X, Server, AlertCircle, Check, CheckCircle, Wrench, ExternalLink, Plug, RefreshCcw, Smartphone } from 'lucide-react';
+import { Plus, Trash2, Edit2, X, Server, Check, Wrench, ExternalLink, Plug, RefreshCcw, Smartphone, Key, Rows3, LayoutGrid, Loader } from 'lucide-react';
 import QRCode from 'qrcode';
-import PageLayout, { Card, Section, Alert, EmptyState } from './ui/PageLayout';
 import { Button } from './ui/Button';
 import { Label } from './ui/Label';
 import { ConfirmDialog } from './ui/ConfirmDialog';
-import { InputField, TextareaField, FormFieldGroup } from './ui/FormField';
+import { InputField, TextareaField } from './ui/FormField';
 import { toast } from './ui/use-toast';
 import {
   Select,
@@ -28,20 +27,15 @@ import {
   DialogFooter,
 } from './ui/Dialog';
 import { MCPTool, MCPClient } from '../services/mcpClient';
-import { 
-  getMCPServers, 
-  createMCPServer, 
-  updateMCPServer, 
-  deleteMCPServer, 
+import {
+  getMCPServers,
+  createMCPServer,
+  updateMCPServer,
+  deleteMCPServer,
   MCPServerConfig,
-  getMCPMarketSources,
-  syncMCPMarketSource,
-  searchMCPMarket,
-  installMCPMarketItem,
-  MCPMarketSource,
-  MCPMarketItemSummary,
   discoverMCPOAuth,
   authorizeMCPOAuth,
+  getMCPOAuthTokenStatus,
   registerNotionClient,
   getNotionRegistrations,
   deleteNotionRegistration,
@@ -50,6 +44,36 @@ import {
 import { getBackendUrl } from '../utils/backendUrl';
 
 interface MCPConfigProps {}
+
+/** 表单中 `http-oauth` 落库为 http-stream + ext.server_type=http_oauth */
+function buildMcpServerPayload(partial: Partial<MCPServerConfig>): Partial<MCPServerConfig> {
+  const isHttpOAuth = partial.type === 'http-oauth';
+  const ext = { ...(partial.ext || {}) } as NonNullable<MCPServerConfig['ext']>;
+  const normalizedUrl = typeof partial.url === 'string' ? partial.url.trim() : partial.url;
+  if (isHttpOAuth) {
+    ext.server_type = 'http_oauth';
+  } else if (ext.server_type === 'http_oauth') {
+    delete ext.server_type;
+  }
+  return {
+    ...partial,
+    url: normalizedUrl,
+    type: isHttpOAuth ? 'http-stream' : (partial.type || 'http-stream'),
+    ext: Object.keys(ext).length ? ext : undefined,
+  };
+}
+
+function serverToFormState(server: MCPServerConfig): Partial<MCPServerConfig> {
+  if (server.ext?.server_type === 'http_oauth') {
+    return { ...server, type: 'http-oauth' };
+  }
+  return { ...server };
+}
+
+function displayMcpServerType(server: MCPServerConfig): string {
+  if (server.ext?.server_type === 'http_oauth') return 'http-oauth';
+  return server.type;
+}
 
 // Helper: 根据服务器类型渲染图标
 const renderServerIcon = (server: MCPServerConfig, size: 'sm' | 'lg' = 'sm') => {
@@ -100,15 +124,15 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<MCPServerConfig | null>(null);
-  const [isAddingNotion, setIsAddingNotion] = useState(false);
   const [newServer, setNewServer] = useState<Partial<MCPServerConfig>>({
     name: '',
     url: '',
     type: 'http-stream',
     enabled: true,
     description: '',
+    ext: {},
   });
-  const [notionIntegrationSecret, setNotionIntegrationSecret] = useState('');
+  const [oauthHttpBusy, setOauthHttpBusy] = useState(false);
   const [notionAuthState, setNotionAuthState] = useState<'idle' | 'authenticating' | 'authenticated'>('idle');
   
   // Notion 工作空间选择和注册相关状态
@@ -129,20 +153,11 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
   // 已连接的客户端实例
   const [connectedClients, setConnectedClients] = useState<Map<string, MCPClient>>(new Map());
 
-  // 市场（Market）状态
-  const [marketSources, setMarketSources] = useState<MCPMarketSource[]>([]);
-  const [selectedSourceId, setSelectedSourceId] = useState<string>('');
-  const [marketQuery, setMarketQuery] = useState('');
-  const [marketLoading, setMarketLoading] = useState(false);
-  const [marketSyncing, setMarketSyncing] = useState(false);
-  const [marketItems, setMarketItems] = useState<MCPMarketItemSummary[]>([]);
-  const [marketTotal, setMarketTotal] = useState(0);
-  const [showMarketModal, setShowMarketModal] = useState(false);
-
   // 新增：UI 状态
   const [selectedServerForDetail, setSelectedServerForDetail] = useState<MCPServerConfig | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showToolsInDetail, setShowToolsInDetail] = useState(false);
+  const [serverViewMode, setServerViewMode] = useState<'list' | 'card'>('list');
 
   // MCP OAuth 二维码弹窗：授权 URL 生成后展示二维码，用户可扫码或在浏览器中打开
   const [oauthQrDialogOpen, setOauthQrDialogOpen] = useState(false);
@@ -168,94 +183,6 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
     loadServers();
   }, []);
 
-  // 加载市场源
-  useEffect(() => {
-    (async () => {
-      try {
-        const sources = await getMCPMarketSources();
-        setMarketSources(sources);
-        if (sources.length > 0) {
-          setSelectedSourceId(sources[0].source_id);
-        }
-      } catch (e) {
-        // 市场 API 不可用不影响主功能
-        console.warn('[MCP Market] Failed to load sources:', e);
-      }
-    })();
-  }, []);
-
-  const handleMarketSync = async () => {
-    if (!selectedSourceId) {
-      toast({ title: '请先选择一个市场源', variant: 'destructive' });
-      return;
-    }
-    setMarketSyncing(true);
-    try {
-      const res = await syncMCPMarketSource(selectedSourceId, true);
-      toast({
-        title: '同步完成',
-        description: `新增 ${res.inserted || 0}，更新 ${res.updated || 0}，总计 ${res.count || 0}`,
-        variant: 'success',
-      });
-      // 同步完成后自动触发搜索，显示更新后的内容
-      void handleMarketSearch();
-      // 重新加载市场源以更新最后同步时间
-      const sources = await getMCPMarketSources();
-      setMarketSources(sources);
-    } catch (e: any) {
-      toast({
-        title: '同步失败',
-        description: e?.message || String(e),
-        variant: 'destructive',
-      });
-    } finally {
-      setMarketSyncing(false);
-    }
-  };
-
-  const handleMarketSearch = async () => {
-    setMarketLoading(true);
-    try {
-      const res = await searchMCPMarket({
-        q: marketQuery.trim(),
-        source_id: selectedSourceId || undefined,
-        runtime_type: 'local_stdio',
-        limit: 50,
-        offset: 0,
-      });
-      setMarketItems(res.items || []);
-      setMarketTotal(res.total || 0);
-    } catch (e: any) {
-      toast({
-        title: '搜索失败',
-        description: e?.message || String(e),
-        variant: 'destructive',
-      });
-    } finally {
-      setMarketLoading(false);
-    }
-  };
-
-  const handleMarketInstall = async (item: MCPMarketItemSummary) => {
-    try {
-      const res = await installMCPMarketItem(item.item_id, {
-        name: item.name,
-      });
-      toast({
-        title: '已安装',
-        description: `已创建服务器：${res.server_id}`,
-        variant: 'success',
-      });
-      await loadServers();
-    } catch (e: any) {
-      toast({
-        title: '安装失败',
-        description: e?.message || String(e),
-        variant: 'destructive',
-      });
-    }
-  };
-
   // OAuth 回调现在由后端处理，不再需要前端处理
 
   const loadServers = async () => {
@@ -276,7 +203,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
     }
 
     try {
-      await createMCPServer(newServer);
+      await createMCPServer(buildMcpServerPayload(newServer));
       await loadServers(); // 重新加载列表
       setIsAdding(false);
       setNewServer({
@@ -285,6 +212,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
         type: 'http-stream',
         enabled: true,
         description: '',
+        ext: {},
       });
       toast({ title: 'MCP 服务器已添加', variant: 'success' });
     } catch (error) {
@@ -686,45 +614,96 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
     }
   };
 
-
-  const handleAddNotionServer = async () => {
-    if (!notionIntegrationSecret.trim()) {
-      toast({
-        title: '请输入 Notion Internal Integration Secret',
-        variant: 'destructive',
+  /** 通用 HTTP OAuth MCP：发现 →（动态注册 client）→ 授权页/二维码 → 轮询 token 落库 */
+  const runHttpOAuthAuthorization = async (mcpUrlRaw: string) => {
+    const mcpUrl = mcpUrlRaw.trim();
+    if (!mcpUrl) {
+      throw new Error('MCP URL 不能为空');
+    }
+    setOauthHttpBusy(true);
+    try {
+      const discovery = await discoverMCPOAuth(mcpUrl);
+      const as = discovery.authorization_server;
+      const authorizeResult = await authorizeMCPOAuth({
+        authorization_endpoint: as.authorization_endpoint,
+        resource: discovery.resource,
+        code_challenge_methods_supported: as.code_challenge_methods_supported,
+        token_endpoint: as.token_endpoint,
+        registration_endpoint: as.registration_endpoint,
+        token_endpoint_auth_methods_supported:
+          as.token_endpoint_auth_methods_supported ?? ['none'],
+        mcp_url: mcpUrl.replace(/\/$/, ''),
       });
+      try {
+        const qrDataUrl = await QRCode.toDataURL(authorizeResult.authorization_url, { width: 260, margin: 2 });
+        setOauthQrDataUrl(qrDataUrl);
+      } catch {
+        setOauthQrDataUrl(null);
+      }
+      setOauthAuthorizationUrl(authorizeResult.authorization_url);
+      setOauthAuthorizeResult(authorizeResult);
+      setOauthQrDialogOpen(true);
+
+      const norm = mcpUrl.replace(/\/$/, '');
+      for (let attempt = 0; attempt < 60; attempt++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const { has_token } = await getMCPOAuthTokenStatus(norm);
+        if (has_token) {
+          setOauthQrDialogOpen(false);
+          setOauthQrDataUrl(null);
+          setOauthAuthorizationUrl(null);
+          setOauthAuthorizeResult(null);
+          return;
+        }
+      }
+      setOauthQrDialogOpen(false);
+      setOauthQrDataUrl(null);
+      setOauthAuthorizationUrl(null);
+      setOauthAuthorizeResult(null);
+      throw new Error('授权超时，请检查是否已在浏览器中完成授权');
+    } finally {
+      setOauthHttpBusy(false);
+    }
+  };
+
+  const handleAddHttpOAuthAndAuthorize = async () => {
+    if (!newServer.name?.trim() || !newServer.url?.trim()) {
+      toast({ title: '请填写名称和 URL', variant: 'destructive' });
       return;
     }
-
     try {
-      const notionServerConfig: Partial<MCPServerConfig> = {
-        name: 'Notion',
-        url: 'https://mcp.notion.com/mcp',
+      await runHttpOAuthAuthorization(newServer.url.trim());
+      await createMCPServer(buildMcpServerPayload({ ...newServer, type: 'http-oauth' }));
+      await loadServers();
+      setIsAdding(false);
+      setNewServer({
+        name: '',
+        url: '',
         type: 'http-stream',
         enabled: true,
-        use_proxy: true,
-        description: 'Notion MCP Server - 通过 Internal Integration 访问 Notion 工作区',
-        metadata: {
-          headers: {
-            'Authorization': `Bearer ${notionIntegrationSecret}`,
-          },
-        },
-        ext: {
-          integration_secret: notionIntegrationSecret,
-          server_type: 'notion',
-        },
-      };
-
-      await createMCPServer(notionServerConfig);
-      await loadServers();
-      setIsAddingNotion(false);
-      setNotionIntegrationSecret('');
-      toast({ title: 'Notion MCP 服务器添加成功', variant: 'success' });
-    } catch (error) {
-      console.error('Failed to create Notion MCP server:', error);
+        description: '',
+        ext: {},
+      });
+      toast({ title: 'HTTP OAuth MCP 已添加', description: 'Token 已保存，可连接测试', variant: 'success' });
+    } catch (e) {
+      console.error('[HTTP OAuth MCP]', e);
       toast({
-        title: '创建 Notion 服务器失败',
-        description: error instanceof Error ? error.message : String(error),
+        title: '添加失败',
+        description: e instanceof Error ? e.message : String(e),
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleReauthorizeHttpOAuth = async (server: MCPServerConfig) => {
+    try {
+      await runHttpOAuthAuthorization(server.url.trim());
+      toast({ title: 'OAuth 授权已更新', variant: 'success' });
+    } catch (e) {
+      console.error('[HTTP OAuth MCP]', e);
+      toast({
+        title: '授权失败',
+        description: e instanceof Error ? e.message : String(e),
         variant: 'destructive',
       });
     }
@@ -733,7 +712,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
   const handleEditServer = (serverId: string) => {
     const server = servers.find(s => s.id === serverId);
     if (server) {
-      setNewServer({ ...server });
+      setNewServer(serverToFormState(server));
       setEditingId(serverId);
     }
   };
@@ -745,7 +724,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
     }
 
     try {
-      await updateMCPServer(editingId, newServer);
+      await updateMCPServer(editingId, buildMcpServerPayload(newServer));
       await loadServers(); // 重新加载列表
       setEditingId(null);
       setNewServer({
@@ -754,6 +733,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
         type: 'http-stream',
         enabled: true,
         description: '',
+        ext: {},
       });
       toast({ title: 'MCP 服务器已保存', variant: 'success' });
     } catch (error) {
@@ -786,7 +766,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
     }
   };
 
-  const handleTestConnection = async (server: MCPServerConfig) => {
+  const handleTestConnection = async (server: MCPServerConfig): Promise<MCPClient | null> => {
     setTestingServers(prev => new Set(prev).add(server.id));
 
     try {
@@ -838,12 +818,24 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
       // 保存连接的客户端实例
       setConnectedClients(prev => new Map(prev).set(server.id, testClient));
 
+      // 自动拉取工具列表，保持与其他 MCP 一致的展示体验
+      let tools: MCPTool[] | undefined = undefined;
+      try {
+        // 首次连接后强制拉取，避免命中空缓存导致“看起来没有请求”
+        tools = await testClient.listTools(true);
+      } catch (toolsError) {
+        console.warn(`[MCP Config] Auto fetch tools failed for ${server.name}:`, toolsError);
+      }
+
       setTestResults(prev => new Map(prev).set(server.id, {
         success: true,
-        message: `连接成功 (${connectTime}ms)`,
+        message: tools
+          ? `连接成功，发现 ${tools.length} 个工具`
+          : `连接成功 (${connectTime}ms)`,
         connected: true,
-        tools: undefined, // 不自动获取工具
+        tools,
       }));
+      return testClient;
 
     } catch (error) {
       console.error(`[MCP Config] Test connection error:`, error);
@@ -864,6 +856,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
         message: errorMessage,
         connected: false,
       }));
+      return null;
     } finally {
       setTestingServers(prev => {
         const newSet = new Set(prev);
@@ -874,24 +867,48 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
   };
 
   const handleFetchTools = async (server: MCPServerConfig) => {
-    const result = testResults.get(server.id);
-    const connectedClient = connectedClients.get(server.id);
-
-    if (!result?.connected || !connectedClient) {
-      console.log(`[MCP Config] Server not connected, testing first...`);
-      await handleTestConnection(server);
-      // 测试完后重新获取状态
-      const newResult = testResults.get(server.id);
-      const newClient = connectedClients.get(server.id);
-      if (!newResult?.connected || !newClient) {
-        toast({ title: '连接失败，无法获取工具', variant: 'destructive' });
-        return;
-      }
-    }
-
     setTestingServers(prev => new Set(prev).add(server.id));
 
     try {
+      // 先走后端测试接口（稳定，不依赖前端 session-id）
+      console.log(`[MCP Config] Fetching tools via backend test API: ${server.id}`);
+      try {
+        const response = await fetch(`${getBackendUrl()}/api/mcp/servers/${server.id}/test`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          const tools: MCPTool[] = Array.isArray(data?.tools) ? data.tools : [];
+          setTestResults(prev => new Map(prev).set(server.id, {
+            success: true,
+            connected: true,
+            tools,
+            message: `连接成功，发现 ${tools.length} 个工具`,
+          }));
+          return;
+        }
+        const apiError = await response.json().catch(() => ({}));
+        console.warn('[MCP Config] Backend test API failed, fallback to client flow:', apiError);
+      } catch (backendApiError) {
+        console.warn('[MCP Config] Backend test API exception, fallback to client flow:', backendApiError);
+      }
+
+      const result = testResults.get(server.id);
+      let connectedClient = connectedClients.get(server.id);
+
+      if (!connectedClient) {
+        console.log(`[MCP Config] Server not connected, testing first...`);
+        const createdClient = await handleTestConnection(server);
+        if (!createdClient) {
+          toast({ title: '连接失败，无法获取工具', variant: 'destructive' });
+          return;
+        }
+        connectedClient = createdClient;
+      }
+
       console.log(`[MCP Config] Fetching tools for ${server.name} (${server.url}) using existing connection`);
       console.log(`[MCP Config] Client state:`, {
         isInitialized: connectedClient.isInitialized,
@@ -921,18 +938,21 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
       // 使用已连接的客户端实例获取工具列表
       console.log(`[MCP Config] Fetching tools list from existing connection`);
       const toolsStart = Date.now();
-      const tools = await connectedClient.listTools();
+      const tools = await connectedClient.listTools(true);
       const toolsTime = Date.now() - toolsStart;
       console.log(`[MCP Config] Tools fetched in ${toolsTime}ms`);
 
       const toolCount = tools.length;
       console.log(`[MCP Config] Retrieved ${toolCount} tools:`, tools);
 
-      setTestResults(prev => new Map(prev).set(server.id, {
-        ...result,
-        tools: tools,
-        message: `连接成功，发现 ${toolCount} 个工具`,
-      }));
+      setTestResults(prev => {
+        const existing = prev.get(server.id) || { success: true, message: '', connected: true };
+        return new Map(prev).set(server.id, {
+          ...existing,
+          tools: tools,
+          message: `连接成功，发现 ${toolCount} 个工具`,
+        });
+      });
 
     } catch (error) {
       console.error(`[MCP Config] Fetch tools error:`, error);
@@ -951,10 +971,13 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
         }
       }
 
-      setTestResults(prev => new Map(prev).set(server.id, {
-        ...result,
-        message: errorMessage,
-      }));
+      setTestResults(prev => {
+        const existing = prev.get(server.id) || { success: false, message: '', connected: false };
+        return new Map(prev).set(server.id, {
+          ...existing,
+          message: errorMessage,
+        });
+      });
     } finally {
       setTestingServers(prev => {
         const newSet = new Set(prev);
@@ -973,169 +996,240 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
   const cancelEdit = () => {
     setIsAdding(false);
     setEditingId(null);
-    setIsAddingNotion(false);
     setNewServer({
       name: '',
       url: '',
       type: 'http-stream',
       enabled: true,
       description: '',
+      ext: {},
     });
-    setNotionIntegrationSecret('');
   };
 
   return (
-    <PageLayout
-      title="MCP 录入"
-      description="添加与管理 MCP 服务器，支持 HTTP-Stream 与 Notion"
-      icon={Plug}
-      variant="persona"
-      headerActions={
-        <div className="flex items-center gap-3">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => setShowMarketModal(true)}
-            className="flex items-center gap-2 [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-transparent [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)] [data-skin='niho']:hover:border-[var(--color-accent-bg)] [data-skin='niho']:hover:text-[var(--color-accent)]"
-          >
-            <Plug className="w-4 h-4" />
-            <span>市场</span>
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => {
-              cancelEdit();
-              setIsAdding(true);
-            }}
-            className="flex items-center gap-2 [data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:text-black [data-skin='niho']:border-0"
-          >
-            <Plus className="w-4 h-4" />
-            <span>新增自定义</span>
-          </Button>
-        </div>
-      }
-    >
-      <section className="space-y-4">
-        <div
-          className="rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] p-4 [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:hover:border-[var(--niho-text-border-strong)] transition-all cursor-pointer flex items-center justify-between mcp-notion-card"
-            onClick={() => {
-              // 需求：始终可点，点击后先进入工作区注册/选择
-              cancelEdit();
-              handleNotionOAuthConnect();
-            }}
-          >
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-transparent rounded-lg flex items-center justify-center">
-                <svg className="w-8 h-8" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M6.017 4.313l55.333 -4.087c6.797 -0.583 8.543 -0.19 12.817 2.917l17.663 12.443c2.913 2.14 3.883 2.723 3.883 5.053v68.243c0 4.277 -1.553 6.807 -6.99 7.193L24.467 99.967c-4.08 0.193 -6.023 -0.39 -8.16 -3.113L3.3 79.94c-2.333 -3.113 -3.3 -5.443 -3.3 -8.167V11.113c0 -3.497 1.553 -6.413 6.017 -6.8z" className="fill-white dark:fill-[#363636]"/>
-                  <path fillRule="evenodd" clipRule="evenodd" d="M61.35 0.227l-55.333 4.087C1.553 4.7 0 7.617 0 11.113v60.66c0 2.724 0.967 5.053 3.3 8.167l13.007 16.913c2.137 2.723 4.08 3.307 8.16 3.113l64.257 -3.89c5.433 -0.387 6.99 -2.917 6.99 -7.193V20.64c0 -2.21 -0.873 -2.847 -3.443 -4.733L74.167 3.143c-4.273 -3.107 -6.02 -3.5 -12.817 -2.917zM25.92 19.523c-5.247 0.353 -6.437 0.433 -9.417 -1.99L8.927 11.507c-0.77 -0.78 -0.383 -1.753 1.557 -1.947l53.193 -3.887c4.467 -0.39 6.793 1.167 8.54 2.527l9.123 6.61c0.39 0.197 1.36 1.36 0.193 1.36l-54.933 3.307 -0.68 0.047zM19.803 88.3V30.367c0 -2.53 0.777 -3.697 3.103 -3.893L86 22.78c2.14 -0.193 3.107 1.167 3.107 3.693v57.547c0 2.53 -0.39 4.67 -3.883 4.863l-60.377 3.5c-3.493 0.193 -5.043 -0.97 -5.043 -4.083zm59.6 -54.827c0.387 1.75 0 3.5 -1.75 3.7l-2.91 0.577v42.773c-2.527 1.36 -4.853 2.137 -6.797 2.137 -3.107 0 -3.883 -0.973 -6.21 -3.887l-19.03 -29.94v28.967l6.02 1.363s0 3.5 -4.857 3.5l-13.39 0.777c-0.39 -0.78 0 -2.723 1.357 -3.11l3.497 -0.97v-38.3L30.48 40.667c-0.39 -1.75 0.58 -4.277 3.3 -4.473l14.367 -0.967 19.8 30.327v-26.83l-5.047 -0.58c-0.39 -2.143 1.163 -3.7 3.103 -3.89l13.4 -0.78z" className="fill-black dark:fill-gray-100"/>
-                </svg>
-              </div>
-              <div>
-                <div className="font-bold text-gray-900 dark:text-gray-100 [data-skin='niho']:text-[var(--text-primary)] mcp-notion-card-title">Notion</div>
-                <div className="text-xs text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-notion-card-desc">官方推荐 · 录入 Notion 工作区</div>
+    <div className="mcp-entry-page h-full flex flex-col bg-[var(--surface-primary)]">
+      <div className="flex-1 overflow-y-auto no-scrollbar app-pane-pad">
+        <div className="max-w-6xl mx-auto w-full space-y-3">
+          <div className="app-card-item app-card-pad-sm flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <Plug className="w-5 h-5 text-[var(--color-accent)] flex-shrink-0" />
+              <div className="min-w-0">
+                <h2 className="text-sm font-semibold text-[var(--text-primary)] truncate">MCP 录入</h2>
+                <p className="text-xs text-[var(--text-muted)] truncate">
+                  管理 MCP 服务端点，支持 Notion、HTTP Stream 与 OAuth 模式
+                </p>
               </div>
             </div>
-            <div className="text-xs font-medium text-blue-600 [data-skin='niho']:text-[var(--color-accent)] mcp-notion-card-action">点击录入</div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <div className="app-view-switch">
+                <button
+                  type="button"
+                  className={`app-view-switch-btn ${serverViewMode === 'list' ? 'is-active' : ''}`}
+                  onClick={() => setServerViewMode('list')}
+                  title="列表布局"
+                >
+                  <Rows3 className="w-3.5 h-3.5" />
+                  列表
+                </button>
+                <button
+                  type="button"
+                  className={`app-view-switch-btn ${serverViewMode === 'card' ? 'is-active' : ''}`}
+                  onClick={() => setServerViewMode('card')}
+                  title="卡片布局"
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  卡片
+                </button>
+              </div>
+              <Button variant="outline" size="sm" className="h-8" onClick={() => loadServers()} disabled={loading}>
+                <RefreshCcw className={`w-3.5 h-3.5 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
+                刷新
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                className="h-8"
+                onClick={() => {
+                  cancelEdit();
+                  setIsAdding(true);
+                }}
+              >
+                <Plus className="w-3.5 h-3.5 mr-1.5" />
+                新增
+              </Button>
+            </div>
           </div>
+          <div className="app-card-item app-card-pad-sm space-y-3">
+            <div
+              className="app-card-item app-card-pad-sm cursor-pointer mcp-notion-card"
+              onClick={() => {
+                cancelEdit();
+                handleNotionOAuthConnect();
+              }}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 bg-transparent rounded-lg flex items-center justify-center">
+                    <svg className="w-6 h-6" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M6.017 4.313l55.333 -4.087c6.797 -0.583 8.543 -0.19 12.817 2.917l17.663 12.443c2.913 2.14 3.883 2.723 3.883 5.053v68.243c0 4.277 -1.553 6.807 -6.99 7.193L24.467 99.967c-4.08 0.193 -6.023 -0.39 -8.16 -3.113L3.3 79.94c-2.333 -3.113 -3.3 -5.443 -3.3 -8.167V11.113c0 -3.497 1.553 -6.413 6.017 -6.8z" className="fill-white dark:fill-[#363636]" />
+                      <path fillRule="evenodd" clipRule="evenodd" d="M61.35 0.227l-55.333 4.087C1.553 4.7 0 7.617 0 11.113v60.66c0 2.724 0.967 5.053 3.3 8.167l13.007 16.913c2.137 2.723 4.08 3.307 8.16 3.113l64.257 -3.89c5.433 -0.387 6.99 -2.917 6.99 -7.193V20.64c0 -2.21 -0.873 -2.847 -3.443 -4.733L74.167 3.143c-4.273 -3.107 -6.02 -3.5 -12.817 -2.917zM25.92 19.523c-5.247 0.353 -6.437 0.433 -9.417 -1.99L8.927 11.507c-0.77 -0.78 -0.383 -1.753 1.557 -1.947l53.193 -3.887c4.467 -0.39 6.793 1.167 8.54 2.527l9.123 6.61c0.39 0.197 1.36 1.36 0.193 1.36l-54.933 3.307 -0.68 0.047zM19.803 88.3V30.367c0 -2.53 0.777 -3.697 3.103 -3.893L86 22.78c2.14 -0.193 3.107 1.167 3.107 3.693v57.547c0 2.53 -0.39 4.67 -3.883 4.863l-60.377 3.5c-3.493 0.193 -5.043 -0.97 -5.043 -4.083zm59.6 -54.827c0.387 1.75 0 3.5 -1.75 3.7l-2.91 0.577v42.773c-2.527 1.36 -4.853 2.137 -6.797 2.137 -3.107 0 -3.883 -0.973 -6.21 -3.887l-19.03 -29.94v28.967l6.02 1.363s0 3.5 -4.857 3.5l-13.39 0.777c-0.39 -0.78 0 -2.723 1.357 -3.11l3.497 -0.97v-38.3L30.48 40.667c-0.39 -1.75 0.58 -4.277 3.3 -4.473l14.367 -0.967 19.8 30.327v-26.83l-5.047 -0.58c-0.39 -2.143 1.163 -3.7 3.103 -3.89l13.4 -0.78z" className="fill-black dark:fill-gray-100" />
+                    </svg>
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-[var(--text-primary)]">Notion 官方 MCP</div>
+                    <div className="text-xs text-[var(--text-secondary)] truncate">点击录入 Notion 工作区</div>
+                  </div>
+                </div>
+                <div className="text-xs text-[var(--color-accent)]">连接</div>
+              </div>
+            </div>
 
-        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--text-primary)] flex items-center gap-2">
-          <Server className="w-4 h-4 [data-skin='niho']:text-[var(--color-accent)]" />
-          服务器 ({servers.length})
-        </h2>
             {loading ? (
-              <div className="flex flex-col items-center justify-center py-20">
-                <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mb-4 [data-skin='niho']:border-[var(--color-accent)] [data-skin='niho']:border-t-transparent mcp-loading-spinner" />
-                <p className="text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-loading-text">加载中...</p>
+              <div className="flex items-center justify-center py-16 text-[var(--text-muted)]">
+                <Loader className="w-6 h-6 animate-spin mr-2" />
+                加载中…
               </div>
             ) : servers.length === 0 ? (
-              <div className="text-center py-20 bg-gray-50 dark:bg-gray-800/30 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-800 [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)] mcp-empty-state">
-                <Server className="w-12 h-12 text-gray-300 mx-auto mb-4 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-empty-state-icon" />
-                <p className="text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-empty-state-text">暂无服务器</p>
-                <Button variant="link" onClick={() => setShowMarketModal(true)} className="mt-2 [data-skin='niho']:text-[var(--color-accent)] [data-skin='niho']:hover:text-[var(--color-accent-hover)] mcp-text-accent">去市场看看</Button>
+              <div className="flex flex-col items-center justify-center py-16 text-center max-w-md mx-auto">
+                <Server className="w-10 h-10 text-[var(--text-muted)] mb-3 opacity-60" />
+                <p className="text-sm text-[var(--text-secondary)]">暂无服务器</p>
+                <p className="text-xs text-[var(--text-muted)] mt-1">点击右上角「新增」录入 MCP 服务器</p>
               </div>
-            ) : (
-              <div className="rounded-lg border border-gray-200 dark:border-[#404040] bg-white dark:bg-[#2d2d2d] overflow-hidden [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)] mcp-server-table">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-800 [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-b-[var(--niho-text-border)]">
-                      <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-text-secondary">服务器</th>
-                      <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-text-secondary">类型</th>
-                      <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-text-secondary">状态</th>
-                      <th className="px-6 py-3 text-xs font-semibold text-gray-500 uppercase text-right [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-text-secondary">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800 [data-skin='niho']:divide-[var(--niho-text-border)]">
-                    {servers.map((server) => (
-                      <tr 
-                        key={server.id} 
-                        className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors cursor-pointer group [data-skin='niho']:hover:bg-[var(--niho-text-bg)] mcp-bg-hover"
-                        onClick={() => handleViewDetail(server)}
-                      >
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-3">
-                            {renderServerIcon(server, 'sm')}
-                            <div>
-                              <div className="text-sm font-semibold text-gray-900 dark:text-gray-100 [data-skin='niho']:text-[var(--text-primary)] mcp-server-name">
-                                {(server as any).display_name || (server as any).client_name || server.name}
-                              </div>
-                              <div className="text-xs text-gray-500 truncate max-w-[200px] [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-server-url">{server.url}</div>
+            ) : serverViewMode === 'list' ? (
+              <ul className="app-list-layout">
+                {servers.map((server) => (
+                  <li
+                    key={server.id}
+                    className="app-list-item app-card-pad-sm cursor-pointer"
+                    onClick={() => handleViewDetail(server)}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          {renderServerIcon(server, 'sm')}
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium text-[var(--text-primary)] truncate">
+                              {(server as any).display_name || (server as any).client_name || server.name}
                             </div>
+                            <p className="text-xs text-[var(--text-secondary)] mt-1 truncate">{server.url}</p>
                           </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 uppercase [data-skin='niho']:bg-transparent [data-skin='niho']:border [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-server-type-badge">
-                            {server.type}
+                        </div>
+                        <div className="flex items-center gap-2 mt-2">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium uppercase bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 [data-skin='niho']:bg-transparent [data-skin='niho']:border [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                            {displayMcpServerType(server)}
                           </span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-1.5">
-                            <div className={`w-2 h-2 rounded-full ${server.enabled ? 'bg-green-500 [data-skin="niho"]:bg-[var(--color-accent)] mcp-server-status-enabled' : 'bg-gray-400 [data-skin="niho"]:bg-[var(--niho-skyblue-gray)] mcp-server-status-disabled'}`} />
-                            <span className={`text-xs text-gray-600 dark:text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)] ${server.enabled ? '[data-skin="niho"]:text-[var(--color-accent)] mcp-server-status-enabled' : 'mcp-server-status-disabled'}`}>{server.enabled ? '已启用' : '已禁用'}</span>
+                          <span className={`text-[10px] ${server.enabled ? 'text-green-600 dark:text-green-400 [data-skin="niho"]:text-[var(--color-accent)]' : 'text-gray-500 dark:text-gray-400 [data-skin="niho"]:text-[var(--niho-skyblue-gray)]'}`}>
+                            {server.enabled ? '已启用' : '已禁用'}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0"
+                          title="测试连接"
+                          onClick={(e) => { e.stopPropagation(); void handleTestConnection(server); }}
+                        >
+                          <RefreshCcw className={`w-4 h-4 ${testingServers.has(server.id) ? 'animate-spin' : ''}`} />
+                        </Button>
+                        {server.ext?.server_type === 'http_oauth' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            title="OAuth 重新授权"
+                            onClick={(e) => { e.stopPropagation(); void handleReauthorizeHttpOAuth(server); }}
+                          >
+                            <Key className="w-4 h-4" />
+                          </Button>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0"
+                          title="编辑"
+                          onClick={(e) => { e.stopPropagation(); handleEditServer(server.id); }}
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0 text-[var(--color-secondary)]"
+                          title="删除"
+                          onClick={(e) => { e.stopPropagation(); setDeleteTarget(server); }}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="app-card-grid">
+                {servers.map((server) => (
+                  <div
+                    key={server.id}
+                    className="app-card-item app-card-pad-sm cursor-pointer"
+                    onClick={() => handleViewDetail(server)}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {renderServerIcon(server, 'sm')}
+                          <div className="text-sm font-medium text-[var(--text-primary)] truncate">
+                            {(server as any).display_name || (server as any).client_name || server.name}
                           </div>
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                          <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity mcp-server-actions">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleTestConnection(server);
-                              }}
-                              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-md [data-skin='niho']:text-[var(--niho-skyblue-gray)] [data-skin='niho']:hover:text-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-bg)]"
-                              title="测试连接"
-                            >
-                              <RefreshCcw className={`w-4 h-4 ${testingServers.has(server.id) ? 'animate-spin' : ''}`} />
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleEditServer(server.id);
-                              }}
-                              className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-md [data-skin='niho']:text-[var(--niho-skyblue-gray)] [data-skin='niho']:hover:text-[var(--color-highlight)] [data-skin='niho']:hover:bg-[var(--niho-text-bg)]"
-                              title="编辑"
-                            >
-                              <Edit2 className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setDeleteTarget(server);
-                              }}
-                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md [data-skin='niho']:text-[var(--niho-skyblue-gray)] [data-skin='niho']:hover:text-[var(--color-secondary)] [data-skin='niho']:hover:bg-[var(--niho-mist-pink-bg)]"
-                              title="删除"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                        </div>
+                        <p className="text-xs text-[var(--text-secondary)] mt-2 truncate">{server.url}</p>
+                        <div className="flex items-center gap-2 mt-2">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium uppercase bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 [data-skin='niho']:bg-transparent [data-skin='niho']:border [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+                            {displayMcpServerType(server)}
+                          </span>
+                          <span className={`text-[10px] ${server.enabled ? 'text-green-600 dark:text-green-400 [data-skin="niho"]:text-[var(--color-accent)]' : 'text-gray-500 dark:text-gray-400 [data-skin="niho"]:text-[var(--niho-skyblue-gray)]'}`}>
+                            {server.enabled ? '已启用' : '已禁用'}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0"
+                          title="测试连接"
+                          onClick={(e) => { e.stopPropagation(); void handleTestConnection(server); }}
+                        >
+                          <RefreshCcw className={`w-4 h-4 ${testingServers.has(server.id) ? 'animate-spin' : ''}`} />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0"
+                          title="编辑"
+                          onClick={(e) => { e.stopPropagation(); handleEditServer(server.id); }}
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0 text-[var(--color-secondary)]"
+                          title="删除"
+                          onClick={(e) => { e.stopPropagation(); setDeleteTarget(server); }}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
-      </section>
+          </div>
+        </div>
+      </div>
 
       {/* 新增/编辑自定义服务器弹框 */}
       <Dialog
@@ -1147,7 +1241,9 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
         <DialogContent className="max-w-2xl bg-white dark:bg-[#1e1e1e] border-gray-200 dark:border-gray-800 [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)] chatee-dialog-standard mcp-dialog">
           <DialogHeader>
             <DialogTitle className="[data-skin='niho']:text-[var(--text-primary)]">{editingId ? '编辑服务器' : '新增服务器'}</DialogTitle>
-            <DialogDescription className="[data-skin='niho']:text-[var(--niho-skyblue-gray)]">填写 MCP 服务器的名称、地址与类型</DialogDescription>
+            <DialogDescription className="[data-skin='niho']:text-[var(--niho-skyblue-gray)]">
+              填写名称、地址与类型。选 HTTP OAuth 时由服务端按 MCP OAuth 发现与动态注册完成授权，无需填写 Client ID。
+            </DialogDescription>
           </DialogHeader>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1178,11 +1274,14 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                 <Label className="block text-sm font-medium mb-1">类型</Label>
                 <Select
                   value={newServer.type || 'http-stream'}
-                  onValueChange={(v) => setNewServer(prev => ({ ...prev, type: v as any }))}
+                  onValueChange={(v) =>
+                    setNewServer((prev) => ({ ...prev, type: v as MCPServerConfig['type'] }))
+                  }
                 >
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="http-stream">HTTP Stream</SelectItem>
+                    <SelectItem value="http-oauth">HTTP OAuth</SelectItem>
                     <SelectItem value="http-post">HTTP POST</SelectItem>
                     <SelectItem value="stdio">Stdio</SelectItem>
                   </SelectContent>
@@ -1201,11 +1300,48 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
             </div>
           </div>
 
-          <DialogFooter>
-            <Button variant="secondary" onClick={cancelEdit} className="niho-close-pink">取消</Button>
-            <Button variant="primary" onClick={editingId ? handleUpdateServer : handleAddServer} className="[data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:text-black [data-skin='niho']:border-0">
-              {editingId ? '保存修改' : '立即创建'}
+          <DialogFooter className="flex flex-col sm:flex-row gap-2 sm:justify-end sm:flex-wrap">
+            <Button variant="secondary" onClick={cancelEdit} className="niho-close-pink" disabled={oauthHttpBusy}>
+              取消
             </Button>
+            {editingId && newServer.type === 'http-oauth' && (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  const s = servers.find((x) => x.id === editingId);
+                  if (s) void handleReauthorizeHttpOAuth(s);
+                }}
+                disabled={oauthHttpBusy}
+                className="[data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-transparent [data-skin='niho']:text-[var(--text-primary)]"
+              >
+                <Key className="w-4 h-4 mr-1.5 inline" />
+                OAuth 重新授权
+              </Button>
+            )}
+            {!editingId && newServer.type === 'http-oauth' ? (
+              <>
+                <Button variant="secondary" onClick={handleAddServer} disabled={oauthHttpBusy}>
+                  立即创建
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={handleAddHttpOAuthAndAuthorize}
+                  disabled={oauthHttpBusy}
+                  className="[data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:text-black [data-skin='niho']:border-0"
+                >
+                  {oauthHttpBusy ? '授权中…' : '创建并授权'}
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="primary"
+                onClick={editingId ? handleUpdateServer : handleAddServer}
+                disabled={oauthHttpBusy}
+                className="[data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:text-black [data-skin='niho']:border-0"
+              >
+                {editingId ? '保存修改' : '立即创建'}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1231,7 +1367,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                   </h2>
                   <div className="flex items-center gap-2 mb-6">
                     <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-xs font-bold rounded uppercase [data-skin='niho']:bg-transparent [data-skin='niho']:border [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--color-accent)] mcp-detail-type-badge">
-                      {selectedServerForDetail.type}
+                      {displayMcpServerType(selectedServerForDetail)}
                     </span>
                     <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium ${selectedServerForDetail.enabled ? 'bg-green-50 text-green-600 [data-skin="niho"]:bg-[var(--color-accent-bg)] [data-skin="niho"]:text-[var(--color-accent)] mcp-detail-status-active' : 'bg-gray-50 text-gray-500 [data-skin="niho"]:bg-[var(--niho-text-bg)] [data-skin="niho"]:text-[var(--niho-skyblue-gray)] mcp-detail-status-disabled'} mcp-detail-status-badge`}>
                       <div className={`w-1.5 h-1.5 rounded-full ${selectedServerForDetail.enabled ? 'bg-green-500 [data-skin="niho"]:bg-[var(--color-accent)]' : 'bg-gray-400 [data-skin="niho"]:bg-[var(--niho-skyblue-gray)]'}`} />
@@ -1257,7 +1393,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                 </div>
 
                 <div className="mt-auto pt-8 flex items-center justify-between border-t border-gray-50 dark:border-gray-800 [data-skin='niho']:border-t-[var(--niho-text-border)]">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <Button 
                       variant="secondary" 
                       size="sm" 
@@ -1267,6 +1403,18 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                     >
                       连接
                     </Button>
+                    {selectedServerForDetail.ext?.server_type === 'http_oauth' && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => void handleReauthorizeHttpOAuth(selectedServerForDetail)}
+                        disabled={oauthHttpBusy}
+                        className="[data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:bg-transparent [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:hover:bg-[var(--niho-text-bg)] [data-skin='niho']:hover:border-[var(--color-highlight)] [data-skin='niho']:hover:text-[var(--color-highlight)]"
+                      >
+                        <Key className="w-3.5 h-3.5 mr-1" />
+                        OAuth 授权
+                      </Button>
+                    )}
                     {testResults.get(selectedServerForDetail.id)?.success && (
                       <span className="text-xs font-medium flex items-center gap-1.5 text-amber-600 dark:text-amber-400 [data-skin='niho']:text-[var(--color-highlight)]">
                         <Check className="w-3.5 h-3.5 [data-skin='niho']:text-[var(--color-highlight)]" />
@@ -1277,11 +1425,10 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
                   <Button 
                     variant={testResults.get(selectedServerForDetail.id)?.connected ? 'primary' : 'secondary'}
                     size="sm"
-                    disabled={!testResults.get(selectedServerForDetail.id)?.connected}
-                    className={`${!testResults.get(selectedServerForDetail.id)?.connected ? 'opacity-60 cursor-not-allowed' : ''} [data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:text-black [data-skin='niho']:border-0`}
+                    className="[data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:text-black [data-skin='niho']:border-0"
                     onClick={() => {
                       setShowToolsInDetail(true);
-                      handleFetchTools(selectedServerForDetail);
+                      void handleFetchTools(selectedServerForDetail);
                     }}
                   >
                     获取工具列表
@@ -1339,94 +1486,6 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
               </div>
             </div>
           )}
-        </DialogContent>
-      </Dialog>
-
-      {/* 市场弹窗 (重新设计) */}
-      <Dialog open={showMarketModal} onOpenChange={setShowMarketModal}>
-        <DialogContent className="max-w-5xl p-0 overflow-hidden bg-white dark:bg-[#1e1e1e] border-none shadow-2xl [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)] mcp-market-dialog">
-          <div className="flex flex-col h-[700px]">
-            {/* 市场头部 */}
-            <div className="px-8 py-6 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between [data-skin='niho']:border-b-[var(--niho-text-border)] mcp-market-header">
-              <div>
-                <h2 className="text-2xl font-bold flex items-center gap-3 [data-skin='niho']:text-[var(--text-primary)] mcp-market-title">
-                  <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white [data-skin='niho']:bg-transparent [data-skin='niho']:border [data-skin='niho']:border-[var(--niho-text-border-strong)] [data-skin='niho']:text-[var(--color-accent)] mcp-market-icon-box">
-                    <Plug className="w-6 h-6" />
-                  </div>
-                  MCP 市场
-                </h2>
-                <p className="text-sm text-gray-500 mt-1 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-market-subtitle">发现并安装官方及社区提供的 MCP 服务器</p>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={marketQuery}
-                    onChange={(e) => setMarketQuery(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleMarketSearch()}
-                    placeholder="搜索服务器..."
-                    className="w-64 pl-10 pr-4 py-2 bg-gray-100 dark:bg-gray-800 border-none rounded-xl text-sm focus:ring-2 focus:ring-blue-500 transition-all [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--text-primary)] [data-skin='niho']:focus:ring-[var(--color-accent)] [data-skin='niho']:placeholder:opacity-60 mcp-market-search-input"
-                  />
-                  <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="11" cy="11" r="8"></circle>
-                    <path d="m21 21-4.35-4.35"></path>
-                  </svg>
-                </div>
-                <Button variant="primary" size="sm" onClick={handleMarketSearch} disabled={marketLoading} className="[data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:text-black [data-skin='niho']:border-0">
-                  {marketLoading ? <RefreshCcw className="w-4 h-4 animate-spin" /> : '搜索'}
-                </Button>
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-8 no-scrollbar">
-              {/* 搜索结果 */}
-              <div>
-                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">
-                  {marketQuery ? `搜索结果 (${marketItems.length})` : '全部服务器'}
-                </h3>
-                
-                {marketLoading ? (
-                  <div className="flex flex-col items-center justify-center py-20">
-                    <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4 [data-skin='niho']:border-[var(--color-accent)] [data-skin='niho']:border-t-transparent" />
-                    <p className="text-gray-500 [data-skin='niho']:text-[var(--niho-skyblue-gray)]">正在检索市场数据...</p>
-                  </div>
-                ) : marketItems.length > 0 ? (
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                    {marketItems.map((item) => (
-                      <div 
-                        key={item.item_id} 
-                        className="p-4 bg-white dark:bg-[#2d2d2d] border border-gray-100 dark:border-gray-800 rounded-2xl hover:border-blue-400 hover:shadow-xl hover:shadow-blue-500/5 transition-all group cursor-pointer [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:hover:border-[var(--niho-text-border-strong)] [data-skin='niho']:shadow-none mcp-market-item-card"
-                        onClick={() => handleMarketInstall(item)}
-                      >
-                        <div className="w-12 h-12 bg-gray-50 dark:bg-gray-800 rounded-xl flex items-center justify-center mb-4 group-hover:bg-blue-50 dark:group-hover:bg-blue-900/20 transition-colors [data-skin='niho']:bg-[var(--niho-text-bg)] [data-skin='niho']:group-hover:bg-[var(--color-accent-bg)] [data-skin='niho']:border [data-skin='niho']:border-[var(--niho-text-border)] mcp-market-item-icon-box">
-                          <div className="text-xl font-bold text-gray-400 group-hover:text-blue-600 [data-skin='niho']:text-[var(--niho-skyblue-gray)] [data-skin='niho']:group-hover:text-[var(--color-accent)] mcp-market-item-icon">
-                            {item.name.charAt(0).toUpperCase()}
-                          </div>
-                        </div>
-                        <div className="font-bold text-sm text-gray-900 dark:text-gray-100 mb-1 truncate [data-skin='niho']:text-[var(--text-primary)] mcp-market-item-name">{item.name}</div>
-                        <p className="text-[10px] text-gray-500 line-clamp-2 h-7 mb-4 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-market-item-desc">{item.description || 'No description'}</p>
-                        <div className="flex items-center justify-between">
-                          <span className="text-[9px] px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-gray-400 uppercase [data-skin='niho']:bg-transparent [data-skin='niho']:border [data-skin='niho']:border-[var(--niho-text-border)] [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-market-item-type-badge">{item.runtime_type}</span>
-                          <Plus className="w-4 h-4 text-gray-300 group-hover:text-blue-600 transition-colors [data-skin='niho']:text-[var(--niho-skyblue-gray)] [data-skin='niho']:group-hover:text-[var(--color-accent)] mcp-market-item-add-icon" />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-20">
-                    <EmptyState icon={Plug} title="未找到服务器" description="尝试更换关键词搜索" />
-                  </div>
-                )}
-              </div>
-            </div>
-            
-            <div className="px-8 py-4 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gray-50 dark:bg-gray-800/30 [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-t-[var(--niho-text-border)] mcp-market-footer">
-              <div className="text-xs text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mcp-market-footer-text">
-                数据源: {marketSources.find(s => s.source_id === selectedSourceId)?.display_name || '默认'}
-              </div>
-              <Button variant="secondary" size="sm" onClick={() => setShowMarketModal(false)} className="niho-close-pink">关闭</Button>
-            </div>
-          </div>
         </DialogContent>
       </Dialog>
 
@@ -1677,7 +1736,7 @@ const MCPConfig: React.FC<MCPConfigProps> = () => {
           await handleDeleteServer(id);
         }}
       />
-    </PageLayout>
+    </div>
   );
 };
 

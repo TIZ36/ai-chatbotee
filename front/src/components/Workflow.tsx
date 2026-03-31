@@ -5,12 +5,12 @@
 
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Send, Loader, Loader2, Bot, Wrench, AlertCircle, CheckCircle, Brain, Plug, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Sparkles, Workflow as WorkflowIcon, Play, ArrowRight, Trash2, X, Edit2, RotateCw, Database, Paperclip, Music, HelpCircle, Package, CheckSquare, Square, Quote, Lightbulb, Eye, Volume2, Paintbrush, Image, Plus, CornerDownRight, Globe } from 'lucide-react';
+import { Send, Loader, Loader2, Bot, Wrench, AlertCircle, CheckCircle, Brain, Plug, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Sparkles, Workflow as WorkflowIcon, Play, ArrowRight, Trash2, X, Edit2, RotateCw, Database, Paperclip, Music, HelpCircle, Package, CheckSquare, Square, Quote, Lightbulb, Eye, Volume2, Paintbrush, Image, Plus, CornerDownRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Virtuoso } from 'react-virtuoso';
 import { LLMClient, LLMMessage } from '../services/llmClient';
-import { getLLMConfigs, getLLMConfig, getLLMConfigApiKey, LLMConfigFromDB, getProviders, LLMProvider } from '../services/llmApi';
+import { getLLMConfigs, getLLMConfig, getLLMConfigApiKey, LLMConfigFromDB, getProviders, LLMProvider, sortLLMConfigsByProviderOrder } from '../services/llmApi';
 import { mcpManager, MCPServer, MCPTool } from '../services/mcpClient';
 import { getMCPServers, MCPServerConfig } from '../services/mcpApi';
 import { getSessions, getAgents, getSession, createSession, saveMessage, summarizeSession, getSessionSummaries, deleteSession, clearSummarizeCache, deleteMessage, updateSessionAvatar, updateSessionName, updateSessionSystemPrompt, updateSessionMediaOutputPath, updateSessionLLMConfig, upgradeToAgent, updateSessionType, Session, Summary, MessageExt } from '../services/sessionApi';
@@ -178,7 +178,7 @@ const Workflow: React.FC<WorkflowProps> = ({
     data: string;
     preview?: string;
   }>>([]);
-  const [useThoughtSignature, setUseThoughtSignature] = useState(true);
+  const useThoughtSignature = false;
   const [mediaPreviewOpen, setMediaPreviewOpen] = useState(false);
   const [mediaPreviewItem, setMediaPreviewItem] = useState<SessionMediaItem | null>(null);
   const [sessionMediaPanelOpen, setSessionMediaPanelOpen] = useState(false);
@@ -195,9 +195,8 @@ const Workflow: React.FC<WorkflowProps> = ({
     setMediaPreviewItem(item);
     setMediaPreviewOpen(true);
   }, []);
-  const [streamEnabled, setStreamEnabled] = useState(true); // 流式响应开关
-  // 联网搜索（仅 Gemini）：null 表示使用配置中的值，true/false 为本次会话覆盖
-  const [enableGoogleSearchInChat, setEnableGoogleSearchInChat] = useState<boolean | null>(null);
+  // 聊天默认使用流式响应，不提供开关
+  const streamEnabled = true;
   const [collapsedThinking, setCollapsedThinking] = useState<Set<string>>(new Set()); // 已折叠的思考过程
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null); // 正在编辑的消息ID
   const [quotedMessageId, setQuotedMessageId] = useState<string | null>(null); // 引用的消息ID
@@ -472,6 +471,7 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [selectedMcpServerIds, setSelectedMcpServerIds] = useState<Set<string>>(new Set());
   const [mcpTools, setMcpTools] = useState<Map<string, MCPTool[]>>(new Map());
   const [connectingServers, setConnectingServers] = useState<Set<string>>(new Set());
+  const connectingServerPromisesRef = useRef<Map<string, Promise<boolean>>>(new Map());
   
   // 技能包列表
   const [allSkillPacks, setAllSkillPacks] = useState<SkillPack[]>([]);
@@ -1950,8 +1950,9 @@ const Workflow: React.FC<WorkflowProps> = ({
       
       setProviders(providersData);
       
-      // 过滤启用的配置（确保 enabled 是布尔值）
-      const enabledConfigs = configs.filter(c => Boolean(c.enabled));
+      // 先按供应商 sort_order 排序，再过滤启用配置，确保聊天侧与「模型录入」排序一致
+      const sortedConfigs = sortLLMConfigsByProviderOrder(configs, providersData);
+      const enabledConfigs = sortedConfigs.filter(c => Boolean(c.enabled));
       console.log('[Workflow] Enabled LLM configs:', enabledConfigs);
       
       setLlmConfigs(enabledConfigs);
@@ -2005,13 +2006,18 @@ const Workflow: React.FC<WorkflowProps> = ({
   /**
    * 连接到 MCP 服务器
    */
-  const handleConnectServer = async (serverId: string) => {
+  const handleConnectServer = async (serverId: string): Promise<boolean> => {
+    const inflight = connectingServerPromisesRef.current.get(serverId);
+    if (inflight) {
+      return await inflight;
+    }
+
     const server = mcpServers.find(s => s.id === serverId);
-    if (!server) return;
+    if (!server) return false;
 
-    setConnectingServers(prev => new Set(prev).add(serverId));
-
-    try {
+    const connectPromise = (async () => {
+      setConnectingServers(prev => new Set(prev).add(serverId));
+      try {
       console.log(`[Workflow] Connecting to ${server.name}...`);
       
       // 转换为 MCPServer 格式
@@ -2026,24 +2032,110 @@ const Workflow: React.FC<WorkflowProps> = ({
         ext: server.ext, // 传递扩展配置（包括 response_format, server_type 等）
       };
 
-      const client = await mcpManager.addServer(mcpServer);
+      const withTimeout = async <T,>(promise: Promise<T>, ms: number, message: string): Promise<T> => {
+        return await Promise.race([
+          promise,
+          new Promise<T>((_, reject) => setTimeout(() => reject(new Error(message)), ms)),
+        ]);
+      };
 
-      // 加载工具列表
-      const tools = await client.listTools();
-      setMcpTools(prev => new Map(prev).set(serverId, tools));
+      const fetchToolsViaBackendTest = async (): Promise<MCPTool[]> => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        try {
+          const response = await fetch(`${getBackendUrl()}/api/mcp/servers/${serverId}/test`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            signal: controller.signal,
+          });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const data = await response.json();
+          return Array.isArray(data?.tools) ? data.tools : [];
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      };
+
+      // 1) 先尝试直接获取工具列表（不依赖前端 session-id）
+      try {
+        const directTools = await fetchToolsViaBackendTest();
+        setMcpTools(prev => new Map(prev).set(serverId, directTools));
+        setConnectedMcpServerIds(prev => new Set(prev).add(serverId));
+        console.log(`[Workflow] Connected to ${server.name} via backend test, loaded ${directTools.length} tools`);
+
+        // 后台补齐标准连接，避免后续真实工具调用时没有 client
+        void withTimeout(
+          mcpManager.addServer(mcpServer),
+          20000,
+          `连接 ${server.name} 超时`
+        )
+          .then(() => console.log(`[Workflow] MCP client warm-up completed for ${server.name}`))
+          .catch((warmError) => console.warn(`[Workflow] MCP client warm-up failed for ${server.name}:`, warmError));
+
+        return true;
+      } catch (directFetchError) {
+        console.warn(`[Workflow] Direct backend tools fetch failed for ${server.name}, fallback to standard flow:`, directFetchError);
+      }
+
+      // 2) 直接获取失败，再走标准流程
+      await withTimeout(
+        mcpManager.addServer(mcpServer),
+        20000,
+        `连接 ${server.name} 超时`
+      );
+
       setConnectedMcpServerIds(prev => new Set(prev).add(serverId));
-      console.log(`[Workflow] Connected to ${server.name}, loaded ${tools.length} tools`);
 
-    } catch (error) {
-      console.error(`[Workflow] Failed to connect to ${server.name}:`, error);
-      alert(`连接失败: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setConnectingServers(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(serverId);
-        return newSet;
-      });
-    }
+      let tools: MCPTool[] = [];
+      try {
+        tools = await fetchToolsViaBackendTest();
+      } catch (backendTestError) {
+        console.warn(`[Workflow] Backend test API failed after standard connect, fallback to MCP client listTools:`, backendTestError);
+        const client = mcpManager.getClient(serverId);
+        if (client) {
+          try {
+            tools = await withTimeout(
+              client.listTools(true),
+              15000,
+              `获取 ${server.name} 工具超时`
+            );
+          } catch (listError) {
+            console.warn(`[Workflow] Fallback listTools failed for ${server.name}:`, listError);
+          }
+        } else {
+          console.warn(`[Workflow] MCP client not found after connect: ${server.name}`);
+        }
+      }
+
+      setMcpTools(prev => new Map(prev).set(serverId, tools));
+      console.log(`[Workflow] Connected to ${server.name}, loaded ${tools.length} tools`);
+        return true;
+
+      } catch (error) {
+        console.error(`[Workflow] Failed to connect to ${server.name}:`, error);
+        setConnectedMcpServerIds(prev => {
+          const next = new Set(prev);
+          next.delete(serverId);
+          return next;
+        });
+        alert(`连接失败: ${error instanceof Error ? error.message : String(error)}`);
+        return false;
+      } finally {
+        setConnectingServers(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(serverId);
+          return newSet;
+        });
+        connectingServerPromisesRef.current.delete(serverId);
+      }
+    })();
+
+    connectingServerPromisesRef.current.set(serverId, connectPromise);
+    return await connectPromise;
   };
 
   const handleLLMConfigChange = async (configId: string) => {
@@ -2279,14 +2371,7 @@ const Workflow: React.FC<WorkflowProps> = ({
           if (sessionForActor?.session_type === 'agent' && selectedLLMConfigId) {
             messageData.ext.user_llm_config_id = selectedLLMConfigId;
           }
-          // 传递用户在本条消息上的 LLM 元数据覆盖（如联网搜索开关），供后端合并到 config.metadata
-          if (selectedLLMConfig) {
-            const pt = (selectedLLMConfig.supplier || selectedLLMConfig.provider || '').toLowerCase();
-            if (pt === 'gemini' || pt === 'google') {
-              const effective = enableGoogleSearchInChat ?? selectedLLMConfig.metadata?.enableGoogleSearch ?? false;
-              messageData.ext.user_llm_metadata_override = { enableGoogleSearch: effective };
-            }
-          }
+          // 聊天页暂不支持联网搜索，避免传递搜索相关覆盖
         }
         
         await saveMessage(sessionId, messageData);
@@ -2325,9 +2410,8 @@ const Workflow: React.FC<WorkflowProps> = ({
       }
       const toolsForRequest = toolCallingEnabled && allTools.length > 0 ? allTools : [];
 
-      // 创建LLM客户端（传递 thinking、联网搜索等）
+      // 创建LLM客户端（传递 thinking）
       const enableThinking = selectedLLMConfig.metadata?.enableThinking ?? false;
-      const effectiveGoogleSearch = enableGoogleSearchInChat ?? selectedLLMConfig.metadata?.enableGoogleSearch ?? false;
       const llmClient = new LLMClient({
         id: selectedLLMConfig.config_id,
         provider: selectedLLMConfig.provider,
@@ -2339,7 +2423,7 @@ const Workflow: React.FC<WorkflowProps> = ({
         metadata: {
           ...selectedLLMConfig.metadata,
           enableThinking: enableThinking,
-          enableGoogleSearch: effectiveGoogleSearch, // 输入框上方 tag 或配置中的联网搜索
+          enableGoogleSearch: false,
         },
       });
 
@@ -3268,9 +3352,8 @@ const Workflow: React.FC<WorkflowProps> = ({
           : msg
       ));
       
-      // 重新发送请求（传递 thinking、联网搜索等）
+      // 重新发送请求（传递 thinking）
       const enableThinking = selectedLLMConfig!.metadata?.enableThinking ?? false;
-      const effectiveGoogleSearch = enableGoogleSearchInChat ?? selectedLLMConfig!.metadata?.enableGoogleSearch ?? false;
       const llmClient = new LLMClient({
         id: selectedLLMConfig!.config_id,
         provider: selectedLLMConfig!.provider,
@@ -3282,7 +3365,7 @@ const Workflow: React.FC<WorkflowProps> = ({
         metadata: {
           ...selectedLLMConfig!.metadata,
           enableThinking: enableThinking,
-          enableGoogleSearch: effectiveGoogleSearch,
+          enableGoogleSearch: false,
         },
       });
       
@@ -3967,9 +4050,11 @@ const Workflow: React.FC<WorkflowProps> = ({
         if (!connectedMcpServerIds.has(component.id)) {
           console.log('[Workflow] MCP server not connected, attempting to connect:', component.name);
           try {
-            await handleConnectServer(component.id);
+            const connected = await handleConnectServer(component.id);
+            if (!connected) return;
           } catch (error) {
             console.error('[Workflow] Failed to connect MCP server:', error);
+            return;
           }
         }
         // 连接后添加到选中列表
@@ -4793,14 +4878,14 @@ const Workflow: React.FC<WorkflowProps> = ({
 
   return (
     <>
-    <div className="workflow-chat-outer h-full flex flex-col bg-gray-50 dark:bg-[#1a1a1a]">
-      <div className="flex-1 flex min-h-0 p-3 justify-center">
-        <div className="w-full max-w-[1400px] flex-1 flex flex-col min-h-0 min-w-0">
-        <div className="workflow-chat-panel flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-[#2d2d2d] overflow-hidden rounded-lg">
+    <div className="workflow-chat-outer h-full flex flex-col">
+      <div className="flex-1 flex min-h-0 justify-center">
+        <div className="w-full flex-1 flex flex-col min-h-0 min-w-0">
+        <div className="workflow-chat-panel flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
           {/* Chaya 主界面不显示顶部 header（头像框与栏目），直接显示对话；SOP 入口移至输入框插件弹框 */}
           {currentSessionId !== 'agent_chaya' && (
-          <div className="workflow-chat-header border-b border-gray-200 dark:border-[#404040] px-4 py-2 bg-gradient-to-r from-gray-50 to-white dark:from-gray-800 dark:to-gray-900 flex-shrink-0">
-          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 min-h-11">
+          <div className="workflow-chat-header border-b border-gray-100 dark:border-[rgba(255,255,255,0.06)] px-4 py-2 flex-shrink-0">
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 min-h-9">
             {/* 左区：头像 */}
             <div className="flex items-center justify-start min-w-0">
                   <div className="w-8 h-8 flex-shrink-0 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary-400 hover:ring-offset-1 transition-all overflow-hidden" onClick={async () => {
@@ -4990,7 +5075,7 @@ const Workflow: React.FC<WorkflowProps> = ({
               chatContainerRef.current = el;
               setChatScrollEl(el);
             }}
-            className="workflow-chat-messages flex-1 overflow-y-auto hide-scrollbar px-3 py-2 space-y-2 relative bg-gray-50/50 dark:bg-gray-950/50"
+            className="workflow-chat-messages flex-1 overflow-y-auto hide-scrollbar px-3 py-2 space-y-2 relative"
             style={{ scrollBehavior: 'auto' }}
             onWheel={(e) => {
               // hybrid 自动触发：接近顶部时继续上拉（滚轮向上）只触发一次
@@ -5283,7 +5368,7 @@ const Workflow: React.FC<WorkflowProps> = ({
         )}
 
         {/* 输入框（固定在底部，不再浮动） */}
-          <div className="flex-shrink-0 px-2 sm:px-4 pb-3 pt-2 bg-white dark:bg-[#2d2d2d] border-t border-gray-200 dark:border-[#404040] workflow-chat-input-area">
+          <div className="flex-shrink-0 px-2 sm:px-4 pb-2 pt-2 border-t border-gray-100 dark:border-[rgba(255,255,255,0.06)] workflow-chat-input-area">
           <div 
             ref={floatingComposerRef}
             className={`${floatingComposerInnerClass.replace('absolute left-2 right-2 sm:left-4 sm:right-4 bottom-3', '')} relative transition-colors ${
@@ -5430,10 +5515,58 @@ const Workflow: React.FC<WorkflowProps> = ({
             </DialogContent>
           </Dialog>
 
-          {/* 工具 Tag 栏 - 常驻显示，左侧工具tag，右侧模型选择 */}
-          <div className="flex items-center justify-between px-2.5 pt-2.5 pb-3">
-            {/* 左侧：插件入口（合并 MCP / 技能包 / 媒体） */}
-            <div className="flex items-center gap-1 flex-nowrap flex-1 min-w-0 overflow-hidden">
+          <div className="workflow-composer-layout">
+          {/* 工具栏：模型选择、插件、人设 */}
+          <div className="workflow-composer-toolbar flex items-center justify-between px-2 py-1.5">
+            <div className="flex items-center gap-0.5 flex-nowrap flex-1 min-w-0 overflow-hidden">
+              {/* 模型选择（放到插件前面） */}
+              {currentSessionType !== 'topic_general' && !isLoading && (
+                <div className="flex items-center gap-1 mr-1 flex-shrink-0">
+                  <button
+                    onClick={() => setShowModelSelectDialog(true)}
+                    className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition-all ${
+                      selectedLLMConfig
+                        ? 'bg-emerald-50 dark:bg-[rgba(0,212,170,0.08)] text-emerald-600 dark:text-[#00d4aa] font-medium ring-1 ring-emerald-200 dark:ring-[rgba(0,212,170,0.25)]'
+                        : 'text-gray-400 dark:text-[#555] hover:text-gray-600 dark:hover:text-[#888]'
+                    }`}
+                    title={selectedLLMConfig ? `${selectedLLMConfig.name}${selectedLLMConfig.model ? ` (${selectedLLMConfig.model})` : ''}` : '选择模型'}
+                  >
+                    {selectedLLMConfig ? (
+                      <>
+                        {(() => {
+                          const providerInfo = getProviderIcon(selectedLLMConfig, providers);
+                          const providerType = (selectedLLMConfig.supplier || selectedLLMConfig.provider || 'openai').toLowerCase();
+                          if (['openai', 'anthropic', 'google', 'gemini', 'deepseek', 'ollama'].includes(providerType)) {
+                            return <ProviderIcon provider={providerType} size={14} className="flex-shrink-0" />;
+                          }
+                          return <span className="text-xs">{providerInfo.icon}</span>;
+                        })()}
+                        <span className="font-medium truncate max-w-[80px]">
+                          {selectedLLMConfig.shortname || selectedLLMConfig.name}
+                        </span>
+                        {(() => {
+                          const enableThinking = selectedLLMConfig.metadata?.enableThinking ?? false;
+                          const supportedInputs: string[] = selectedLLMConfig.metadata?.supportedInputs ?? [];
+                          const supportedOutputs: string[] = selectedLLMConfig.metadata?.supportedOutputs ?? [];
+                          const caps = [];
+                          if (enableThinking) caps.push(<Brain key="t" className="w-2.5 h-2.5 text-purple-400" />);
+                          if (supportedInputs.includes('image')) caps.push(<Eye key="v" className="w-2.5 h-2.5 text-yellow-400" />);
+                          if (supportedInputs.includes('audio')) caps.push(<Volume2 key="a" className="w-2.5 h-2.5 text-neon-400" />);
+                          if (supportedOutputs.includes('image')) caps.push(<Paintbrush key="i" className="w-2.5 h-2.5 text-red-400" />);
+                          return caps.length > 0 ? <div className="flex items-center gap-0.5">{caps}</div> : null;
+                        })()}
+                      </>
+                    ) : (
+                      <>
+                        <Brain className="w-3 h-3" />
+                        <span>选择模型</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+
+              {/* 插件入口（MCP / Skill / 媒体附件） */}
               <AttachmentMenu
                 mcpServers={mcpServers}
                 skillPacks={allSkillPacks}
@@ -5449,10 +5582,6 @@ const Workflow: React.FC<WorkflowProps> = ({
                 onAttachFile={handleAttachFile}
                 onAttachMediaDirect={(item) => setAttachedMedia(prev => [...prev, item])}
                 attachedCount={attachedMedia.length}
-                toolCallingEnabled={toolCallingEnabled}
-                onToggleToolCalling={onToggleToolCalling}
-                showSopPlugin={currentSessionId === 'agent_chaya'}
-                onOpenAddSop={currentSessionId === 'agent_chaya' ? () => setShowAddSopDialog(true) : undefined}
               />
 
               {/* 人设 - 点击后弹框切换（Chaya）或编辑人设（其他 Agent/话题）；Chaya 选中预设时按钮显示昵称（最多 5 字） */}
@@ -5490,116 +5619,16 @@ const Workflow: React.FC<WorkflowProps> = ({
                 );
               })()}
             </div>
-
-            {/* 右侧：模型选择（非话题模式时显示） */}
-            {currentSessionType !== 'topic_general' && !isLoading && (
-              <div className="flex items-center gap-1.5 ml-2 flex-shrink-0">
-                {/* 流式响应开关 */}
-                <label className="flex items-center space-x-1 cursor-pointer group px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-[#1a1a1a] transition-colors">
-                  <input
-                    type="checkbox"
-                    checked={streamEnabled}
-                    onChange={(e) => setStreamEnabled(e.target.checked)}
-                    className="w-2.5 h-2.5 text-neon-500 border-gray-300 dark:border-[#444] rounded focus:ring-neon-500 accent-neon-500"
-                  />
-                  <span className="text-[9px] font-medium text-gray-500 dark:text-[#666] group-hover:text-neon-600 dark:group-hover:text-neon-400">流式</span>
-                </label>
-
-                {/* 模型选择按钮 */}
-                <button
-                  onClick={() => setShowModelSelectDialog(true)}
-                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition-all ${
-                    selectedLLMConfig
-                      ? 'bg-emerald-50 dark:bg-[rgba(0,212,170,0.08)] text-emerald-600 dark:text-[#00d4aa] font-medium ring-1 ring-emerald-200 dark:ring-[rgba(0,212,170,0.25)]'
-                      : 'text-gray-400 dark:text-[#555] hover:text-gray-600 dark:hover:text-[#888]'
-                  }`}
-                  title={selectedLLMConfig ? `${selectedLLMConfig.name}${selectedLLMConfig.model ? ` (${selectedLLMConfig.model})` : ''}` : '选择模型'}
-                >
-                  {selectedLLMConfig ? (
-                    <>
-                      {(() => {
-                        const providerInfo = getProviderIcon(selectedLLMConfig, providers);
-                        const providerType = (selectedLLMConfig.supplier || selectedLLMConfig.provider || 'openai').toLowerCase();
-                        if (['openai', 'anthropic', 'google', 'gemini', 'deepseek', 'ollama'].includes(providerType)) {
-                          return <ProviderIcon provider={providerType} size={14} className="flex-shrink-0" />;
-                        }
-                        return <span className="text-xs">{providerInfo.icon}</span>;
-                      })()}
-                      <span className="font-medium truncate max-w-[80px]">
-                        {selectedLLMConfig.shortname || selectedLLMConfig.name}
-                      </span>
-                      {/* 模型能力图标 */}
-                      {(() => {
-                        const enableThinking = selectedLLMConfig.metadata?.enableThinking ?? false;
-                        const supportedInputs: string[] = selectedLLMConfig.metadata?.supportedInputs ?? [];
-                        const supportedOutputs: string[] = selectedLLMConfig.metadata?.supportedOutputs ?? [];
-                        const caps = [];
-                        if (enableThinking) caps.push(<Brain key="t" className="w-2.5 h-2.5 text-purple-400" />);
-                        if (supportedInputs.includes('image')) caps.push(<Eye key="v" className="w-2.5 h-2.5 text-yellow-400" />);
-                        if (supportedInputs.includes('audio')) caps.push(<Volume2 key="a" className="w-2.5 h-2.5 text-neon-400" />);
-                        if (supportedOutputs.includes('image')) caps.push(<Paintbrush key="i" className="w-2.5 h-2.5 text-red-400" />);
-                        return caps.length > 0 ? <div className="flex items-center gap-0.5">{caps}</div> : null;
-                      })()}
-                    </>
-                  ) : (
-                    <>
-                      <Brain className="w-3 h-3" />
-                      <span>选择模型</span>
-                    </>
-                  )}
-                </button>
-
-                {/* Gemini 联网搜索 tag：仅在选择 Gemini/Google 模型时显示，点击切换 */}
-                {selectedLLMConfig && (() => {
-                  const pt = (selectedLLMConfig.supplier || selectedLLMConfig.provider || '').toLowerCase();
-                  if (pt !== 'gemini' && pt !== 'google') return null;
-                  const effective = enableGoogleSearchInChat ?? selectedLLMConfig.metadata?.enableGoogleSearch ?? false;
-                  return (
-                    <button
-                      type="button"
-                      onClick={() => setEnableGoogleSearchInChat(!effective)}
-                      title={effective ? '联网搜索已开，点击关闭' : '点击开启联网搜索（Google Search）'}
-                      className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium transition-all ${
-                        effective
-                          ? 'bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300 ring-1 ring-sky-300 dark:ring-sky-600'
-                          : 'text-gray-400 dark:text-[#666] hover:bg-gray-100 dark:hover:bg-[#1a1a1a] hover:text-gray-600 dark:hover:text-[#888]'
-                      }`}
-                    >
-                      <Globe className="w-3 h-3 flex-shrink-0" />
-                      <span>联网搜索</span>
-                    </button>
-                  );
-                })()}
-
-                {/* 签名回灌开关（生图模型时显示） */}
-                {(() => {
-                  const isImageGenModel = (selectedLLMConfig?.model || '').toLowerCase().includes('image');
-                  if (!isImageGenModel) return null;
-                  return (
-                    <Button
-                      onClick={() => setUseThoughtSignature(v => !v)}
-                      variant={useThoughtSignature ? 'secondary' : 'outline'}
-                      size="sm"
-                      className="h-7 px-2 text-xs"
-                      title={useThoughtSignature ? '已开启签名回灌' : '已关闭签名回灌'}
-                    >
-                      {useThoughtSignature ? '签名:开' : '签名:关'}
-                    </Button>
-                  );
-                })()}
-
-              </div>
-            )}
           </div>
 
-          <div className="flex space-x-1.5 px-2 pb-1.5">
+          <div className="workflow-composer-main flex space-x-1 px-1.5 pb-1.5">
             {/* 媒体预览区域 - 缩略图画廊样式 */}
             {attachedMedia.length > 0 && (
               <div className="mb-1 flex flex-wrap gap-1.5">
                 {attachedMedia.map((media, index) => (
                   <div key={index} className="relative group">
                     {media.type === 'image' ? (
-                      <div className="w-12 h-12 rounded-lg overflow-hidden border border-gray-200/60 dark:border-[#404040]/60 hover:border-primary-500 dark:hover:border-primary-500 transition-all hover:scale-105">
+                      <div className="w-10 h-10 rounded-lg overflow-hidden border border-gray-200/60 dark:border-[#404040]/60 hover:border-primary-500 dark:hover:border-primary-500 transition-all hover:scale-105">
                         <img
                           src={media.preview || ensureDataUrlFromMaybeBase64(media.data, media.mimeType)}
                           alt={`媒体 ${index + 1}`}
@@ -5607,21 +5636,21 @@ const Workflow: React.FC<WorkflowProps> = ({
                         />
                       </div>
                     ) : media.type === 'video' ? (
-                      <div className="w-12 h-12 rounded-lg overflow-hidden border border-gray-200/60 dark:border-[#404040]/60 hover:border-primary-500 dark:hover:border-primary-500 transition-all hover:scale-105 relative bg-gray-900">
+                      <div className="w-10 h-10 rounded-lg overflow-hidden border border-gray-200/60 dark:border-[#404040]/60 hover:border-primary-500 dark:hover:border-primary-500 transition-all hover:scale-105 relative bg-gray-900">
                         <video
                           src={media.preview || ensureDataUrlFromMaybeBase64(media.data, media.mimeType)}
                           className="w-full h-full object-cover"
                           muted
                         />
                         <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-                          <div className="w-6 h-6 rounded-full bg-white/90 flex items-center justify-center">
-                            <Play className="w-3 h-3 text-gray-800 ml-0.5" />
+                          <div className="w-5 h-5 rounded-full bg-white/90 flex items-center justify-center">
+                            <Play className="w-2.5 h-2.5 text-gray-800 ml-0.5" />
                           </div>
                         </div>
                       </div>
                     ) : media.type === 'audio' ? (
-                      <div className="w-12 h-12 flex items-center justify-center rounded-lg border border-gray-200/60 dark:border-[#404040]/60 hover:border-primary-500 dark:hover:border-primary-500 transition-all hover:scale-105 bg-gradient-to-br from-primary-500 to-primary-700">
-                        <Music className="w-5 h-5 text-white/80" />
+                      <div className="w-10 h-10 flex items-center justify-center rounded-lg border border-gray-200/60 dark:border-[#404040]/60 hover:border-primary-500 dark:hover:border-primary-500 transition-all hover:scale-105 bg-gradient-to-br from-primary-500 to-primary-700">
+                        <Music className="w-4 h-4 text-white/80" />
                       </div>
                     ) : null}
                     <button
@@ -5761,21 +5790,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                   });
                 }
               }}
-                onKeyDown={(e) => {
-                  // Tab：在支持联网的模型下切换联网搜索开关
-                  if (e.key === 'Tab' && selectedLLMConfig) {
-                    const pt = (selectedLLMConfig.supplier || selectedLLMConfig.provider || '').toLowerCase();
-                    if (pt === 'gemini' || pt === 'google') {
-                      e.preventDefault();
-                      setEnableGoogleSearchInChat((prev) => {
-                        const effective = prev ?? selectedLLMConfig!.metadata?.enableGoogleSearch ?? false;
-                        return !effective;
-                      });
-                      return;
-                    }
-                  }
-                  handleKeyDown(e);
-                }}
+                onKeyDown={handleKeyDown}
                 onBlur={(e) => {
                   // 检查焦点是否移到了浮岛容器内的其他元素
                   const relatedTarget = e.relatedTarget as HTMLElement;
@@ -5862,12 +5877,12 @@ const Workflow: React.FC<WorkflowProps> = ({
                     ? `输入你的任务，我可以使用 ${totalTools} 个工具帮助你完成...`
                     : '输入你的问题，我会尽力帮助你...'
               }
-                  className={`flex-1 resize-none no-scrollbar overflow-y-auto transition-all duration-200 bg-transparent border-none focus:outline-none focus:ring-0 text-gray-900 dark:text-[#ffffff] placeholder-gray-400 dark:placeholder-[#606060] ${
-                    isInputFocused ? 'px-2.5 py-2' : 'px-2.5 py-1.5 overflow-hidden'
+                  className={`workflow-composer-textarea flex-1 resize-none no-scrollbar overflow-y-auto transition-all duration-200 bg-transparent border-none focus:outline-none focus:ring-0 text-gray-900 dark:text-[#ffffff] placeholder-gray-400 dark:placeholder-[#606060] ${
+                    isInputFocused ? 'px-2 py-2' : 'px-2 py-2'
                   } ${
                     isInputExpanded 
                       ? 'min-h-[180px] max-h-[360px]' 
-                      : isInputFocused ? 'min-h-[52px] max-h-[140px]' : 'min-h-[40px] max-h-[40px]'
+                      : isInputFocused ? 'min-h-[56px] max-h-[140px]' : 'min-h-[56px] max-h-[120px]'
                   }`}
                   style={{ fontSize: isInputFocused ? '13px' : '12px', lineHeight: '1.5' }}
                   rows={1}
@@ -5876,7 +5891,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                 )}
                 
                 {/* 右侧：发送/中断按钮 */}
-                <div className="flex flex-col items-end gap-0.5 flex-shrink-0 pb-0.5">
+                <div className="flex flex-col items-end gap-0.5 flex-shrink-0 pt-2 pb-0 -ml-0.5">
                   <div className="flex items-center gap-1">
                 {isLoading ? (
                   // 加载时：显示打断按钮（请求后端解绑旧 Actor、绑定新 Actor，并本地中止）
@@ -5884,7 +5899,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                     onClick={handleInterrupt}
                     variant="destructive"
                     size="sm"
-                    className="gap-1.5 px-3 py-1 h-7 text-xs shrink-0"
+                    className="gap-1.5 px-3 py-1 h-7 text-xs shrink-0 mt-2"
                     title="停止生成并可立即发送下一条"
                   >
                     <XCircle className="w-3.5 h-3.5" />
@@ -5901,10 +5916,9 @@ const Workflow: React.FC<WorkflowProps> = ({
                         disabled={(!input.trim() && attachedMedia.length === 0) || !selectedLLMConfig}
                         variant="primary"
                         size="sm"
-                        className="gap-1 px-3 py-1 h-7 text-xs font-medium dark:bg-neon-500 dark:hover:bg-neon-400 dark:text-black dark:shadow-glow-neon/50"
+                        className="workflow-composer-send-btn h-8 w-8 rounded-[10px] p-0 min-w-0 dark:text-black mt-2"
                       >
                         <Send className="w-3.5 h-3.5" />
-                        <span className="hidden sm:inline">{editingMessageId ? '重发' : '发送'}</span>
                       </Button>
                     </>
                   )}
@@ -5927,6 +5941,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                 </button>
               </div>
             )}
+          </div>
           </div>
               
           {/* @ 符号选择器 - 相对于输入框容器定位 */}
@@ -6040,7 +6055,8 @@ const Workflow: React.FC<WorkflowProps> = ({
                             }
                             if (isConnecting) return;
                             if (!isConnected) {
-                              await handleConnectServer(server.id);
+                              const connected = await handleConnectServer(server.id);
+                              if (!connected) return;
                               const newComponent = { type: 'mcp' as const, id: server.id, name: server.name };
                               handleSelectComponent(newComponent);
                             } else {

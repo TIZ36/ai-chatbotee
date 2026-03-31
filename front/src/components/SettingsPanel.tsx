@@ -29,6 +29,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   settings,
   onUpdateSettings,
 }) => {
+  const [activeSection, setActiveSection] = useState<'backend' | 'runtime'>('backend');
   const [backendUrl, setBackendUrl] = useState<string>(getBackendUrl());
   const [llmKeyStatus, setLlmKeyStatus] = useState<LLMKeyStatus>({
     total: 0,
@@ -105,86 +106,110 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       description="管理应用配置和偏好设置"
       icon={Settings}
       variant="persona"
+      showHeader={false}
     >
-      <section className="settings-panel space-y-3">
-        <h2 className="settings-panel-section-title text-sm font-semibold text-[var(--text-primary)]">通用</h2>
-        <div className="settings-panel-cards flex flex-col gap-4">
-          <Card title="后端服务器" variant="persona" size="relaxed" className="settings-panel-card">
-            <div className="space-y-3">
-              <div>
-                <label className="settings-panel-label block text-sm font-medium text-gray-700 dark:text-[#e0e0e0] mb-1.5">
-                  后端服务器地址
-                </label>
-                <Input
-                  type="text"
-                  value={backendUrl}
-                  onChange={(e) => setBackendUrl(e.target.value)}
-                  placeholder="http://localhost:3002"
-                  className="w-full"
-                />
-                <p className="settings-panel-desc text-xs text-gray-500 dark:text-[#a0a0a0] mt-1">
-                  设置后端 API 服务器地址，留空则使用默认值或根据当前域名自动推断
-                </p>
-              </div>
-              <Button
-                variant="primary"
-                onClick={handleSaveBackendUrl}
-                className="settings-panel-btn-primary w-full"
+      <section className="settings-panel settings-two-pane h-full min-h-0">
+        <div className="settings-two-pane-layout h-full min-h-0">
+          <aside className="settings-two-pane-nav no-scrollbar">
+            <div className="settings-two-pane-nav-title">通用设置</div>
+            <div className="settings-two-pane-nav-list">
+              <button
+                type="button"
+                className={`settings-two-pane-nav-item ${activeSection === 'backend' ? 'is-active' : ''}`}
+                onClick={() => setActiveSection('backend')}
               >
-                保存后端地址
-              </Button>
+                后端服务器
+              </button>
+              <button
+                type="button"
+                className={`settings-two-pane-nav-item ${activeSection === 'runtime' ? 'is-active' : ''}`}
+                onClick={() => setActiveSection('runtime')}
+              >
+                运行状态
+              </button>
             </div>
-          </Card>
+          </aside>
 
-          <Card title="运行状态" variant="persona" size="relaxed" className="settings-panel-card">
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center gap-4">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-[var(--text-primary)]"
-                  onClick={() => setActorPoolOpen(true)}
-                  title="查看正在工作的 Actor"
-                >
-                  <Users className="w-4 h-4 mr-2" />
-                  Actor 池
-                </Button>
-                <div className="flex items-center gap-2">
-                  <Key className="w-4 h-4 text-[var(--text-muted)]" />
-                  <span className="text-sm text-[var(--text-secondary)]">LLM</span>
-                  {llmKeyStatus.withoutKey > 0 ? (
-                    <span className="text-xs text-amber-500">
-                      {llmKeyStatus.withKey}/{llmKeyStatus.enabled} 有Key
-                    </span>
-                  ) : llmKeyStatus.enabled > 0 ? (
-                    <span className="text-xs text-emerald-500">{llmKeyStatus.enabled} 已配置</span>
-                  ) : (
-                    <span className="text-xs text-[var(--text-muted)]">未配置</span>
-                  )}
+          <div className="settings-two-pane-content settings-two-pane-content-scroll no-scrollbar">
+            {activeSection === 'backend' ? (
+              <Card title="后端服务器" variant="persona" size="relaxed" className="settings-panel-card app-card-item">
+                <div className="app-section-gap">
+                  <div>
+                    <label className="settings-panel-label block text-sm font-medium text-gray-700 dark:text-[#e0e0e0] mb-1.5">
+                      后端服务器地址
+                    </label>
+                    <Input
+                      type="text"
+                      value={backendUrl}
+                      onChange={(e) => setBackendUrl(e.target.value)}
+                      placeholder="http://localhost:3002"
+                      className="w-full"
+                    />
+                    <p className="settings-panel-desc text-xs text-gray-500 dark:text-[#a0a0a0] mt-1">
+                      设置后端 API 服务器地址，留空则使用默认值或根据当前域名自动推断
+                    </p>
+                  </div>
+                  <Button
+                    variant="primary"
+                    onClick={handleSaveBackendUrl}
+                    className="settings-panel-btn-primary w-full"
+                  >
+                    保存后端地址
+                  </Button>
                 </div>
-                <div className="flex items-center gap-2">
-                  <MessageSquare className="w-4 h-4 text-[var(--text-muted)]" />
-                  <span className="text-sm text-[var(--text-secondary)]">Topic</span>
-                  <span className="text-xs text-[var(--text-muted)]">
-                    {topicStatus.total} 个 / {topicStatus.active} 活跃
-                  </span>
+              </Card>
+            ) : (
+              <Card title="运行状态" variant="persona" size="relaxed" className="settings-panel-card app-card-item">
+                <div className="app-section-gap">
+                  <div className="flex flex-wrap items-center gap-4">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-[var(--text-primary)]"
+                      onClick={() => setActorPoolOpen(true)}
+                      title="查看正在工作的 Actor"
+                    >
+                      <Users className="w-4 h-4 mr-2" />
+                      Actor 池
+                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Key className="w-4 h-4 text-[var(--text-muted)]" />
+                      <span className="text-sm text-[var(--text-secondary)]">LLM</span>
+                      {llmKeyStatus.withoutKey > 0 ? (
+                        <span className="text-xs text-amber-500">
+                          {llmKeyStatus.withKey}/{llmKeyStatus.enabled} 有Key
+                        </span>
+                      ) : llmKeyStatus.enabled > 0 ? (
+                        <span className="text-xs text-emerald-500">{llmKeyStatus.enabled} 已配置</span>
+                      ) : (
+                        <span className="text-xs text-[var(--text-muted)]">未配置</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <MessageSquare className="w-4 h-4 text-[var(--text-muted)]" />
+                      <span className="text-sm text-[var(--text-secondary)]">Topic</span>
+                      <span className="text-xs text-[var(--text-muted)]">
+                        {topicStatus.total} 个 / {topicStatus.active} 活跃
+                      </span>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={checkStatus}
+                      disabled={isRefreshing}
+                      className="text-[var(--text-muted)]"
+                      title="刷新状态"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+                    </Button>
+                  </div>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    当前后端：{backendUrl || '（默认）'}
+                  </p>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={checkStatus}
-                  disabled={isRefreshing}
-                  className="text-[var(--text-muted)]"
-                  title="刷新状态"
-                >
-                  <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-                </Button>
-              </div>
-              <p className="text-xs text-[var(--text-muted)]">
-                当前后端：{backendUrl || '（默认）'}
-              </p>
-            </div>
-          </Card>
+              </Card>
+            )}
+          </div>
         </div>
       </section>
 

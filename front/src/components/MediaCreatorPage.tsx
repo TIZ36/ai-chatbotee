@@ -1131,10 +1131,10 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
 
   const mainContent = (
     <>
-      <div className="chatu-page chatu-page-one-screen h-full w-full flex flex-col min-h-0 px-2 py-1.5 sm:px-4 md:px-5 lg:px-6 max-w-[1600px] mx-auto w-full box-border">
+      <div className="chatu-page chatu-page-one-screen h-full w-full flex flex-col min-h-0 px-2 py-1.5 sm:px-4 md:px-5 lg:px-6 max-w-[1360px] mx-auto w-full box-border">
         <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
         {/* ════════ 创作区 ════════ */}
-        <Card title="创作区" variant="persona" size="relaxed" className="media-create-card flex-1 min-h-0 flex flex-col overflow-hidden">
+        <Card title="创作区" variant="persona" size="default" className="media-create-card flex-1 min-h-0 flex flex-col overflow-hidden">
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden space-y-4">
             {/* Tab（仅 both 模式显示） */}
             {mode === 'both' && (
