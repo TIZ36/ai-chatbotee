@@ -20,8 +20,10 @@ export const Switch = React.forwardRef<
   >
     <SwitchPrimitives.Thumb
       className={cn(
-        'pointer-events-none block h-4 w-4 translate-x-0.5 rounded-full bg-background transition-transform',
-        'data-[state=checked]:translate-x-4.5',
+        // w-9(36px) 轨道、h-4(16px) 滑块：左右各约 2px 内边距，行程 18px（勿用 translate-x-4.5，会与轨道宽度错位）
+        'pointer-events-none block h-4 w-4 rounded-full bg-background shadow-sm transition-transform duration-200 ease-out',
+        'data-[state=unchecked]:translate-x-[2px]',
+        'data-[state=checked]:translate-x-[18px]',
       )}
     />
   </SwitchPrimitives.Root>

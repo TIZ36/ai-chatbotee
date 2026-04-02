@@ -16,6 +16,7 @@ from .actor_pool import actor_pool_bp
 from .media import media_bp
 from .discord import discord_bp
 from .tts import tts_bp, init_tts_routes
+from .chill import chill_bp
 
 
 def register_api_routes(app, get_connection=None, config=None):
@@ -69,5 +70,6 @@ def register_api_routes(app, get_connection=None, config=None):
     app.register_blueprint(media_bp)
     app.register_blueprint(discord_bp, url_prefix='/api/discord')
     app.register_blueprint(tts_bp, url_prefix='/api/tts')
+    app.register_blueprint(chill_bp, url_prefix='/api/chill')
 
     print("[API] All API routes registered successfully")

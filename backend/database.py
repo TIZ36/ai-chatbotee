@@ -1337,6 +1337,14 @@ def create_tables():
         _ensure_column('skill_packs', 'ext', 
                       "ALTER TABLE `skill_packs` ADD COLUMN `ext` JSON DEFAULT NULL COMMENT '扩展数据（processSteps执行轨迹等）' AFTER `source_messages`", 
                       'ext')
+
+        # 迁移：结构化步骤列（Actor 编排 MCP 等；与 actor_base._load_skill_packs 查询一致）
+        _ensure_column(
+            'skill_packs',
+            'process_steps',
+            "ALTER TABLE `skill_packs` ADD COLUMN `process_steps` JSON NULL COMMENT '结构化执行步骤 JSON' AFTER `summary`",
+            'process_steps',
+        )
         
         # 技能包分配表（多对多关系：技能包与记忆体/智能体）
         create_skill_pack_assignments_table = """

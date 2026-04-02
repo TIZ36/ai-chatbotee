@@ -156,16 +156,27 @@ echo "使用 pip: $(python -m pip --version)"
 echo "升级 pip..."
 python -m pip install --upgrade pip --quiet 2>/dev/null || python -m pip install --upgrade pip
 
-# ========== 安装依赖 ==========
-NEED_INSTALL=false
-if ! python -c "import flask" 2>/dev/null; then
-    NEED_INSTALL=true
-elif ! python -c "import dbutils" 2>/dev/null; then
-    NEED_INSTALL=true
-fi
+# ========== 检查并安装 Python 依赖（与 backend/requirements.txt 一致）==========
+# 关键包缺一时触发完整安装；齐全时仍静默同步一次，以便 requirements 新增条目（如 xai-sdk）被装上
+echo "检查 Python 依赖（requirements.txt）..."
 
-if [ "$NEED_INSTALL" = true ]; then
-    echo "安装依赖..."
+check_python_deps() {
+    python -c "
+import importlib
+import sys
+# 与 requirements.txt 对齐：任缺一则需 pip install -r
+for mod in ('flask', 'dbutils', 'xai_sdk'):
+    try:
+        importlib.import_module(mod)
+    except ImportError as e:
+        sys.stderr.write(f'missing import: {mod} ({e})\n')
+        sys.exit(1)
+sys.exit(0)
+"
+}
+
+if ! check_python_deps; then
+    echo "  检测到缺失依赖，正在执行: pip install -r requirements.txt"
     python -m pip install -r requirements.txt
     if [ $? -ne 0 ]; then
         echo "❌ 错误: 安装依赖失败"
@@ -173,10 +184,16 @@ if [ "$NEED_INSTALL" = true ]; then
     fi
     echo "✅ 依赖安装完成"
 else
-    echo "✅ 依赖已安装"
-    # 检查是否有新依赖需要安装
-    echo "检查新依赖..."
-    python -m pip install -r requirements.txt --quiet --upgrade 2>/dev/null || true
+    echo "✅ 关键包可用（flask / dbutils / xai_sdk）"
+    echo "  同步 requirements.txt（静默，补装新增包）..."
+    python -m pip install -r requirements.txt --quiet 2>/dev/null || {
+        echo "  ⚠️  静默同步失败，尝试完整安装..."
+        python -m pip install -r requirements.txt || {
+            echo "❌ 错误: 安装依赖失败"
+            exit 1
+        }
+    }
+    echo "✅ 依赖已同步"
 fi
 
 # ========== 初始化数据库 ==========

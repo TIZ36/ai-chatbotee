@@ -301,7 +301,10 @@ class ActorBase(ABC):
                     elif isinstance(ps, list):
                         steps = ps
                 except Exception:
-                    pass
+                    logger.warning(
+                        f"[ActorBase:{self.agent_id}] Failed to parse process_steps for skill pack {sp.get('skill_pack_id')}"
+                    )
+                    steps = []
 
                 self.capabilities.register_skill(
                     skill_id=sp.get("skill_pack_id"),
@@ -318,6 +321,80 @@ class ActorBase(ABC):
             logger.error(f"[ActorBase:{self.agent_id}] Error loading skill packs: {e}")
             if conn:
                 conn.close()
+
+    def _load_single_skill(self, skill_id: str):
+        """
+        按需加载单个 Skill（Skill Pack）
+
+        用途：
+        - 当前迭代 ext.skill_packs 中包含的 Skill，可能尚未通过 _load_skill_packs 预加载
+        - 按 skill_pack_id 从 DB 查询并注册到 CapabilityRegistry
+        """
+        conn = get_mysql_connection()
+        if not conn:
+            logger.warning(
+                f"[ActorBase:{self.agent_id}] Cannot load single skill {skill_id}: no DB connection"
+            )
+            return None
+
+        try:
+            import pymysql
+
+            cursor = conn.cursor(pymysql.cursors.DictCursor)
+            cursor.execute(
+                """
+                SELECT sp.skill_pack_id, sp.name, sp.summary, sp.process_steps
+                FROM skill_packs sp
+                WHERE sp.skill_pack_id = %s
+                LIMIT 1
+            """,
+                (skill_id,),
+            )
+            row = cursor.fetchone()
+            cursor.close()
+            conn.close()
+
+            if not row:
+                logger.warning(
+                    f"[ActorBase:{self.agent_id}] Skill pack not found for id={skill_id}"
+                )
+                return None
+
+            # 解析 process_steps
+            steps = []
+            try:
+                ps = row.get("process_steps")
+                if isinstance(ps, str):
+                    steps = json.loads(ps) or []
+                elif isinstance(ps, list):
+                    steps = ps
+            except Exception:
+                logger.warning(
+                    f"[ActorBase:{self.agent_id}] Failed to parse process_steps for skill {skill_id}"
+                )
+                steps = []
+
+            self.capabilities.register_skill(
+                skill_id=row.get("skill_pack_id"),
+                name=row.get("name", ""),
+                description=row.get("summary", ""),
+                steps=steps,
+            )
+
+            skill = self.capabilities.get_skill(row.get("skill_pack_id"))
+            logger.info(
+                f"[ActorBase:{self.agent_id}] Loaded single skill pack {skill_id} ({row.get('name')})"
+            )
+            return skill
+        except Exception as e:
+            logger.error(
+                f"[ActorBase:{self.agent_id}] Error loading single skill pack {skill_id}: {e}"
+            )
+            try:
+                conn.close()
+            except Exception:
+                pass
+            return None
 
     def _register_builtin_tools(self):
         """注册内置工具（子类可重写扩展）"""
@@ -4042,7 +4119,7 @@ class ActorBase(ABC):
                 action_type="skill",
                 data=result_data,
                 duration_ms=duration_ms,
-                step=action,
+                step=step,
             )
 
         except Exception as e:
@@ -4052,7 +4129,7 @@ class ActorBase(ABC):
                 action_type="skill",
                 error=str(e),
                 duration_ms=duration_ms,
-                step=action,
+                step=step,
             )
 
     def _execute_skill_steps(
@@ -4118,7 +4195,7 @@ class ActorBase(ABC):
                 data=result_data,
                 text_result=text_result,
                 duration_ms=duration_ms,
-                step=action,
+                step=step,
             )
 
         except Exception as e:
@@ -4128,7 +4205,7 @@ class ActorBase(ABC):
                 action_type="tool",
                 error=str(e),
                 duration_ms=duration_ms,
-                step=action,
+                step=step,
             )
 
     def _call_llm(self, action: Action, ctx: IterationContext) -> ActionResult:
@@ -4681,6 +4758,43 @@ class ActorBase(ABC):
         cap_desc = self.capabilities.get_capability_description()
         if cap_desc:
             system_prompt += f"\n\n{cap_desc}"
+
+        # ========== Skill 注入策略 ==========
+        # 1) 已激活 Skill：本轮显式选中的技能，提供完整 SOP 步骤，并强调必须遵守
+        active_skills = getattr(ctx, "active_skills", None) or []
+        if active_skills:
+            system_prompt += "\n\n【本轮已激活的技能包】\n"
+            system_prompt += (
+                "用户已在本轮对话中主动选中了以下技能包，请在处理本轮请求时优先按照这些技能的流程执行：\n"
+            )
+            for skill in active_skills:
+                try:
+                    system_prompt += "\n" + skill.to_sop_text()
+                    system_prompt += "\n【要求】当用户问题与该技能相关时，必须严格按上述步骤执行；如步骤中包含 MCP 或工具调用，请结合这些能力完成任务。"
+                except Exception:
+                    # 防御性：单个 skill 文本异常不影响整体
+                    continue
+
+        # 2) 可用但未激活的 Skill：仅提供目录列表（名称 + 摘要），供模型参考
+        available_skills = []
+        try:
+            available_skills = self.capabilities.get_available_skills()
+        except Exception:
+            available_skills = []
+
+        passive_skills = [
+            s for s in available_skills if s not in active_skills  # 简单引用比较即可
+        ]
+        if passive_skills:
+            system_prompt += "\n\n【可用的其他技能包目录】\n"
+            system_prompt += (
+                "以下是当前会话中可用但未被用户显式激活的技能包，仅供你理解用户长期偏好和能力边界：\n"
+            )
+            for skill in passive_skills:
+                try:
+                    system_prompt += "\n- " + skill.to_description(include_steps=False)
+                except Exception:
+                    continue
 
         # 注入话题级SOP（仅对 topic_general 生效）
         topic_id = ctx.topic_id or self.topic_id

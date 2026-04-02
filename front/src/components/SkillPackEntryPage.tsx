@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Package, Loader, RefreshCw, Trash2, Pencil, BookOpen, Rows3, LayoutGrid } from 'lucide-react';
+import { Package, Loader, RefreshCw, Trash2, Pencil, BookOpen, Rows3, LayoutGrid, Plus } from 'lucide-react';
 import {
   getSkillPacks,
   deleteSkillPack,
   updateSkillPack,
+  saveSkillPack,
   type SkillPack,
 } from '../services/skillPackApi';
 import { Button } from './ui/Button';
@@ -32,6 +33,10 @@ const SkillPackEntryPage: React.FC = () => {
   const [viewMode, setViewMode] = useState<'list' | 'card'>('list');
   const [selectedPack, setSelectedPack] = useState<SkillPack | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createName, setCreateName] = useState('');
+  const [createSummary, setCreateSummary] = useState('');
+  const [creating, setCreating] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -93,6 +98,37 @@ const SkillPackEntryPage: React.FC = () => {
     }
   };
 
+  const handleCreateSkillPack = async () => {
+    const name = createName.trim();
+    if (!name) {
+      toast({ title: '请填写技能包名称', variant: 'destructive' });
+      return;
+    }
+    setCreating(true);
+    try {
+      const saved = await saveSkillPack({
+        name,
+        summary: createSummary.trim() || undefined,
+      });
+      toast({ title: '已创建技能包', variant: 'success' });
+      setCreateOpen(false);
+      setCreateName('');
+      setCreateSummary('');
+      await load();
+      setSelectedPack(saved);
+      setDetailOpen(true);
+      cancelEdit();
+    } catch (e) {
+      toast({
+        title: '创建失败',
+        description: e instanceof Error ? e.message : String(e),
+        variant: 'destructive',
+      });
+    } finally {
+      setCreating(false);
+    }
+  };
+
   const openDetail = (pack: SkillPack, editable = false) => {
     setSelectedPack(pack);
     setDetailOpen(true);
@@ -115,11 +151,15 @@ const SkillPackEntryPage: React.FC = () => {
               <div className="min-w-0">
                 <h2 className="text-sm font-semibold text-[var(--text-primary)] truncate">技能包</h2>
                 <p className="text-xs text-[var(--text-muted)] truncate">
-                  在 Chaya 对话中可从消息生成技能包；此处可改名、改摘要或删除
+                  可在此新建空白技能包，或在 Chaya 对话中从消息生成；支持改名、改摘要或删除
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
+              <Button variant="primary" size="sm" className="h-8" onClick={() => setCreateOpen(true)}>
+                <Plus className="w-3.5 h-3.5 mr-1.5" />
+                新建技能包
+              </Button>
               <div className="app-view-switch">
                 <button
                   type="button"
@@ -157,8 +197,12 @@ const SkillPackEntryPage: React.FC = () => {
                 <BookOpen className="w-10 h-10 text-[var(--text-muted)] mb-3 opacity-60" />
                 <p className="text-sm text-[var(--text-secondary)]">暂无技能包</p>
                 <p className="text-xs text-[var(--text-muted)] mt-1">
-                  在「Chaya 聊天」中勾选消息后，可生成并保存技能包
+                  点击上方「新建技能包」手动创建，或在「Chaya 聊天」中勾选消息后生成并保存
                 </p>
+                <Button variant="outline" size="sm" className="mt-4 h-8" onClick={() => setCreateOpen(true)}>
+                  <Plus className="w-3.5 h-3.5 mr-1.5" />
+                  新建技能包
+                </Button>
               </div>
             ) : viewMode === 'list' ? (
               <ul className="app-list-layout">
@@ -256,6 +300,38 @@ const SkillPackEntryPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      <Dialog open={createOpen} onOpenChange={(o) => { setCreateOpen(o); if (!o) { setCreateName(''); setCreateSummary(''); } }}>
+        <DialogContent className="max-w-lg chatee-dialog-standard">
+          <DialogHeader>
+            <DialogTitle>新建技能包</DialogTitle>
+            <DialogDescription>填写名称与可选摘要；摘要不填时系统将使用默认占位文案。</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 max-h-[60vh] overflow-auto no-scrollbar">
+            <Input
+              value={createName}
+              onChange={(e) => setCreateName(e.target.value)}
+              placeholder="技能包名称（必填）"
+              className="h-9"
+            />
+            <textarea
+              value={createSummary}
+              onChange={(e) => setCreateSummary(e.target.value)}
+              placeholder="摘要 / 能力说明（可选）"
+              rows={6}
+              className="w-full rounded-md border border-[var(--border-default)] bg-[var(--surface-primary)] px-3 py-2 text-sm text-[var(--text-primary)] resize-y min-h-[120px]"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setCreateOpen(false)} disabled={creating}>
+              取消
+            </Button>
+            <Button variant="primary" size="sm" onClick={() => void handleCreateSkillPack()} disabled={creating}>
+              {creating ? '创建中…' : '创建'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={detailOpen}

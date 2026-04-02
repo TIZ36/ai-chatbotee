@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .action_chain import ActionStep, ActionResult
+    from .actions import Action
 
 
 class MessageType:
@@ -82,6 +83,10 @@ class IterationContext:
 
     # MCP 返回的媒体数据（图片等）
     mcp_media: Optional[List[Dict[str, Any]]] = None
+
+    # 已激活的 Skill 列表（本轮对话中前端/系统显式选中的技能）
+    # 由 Actor 在规划阶段填充，供 system prompt 注入与行动规划使用
+    active_skills: List[Any] = field(default_factory=list)
 
     # 错误信息
     error: Optional[str] = None

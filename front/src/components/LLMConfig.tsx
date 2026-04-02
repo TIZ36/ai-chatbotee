@@ -231,7 +231,6 @@ const TokenListSimple: React.FC<TokenListSimpleProps> = ({
   return (
     <div className="space-y-2">
       {visibleGroups.map(([tokenKey, group]) => {
-        const enabledCount = group.configs.filter(c => c.enabled).length;
         const totalCount = group.configs.length;
         const showKey = showTokenKeys[tokenKey] || false;
         const displayKey = tokenApiKeys[tokenKey] || group.apiKey || '';
@@ -254,9 +253,6 @@ const TokenListSimple: React.FC<TokenListSimpleProps> = ({
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate ">
                     {displayKey ? maskApiKey(displayKey) : '未设置 Token'}
-                  </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">
-                    {enabledCount} / {totalCount} 个模型 {group.isActive ? '(当前使用)' : ''}
                   </div>
                 </div>
               </div>
@@ -381,14 +377,6 @@ const LLMConfigPanel: React.FC = () => {
   const [showAddModelsSection, setShowAddModelsSection] = useState(false);
   const [selectedNewModels, setSelectedNewModels] = useState<Set<string>>(new Set());
   
-  // ── 媒体创作专用录入 ──
-  const [showMediaTokenDialog, setShowMediaTokenDialog] = useState(false);
-  const [mediaTokenApiKey, setMediaTokenApiKey] = useState('');
-  const [mediaTokenModels, setMediaTokenModels] = useState<(string | ModelWithCapabilities)[]>([]);
-  const [selectedMediaModels, setSelectedMediaModels] = useState<Set<string>>(new Set());
-  const [isLoadingMediaModels, setIsLoadingMediaModels] = useState(false);
-  const [mediaTokenError, setMediaTokenError] = useState<string | null>(null);
-
   // Logo 上传和设置功能已移除，现在直接使用 @lobehub/icons 组件
 
   // Remove logo
@@ -1009,6 +997,25 @@ const LLMConfigPanel: React.FC = () => {
     return configs.filter(c => (c.supplier || c.provider) === selectedProviderId);
   }, [configs, selectedProviderId, selectedProvider]);
 
+  const mediaModelNameRegex = /(image|video|veo)/i;
+  const isMediaModelByName = useCallback((config: LLMConfigFromDB) => {
+    const source = `${config.model || ''} ${config.name || ''}`;
+    return mediaModelNameRegex.test(source);
+  }, []);
+
+  const enabledProviderConfigs = useMemo(
+    () => providerConfigs.filter((c) => c.enabled),
+    [providerConfigs],
+  );
+  const enabledChatConfigs = useMemo(
+    () => enabledProviderConfigs.filter((c) => !isMediaModelByName(c)),
+    [enabledProviderConfigs, isMediaModelByName],
+  );
+  const enabledMediaConfigs = useMemo(
+    () => enabledProviderConfigs.filter((c) => isMediaModelByName(c)),
+    [enabledProviderConfigs, isMediaModelByName],
+  );
+
   // 条件返回必须在所有 hooks 之后
   if (isLoading || isLoadingProviders) {
     return (
@@ -1040,13 +1047,13 @@ const LLMConfigPanel: React.FC = () => {
         className={`
           llm-config-tab ${showAddProviderContent ? 'llm-config-tab--active' : ''}
           flex items-center gap-2 text-sm font-medium whitespace-nowrap transition-colors
-          ${vertical ? 'app-list-item w-full px-3 py-2.5 text-left border' : 'px-4 py-2.5 border-b-2'}
+          ${vertical ? 'llm-two-pane-nav-item w-full text-left' : 'px-4 py-2.5 border-b-2'}
           ${showAddProviderContent
             ? vertical
-              ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
+              ? 'is-active'
               : 'border-[var(--color-accent)] text-[var(--color-accent)]'
             : vertical
-              ? 'border-transparent text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#252525]'
+              ? ''
               : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
           }
         `}
@@ -1056,7 +1063,7 @@ const LLMConfigPanel: React.FC = () => {
       </button>
       {vertical && providerDragFrom !== null && providerInsertBefore === 0 && (
         <div className="relative h-0 pointer-events-none flex items-center justify-center py-0.5 -my-px" aria-hidden>
-          <div className="h-0.5 w-full rounded-full bg-[var(--color-accent)] shadow-[0_0_8px_rgba(0,255,136,0.4)] [data-skin='niho']:shadow-[0_0_10px_rgba(0,255,136,0.5)]" />
+          <div className="h-0.5 w-full rounded-full bg-[var(--color-accent)] shadow-[0_0_8px_rgba(59,130,246,0.35)] [data-skin='niho']:shadow-[0_0_10px_rgba(0,255,136,0.5)]" />
         </div>
       )}
       {providers.map((provider, providerIndex) => {
@@ -1092,13 +1099,13 @@ const LLMConfigPanel: React.FC = () => {
               className={`
                 llm-config-tab ${isActive ? 'llm-config-tab--active' : ''}
                 flex items-center gap-2 text-sm font-medium whitespace-nowrap transition-colors
-                ${vertical ? 'app-list-item flex-1 min-w-0 px-3 py-2.5 text-left border' : 'px-4 py-2.5 border-b-2'}
+                ${vertical ? 'llm-two-pane-nav-item flex-1 min-w-0 text-left' : 'px-4 py-2.5 border-b-2'}
                 ${isActive
                   ? vertical
-                    ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
+                    ? 'is-active'
                     : 'border-[var(--color-accent)] text-[var(--color-accent)]'
                   : vertical
-                    ? 'border-transparent text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#252525]'
+                    ? ''
                     : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
                 }
               `}
@@ -1154,7 +1161,7 @@ const LLMConfigPanel: React.FC = () => {
           </div>
           {vertical && providerDragFrom !== null && providerInsertBefore === providerIndex + 1 && (
             <div className="relative h-0 pointer-events-none flex items-center justify-center py-0.5 -my-px" aria-hidden>
-              <div className="h-0.5 w-full rounded-full bg-[var(--color-accent)] shadow-[0_0_8px_rgba(0,255,136,0.4)] [data-skin='niho']:shadow-[0_0_10px_rgba(0,255,136,0.5)]" />
+              <div className="h-0.5 w-full rounded-full bg-[var(--color-accent)] shadow-[0_0_8px_rgba(59,130,246,0.35)] [data-skin='niho']:shadow-[0_0_10px_rgba(0,255,136,0.5)]" />
             </div>
           )}
           </React.Fragment>
@@ -1173,11 +1180,11 @@ const LLMConfigPanel: React.FC = () => {
       showHeader={false}
     >
       {/* 整体居中：供应商列表 + Token/内容区 作为一块，两侧留白 */}
-      <div className="llm-config-page flex-1 min-h-0 overflow-auto flex justify-center app-pane-pad">
-        <div className="llm-two-pane flex flex-col lg:flex-row h-full min-h-0 w-full max-w-4xl">
+      <div className="llm-config-page h-full min-h-0 app-pane-pad">
+        <div className="llm-two-pane h-full min-h-0 w-full max-w-6xl mx-auto">
           {/* 左侧：供应商列表（紧挨内容区） */}
-          <div className="llm-two-pane-nav flex-shrink-0 flex flex-col border-b lg:border-b-0 lg:border-r border-gray-200 dark:border-[#404040]  lg:w-52 xl:w-56">
-            <div className="llm-two-pane-nav-title hidden lg:block">
+          <div className="llm-two-pane-nav">
+            <div className="llm-two-pane-nav-title">
               模型录入菜单
             </div>
             {/* 小屏：顶部横向 Tab */}
@@ -1187,13 +1194,13 @@ const LLMConfigPanel: React.FC = () => {
               </div>
             </div>
             {/* 大屏：左侧竖排列表 */}
-            <div className="hidden lg:flex flex-col flex-1 min-h-0 overflow-y-auto no-scrollbar p-2 gap-1">
+            <div className="llm-two-pane-nav-list hidden lg:flex">
               {renderProviderTabs(true)}
             </div>
           </div>
 
           {/* 右侧：Token 录入 / 模型内容区 */}
-          <div className="flex-1 min-w-0 overflow-auto app-pane-pad-left pr-0 lg:pr-0">
+          <div className="llm-two-pane-content min-w-0 overflow-auto app-pane-pad-left pr-0 lg:pr-0">
             <div className="w-full max-w-2xl">
       {showAddProviderContent ? (
         <div className="space-y-6">
@@ -1203,7 +1210,7 @@ const LLMConfigPanel: React.FC = () => {
                 onClick={() => setShowCreateProviderDialog(true)}
                 variant="primary"
                 size="sm"
-                className="llm-config-btn-primary"
+                className="llm-config-btn-primary llm-config-btn-compact"
               >
                 <Plus className="w-4 h-4 mr-2" />
                 添加自定义供应商
@@ -1292,8 +1299,8 @@ const LLMConfigPanel: React.FC = () => {
               {selectedProvider && ['openai', 'anthropic', 'gemini', 'deepseek'].includes(selectedProvider.provider_type) && (
                 <Card 
                   className="llm-config-token-card-wrap"
-                  title={selectedProvider ? `Token 管理 - ${getProviderDisplayName(selectedProvider)}` : 'Token 管理'}
-                  description={`为 ${getProviderDisplayName(selectedProvider)} 录入和管理 API Token，系统会自动获取支持的模型列表`}
+                  title="录入token"
+                  description={undefined}
                   size="compact"
                   variant="persona"
                   headerAction={
@@ -1313,31 +1320,11 @@ const LLMConfigPanel: React.FC = () => {
                           setShowAddTokenDialog(true);
                           console.log('showAddTokenDialog 设置为 true');
                         }}
-                        className="relative z-10 pointer-events-auto llm-config-btn-primary"
+                        className="relative z-10 pointer-events-auto llm-config-btn-primary llm-config-btn-compact"
                       >
                         <Plus className="w-4 h-4 mr-2" />
                         录入 Token
                       </Button>
-                      {['gemini', 'openai'].includes(selectedProvider?.provider_type || '') && (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          type="button"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            setMediaTokenApiKey('');
-                            setMediaTokenModels([]);
-                            setMediaTokenError(null);
-                            setSelectedMediaModels(new Set());
-                            setShowMediaTokenDialog(true);
-                          }}
-                          className="relative z-10 pointer-events-auto llm-config-btn-secondary"
-                        >
-                          <ImageIcon className="w-4 h-4 mr-1.5" />
-                          媒体创作录入
-                        </Button>
-                      )}
                     </div>
                   }
                 >
@@ -1376,21 +1363,19 @@ const LLMConfigPanel: React.FC = () => {
 
               {/* 已有 Token 时，展示当前已开启模型（内部滚动） */}
               {selectedProvider && ['openai', 'anthropic', 'gemini', 'deepseek'].includes(selectedProvider.provider_type) && providerConfigs.length > 0 && (
-                <Card
-                  title={`已开启模型 (${providerConfigs.filter(c => c.enabled).length})`}
-                  description="仅显示当前已启用模型，列表区域支持内部滚动"
-                  size="compact"
-                  variant="persona"
-                >
-                  <div className="max-h-[320px] overflow-y-auto no-scrollbar pr-1 space-y-2">
-                    {providerConfigs.filter(c => c.enabled).length === 0 ? (
-                      <div className="text-sm text-gray-500 dark:text-gray-400 py-2 px-1">
-                        当前 Token 下暂无已开启模型
-                      </div>
-                    ) : (
-                      providerConfigs
-                        .filter(c => c.enabled)
-                        .map(config => (
+                <div className="space-y-3">
+                  <Card
+                    title={`聊天模型 (${enabledChatConfigs.length})`}
+                    size="compact"
+                    variant="persona"
+                  >
+                    <div className="max-h-[240px] overflow-y-auto no-scrollbar pr-1 space-y-2">
+                      {enabledChatConfigs.length === 0 ? (
+                        <div className="text-sm text-gray-500 dark:text-gray-400 py-2 px-1">
+                          暂无聊天模型
+                        </div>
+                      ) : (
+                        enabledChatConfigs.map((config) => (
                           <div
                             key={config.config_id}
                             className="llm-config-model-row app-list-item flex items-center justify-between p-3 transition-colors"
@@ -1417,9 +1402,52 @@ const LLMConfigPanel: React.FC = () => {
                             </div>
                           </div>
                         ))
-                    )}
-                  </div>
-                </Card>
+                      )}
+                    </div>
+                  </Card>
+
+                  <Card
+                    title={`媒体模型 (${enabledMediaConfigs.length})`}
+                    size="compact"
+                    variant="persona"
+                  >
+                    <div className="max-h-[240px] overflow-y-auto no-scrollbar pr-1 space-y-2">
+                      {enabledMediaConfigs.length === 0 ? (
+                        <div className="text-sm text-gray-500 dark:text-gray-400 py-2 px-1">
+                          暂无媒体模型
+                        </div>
+                      ) : (
+                        enabledMediaConfigs.map((config) => (
+                          <div
+                            key={config.config_id}
+                            className="llm-config-model-row app-list-item flex items-center justify-between p-3 transition-colors"
+                          >
+                            <div className="flex items-center space-x-3 flex-1 min-w-0">
+                              <div className="w-8 h-8 rounded flex items-center justify-center overflow-hidden border border-gray-200 dark:border-[#404040]">
+                                {renderProviderIcon(config.supplier || config.provider, 'w-full h-full', 24)}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="font-medium text-sm text-gray-900 dark:text-gray-100 truncate">
+                                  {config.name}
+                                </div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1 truncate">
+                                  <span className="truncate">{config.model || '未设置模型'}</span>
+                                  {config.supplier && config.supplier !== config.provider && (
+                                    <span className="text-gray-400 shrink-0">(兼容: {config.provider})</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 ml-3 flex-shrink-0">
+                              <span className="ui-badge-success text-xs">已启用</span>
+                              <CapabilityIcons capabilities={config.metadata?.capabilities} modelName={config.model} className="w-3.5 h-3.5" />
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </Card>
+                </div>
               )}
 
               {/* 已有模型列表（非主流供应商或传统视图） */}
@@ -1433,7 +1461,7 @@ const LLMConfigPanel: React.FC = () => {
                   <Button
                     variant="primary"
                     size="sm"
-                    className="w-full md:w-auto llm-config-btn-primary"
+                    className="w-full md:w-auto llm-config-btn-primary llm-config-btn-compact"
                     onClick={async () => {
                       if (!selectedProvider) {
                         toast({
@@ -2520,7 +2548,7 @@ const LLMConfigPanel: React.FC = () => {
                   }
                 }}
                 disabled={isLoadingTokenModels || !newTokenApiKey.trim()}
-                className="w-full "
+                className="w-full llm-config-btn-compact"
               >
                 {isLoadingTokenModels ? (
                   <>
@@ -2540,7 +2568,7 @@ const LLMConfigPanel: React.FC = () => {
                   <Button
                     variant="secondary"
                     size="sm"
-                    className="shrink-0 "
+                    className="shrink-0 llm-config-btn-compact"
                     onClick={async () => {
                       if (!selectedProvider || !newTokenApiKey.trim()) return;
                       setIsLoadingTokenModels(true);
@@ -2584,7 +2612,7 @@ const LLMConfigPanel: React.FC = () => {
                   <Button
                     variant="secondary"
                     size="sm"
-                    className=""
+                    className="llm-config-btn-compact"
                     onClick={() => {
                       const callableIds = tokenAvailableModels
                         .filter(m => typeof m === 'string' || (m as ModelWithCapabilities).isCallable !== false)
@@ -2597,7 +2625,7 @@ const LLMConfigPanel: React.FC = () => {
                   <Button
                     variant="secondary"
                     size="sm"
-                    className=""
+                    className="llm-config-btn-compact"
                     onClick={() => setSelectedModelsForToken(new Set())}
                   >
                     全不选
@@ -2775,6 +2803,7 @@ const LLMConfigPanel: React.FC = () => {
                   }
                 }}
                 disabled={selectedModelsForToken.size === 0}
+                className="llm-config-btn-compact"
               >
                 <Save className="w-4 h-4 mr-2" />
                 保存 ({selectedModelsForToken.size} 个模型)
@@ -2801,6 +2830,7 @@ const LLMConfigPanel: React.FC = () => {
                   <Button
                     variant="outline"
                     size="sm"
+                    className="llm-config-btn-compact"
                     onClick={async () => {
                       if (!selectedProvider || !selectedTokenApiKey) return;
                       setIsLoadingAvailableModels(true);
@@ -3173,7 +3203,7 @@ const LLMConfigPanel: React.FC = () => {
                       </span>
                     </div>
                     {mediaConfigs.length === 0
-                      ? <p className="text-xs text-gray-400 px-2">暂无媒体创作模型 — 请使用「媒体创作录入」添加</p>
+                      ? <p className="text-xs text-gray-400 px-2">暂无媒体创作模型</p>
                       : mediaConfigs.map(c => renderConfigRow(c, 'media'))
                     }
                   </div>
@@ -3254,291 +3284,6 @@ const LLMConfigPanel: React.FC = () => {
 
       {/* Logo 设置对话框已移除，现在直接使用 @lobehub/icons 组件 */}
 
-      {/* ══════ 媒体创作 Token 录入对话框 ══════ */}
-      <Dialog open={showMediaTokenDialog} onOpenChange={setShowMediaTokenDialog}>
-        <DialogContent className="chatee-dialog-standard max-w-2xl w-[95vw] md:w-auto max-h-[80vh] md:max-h-none [data-skin='niho']:bg-[var(--niho-pure-black)] [data-skin='niho']:border-[var(--niho-text-border)]">
-          <DialogHeader>
-            <DialogTitle className="[data-skin='niho']:text-[var(--text-primary)] flex items-center gap-2">
-              <ImageIcon className="w-5 h-5 text-[var(--color-secondary)]" />
-              {selectedProvider ? `媒体创作录入 - ${getProviderDisplayName(selectedProvider)}` : '媒体创作录入'}
-            </DialogTitle>
-            <DialogDescription className="[data-skin='niho']:text-[var(--niho-skyblue-gray)]">
-              专门为图像/视频生成配置模型。仅显示支持生图或生视频的模型，不支持媒体生成的模型将被禁用。
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 max-h-[60vh] overflow-auto no-scrollbar">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 [data-skin='niho']:text-[var(--niho-skyblue-gray)] mb-2">
-                API Token <span className="text-red-500 [data-skin='niho']:text-[var(--color-secondary)]">*</span>
-              </label>
-              <input
-                type="password"
-                value={mediaTokenApiKey}
-                onChange={(e) => setMediaTokenApiKey(e.target.value)}
-                className="input-field w-full"
-                placeholder={selectedProvider
-                  ? `请输入 ${getProviderDisplayName(selectedProvider)} 的 API Token`
-                  : '请输入 API Token'}
-              />
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400 [data-skin='niho']:text-[var(--niho-skyblue-gray)] opacity-70">
-                可以使用与聊天模型相同的 Token，也可以使用专用 Token
-              </p>
-            </div>
-            {mediaTokenError && (
-              <div className="text-sm text-red-600 dark:text-red-400 [data-skin='niho']:text-[var(--color-secondary)]">
-                {mediaTokenError}
-              </div>
-            )}
-            {mediaTokenModels.length === 0 ? (
-              <Button
-                variant="primary"
-                onClick={async () => {
-                  if (!selectedProvider) return;
-                  if (!mediaTokenApiKey.trim()) {
-                    setMediaTokenError('请输入 API Token');
-                    return;
-                  }
-                  setIsLoadingMediaModels(true);
-                  setMediaTokenError(null);
-                  try {
-                    const defaultUrl = selectedProvider.default_api_url || getProviderDefaultUrl(selectedProvider.provider_type);
-                    const models = await fetchModelsForProvider(
-                      selectedProvider.provider_type,
-                      defaultUrl,
-                      mediaTokenApiKey.trim(),
-                      true
-                    );
-                    if (models.length === 0) {
-                      setMediaTokenError('未获取到可用模型，请检查 Token 是否正确');
-                      return;
-                    }
-                    setMediaTokenModels(models);
-
-                    // 查找同 Token 下已有的媒体配置（去重）
-                    const existingMediaNames = new Set<string>();
-                    for (const cfg of providerConfigs) {
-                      if (!cfg.metadata?.media_purpose) continue;
-                      try {
-                        const k = await getLLMConfigApiKey(cfg.config_id);
-                        if (k === mediaTokenApiKey.trim()) existingMediaNames.add(cfg.model || cfg.name);
-                      } catch { /* skip */ }
-                    }
-
-                    // 自动选择有媒体能力且未配置的模型
-                    const mediaIds = models
-                      .filter((m) => {
-                        if (typeof m === 'string') return false;
-                        const cap = inferMediaCapabilitiesFromModelId(m.id, m.capabilities);
-                        return (cap?.image_gen || cap?.video_gen) && !existingMediaNames.has(m.id);
-                      })
-                      .map((m) => (typeof m === 'string' ? m : m.id));
-                    setSelectedMediaModels(new Set(mediaIds));
-                  } catch (error) {
-                    setMediaTokenError(error instanceof Error ? error.message : '获取模型列表失败');
-                  } finally {
-                    setIsLoadingMediaModels(false);
-                  }
-                }}
-                disabled={isLoadingMediaModels || !mediaTokenApiKey.trim()}
-                className="w-full"
-              >
-                {isLoadingMediaModels ? (
-                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> 获取模型列表...</>
-                ) : (
-                  '获取模型列表'
-                )}
-              </Button>
-            ) : (
-              <div>
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    选择要启用的媒体模型 ({selectedMediaModels.size})
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => {
-                        const mediaIds = mediaTokenModels
-                          .filter((m) => {
-                            if (typeof m === 'string') return false;
-                            const cap = inferMediaCapabilitiesFromModelId(m.id, m.capabilities);
-                            return cap?.image_gen || cap?.video_gen;
-                          })
-                          .map((m) => (typeof m === 'string' ? m : m.id));
-                        setSelectedMediaModels(new Set(mediaIds));
-                      }}
-                    >
-                      全选
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => setSelectedMediaModels(new Set())}
-                    >
-                      全不选
-                    </Button>
-                  </div>
-                </div>
-                <div className="max-h-60 overflow-y-auto border border-gray-200 dark:border-[#404040] rounded-lg p-2 space-y-1">
-                  {mediaTokenModels.map((model) => {
-                    const modelId = typeof model === 'string' ? model : model.id;
-                    const capabilities = typeof model === 'object' && 'capabilities' in model ? model.capabilities : null;
-                    const inferredCap = inferMediaCapabilitiesFromModelId(modelId, capabilities);
-                    const hasMediaCap = !!(inferredCap?.image_gen || inferredCap?.video_gen);
-                    const isSelected = selectedMediaModels.has(modelId);
-                    // 检查该 Token 下是否已有同名媒体配置
-                    const alreadyExists = hasMediaCap && providerConfigs.some(c =>
-                      c.metadata?.media_purpose && (c.model || c.name) === modelId
-                    );
-
-                    return (
-                      <label
-                        key={modelId}
-                        className={`flex items-center gap-2 p-2 rounded ${
-                          alreadyExists
-                            ? 'opacity-50 cursor-default'
-                            : hasMediaCap
-                              ? 'hover:bg-gray-100 dark:hover:bg-[#363636] cursor-pointer'
-                              : 'opacity-40 cursor-not-allowed'
-                        }`}
-                        title={alreadyExists ? '该模型已在此 Token 下配置为媒体模型' : !hasMediaCap ? '该模型不支持图像/视频生成' : undefined}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={alreadyExists || isSelected}
-                          disabled={!hasMediaCap || alreadyExists}
-                          onChange={(e) => {
-                            if (!hasMediaCap || alreadyExists) return;
-                            const next = new Set(selectedMediaModels);
-                            if (e.target.checked) next.add(modelId);
-                            else next.delete(modelId);
-                            setSelectedMediaModels(next);
-                          }}
-                          className="rounded"
-                        />
-                        <span className={`text-sm flex-1 ${alreadyExists ? 'text-gray-400 dark:text-gray-600' : hasMediaCap ? 'text-gray-700 dark:text-gray-300' : 'text-gray-400 dark:text-gray-600'}`}>
-                          {modelId}
-                        </span>
-                        <div className="flex items-center gap-1.5">
-                          {alreadyExists && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-500">已配置</span>
-                          )}
-                          <CapabilityIcons capabilities={capabilities} modelName={modelId} className="w-4 h-4" />
-                          {capabilities?.image_gen && (
-                            <span className="text-[10px] px-1 py-0 rounded bg-green-500/15 text-green-400">生图</span>
-                          )}
-                          {capabilities?.video_gen && (
-                            <span className="text-[10px] px-1 py-0 rounded bg-blue-500/15 text-blue-400">生视频</span>
-                          )}
-                          {!hasMediaCap && (
-                            <span className="text-[10px] px-1 py-0 rounded bg-gray-500/15 text-gray-500">仅聊天</span>
-                          )}
-                        </div>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-          <DialogFooter className="[data-skin='niho']:border-t-[var(--niho-text-border)]">
-            <Button
-              variant="secondary"
-              className="niho-close-pink"
-              onClick={() => {
-                setShowMediaTokenDialog(false);
-                setMediaTokenApiKey('');
-                setMediaTokenModels([]);
-                setSelectedMediaModels(new Set());
-                setMediaTokenError(null);
-              }}
-            >
-              取消
-            </Button>
-            {mediaTokenModels.length > 0 && (
-              <Button
-                variant="primary"
-                className="[data-skin='niho']:bg-[var(--color-accent)] [data-skin='niho']:hover:bg-[var(--color-accent-hover)] [data-skin='niho']:text-black [data-skin='niho']:border-0"
-                onClick={async () => {
-                  if (!selectedProvider || selectedMediaModels.size === 0) return;
-                  try {
-                    const defaultUrl = selectedProvider.default_api_url || getProviderDefaultUrl(selectedProvider.provider_type);
-                    const supplierId = selectedProvider.provider_id;
-                    if (!supplierId) {
-                      setMediaTokenError('供应商 ID 为空');
-                      return;
-                    }
-
-                    // 获取同 Token 下已有的媒体配置（用于去重）
-                    const existingMediaModels = new Set<string>();
-                    for (const cfg of providerConfigs) {
-                      if (!cfg.metadata?.media_purpose) continue;
-                      try {
-                        const k = await getLLMConfigApiKey(cfg.config_id);
-                        if (k === mediaTokenApiKey.trim()) existingMediaModels.add(cfg.model || cfg.name);
-                      } catch { /* skip */ }
-                    }
-
-                    let mediaCreated = 0;
-                    let mediaSkipped = 0;
-                    for (const modelId of selectedMediaModels) {
-                      if (existingMediaModels.has(modelId)) {
-                        mediaSkipped++;
-                        continue;
-                      }
-                      const modelInfo = mediaTokenModels.find((m) => (typeof m === 'string' ? m : m.id) === modelId);
-                      const capabilities = typeof modelInfo === 'object' && modelInfo && 'capabilities' in modelInfo ? modelInfo.capabilities : null;
-                      const isCallable = typeof modelInfo === 'object' && modelInfo && 'isCallable' in modelInfo
-                        ? (modelInfo as ModelWithCapabilities).isCallable !== false : true;
-
-                      await createLLMConfig({
-                        name: `[媒体] ${modelId}`,
-                        provider: selectedProvider.provider_type,
-                        supplier: supplierId,
-                        api_key: mediaTokenApiKey.trim(),
-                        api_url: defaultUrl,
-                        model: modelId,
-                        enabled: true,
-                        tags: ['media'],
-                        description: '媒体创作专用模型',
-                        metadata: {
-                          ...(capabilities ? { capabilities } : {}),
-                          is_callable: isCallable,
-                          media_purpose: true,
-                        },
-                      });
-                      mediaCreated++;
-                    }
-
-                    await loadConfigs();
-
-                    toast({
-                      title: '媒体创作模型录入成功',
-                      description: mediaSkipped > 0
-                        ? `已创建 ${mediaCreated} 个媒体模型配置（跳过 ${mediaSkipped} 个已存在的模型）`
-                        : `已创建 ${mediaCreated} 个媒体模型配置`,
-                      variant: 'success',
-                    });
-
-                    setShowMediaTokenDialog(false);
-                    setMediaTokenApiKey('');
-                    setMediaTokenModels([]);
-                    setSelectedMediaModels(new Set());
-                    setMediaTokenError(null);
-                  } catch (error) {
-                    setMediaTokenError(error instanceof Error ? error.message : '创建失败');
-                  }
-                }}
-                disabled={selectedMediaModels.size === 0}
-              >
-                <Save className="w-4 h-4 mr-2" />
-                保存 ({selectedMediaModels.size} 个媒体模型)
-              </Button>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </PageLayout>
   );
 };

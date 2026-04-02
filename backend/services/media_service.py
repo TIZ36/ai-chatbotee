@@ -4,6 +4,7 @@
 - Imagen：imagen-3 / imagen-4 使用 generate_images 或 REST :predict，不支持 generateContent。
 - 视频：Veo 通过 generateVideos REST API 生成。
 - OpenAI：Images API (generations, edits)。
+- xAI Grok 图像：优先官方 xai-sdk（gRPC），失败回退 HTTPS REST。
 - Runway：视频生成 (REST API)。
 """
 
@@ -17,6 +18,140 @@ from services.providers import create_provider
 from services.providers.base import LLMMessage
 
 logger = logging.getLogger(__name__)
+
+
+def _is_xai_api_base(base_url: str) -> bool:
+    return 'x.ai' in (base_url or '').lower()
+
+
+def _normalize_xai_grok_imagine_model(base_url: str, model: str) -> str:
+    """
+    xAI 官方图像模型统一为 grok-imagine-image（文生图 / 图生图同一模型名）。
+    见: https://docs.x.ai/docs/guides/image-generation
+    旧别名 grok-imagine-1.0、grok-imagine-1.0-edit 等已不应再传给 API。
+    """
+    if not _is_xai_api_base(base_url):
+        return model
+    m = (model or '').lower().strip()
+    if not m:
+        return 'grok-imagine-image'
+    if 'grok-imagine' in m or 'grok_imagine' in m:
+        return 'grok-imagine-image'
+    return model
+
+
+def _openai_size_to_xai_aspect_ratio(size: Optional[str]) -> Optional[str]:
+    """将 OpenAI 常见 size 映射为 xAI 文档中的 aspect_ratio。"""
+    if not size:
+        return None
+    s = size.lower().replace(' ', '')
+    if s in ('1024x1024', '512x512', '256x256'):
+        return '1:1'
+    if s in ('1792x1024',):
+        return '16:9'
+    if s in ('1024x1792',):
+        return '9:16'
+    return None
+
+
+def _xai_sdk_response_to_media(resp: Any, api_key: str) -> Optional[Dict[str, Any]]:
+    """将 xai_sdk.image.sample 返回的 ImageResponse 转为统一 media 条目。"""
+    try:
+        b64_raw = resp.base64
+        if 'base64,' in b64_raw:
+            b64 = b64_raw.split('base64,', 1)[1]
+        else:
+            b64 = b64_raw
+        return {'type': 'image', 'mimeType': 'image/png', 'data': b64}
+    except Exception:
+        pass
+    try:
+        url_val = resp.url
+        if not url_val:
+            return None
+        dl_headers = {'Authorization': f'Bearer {api_key}'} if api_key else {}
+        dl = requests.get(url_val, headers=dl_headers, timeout=120, allow_redirects=True)
+        if dl.status_code != 200:
+            return None
+        content_type = (dl.headers.get('Content-Type') or '').split(';', 1)[0].strip() or 'image/png'
+        return {
+            'type': 'image',
+            'mimeType': content_type,
+            'data': base64.b64encode(dl.content).decode('ascii'),
+        }
+    except Exception:
+        return None
+
+
+def _xai_image_generations_via_sdk(
+    api_key: str,
+    prompt: str,
+    model: str,
+    size: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """
+    使用 xAI 官方 Python SDK（gRPC）生成图像；失败返回 None 以便回退 REST。
+    文档: https://docs.x.ai/docs/guides/image-generation
+    """
+    try:
+        from xai_sdk import Client
+    except ImportError:
+        logger.info('[xAI SDK] 未安装 xai-sdk，生图将使用 REST')
+        return None
+    try:
+        client = Client(api_key=api_key)
+        kwargs: Dict[str, Any] = {
+            'prompt': prompt or 'a cute cat',
+            'model': model,
+            'image_format': 'base64',
+        }
+        ar = _openai_size_to_xai_aspect_ratio(size)
+        if ar:
+            kwargs['aspect_ratio'] = ar
+        resp = client.image.sample(**kwargs)
+        media_item = _xai_sdk_response_to_media(resp, api_key)
+        if not media_item:
+            logger.warning('[xAI SDK] 生图成功但无法解析为 media，回退 REST')
+            return None
+        return {
+            'media': [media_item],
+            'raw': {'source': 'xai_sdk', 'model': resp.model},
+        }
+    except Exception as e:
+        logger.warning(f'[xAI SDK] image.sample 失败，回退 REST: {e}')
+        return None
+
+
+def _xai_image_edits_via_sdk(
+    api_key: str,
+    prompt: str,
+    model: str,
+    image_data_uri: str,
+) -> Optional[Dict[str, Any]]:
+    """使用 xAI 官方 SDK 做图生图（image_url 可为 data URI）。"""
+    try:
+        from xai_sdk import Client
+    except ImportError:
+        return None
+    try:
+        client = Client(api_key=api_key)
+        resp = client.image.sample(
+            prompt=prompt or 'edit this image',
+            model=model,
+            image_url=image_data_uri,
+            image_format='base64',
+        )
+        media_item = _xai_sdk_response_to_media(resp, api_key)
+        if not media_item:
+            logger.warning('[xAI SDK] 编辑成功但无法解析为 media，回退 REST')
+            return None
+        return {
+            'media': [media_item],
+            'raw': {'source': 'xai_sdk', 'model': resp.model},
+        }
+    except Exception as e:
+        logger.warning(f'[xAI SDK] image.sample(edit) 失败，回退 REST: {e}')
+        return None
 
 
 def _ensure_media_json_serializable(media: List[Dict[str, Any]], strip_thought_signature: bool = True) -> List[Dict[str, Any]]:
@@ -664,16 +799,26 @@ def openai_image_generations(prompt: str, config_id: Optional[str] = None,
         if '/v1' not in base_url and not base_url.endswith('/v1'):
             base_url = base_url + '/v1'
         url = f"{base_url}/images/generations"
-        use_model = model or 'dall-e-3'
-        if use_model.lower().startswith('grok-imagine') and use_model.lower().endswith('-edit'):
-            use_model = 'grok-imagine-1.0'
+        if _is_xai_api_base(base_url):
+            use_model = _normalize_xai_grok_imagine_model(base_url, model or '')
+        else:
+            use_model = model or 'dall-e-3'
+        if _is_xai_api_base(base_url):
+            sdk_out = _xai_image_generations_via_sdk(api_key, prompt, use_model, size)
+            if sdk_out is not None:
+                return sdk_out
         payload = {
             'model': use_model,
             'prompt': prompt or 'a cute cat',
             'n': 1,
         }
         if size:
-            payload['size'] = size
+            if _is_xai_api_base(base_url) and use_model == 'grok-imagine-image':
+                ar = _openai_size_to_xai_aspect_ratio(size)
+                if ar:
+                    payload['aspect_ratio'] = ar
+            else:
+                payload['size'] = size
         if response_format:
             payload['response_format'] = response_format
         if use_model.lower().startswith('dall-e-3'):
@@ -1000,8 +1145,11 @@ def runway_video_status(task_id: str) -> Dict[str, Any]:
 def openai_image_edits(prompt: str, image_b64: Optional[str] = None, image_mime: Optional[str] = None,
                        config_id: Optional[str] = None, model: Optional[str] = None) -> Dict[str, Any]:
     """
-    图生图/编辑（OpenAI Images Edits）。需 multipart 或 JSON with image. 此处用 JSON 传 base64 需看 OpenAI 是否支持；
-    文档多为 multipart。为简单先使用 multipart：image 为文件上传或 base64 写入临时文件。
+    图生图/编辑（OpenAI 兼容 Images Edits）。
+    兼容策略：
+    - 有些供应商要求 multipart/form-data（OpenAI 标准）
+    - 有些供应商要求 application/json（如部分 OpenAI 兼容实现）
+    本方法会按供应商特征优先尝试一种格式，失败后自动回退另一种。
     """
     try:
         svc = _get_llm_service()
@@ -1016,14 +1164,12 @@ def openai_image_edits(prompt: str, image_b64: Optional[str] = None, image_mime:
         if '/v1' not in base_url:
             base_url = base_url + '/v1'
         url = f"{base_url}/images/edits"
-        use_model = model or 'gpt-image-1.5'
-        if use_model.lower().startswith('grok-imagine') and not use_model.lower().endswith('-edit'):
-            use_model = 'grok-imagine-1.0-edit'
+        if _is_xai_api_base(base_url):
+            use_model = _normalize_xai_grok_imagine_model(base_url, model or '')
+        else:
+            use_model = model or 'gpt-image-1.5'
         if not image_b64:
             return {'error': 'image_b64 or image file required'}
-        # OpenAI edits 通常要求 multipart: image=file, prompt=text
-        import tempfile
-        import os
         data = image_b64.strip()
         if data.startswith('data:'):
             if ';base64,' in data:
@@ -1031,23 +1177,15 @@ def openai_image_edits(prompt: str, image_b64: Optional[str] = None, image_mime:
             else:
                 data = data.split(',', 1)[-1]
         raw = base64.b64decode(data)
-        ext = 'png' if (image_mime or '').find('png') >= 0 else 'jpg'
-        with tempfile.NamedTemporaryFile(suffix=f'.{ext}', delete=False) as f:
-            f.write(raw)
-            path = f.name
-        try:
-            with open(path, 'rb') as f:
-                files = {'image': (f'image.{ext}', f, image_mime or f'image/{ext}')}
-                payload = {
-                    'prompt': prompt or 'edit this image',
-                    'model': use_model,
-                    'response_format': 'b64_json',
-                }
-                headers = {'Authorization': f'Bearer {api_key}'}
-                r = requests.post(url, data=payload, files=files, headers=headers, timeout=120)
-            if r.status_code != 200:
-                return {'error': r.text or f'HTTP {r.status_code}'}
-            data = r.json()
+        mime = image_mime or 'image/png'
+        ext = 'png' if 'png' in mime else 'jpg'
+        image_data_uri = f"data:{mime};base64,{data}"
+        if _is_xai_api_base(base_url):
+            sdk_out = _xai_image_edits_via_sdk(api_key, prompt, use_model, image_data_uri)
+            if sdk_out is not None:
+                return sdk_out
+
+        def parse_response_to_media(resp_data: Dict[str, Any]) -> Dict[str, Any]:
             def infer_image_mime(b64: Optional[str], url_val: Optional[str]) -> str:
                 lower_url = (url_val or '').lower()
                 if '.jpg' in lower_url or '.jpeg' in lower_url:
@@ -1084,7 +1222,7 @@ def openai_image_edits(prompt: str, image_b64: Optional[str] = None, image_mime:
                     return None
 
             out_media = []
-            for item in data.get('data', []):
+            for item in resp_data.get('data', []):
                 b64 = item.get('b64_json')
                 url_val = item.get('url')
                 mime_type = infer_image_mime(b64, url_val)
@@ -1095,14 +1233,136 @@ def openai_image_edits(prompt: str, image_b64: Optional[str] = None, image_mime:
                     if fetched:
                         out_media.append(fetched)
                     else:
-                        return {'error': 'Failed to proxy edited image from upstream', 'raw': data}
+                        return {'error': 'Failed to proxy edited image from upstream', 'raw': resp_data}
             if not out_media:
-                return {'error': 'No image in response', 'raw': data}
-            return {'media': out_media, 'raw': data}
-        finally:
+                return {'error': 'No image in response', 'raw': resp_data}
+            return {'media': out_media, 'raw': resp_data}
+
+        prefer_json = ('x.ai' in base_url.lower()) or use_model.lower().startswith('grok-imagine')
+        is_xai = _is_xai_api_base(base_url)
+
+        def post_json() -> requests.Response:
+            headers = {'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}
+            base_payload = {
+                'prompt': prompt or 'edit this image',
+                'model': use_model,
+                'response_format': 'b64_json',
+            }
+            # xAI 官方：image 为对象 { "url": "...", "type": "image_url" }，url 可为 data URI
+            # https://docs.x.ai/docs/guides/image-generation
+            xai_official_edit = {
+                **base_payload,
+                'image': {'url': image_data_uri, 'type': 'image_url'},
+            }
+            # 其他 OpenAI 兼容实现可能仍接受字符串或其它结构
+            payload_variants = [
+                xai_official_edit,
+                {**base_payload, 'image': image_data_uri},
+                {**base_payload, 'image': {'image_url': image_data_uri}},
+                {**base_payload, 'image': {'data': data, 'mime_type': mime}},
+                {**base_payload, 'image': {'b64_json': data, 'mime_type': mime}},
+                {**base_payload, 'images': [image_data_uri]},
+                {**base_payload, 'images': [{'image_url': image_data_uri}]},
+                {**base_payload, 'images': [{'data': data, 'mime_type': mime}]},
+            ]
+
+            if is_xai:
+                variants = [xai_official_edit]
+            elif prefer_json:
+                variants = payload_variants
+            else:
+                variants = payload_variants[:1]
+            last_response: Optional[requests.Response] = None
+            for i, payload in enumerate(variants):
+                r = requests.post(url, json=payload, headers=headers, timeout=120)
+                if r.status_code == 200:
+                    return r
+                last_response = r
+                err_text = (r.text or '')[:240]
+                logger.warning(
+                    f"[OpenAI Image Edits] json variant={i + 1}/{len(variants)} failed: "
+                    f"status={r.status_code}, body={err_text}"
+                )
+                # 仅在明显的字段类型/反序列化问题下继续尝试下一种 JSON 结构
+                msg = (r.text or '').lower()
+                can_retry_same_mode = (
+                    'invalid type' in msg
+                    or 'deserialize' in msg
+                    or 'expected' in msg
+                    or 'image' in msg
+                    or r.status_code in (400, 422)
+                )
+                if not can_retry_same_mode:
+                    return r
+            return last_response if last_response is not None else requests.post(
+                url, json=variants[0], headers=headers, timeout=120
+            )
+
+        def post_multipart() -> requests.Response:
+            import tempfile
+            import os
+            with tempfile.NamedTemporaryFile(suffix=f'.{ext}', delete=False) as f:
+                f.write(raw)
+                path = f.name
             try:
-                os.unlink(path)
-            except Exception:
-                pass
+                with open(path, 'rb') as fobj:
+                    files = {'image': (f'image.{ext}', fobj, mime)}
+                    payload = {
+                        'prompt': prompt or 'edit this image',
+                        'model': use_model,
+                        'response_format': 'b64_json',
+                    }
+                    headers = {'Authorization': f'Bearer {api_key}'}
+                    return requests.post(url, data=payload, files=files, headers=headers, timeout=120)
+            finally:
+                try:
+                    os.unlink(path)
+                except Exception:
+                    pass
+
+        attempt_order = ('json', 'multipart') if prefer_json else ('multipart', 'json')
+        first_error_text = ''
+        first_status = 0
+        first_mode = ''
+
+        def _should_try_fallback(failed_mode: str, err_text: str, status_code: int) -> bool:
+            msg = (err_text or '').lower()
+            # 典型“格式不匹配”才切换协议；避免把真正错误被第二次尝试覆盖
+            format_mismatch = (
+                'content-type' in msg
+                or 'application/json' in msg
+                or 'multipart' in msg
+                or status_code in (400, 415)
+            )
+            if not format_mismatch:
+                return False
+            # x.ai / grok 默认 JSON，只有明确提示 multipart 才尝试回退
+            if prefer_json and failed_mode == 'json':
+                return 'multipart' in msg or 'form-data' in msg or 'file' in msg
+            # 非 JSON 优先场景：若提示 expected application/json，则切到 JSON
+            if (not prefer_json) and failed_mode == 'multipart':
+                return 'application/json' in msg or 'content-type' in msg
+            return True
+
+        for idx, mode in enumerate(attempt_order):
+            logger.info(f"[OpenAI Image Edits] trying mode={mode}, model={use_model}")
+            r = post_json() if mode == 'json' else post_multipart()
+            if r.status_code == 200:
+                return parse_response_to_media(r.json())
+            err_text = r.text or f'HTTP {r.status_code}'
+            if idx == 0:
+                first_error_text = err_text
+                first_status = r.status_code
+                first_mode = mode
+            logger.warning(f"[OpenAI Image Edits] mode={mode} failed: status={r.status_code}, body={err_text[:300]}")
+            # 首次失败后仅在“疑似协议格式不匹配”时再尝试下一种
+            if idx == 0 and len(attempt_order) > 1:
+                if not _should_try_fallback(mode, err_text, r.status_code):
+                    break
+
+        # 返回首次错误，避免被二次尝试噪音覆盖
+        final_error = first_error_text or 'Image edit request failed'
+        logger.error(f"[OpenAI Image Edits] final failure mode={first_mode}, status={first_status}, error={final_error[:300]}")
+        return {'error': final_error}
     except Exception as e:
         return {'error': str(e)}

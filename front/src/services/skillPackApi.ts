@@ -96,7 +96,8 @@ export async function createSkillPack(params: {
  */
 export async function saveSkillPack(params: {
   name: string;
-  summary: string;
+  /** 可省略，后端会写入默认占位摘要 */
+  summary?: string;
   source_session_id?: string;
   source_messages?: string[];
 }): Promise<SkillPack> {

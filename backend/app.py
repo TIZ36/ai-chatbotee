@@ -326,26 +326,6 @@ def log_http_response(response):
     print(f"{'=' * 80}\n")
 
 
-# CORS 预检请求处理辅助函数
-def handle_cors_preflight():
-    """处理 CORS 预检请求，使用统一的CORS配置"""
-    response = Response(status=200)
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = CORS_ALLOWED_METHODS_STR
-    # 允许所有请求头：回显浏览器在 Access-Control-Request-Headers 中请求的所有请求头
-    requested_headers = request.headers.get("Access-Control-Request-Headers", "")
-    if requested_headers:
-        # 如果浏览器指定了需要的请求头，直接回显它们（允许所有）
-        response.headers["Access-Control-Allow-Headers"] = requested_headers
-    else:
-        # 如果没有指定，使用统一的允许头列表
-        response.headers["Access-Control-Allow-Headers"] = CORS_ALLOWED_HEADERS_STR
-    # 使用统一的暴露响应头列表
-    response.headers["Access-Control-Expose-Headers"] = CORS_EXPOSE_HEADERS_STR
-    response.headers["Access-Control-Max-Age"] = "3600"
-    return response
-
-
 # ==================== Role Versions（角色版本） ====================
 
 
@@ -512,6 +492,27 @@ CORS(
     expose_headers=CORS_EXPOSE_HEADERS,
     methods=CORS_ALLOWED_METHODS,
 )
+
+
+def handle_cors_preflight():
+    """CORS 预检；须与 after_request_cors 一致（supports_credentials 时回显具体 Origin）。"""
+    response = Response(status=200)
+    origin = request.headers.get("Origin")
+    if origin:
+        if "*" in cors_origins or origin in cors_origins:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+    elif "*" in cors_origins:
+        response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = CORS_ALLOWED_METHODS_STR
+    requested_headers = request.headers.get("Access-Control-Request-Headers", "")
+    if requested_headers:
+        response.headers["Access-Control-Allow-Headers"] = requested_headers
+    else:
+        response.headers["Access-Control-Allow-Headers"] = CORS_ALLOWED_HEADERS_STR
+    response.headers["Access-Control-Expose-Headers"] = CORS_EXPOSE_HEADERS_STR
+    response.headers["Access-Control-Max-Age"] = "3600"
+    return response
 
 
 # 添加after_request处理器确保CORS头正确 - 使用统一的CORS配置常量
@@ -8942,6 +8943,9 @@ def import_agent():
 def list_skill_packs():
     """获取所有技能包列表"""
 
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+
     try:
         conn = get_mysql_connection()
         if not conn:
@@ -8993,6 +8997,9 @@ def list_skill_packs():
 @app.route("/api/skill-packs", methods=["POST", "OPTIONS"])
 def create_skill_pack():
     """创建技能包（从选定的消息范围生成）"""
+
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
 
     try:
         conn = get_mysql_connection()
@@ -9381,20 +9388,28 @@ def create_skill_pack():
 def save_skill_pack():
     """保存技能包（用户确认后）"""
 
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+
     try:
         conn = get_mysql_connection()
         if not conn:
             return jsonify({"error": "MySQL not available"}), 503
 
         data = request.json
-        name = data.get("name")
-        summary = data.get("summary")
+        name = (data.get("name") or "").strip()
+        summary = (data.get("summary") or "").strip()
         source_session_id = data.get("source_session_id")
         source_messages = data.get("source_messages", [])
         process_steps = data.get("process_steps", [])  # Topic会话的执行轨迹
+        if not isinstance(process_steps, list):
+            process_steps = []
 
-        if not name or not summary:
-            return jsonify({"error": "name and summary are required"}), 400
+        if not name:
+            return jsonify({"error": "name is required"}), 400
+        # summary 列 NOT NULL：允许前端只填名称，空摘要时使用占位文案
+        if not summary:
+            summary = "（暂无描述，可在技能包页补充）"
 
         cursor = None
         try:
@@ -9408,11 +9423,14 @@ def save_skill_pack():
             if process_steps:
                 ext_data = json.dumps({"processSteps": process_steps})
 
+            # process_steps 列：与 Actor 加载一致；空列表写入 JSON []，避免 NOT NULL 无默认值时 INSERT 失败
+            process_steps_json = json.dumps(process_steps)
+
             cursor.execute(
                 """
                 INSERT INTO skill_packs 
-                (skill_pack_id, name, summary, source_session_id, source_messages, ext)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                (skill_pack_id, name, summary, source_session_id, source_messages, ext, process_steps)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
             """,
                 (
                     skill_pack_id,
@@ -9421,6 +9439,7 @@ def save_skill_pack():
                     source_session_id,
                     json.dumps(source_messages) if source_messages else None,
                     ext_data,
+                    process_steps_json,
                 ),
             )
 
@@ -9453,6 +9472,9 @@ def save_skill_pack():
 def create_sop_skill_pack():
     """创建纯文本SOP技能包（用户手动输入）"""
 
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+
     try:
         conn = get_mysql_connection()
         if not conn:
@@ -9480,22 +9502,31 @@ def create_sop_skill_pack():
             cursor.execute(
                 """
                 INSERT INTO skill_packs 
-                (skill_pack_id, name, summary, ext)
-                VALUES (%s, %s, %s, %s)
+                (skill_pack_id, name, summary, ext, process_steps)
+                VALUES (%s, %s, %s, %s, %s)
             """,
-                (skill_pack_id, name, sop_text, ext_data),
+                (skill_pack_id, name, sop_text, ext_data, json.dumps([])),
             )
 
             # 如果指定了分配目标，创建分配记录
             if assign_to_session_id:
+                cursor.execute(
+                    """
+                    SELECT session_type FROM sessions WHERE session_id = %s
+                """,
+                    (assign_to_session_id,),
+                )
+                sess_row = cursor.fetchone()
+                target_type = (sess_row.get("session_type") if sess_row else None) or "memory"
+
                 assignment_id = str(uuid.uuid4())
                 cursor.execute(
                     """
                     INSERT INTO skill_pack_assignments 
-                    (assignment_id, skill_pack_id, target_session_id)
-                    VALUES (%s, %s, %s)
+                    (assignment_id, skill_pack_id, target_type, target_session_id)
+                    VALUES (%s, %s, %s, %s)
                 """,
-                    (assignment_id, skill_pack_id, assign_to_session_id),
+                    (assignment_id, skill_pack_id, target_type, assign_to_session_id),
                 )
 
                 # 如果要设为当前SOP，更新会话的ext
@@ -9557,6 +9588,9 @@ def create_sop_skill_pack():
 @app.route("/api/skill-packs/optimize", methods=["POST", "OPTIONS"])
 def optimize_skill_pack_summary():
     """优化技能包总结"""
+
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
 
     try:
         conn = get_mysql_connection()
@@ -9818,6 +9852,9 @@ def optimize_skill_pack_summary():
 def get_skill_pack(skill_pack_id):
     """获取技能包详情"""
 
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+
     try:
         conn = get_mysql_connection()
         if not conn:
@@ -9873,6 +9910,9 @@ def get_skill_pack(skill_pack_id):
 @app.route("/api/skill-packs/<skill_pack_id>", methods=["PUT", "OPTIONS"])
 def update_skill_pack(skill_pack_id):
     """更新技能包"""
+
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
 
     try:
         conn = get_mysql_connection()
@@ -9935,6 +9975,9 @@ def update_skill_pack(skill_pack_id):
 def delete_skill_pack(skill_pack_id):
     """删除技能包"""
 
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+
     try:
         conn = get_mysql_connection()
         if not conn:
@@ -9974,6 +10017,9 @@ def delete_skill_pack(skill_pack_id):
 @app.route("/api/skill-packs/<skill_pack_id>/assign", methods=["POST", "OPTIONS"])
 def assign_skill_pack(skill_pack_id):
     """分配技能包到记忆体/智能体"""
+
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
 
     try:
         conn = get_mysql_connection()
@@ -10052,6 +10098,9 @@ def assign_skill_pack(skill_pack_id):
 def unassign_skill_pack(skill_pack_id):
     """取消技能包分配"""
 
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+
     try:
         conn = get_mysql_connection()
         if not conn:
@@ -10097,6 +10146,9 @@ def unassign_skill_pack(skill_pack_id):
 @app.route("/api/sessions/<session_id>/skill-packs", methods=["GET", "OPTIONS"])
 def get_session_skill_packs(session_id):
     """获取某会话已分配的技能包列表"""
+
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
 
     try:
         conn = get_mysql_connection()

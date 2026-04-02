@@ -5,7 +5,7 @@
 
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Send, Loader, Loader2, Bot, Wrench, AlertCircle, CheckCircle, Brain, Plug, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Sparkles, Workflow as WorkflowIcon, Play, ArrowRight, Trash2, X, Edit2, RotateCw, Database, Paperclip, Music, HelpCircle, Package, CheckSquare, Square, Quote, Lightbulb, Eye, Volume2, Paintbrush, Image, Plus, CornerDownRight } from 'lucide-react';
+import { Send, Loader, Loader2, Bot, Wrench, AlertCircle, CheckCircle, Brain, Plug, XCircle, ChevronDown, ChevronUp, MessageCircle, FileText, Sparkles, Workflow as WorkflowIcon, Play, ArrowRight, Trash2, X, Edit2, RotateCw, Database, Paperclip, Music, HelpCircle, Package, CheckSquare, Square, Quote, Lightbulb, Eye, Volume2, Paintbrush, Image, Plus, CornerDownRight, Check } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Virtuoso } from 'react-virtuoso';
@@ -20,6 +20,7 @@ import { createSkillPack, saveSkillPack, optimizeSkillPackSummary, getSkillPacks
 import { getBackendUrl } from '../utils/backendUrl';
 import { estimate_messages_tokens, get_model_max_tokens, estimate_tokens } from '../services/tokenCounter';
 import AttachmentMenu from './AttachmentMenu';
+import { readMcpAutoUseEnabled } from '../utils/mcpAutoUse';
 import { Button } from './ui/Button';
 import { Checkbox } from './ui/Checkbox';
 import { ConfirmDialog } from './ui/ConfirmDialog';
@@ -115,6 +116,8 @@ interface WorkflowProps {
   onSelectSession?: (sessionId: string) => void;
   enableToolCalling?: boolean;
   onToggleToolCalling?: (enabled: boolean) => void;
+  /** 外部传入的已选 SkillPack ID 列表（用于 AgentActor 模式触发 Skill） */
+  selectedSkillPackIds?: string[];
 }
 
 const Workflow: React.FC<WorkflowProps> = ({
@@ -122,6 +125,7 @@ const Workflow: React.FC<WorkflowProps> = ({
   onSelectSession,
   enableToolCalling,
   onToggleToolCalling,
+  selectedSkillPackIds: selectedSkillPackIdsFromProps,
 }) => {
   // 将工作流消息的 'error' role 规范化为 UI 组件可识别的 role（避免类型不匹配）
   const toUIRole = useCallback((role: 'user' | 'assistant' | 'system' | 'tool' | 'error'): UIMessageRole => {
@@ -221,6 +225,10 @@ const Workflow: React.FC<WorkflowProps> = ({
   const [atSelectorQuery, setAtSelectorQuery] = useState(''); // @ 选择器的查询字符串
   const [selectedComponentIndex, setSelectedComponentIndex] = useState(0); // 当前选中的组件索引（用于键盘导航）
   const [selectedComponents, setSelectedComponents] = useState<Array<{ type: 'mcp' | 'skillpack' | 'agent'; id: string; name: string }>>([]); // 已选定的组件（tag）
+  // Skill 浮动选择器（独立于 @，用于显式选 skill）
+  const [showSkillSelector, setShowSkillSelector] = useState(false);
+  const [skillSelectorIndex, setSkillSelectorIndex] = useState(0);
+  const [skillTriggeredBySlash, setSkillTriggeredBySlash] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const editingMessageIdRef = useRef<string | null>(null);
   const selectorRef = useRef<HTMLDivElement>(null);
@@ -2347,17 +2355,37 @@ const Workflow: React.FC<WorkflowProps> = ({
         const isActorSession = sessionForActor?.session_type === 'topic_general' || sessionForActor?.session_type === 'agent';
         if (isActorSession) {
           const mcp_servers = Array.from(selectedMcpServerIds);
-          const skill_pack_ids = selectedComponents
-            .filter(c => c.type === 'skillpack')
-            .map(c => c.id);
+          const skill_pack_ids = Array.from(selectedSkillPackIds);
           
           messageData.ext = {
             ...(messageData.ext || {}),
+            auto_mcp: readMcpAutoUseEnabled(),
           };
           
           if (mcp_servers.length > 0 || skill_pack_ids.length > 0) {
             messageData.ext.mcp_servers = mcp_servers;
             messageData.ext.skill_packs = skill_pack_ids;
+
+            // 为前端展示记录本轮激活的 Skill 名称
+            const activeSkillNames: string[] = [];
+            if (skill_pack_ids.length > 0) {
+              const byId = new Map<string, string>();
+              currentSessionSkillPacks.forEach(sp => {
+                if (sp.skill_pack_id && sp.name) byId.set(sp.skill_pack_id, sp.name);
+              });
+              allSkillPacks.forEach(sp => {
+                if (sp.skill_pack_id && sp.name && !byId.has(sp.skill_pack_id)) {
+                  byId.set(sp.skill_pack_id, sp.name);
+                }
+              });
+              for (const sid of skill_pack_ids) {
+                const nm = byId.get(sid);
+                if (nm) activeSkillNames.push(nm);
+              }
+            }
+            if (activeSkillNames.length > 0) {
+              (messageData.ext as any).active_skill_names = activeSkillNames;
+            }
           }
           messageData.ext.use_tool_calling = toolCallingEnabled;
           if (attachedMedia.length > 0) {
@@ -3665,6 +3693,7 @@ const Workflow: React.FC<WorkflowProps> = ({
       setSkillPackProcessInfo(null);
       setSkillPackConversationText('');
       setOptimizationPrompt('');
+      await loadSkillPacks();
       alert(`技能包 "${saved.name}" 保存成功！`);
     } catch (error: any) {
       console.error('[Workflow] Failed to save skill pack:', error);
@@ -3988,17 +4017,11 @@ const Workflow: React.FC<WorkflowProps> = ({
   
   // 处理输入框变化，检测 @ 符号
   const getSelectableComponents = React.useCallback(() => {
-    const mcpList = mcpServers
-      .filter(s => s.name.toLowerCase().includes(atSelectorQuery.toLowerCase()))
-      .map(s => ({ type: 'mcp' as const, id: s.id, name: s.name, displayName: s.display_name || s.name }));
-    
-    // 话题参与者（Agent）
     const agentList = topicParticipants
       .filter(p => p.participant_type === 'agent' && (p.name || '').toLowerCase().includes(atSelectorQuery.toLowerCase()))
       .map(p => ({ type: 'agent' as const, id: p.participant_id, name: p.name || p.participant_id, displayName: p.name || p.participant_id, avatar: p.avatar }));
-    
-    return [...agentList, ...mcpList];
-  }, [mcpServers, atSelectorQuery, topicParticipants]);
+    return agentList;
+  }, [atSelectorQuery, topicParticipants]);
   
   // 选择感知组件（添加为 tag）
   const handleSelectComponent = async (component: { type: 'mcp' | 'skillpack' | 'agent'; id: string; name: string }) => {
@@ -4034,39 +4057,8 @@ const Workflow: React.FC<WorkflowProps> = ({
       }
       return;
     }
-    
-    // 检查是否已经添加过该组件
-    const isAlreadySelected = selectedComponents.some(
-      c => c.id === component.id && c.type === component.type
-    );
-    
-    if (!isAlreadySelected) {
-      // 添加到已选定的组件列表
-      setSelectedComponents(prev => [...prev, component]);
-      
-      // 如果是MCP服务器，自动激活它（添加到selectedMcpServerIds）
-      if (component.type === 'mcp') {
-        // 如果MCP服务器未连接，先尝试连接
-        if (!connectedMcpServerIds.has(component.id)) {
-          console.log('[Workflow] MCP server not connected, attempting to connect:', component.name);
-          try {
-            const connected = await handleConnectServer(component.id);
-            if (!connected) return;
-          } catch (error) {
-            console.error('[Workflow] Failed to connect MCP server:', error);
-            return;
-          }
-        }
-        // 连接后添加到选中列表
-          setSelectedMcpServerIds(prev => {
-            const newSet = new Set(prev);
-            newSet.add(component.id);
-            return newSet;
-          });
-          console.log('[Workflow] Auto-activated MCP server:', component.name);
-      }
-    }
-    
+
+    // @ 列表仅包含 Agent；MCP 在「MCP」页签与输入区「插件」中管理
     // 移除输入框中的 @ 符号及其后的内容
     const beforeAt = input.substring(0, atSelectorIndex);
     const afterAt = input.substring(atSelectorIndex + 1);
@@ -4215,9 +4207,12 @@ const Workflow: React.FC<WorkflowProps> = ({
   };
 
 
-  // 获取选中的skill pack IDs
+  // 获取选中的 skill pack IDs（优先使用外部传入，用于与顶部工具条同步）
   const selectedSkillPackIds = new Set(
-    selectedComponents.filter(c => c.type === 'skillpack').map(c => c.id)
+    (selectedSkillPackIdsFromProps && selectedSkillPackIdsFromProps.length > 0
+      ? selectedSkillPackIdsFromProps
+      : selectedComponents.filter(c => c.type === 'skillpack').map(c => c.id)
+    ),
   );
 
   // 处理拖拽组件到对话框
@@ -4578,6 +4573,21 @@ const Workflow: React.FC<WorkflowProps> = ({
               </div>
               {/* 第二行：气泡换行顶格贴左（抵消列表 px-3），不空头像位 */}
               <div className="w-full min-w-0 group relative mt-1 -ml-3">
+                {/* Skill 使用标记（助手/工具消息） */}
+                {Array.isArray((message.ext as any)?.active_skill_names) &&
+                  (message.ext as any).active_skill_names.length > 0 && (
+                    <div className="mb-1 ml-3 flex flex-wrap gap-1">
+                      {(message.ext as any).active_skill_names.map((name: string) => (
+                        <span
+                          key={name}
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border border-emerald-500/60 bg-emerald-500/8 text-[11px] text-emerald-500"
+                        >
+                          <Package className="w-3 h-3" />
+                          <span className="max-w-[120px] truncate">{name}</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 <MessageBubbleContainer role={toUIRole(message.role)} toolType={message.toolType} className="w-full">
                   <MessageContent
                     message={message}
@@ -4638,6 +4648,23 @@ const Workflow: React.FC<WorkflowProps> = ({
                 )}
                 <MessageAvatar role={toUIRole(message.role)} toolType={message.toolType} size="md" />
               </div>
+              {/* Skill 使用标记（用户消息） */}
+              {Array.isArray((message.ext as any)?.active_skill_names) &&
+                (message.ext as any).active_skill_names.length > 0 && (
+                  <div className="w-full min-w-0 flex justify-end">
+                    <div className="mb-1 flex flex-wrap justify-end gap-1 max-w-[85%]">
+                      {(message.ext as any).active_skill_names.map((name: string) => (
+                        <span
+                          key={name}
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border border-emerald-500/60 bg-emerald-500/8 text-[11px] text-emerald-500"
+                        >
+                          <Package className="w-3 h-3" />
+                          <span className="max-w-[120px] truncate">{name}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               <div className="w-full min-w-0 flex justify-end">
                 <MessageBubbleContainer role={toUIRole(message.role)} toolType={message.toolType} className="max-w-[85%] w-max">
                   <MessageContent
@@ -4875,6 +4902,77 @@ const Workflow: React.FC<WorkflowProps> = ({
     selectedComponentIndex,
     setSelectedComponentIndex,
   });
+
+  // 监听 "/" 触发 Skill 选择（仅在输入框聚焦且未显示 @ 选择器时生效）
+  const handleKeyDownWithSlash = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === '/' && !showAtSelector) {
+        // 使用 "/" 呼出 Skill 选择
+        if (!showSkillSelector) {
+          setShowSkillSelector(true);
+          setSkillTriggeredBySlash(true);
+          setSkillSelectorIndex(0);
+        }
+        return handleKeyDown(e);
+      }
+
+      if (showSkillSelector) {
+        // 删除 "/"：关闭弹框并重置标记
+        if (e.key === 'Backspace' && skillTriggeredBySlash) {
+          setShowSkillSelector(false);
+          setSkillTriggeredBySlash(false);
+          return handleKeyDown(e);
+        }
+
+        // "/" 后输入空格：认为只是想输入 "/"，关闭弹框
+        if (e.key === ' ' && skillTriggeredBySlash) {
+          setShowSkillSelector(false);
+          setSkillTriggeredBySlash(false);
+          return handleKeyDown(e);
+        }
+
+        if (allSkillPacks.length > 0) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setSkillSelectorIndex((prev) => (prev + 1) % allSkillPacks.length);
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setSkillSelectorIndex((prev) =>
+            prev - 1 < 0 ? allSkillPacks.length - 1 : prev - 1,
+          );
+          return;
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const sp = allSkillPacks[skillSelectorIndex];
+          if (sp) {
+            setSelectedComponents([
+              { type: 'skillpack', id: sp.skill_pack_id, name: sp.name },
+            ]);
+            setShowSkillSelector(false);
+            if (skillTriggeredBySlash) {
+              setSkillTriggeredBySlash(false);
+              setInput((prev) => {
+                if (!inputRef.current) return prev.replace('/', '');
+                const cursor = inputRef.current.selectionStart || 0;
+                const before = prev.slice(0, cursor);
+                const after = prev.slice(cursor);
+                const lastSlash = before.lastIndexOf('/');
+                if (lastSlash === -1) return prev.replace('/', '');
+                return before.slice(0, lastSlash) + before.slice(lastSlash + 1) + after;
+              });
+            }
+          }
+          return;
+        }
+        } // end allSkillPacks.length > 0
+      }
+      handleKeyDown(e);
+    },
+    [handleKeyDown, showAtSelector, showSkillSelector, allSkillPacks, skillSelectorIndex],
+  );
 
   return (
     <>
@@ -5380,8 +5478,9 @@ const Workflow: React.FC<WorkflowProps> = ({
             onClick={(e) => {
               // 点击输入框区域外部时关闭选择器（但不包括选择器本身）
               const target = e.target as HTMLElement;
-              if (showAtSelector && !target.closest('.at-selector-container') && !target.closest('textarea')) {
-                setShowAtSelector(false);
+              if (!target.closest('.at-selector-container') && !target.closest('textarea')) {
+                if (showAtSelector) setShowAtSelector(false);
+                if (showSkillSelector) setShowSkillSelector(false);
               }
             }}
           >
@@ -5519,51 +5618,20 @@ const Workflow: React.FC<WorkflowProps> = ({
           {/* 工具栏：模型选择、插件、人设 */}
           <div className="workflow-composer-toolbar flex items-center justify-between px-2 py-1.5">
             <div className="flex items-center gap-0.5 flex-nowrap flex-1 min-w-0 overflow-hidden">
-              {/* 模型选择（放到插件前面） */}
-              {currentSessionType !== 'topic_general' && !isLoading && (
-                <div className="flex items-center gap-1 mr-1 flex-shrink-0">
-                  <button
-                    onClick={() => setShowModelSelectDialog(true)}
-                    className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition-all ${
-                      selectedLLMConfig
-                        ? 'bg-emerald-50 dark:bg-[rgba(0,212,170,0.08)] text-emerald-600 dark:text-[#00d4aa] font-medium ring-1 ring-emerald-200 dark:ring-[rgba(0,212,170,0.25)]'
-                        : 'text-gray-400 dark:text-[#555] hover:text-gray-600 dark:hover:text-[#888]'
-                    }`}
-                    title={selectedLLMConfig ? `${selectedLLMConfig.name}${selectedLLMConfig.model ? ` (${selectedLLMConfig.model})` : ''}` : '选择模型'}
-                  >
-                    {selectedLLMConfig ? (
-                      <>
-                        {(() => {
-                          const providerInfo = getProviderIcon(selectedLLMConfig, providers);
-                          const providerType = (selectedLLMConfig.supplier || selectedLLMConfig.provider || 'openai').toLowerCase();
-                          if (['openai', 'anthropic', 'google', 'gemini', 'deepseek', 'ollama'].includes(providerType)) {
-                            return <ProviderIcon provider={providerType} size={14} className="flex-shrink-0" />;
-                          }
-                          return <span className="text-xs">{providerInfo.icon}</span>;
-                        })()}
-                        <span className="font-medium truncate max-w-[80px]">
-                          {selectedLLMConfig.shortname || selectedLLMConfig.name}
-                        </span>
-                        {(() => {
-                          const enableThinking = selectedLLMConfig.metadata?.enableThinking ?? false;
-                          const supportedInputs: string[] = selectedLLMConfig.metadata?.supportedInputs ?? [];
-                          const supportedOutputs: string[] = selectedLLMConfig.metadata?.supportedOutputs ?? [];
-                          const caps = [];
-                          if (enableThinking) caps.push(<Brain key="t" className="w-2.5 h-2.5 text-purple-400" />);
-                          if (supportedInputs.includes('image')) caps.push(<Eye key="v" className="w-2.5 h-2.5 text-yellow-400" />);
-                          if (supportedInputs.includes('audio')) caps.push(<Volume2 key="a" className="w-2.5 h-2.5 text-neon-400" />);
-                          if (supportedOutputs.includes('image')) caps.push(<Paintbrush key="i" className="w-2.5 h-2.5 text-red-400" />);
-                          return caps.length > 0 ? <div className="flex items-center gap-0.5">{caps}</div> : null;
-                        })()}
-                      </>
-                    ) : (
-                      <>
-                        <Brain className="w-3 h-3" />
-                        <span>选择模型</span>
-                      </>
-                    )}
-                  </button>
-                </div>
+              {/* Skill 选择按钮：底部插件栏左侧（仅在未选择 Skill 时显示） */}
+              {!isLoading && Array.from(selectedSkillPackIds).length === 0 && (
+                <button
+                  type="button"
+                  className="mr-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border border-dashed border-gray-300 dark:border-gray-600 text-[11px] text-gray-600 dark:text-[#c0c0c0] hover:bg-muted/60 flex-shrink-0"
+                  onClick={() => {
+                    setShowSkillSelector((v) => !v);
+                    setSkillSelectorIndex(0);
+                    setSkillTriggeredBySlash(false);
+                  }}
+                >
+                  <Package className="w-3 h-3" />
+                  <span>选择 Skill</span>
+                </button>
               )}
 
               {/* 插件入口（MCP / Skill / 媒体附件） */}
@@ -5619,6 +5687,80 @@ const Workflow: React.FC<WorkflowProps> = ({
                 );
               })()}
             </div>
+
+            <div className="ml-2 flex items-center gap-1 flex-shrink-0">
+              {/* 模型选择：底部插件栏右侧，位于发送按钮左侧 */}
+              {currentSessionType !== 'topic_general' && (
+                <button
+                  onClick={() => setShowModelSelectDialog(true)}
+                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition-all ${
+                    selectedLLMConfig
+                      ? 'bg-emerald-50 dark:bg-[rgba(0,212,170,0.08)] text-emerald-600 dark:text-[#00d4aa] font-medium ring-1 ring-emerald-200 dark:ring-[rgba(0,212,170,0.25)]'
+                      : 'text-gray-400 dark:text-[#555] hover:text-gray-600 dark:hover:text-[#888]'
+                  }`}
+                  title={selectedLLMConfig ? `${selectedLLMConfig.name}${selectedLLMConfig.model ? ` (${selectedLLMConfig.model})` : ''}` : '选择模型'}
+                >
+                  {selectedLLMConfig ? (
+                    <>
+                      {(() => {
+                        const providerInfo = getProviderIcon(selectedLLMConfig, providers);
+                        const providerType = (selectedLLMConfig.supplier || selectedLLMConfig.provider || 'openai').toLowerCase();
+                        if (['openai', 'anthropic', 'google', 'gemini', 'deepseek', 'ollama'].includes(providerType)) {
+                          return <ProviderIcon provider={providerType} size={14} className="flex-shrink-0" />;
+                        }
+                        return <span className="text-xs">{providerInfo.icon}</span>;
+                      })()}
+                      <span className="font-medium truncate max-w-[80px]">
+                        {selectedLLMConfig.shortname || selectedLLMConfig.name}
+                      </span>
+                      {(() => {
+                        const enableThinking = selectedLLMConfig.metadata?.enableThinking ?? false;
+                        const supportedInputs: string[] = selectedLLMConfig.metadata?.supportedInputs ?? [];
+                        const supportedOutputs: string[] = selectedLLMConfig.metadata?.supportedOutputs ?? [];
+                        const caps = [];
+                        if (enableThinking) caps.push(<Brain key="t" className="w-2.5 h-2.5 text-purple-400" />);
+                        if (supportedInputs.includes('image')) caps.push(<Eye key="v" className="w-2.5 h-2.5 text-yellow-400" />);
+                        if (supportedInputs.includes('audio')) caps.push(<Volume2 key="a" className="w-2.5 h-2.5 text-neon-400" />);
+                        if (supportedOutputs.includes('image')) caps.push(<Paintbrush key="i" className="w-2.5 h-2.5 text-red-400" />);
+                        return caps.length > 0 ? <div className="flex items-center gap-0.5">{caps}</div> : null;
+                      })()}
+                    </>
+                  ) : (
+                    <>
+                      <Brain className="w-3 h-3" />
+                      <span>选择模型</span>
+                    </>
+                  )}
+                </button>
+              )}
+
+              {/* 发送/中断按钮：底部插件栏最右侧 */}
+              {isLoading ? (
+                <Button
+                  onClick={handleInterrupt}
+                  variant="destructive"
+                  size="sm"
+                  className="gap-1.5 px-3 py-1 h-7 text-xs shrink-0 mt-0"
+                  title="停止生成并可立即发送下一条"
+                >
+                  <XCircle className="w-3.5 h-3.5" />
+                  <span>停止生成</span>
+                </Button>
+              ) : (
+                <Button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleSend();
+                  }}
+                  disabled={(!input.trim() && attachedMedia.length === 0) || !selectedLLMConfig}
+                  variant="primary"
+                  size="sm"
+                  className="workflow-composer-send-btn !h-6 !w-6 !min-h-0 !min-w-0 !px-0 rounded-md dark:text-black mt-0"
+                >
+                  <Send className="w-2.5 h-2.5" />
+                </Button>
+              )}
+            </div>
           </div>
 
           <div className="workflow-composer-main flex space-x-1 px-1.5 pb-1.5">
@@ -5666,10 +5808,37 @@ const Workflow: React.FC<WorkflowProps> = ({
                 ))}
               </div>
             )}
-            
+            {/* 输入区上方 Skill tags（来自 selectedComponents 中的 skillpack） */}
+            {Array.from(selectedSkillPackIds).length > 0 && (
+              <div className="mb-1 flex flex-wrap gap-1">
+                {Array.from(selectedSkillPackIds).map((sid) => {
+                  const sp = allSkillPacks.find((p) => p.skill_pack_id === sid);
+                  const name = sp?.name || sid;
+                  return (
+                    <button
+                      key={sid}
+                      type="button"
+                      onClick={() => {
+                        // 取消选中该 skill（影响 ext.skill_packs）
+                        setSelectedComponents((prev) =>
+                          prev.filter((c) => !(c.type === 'skillpack' && c.id === sid)),
+                        );
+                      }}
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border border-emerald-500/60 bg-emerald-500/8 text-[11px] text-emerald-500 max-w-[160px] truncate"
+                      title={name}
+                    >
+                      <Package className="w-3 h-3" />
+                      <span className="truncate">{name}</span>
+                      <X className="w-3 h-3" />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             <div className="flex-1 relative at-selector-container">
               {/* 输入框和右侧按钮容器 */}
-              <div className="flex items-end gap-1.5">
+              <div className="flex flex-col gap-1.5">
                 {/* 加载时显示状态文本 + 左侧高亮工具，否则显示输入框 */}
                 {isLoading ? (
                   <div 
@@ -5713,6 +5882,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                     </div>
                   </div>
                 ) : (
+                  <>
                 <textarea
                 ref={inputRef}
               value={input}
@@ -5790,7 +5960,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                   });
                 }
               }}
-                onKeyDown={handleKeyDown}
+                      onKeyDown={handleKeyDownWithSlash}
                 onBlur={(e) => {
                   // 检查焦点是否移到了浮岛容器内的其他元素
                   const relatedTarget = e.relatedTarget as HTMLElement;
@@ -5881,53 +6051,22 @@ const Workflow: React.FC<WorkflowProps> = ({
                     isInputFocused ? 'px-2 py-2' : 'px-2 py-2'
                   } ${
                     isInputExpanded 
-                      ? 'min-h-[180px] max-h-[360px]' 
-                      : isInputFocused ? 'min-h-[56px] max-h-[140px]' : 'min-h-[56px] max-h-[120px]'
+                      ? 'min-h-[240px] max-h-[420px]' 
+                      : isInputFocused ? 'min-h-[84px] max-h-[180px]' : 'min-h-[72px] max-h-[160px]'
                   }`}
                   style={{ fontSize: isInputFocused ? '13px' : '12px', lineHeight: '1.5' }}
-                  rows={1}
+                  rows={2}
                   disabled={isLoading || !selectedLLMConfig}
                 />
+                  </>
                 )}
-                
-                {/* 右侧：发送/中断按钮 */}
-                <div className="flex flex-col items-end gap-0.5 flex-shrink-0 pt-2 pb-0 -ml-0.5">
-                  <div className="flex items-center gap-1">
-                {isLoading ? (
-                  // 加载时：显示打断按钮（请求后端解绑旧 Actor、绑定新 Actor，并本地中止）
-                  <Button
-                    onClick={handleInterrupt}
-                    variant="destructive"
-                    size="sm"
-                    className="gap-1.5 px-3 py-1 h-7 text-xs shrink-0 mt-2"
-                    title="停止生成并可立即发送下一条"
-                  >
-                    <XCircle className="w-3.5 h-3.5" />
-                    <span>停止生成</span>
-                  </Button>
-                  ) : (
-                    <>
-                      {/* 发送按钮 - 萤绿色 */}
-                      <Button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          handleSend();
-                        }}
-                        disabled={(!input.trim() && attachedMedia.length === 0) || !selectedLLMConfig}
-                        variant="primary"
-                        size="sm"
-                        className="workflow-composer-send-btn h-8 w-8 rounded-[10px] p-0 min-w-0 dark:text-black mt-2"
-                      >
-                        <Send className="w-3.5 h-3.5" />
-                      </Button>
-                    </>
-                  )}
-                  </div>
-                  {/* Context 用量 */}
-                  {selectedLLMConfig && (
+
+                {/* Context 用量 */}
+                {selectedLLMConfig && (
+                  <div className="flex justify-end pr-0.5">
                     <TokenCounter selectedLLMConfig={selectedLLMConfig} messages={messages} />
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             {/* 编辑模式提示和取消按钮 */}
             {editingMessageId && (
@@ -5944,7 +6083,92 @@ const Workflow: React.FC<WorkflowProps> = ({
           </div>
           </div>
               
-          {/* @ 符号选择器 - 相对于输入框容器定位 */}
+            {/* Skill 浮动选择器（按钮触发），参考 @ 选择器布局 */}
+            {showSkillSelector && (
+              <div
+                ref={selectorRef}
+                className="absolute bottom-full left-0 mb-1 z-[190] bg-white dark:bg-[#2d2d2d] border border-gray-300 dark:border-[#404040] rounded-lg shadow-lg overflow-y-auto at-selector-container"
+                style={{
+                  minWidth: '220px',
+                  maxWidth: '320px',
+                  maxHeight: '256px',
+                }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onMouseUp={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+              >
+                <div className="p-2 border-b border-gray-200 dark:border-[#404040]">
+                  <div className="text-xs font-semibold text-gray-700 dark:text-[#ffffff]">
+                    选择要激活的 Skill
+                  </div>
+                  <div className="mt-1 text-[11px] text-gray-500 dark:text-[#b0b0b0]">
+                    选中的 Skill 会在本轮对话中启用，并在消息中打标。
+                  </div>
+                </div>
+                <div className="py-1">
+                  {allSkillPacks.length === 0 ? (
+                    <div className="px-3 py-2 text-[12px] text-gray-500 dark:text-[#b0b0b0]">
+                      暂无技能包
+                    </div>
+                  ) : (
+                    allSkillPacks.map((sp, index) => {
+                      const active = selectedSkillPackIds.has(sp.skill_pack_id);
+                      const isCursor = index === skillSelectorIndex;
+                      return (
+                        <button
+                          key={sp.skill_pack_id}
+                          type="button"
+                          onClick={() => {
+                            // 一次只支持一个 skill：替换为当前点击的 skill
+                            setSelectedComponents([
+                              { type: 'skillpack', id: sp.skill_pack_id, name: sp.name },
+                            ]);
+                            setShowSkillSelector(false);
+                            if (skillTriggeredBySlash) {
+                              setSkillTriggeredBySlash(false);
+                              // 去掉由 "/" 触发的前导斜杠
+                              setInput((prev) => {
+                                if (!inputRef.current) return prev.replace('/', '');
+                                const cursor = inputRef.current.selectionStart || 0;
+                                const before = prev.slice(0, cursor);
+                                const after = prev.slice(cursor);
+                                const lastSlash = before.lastIndexOf('/');
+                                if (lastSlash === -1) return prev.replace('/', '');
+                                return before.slice(0, lastSlash) + before.slice(lastSlash + 1) + after;
+                              });
+                            }
+                          }}
+                          className={`w-full px-3 py-2 flex items-center justify-between text-left text-sm ${
+                            active
+                              ? 'bg-emerald-500/10 border-l-2 border-emerald-500 text-emerald-500'
+                              : isCursor
+                              ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-[#f5f5f5]'
+                              : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-900 dark:text-[#f5f5f5]'
+                          }`}
+                        >
+                          <div className="flex flex-col min-w-0">
+                            <span className="truncate">{sp.name}</span>
+                            {sp.summary && (
+                              <span className="mt-0.5 text-[11px] text-gray-500 dark:text-[#b0b0b0] truncate">
+                                {sp.summary}
+                              </span>
+                            )}
+                          </div>
+                          {active && <Check className="w-3 h-3 flex-shrink-0" />}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* @ 符号选择器 - 相对于输入框容器定位 */}
           {showAtSelector && (
             <div
               ref={selectorRef}
@@ -5969,7 +6193,7 @@ const Workflow: React.FC<WorkflowProps> = ({
             >
               <div className="p-2 border-b border-gray-200 dark:border-[#404040]">
                 <div className="text-xs font-semibold text-gray-700 dark:text-[#ffffff]">
-                  选择提及或感知组件
+                  提及话题参与者
                 </div>
               </div>
 
@@ -6018,93 +6242,10 @@ const Workflow: React.FC<WorkflowProps> = ({
                 </div>
               )}
 
-              {/* MCP 服务器列表 */}
-              {mcpServers.filter(s => s.name.toLowerCase().includes(atSelectorQuery)).length > 0 && (
-                <div className="py-1">
-                  <div className="text-xs font-medium text-gray-500 dark:text-[#b0b0b0] px-3 py-1.5 flex items-center justify-between">
-                    <span>MCP 服务器</span>
-                    <span className="text-[10px]">
-                      ({connectedMcpServerIds.size} / {mcpServers.length} 已连接)
-                    </span>
-                  </div>
-                  {mcpServers
-                    .filter(s => s.name.toLowerCase().includes(atSelectorQuery))
-                    .map((server) => {
-                      const isConnected = connectedMcpServerIds.has(server.id);
-                      const isConnecting = connectingServers.has(server.id);
-                      const component = { type: 'mcp' as const, id: server.id, name: server.name };
-                      const selectableComponents = getSelectableComponents();
-                      const componentIndex = selectableComponents.findIndex(
-                        (c) =>
-                          c.id === component.id && c.type === component.type
-                      );
-                      const isSelected = componentIndex === selectedComponentIndex;
-
-                      return (
-                        <div
-                          key={server.id}
-                          onMouseDown={(e) => {
-                            e.preventDefault(); // 防止触发输入框的 blur
-                          }}
-                          onClick={async (e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            if (blurTimeoutRef.current) {
-                              clearTimeout(blurTimeoutRef.current);
-                              blurTimeoutRef.current = null;
-                            }
-                            if (isConnecting) return;
-                            if (!isConnected) {
-                              const connected = await handleConnectServer(server.id);
-                              if (!connected) return;
-                              const newComponent = { type: 'mcp' as const, id: server.id, name: server.name };
-                              handleSelectComponent(newComponent);
-                            } else {
-                              handleSelectComponent(component);
-                            }
-                          }}
-                          className={`px-3 py-2 cursor-pointer flex items-center space-x-2 ${
-                            isConnecting
-                              ? 'opacity-70 cursor-wait'
-                              : isSelected
-                                ? 'bg-primary-100 dark:bg-primary-900/30'
-                                : !isConnected
-                                  ? 'hover:bg-yellow-50 dark:hover:bg-yellow-900/20'
-                                  : 'hover:bg-gray-100 dark:hover:bg-gray-700'
-                          }`}
-                        >
-                          <div className="relative">
-                            {isConnecting ? (
-                              <div className="w-4 h-4 border-2 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
-                            ) : (
-                              <>
-                                <Plug className={`w-4 h-4 flex-shrink-0 ${isConnected ? 'text-primary-500' : 'text-gray-400'}`} />
-                                {isConnected && (
-                                  <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-green-500 rounded-full"></span>
-                                )}
-                              </>
-                            )}
-                          </div>
-                          <span className={`text-sm ${isConnected ? 'text-gray-900 dark:text-[#ffffff]' : 'text-gray-600 dark:text-gray-400'}`}>
-                            {server.display_name || server.client_name || server.name}
-                          </span>
-                          {isConnecting && (
-                            <span className="text-[10px] text-primary-500 ml-auto">连接中...</span>
-                          )}
-                          {!isConnected && !isConnecting && (
-                            <span className="text-[10px] text-yellow-600 dark:text-yellow-400 ml-auto">点击连接</span>
-                          )}
-                        </div>
-                      );
-                    })}
-                </div>
-              )}
-
               {/* 无匹配结果 */}
-              {mcpServers.filter(s => s.name.toLowerCase().includes(atSelectorQuery.toLowerCase())).length === 0 &&
-                topicParticipants.filter(p => p.participant_type === 'agent' && (p.name || '').toLowerCase().includes(atSelectorQuery.toLowerCase())).length === 0 && (
+              {topicParticipants.filter(p => p.participant_type === 'agent' && (p.name || '').toLowerCase().includes(atSelectorQuery.toLowerCase())).length === 0 && (
                   <div className="px-3 py-2 text-xs text-gray-500 dark:text-[#b0b0b0] text-center">
-                    未找到匹配的组件或智能体
+                    未找到匹配的智能体
                   </div>
                 )}
             </div>

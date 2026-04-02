@@ -15,7 +15,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from ..actor_base import ActorBase
-from ..actions import ActionResult, ResponseDecision
+from ..actions import Action, ActionResult, ResponseDecision
 from ..action_chain import ActionStep, create_mcp_step
 from ..iteration_context import IterationContext
 
@@ -264,40 +264,132 @@ class ChatAgent(ActorBase):
     def _plan_actions(self, ctx: IterationContext) -> List[Action]:
         """
         规划行动
-        
-        ChatAgent 的默认实现：
-        - 检查是否有 MCP 工具需要调用
-        - 如果有，规划 MCP 调用
-        - 否则直接生成回复
-        
+
+        ChatAgent 的实现：
+        1. 读取 ext.skill_packs，按需激活 Skill，并记录到 ctx.active_skills
+        2. 遍历已激活 Skill 的步骤，将其中的 mcp_call 步骤编排为 MCP 行动
+        3. 在此基础上，再按原有策略做 MCP 自动/显式路由
+
         Args:
             ctx: 迭代上下文
-            
+
         Returns:
             行动列表
         """
-        # 检查用户消息中是否指定了 MCP
-        ext = ctx.original_message.get('ext', {}) or {}
-        mcp_servers = (
-            ext.get('mcp_servers') or 
-            ext.get('selectedMcpServerIds') or 
-            ext.get('selected_mcp_server_ids') or 
-            []
-        )
-        
-        if isinstance(mcp_servers, str):
-            mcp_servers = [mcp_servers]
-        
-        actions = []
-        
-        # 为每个 MCP 服务器创建调用行动
-        for server_id in mcp_servers[:3]:  # 最多 3 个
-            actions.append(create_mcp_step(
-                mcp_server_id=server_id,
-                mcp_tool_name='auto',
-                params={'input': ctx.original_message.get('content', '')},
-            ))
-        
+        ext = (ctx.original_message or {}).get("ext", {}) or {}
+        content = (ctx.original_message or {}).get("content", "") or ""
+        content = content.strip()
+
+        actions: List[Action] = []
+        mcp_servers: List[str] = []
+
+        # ========== 1) 处理前端激活的 Skill ==========
+        skill_ids = ext.get("skill_packs") or []
+        if isinstance(skill_ids, str):
+            skill_ids = [skill_ids]
+        if not isinstance(skill_ids, list):
+            skill_ids = []
+
+        active_skills = []
+        for sid in skill_ids:
+            if not sid:
+                continue
+            skill = self.capabilities.get_skill(sid)
+            if not skill:
+                # 按需从 DB 加载
+                try:
+                    skill = self._load_single_skill(sid)
+                except Exception as e:
+                    logger.warning(
+                        "[ChatAgent:%s] Failed to load skill %s: %s",
+                        self.agent_id,
+                        sid,
+                        e,
+                    )
+                    skill = None
+            if not skill:
+                continue
+
+            active_skills.append(skill)
+
+            # Skill 可能声明 required_mcps，纳入 MCP 候选
+            for mid in getattr(skill, "required_mcps", []) or []:
+                if mid and mid not in mcp_servers:
+                    mcp_servers.append(mid)
+
+            # Skill 步骤中的 mcp_call 转化为 MCP 行动
+            for step in getattr(skill, "steps", []) or []:
+                if step.get("type") != "mcp_call":
+                    continue
+
+                server_id = (
+                    step.get("mcpServer")
+                    or step.get("mcp_server")
+                    or step.get("server_id")
+                )
+                tool_name = step.get("toolName") or step.get("tool_name") or "auto"
+                params = step.get("arguments") or step.get("params") or {}
+
+                if not server_id:
+                    continue
+
+                if server_id not in mcp_servers:
+                    mcp_servers.append(server_id)
+
+                actions.append(
+                    create_mcp_step(
+                        mcp_server_id=server_id,
+                        mcp_tool_name=tool_name,
+                        params=params or {"input": content},
+                    )
+                )
+
+        # 将激活的 Skill 写入上下文，供 system prompt 使用
+        ctx.active_skills = active_skills
+
+        # ========== 2) MCP 自动/显式路由补充 ==========
+        auto_mcp_servers: List[str] = []
+        try:
+            from services.mcp_chat_router import resolve_mcp_server_ids_for_message
+
+            auto_mcp_servers, mcp_reason = resolve_mcp_server_ids_for_message(
+                content, ext
+            )
+            if auto_mcp_servers:
+                logger.info(
+                    "[ChatAgent:%s] MCP 路由: %s servers=%s",
+                    self.agent_id,
+                    mcp_reason,
+                    auto_mcp_servers,
+                )
+        except Exception as e:
+            logger.warning("[ChatAgent:%s] MCP 路由失败，回退仅显式: %s", self.agent_id, e)
+            auto_mcp_servers = (
+                ext.get("mcp_servers")
+                or ext.get("selectedMcpServerIds")
+                or ext.get("selected_mcp_server_ids")
+                or []
+            )
+            if isinstance(auto_mcp_servers, str):
+                auto_mcp_servers = [auto_mcp_servers]
+            auto_mcp_servers = [x for x in auto_mcp_servers if x][:3]
+
+        # 合并路由得到的 MCP 服务器，避免重复
+        for sid in auto_mcp_servers:
+            if sid and sid not in mcp_servers:
+                mcp_servers.append(sid)
+
+        # 为剩余 MCP 服务器规划默认 auto 工具调用（不重复已由 Skill 显式规划的）
+        for server_id in mcp_servers:
+            # 如果此 server 已经有基于 Skill 的行动，则允许重复（可能需要多次调用不同工具）
+            actions.append(
+                create_mcp_step(
+                    mcp_server_id=server_id,
+                    mcp_tool_name="auto",
+                    params={"input": content},
+                )
+            )
+
         return actions
     
     def _should_continue(self, ctx: IterationContext) -> bool:

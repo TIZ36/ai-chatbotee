@@ -13,6 +13,11 @@ import {
   Package,
   Plug,
   Palette,
+  ChevronLeft,
+  Hand,
+  Sparkles,
+  Radio,
+  Headphones,
 } from 'lucide-react';
 import appLogoDark from '../assets/app_logo_dark.png';
 import appLogoLight from '../assets/app_logo_light.png';
@@ -30,16 +35,23 @@ import {
 } from './components/ui/Dialog';
 import SettingsPanel from './components/SettingsPanel';
 import LLMConfigPanel from './components/LLMConfig';
-import MCPConfig from './components/MCPConfig';
+import McpWorkspacePanel from './components/McpWorkspacePanel';
+import McpSupportPage from './components/McpSupportPage';
 import Workflow from './components/Workflow';
 import AgentsPage from './components/AgentsPage';
 import MediaCreatorPage from './components/MediaCreatorPage';
-import DiscordConnector from './components/DiscordConnector';
+import CommunicationPage from './components/CommunicationPage';
 import SkillPackEntryPage from './components/SkillPackEntryPage';
 import { getAgents, getSessions, createSession, deleteSession, type Session } from './services/sessionApi';
 import { toast } from './components/ui/use-toast';
 import { ConfirmDialog } from './components/ui/ConfirmDialog';
+import { CapsuleToggle } from './components/ui/CapsuleToggle';
 import { SESSIONS_CHANGED_EVENT } from './utils/sessionEvents';
+import { MCP_AUTO_USE_LS_KEY, readMcpAutoUseEnabled, writeMcpAutoUseEnabled } from './utils/mcpAutoUse';
+import { ChillPage } from './components/ChillPage';
+import { ChillMiniBar } from './components/ChillMiniBar';
+import { ChillGlobalPlayer } from './components/ChillGlobalPlayer';
+import type { ChillPanelTab } from './components/ChillPanel';
 
 export type SkinId = 'light' | 'niho';
 export type FontId = 'default' | 'pixel' | 'terminal' | 'rounded' | 'dotgothic' | 'silkscreen';
@@ -52,8 +64,8 @@ interface Settings {
   enableToolCalling: boolean;
 }
 
-type MainModule = 'chat' | 'media' | 'settings';
-type ChatSubTab = 'chaya' | 'mcp' | 'skill' | 'persona';
+type MainModule = 'chat' | 'media' | 'chill' | 'settings';
+type ChatSubTab = 'chaya' | 'mcp' | 'skill' | 'persona' | 'communication';
 type MediaSubTab = 'image' | 'video';
 type SettingsSubTab = 'general' | 'llm';
 
@@ -61,6 +73,7 @@ const LS_MAIN = 'chatee_main_module';
 const LS_CHAT_SUB = 'chatee_chat_sub_tab';
 const LS_MEDIA_SUB = 'chatee_media_sub_tab';
 const LS_SETTINGS_SUB = 'chatee_settings_sub_tab';
+const LS_CHILL_SUB = 'chatee_chill_sub_tab';
 
 function readLs<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
   try {
@@ -115,16 +128,19 @@ const App: React.FC = () => {
 
   // ── 主模块 / 子 Tab 状态 ──
   const [mainModule, setMainModule] = useState<MainModule>(() =>
-    readLs(LS_MAIN, ['chat', 'media', 'settings'] as const, 'chat'),
+    readLs(LS_MAIN, ['chat', 'media', 'chill', 'settings'] as const, 'chat'),
   );
   const [chatSubTab, setChatSubTab] = useState<ChatSubTab>(() =>
-    readLs(LS_CHAT_SUB, ['chaya', 'mcp', 'skill', 'persona'] as const, 'chaya'),
+    readLs(LS_CHAT_SUB, ['chaya', 'mcp', 'skill', 'persona', 'communication'] as const, 'chaya'),
   );
   const [mediaSubTab, setMediaSubTab] = useState<MediaSubTab>(() =>
     readLs(LS_MEDIA_SUB, ['image', 'video'] as const, 'image'),
   );
   const [settingsSubTab, setSettingsSubTab] = useState<SettingsSubTab>(() =>
     readLs(LS_SETTINGS_SUB, ['general', 'llm'] as const, 'general'),
+  );
+  const [chillSubTab, setChillSubTab] = useState<ChillPanelTab>(() =>
+    readLs(LS_CHILL_SUB, ['live', 'search'] as const, 'live'),
   );
 
   useEffect(() => {
@@ -133,8 +149,33 @@ const App: React.FC = () => {
       localStorage.setItem(LS_CHAT_SUB, chatSubTab);
       localStorage.setItem(LS_MEDIA_SUB, mediaSubTab);
       localStorage.setItem(LS_SETTINGS_SUB, settingsSubTab);
+      localStorage.setItem(LS_CHILL_SUB, chillSubTab);
     } catch { /* */ }
-  }, [mainModule, chatSubTab, mediaSubTab, settingsSubTab]);
+  }, [mainModule, chatSubTab, mediaSubTab, settingsSubTab, chillSubTab]);
+
+  const isMcpSupportRoute = location.pathname === '/mcp-support';
+  const [mcpAutoUse, setMcpAutoUse] = useState(() => readMcpAutoUseEnabled());
+
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === MCP_AUTO_USE_LS_KEY || e.key === null) {
+        setMcpAutoUse(readMcpAutoUseEnabled());
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
+  const onMcpAutoUseChange = useCallback((checked: boolean) => {
+    writeMcpAutoUseEnabled(checked);
+    setMcpAutoUse(checked);
+  }, []);
+
+  useEffect(() => {
+    if (location.pathname === '/mcp-support' && mainModule !== 'chat') {
+      navigate('/', { replace: true });
+    }
+  }, [mainModule, location.pathname, navigate]);
 
   // ── 会话 ──
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(() => {
@@ -237,6 +278,8 @@ const App: React.FC = () => {
     if (p === '/mcp-config')      { setMainModule('chat');     setChatSubTab('mcp');         navigate('/', { replace: true }); return; }
     if (p === '/settings')        { setMainModule('settings'); setSettingsSubTab('general'); navigate('/', { replace: true }); return; }
     if (p === '/agents')          { setMainModule('chat');     setChatSubTab('persona');     navigate('/', { replace: true }); return; }
+    if (p === '/communication')  { setMainModule('chat');     setChatSubTab('communication'); navigate('/', { replace: true }); return; }
+    if (p === '/chill')            { setMainModule('chill');   navigate('/', { replace: true }); return; }
     if (p === '/media-creator' || p === '/media-creator-image') { setMainModule('media'); setMediaSubTab('image'); navigate('/', { replace: true }); return; }
     if (p === '/media-creator-video') { setMainModule('media'); setMediaSubTab('video'); navigate('/', { replace: true }); }
   }, [location.pathname, navigate]);
@@ -314,6 +357,7 @@ const App: React.FC = () => {
     { id: 'mcp',     label: 'MCP',      icon: <Plug className="w-3.5 h-3.5" /> },
     { id: 'skill',   label: 'Skill',    icon: <Package className="w-3.5 h-3.5" /> },
     { id: 'persona', label: 'Persona',  icon: <Palette className="w-3.5 h-3.5" /> },
+    { id: 'communication', label: '通信', icon: <Radio className="w-3.5 h-3.5" /> },
   ];
   const mediaTabs: { id: MediaSubTab; label: string }[] = [
     { id: 'image', label: '生图' },
@@ -323,16 +367,35 @@ const App: React.FC = () => {
     { id: 'general', label: '通用设置' },
     { id: 'llm', label: '模型录入' },
   ];
+  const chillTabs: { id: ChillPanelTab; label: string }[] = [
+    { id: 'live', label: '直播' },
+    { id: 'search', label: '搜索' },
+  ];
 
   // ── 内容渲染 ──
   const renderPanel = () => {
+    if (mainModule === 'chat' && isMcpSupportRoute) {
+      return (
+        <div className="h-full min-h-0 overflow-hidden">
+          <McpSupportPage />
+        </div>
+      );
+    }
     if (mainModule === 'chat') {
       if (chatSubTab === 'chaya') return <div key={`c-${selectedSessionId}`} className="h-full min-h-0"><Workflow sessionId={selectedSessionId} onSelectSession={handleSelectSession} enableToolCalling={settings.enableToolCalling} onToggleToolCalling={(v) => updateSettings({ enableToolCalling: v })} /></div>;
-      if (chatSubTab === 'mcp') return <div className="h-full min-h-0 overflow-hidden"><MCPConfig /></div>;
+      if (chatSubTab === 'mcp') return <div className="h-full min-h-0 overflow-hidden"><McpWorkspacePanel /></div>;
       if (chatSubTab === 'skill') return <SkillPackEntryPage />;
+      if (chatSubTab === 'communication') return <div className="h-full min-h-0 overflow-hidden"><CommunicationPage /></div>;
       return <div className="h-full min-h-0 overflow-hidden"><AgentsPage /></div>;
     }
     if (mainModule === 'media') return <div className="h-full min-h-0"><MediaCreatorPage embedded mode={mediaSubTab === 'video' ? 'video' : 'image'} /></div>;
+    if (mainModule === 'chill') {
+      return (
+        <div className="h-full min-h-0 overflow-hidden">
+          <ChillPage isMobile={isMobile} tab={chillSubTab} onTabChange={setChillSubTab} />
+        </div>
+      );
+    }
     if (settingsSubTab === 'general') return <SettingsPanel settings={settings} onUpdateSettings={updateSettings} />;
     return <div className="h-full min-h-0 overflow-hidden llm-config-page"><LLMConfigPanel /></div>;
   };
@@ -350,12 +413,15 @@ const App: React.FC = () => {
           <div className="app-rail-top">
             <RailBtn active={mainModule === 'chat'} onClick={() => setMainModule('chat')} title="聊天与工具">
               {chayaAvatar
-                ? <img src={chayaAvatar} alt="" className="w-7 h-7 rounded-full object-cover" />
-                : <img src={skin === 'niho' ? appLogoDark : appLogoLight} alt="Chaya" className="w-7 h-7 object-contain" />
+                ? <img src={chayaAvatar} alt="" className="w-full h-full rounded-[inherit] object-cover" />
+                : <img src={skin === 'niho' ? appLogoDark : appLogoLight} alt="Chaya" className="w-full h-full rounded-[inherit] object-contain" />
               }
             </RailBtn>
             <RailBtn active={mainModule === 'media'} onClick={() => setMainModule('media')} title="媒体创作">
               <Film className="w-5 h-5" strokeWidth={1.75} />
+            </RailBtn>
+            <RailBtn active={mainModule === 'chill'} onClick={() => setMainModule('chill')} title="Chill 氛围">
+              <Headphones className="w-5 h-5" strokeWidth={1.75} />
             </RailBtn>
           </div>
           <div className="app-rail-bottom">
@@ -378,13 +444,30 @@ const App: React.FC = () => {
 
         {/* ─── 主区域 ─── */}
         <div className="app-main relative">
+          <ChillMiniBar suppress={mainModule === 'chill'} onOpenChill={() => setMainModule('chill')} />
+          <ChillGlobalPlayer />
           {/* 气泡 Tab 条 */}
           <header
             className={`app-bubble-bar ${isElectron ? 'electron-titlebar-drag' : ''}`}
             style={isMobile ? { paddingTop: 'var(--safe-area-inset-top)' } : undefined}
           >
             <nav className="app-bubble-tabs">
-              {mainModule === 'chat' && chatTabs.map((t) => (
+              {mainModule === 'chat' && isMcpSupportRoute && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigate('/', { replace: true });
+                    setChatSubTab('mcp');
+                  }}
+                  className="app-bubble-tab app-no-drag flex items-center gap-1.5"
+                >
+                  <span className="app-bubble-tab-icon">
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </span>
+                  <span className="app-bubble-tab-label">返回 MCP</span>
+                </button>
+              )}
+              {mainModule === 'chat' && !isMcpSupportRoute && chatTabs.map((t) => (
                 <button
                   key={t.id}
                   type="button"
@@ -415,12 +498,51 @@ const App: React.FC = () => {
                   <span className="app-bubble-tab-label">{t.label}</span>
                 </button>
               ))}
+              {mainModule === 'chill' && chillTabs.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setChillSubTab(t.id)}
+                  className={`app-bubble-tab app-no-drag ${chillSubTab === t.id ? 'app-bubble-tab--active' : ''}`}
+                >
+                  <span className="app-bubble-tab-label">{t.label}</span>
+                </button>
+              ))}
             </nav>
-            {/* Discord 悬浮按钮 — 右上角 */}
-            <div className="dc-float app-no-drag">
-              <DiscordConnector />
-            </div>
           </header>
+
+          {/* Chaya 主面板上方工具条（开关展位，与顶层 Tab 栏分离） */}
+          {mainModule === 'chat' && !isMcpSupportRoute && chatSubTab === 'chaya' && (
+            <div className="chaya-panel-toolbar app-no-drag" role="region" aria-label="对话工具栏">
+              <div className="chaya-panel-toolbar-inner">
+                <div className="chaya-panel-toolbar-slots">
+                  <div
+                    className="chaya-panel-toolbar-item"
+                    title="开启后，对话中由系统按内容自动选用已启用的 MCP；关闭后仅使用输入区「插件」中勾选的服务器。点击文字可进入 MCP 配置。"
+                  >
+                    <button
+                      type="button"
+                      className="chaya-panel-toolbar-item-label chaya-panel-toolbar-link"
+                      onClick={() => {
+                        setMainModule('chat');
+                        setChatSubTab('mcp');
+                        if (location.pathname !== '/') navigate('/', { replace: true });
+                      }}
+                    >
+                      MCP
+                    </button>
+                    <CapsuleToggle
+                      checked={mcpAutoUse}
+                      onCheckedChange={onMcpAutoUseChange}
+                      aria-label="对话中自动使用 MCP"
+                      leftIcon={<Hand />}
+                      rightIcon={<Sparkles />}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           <main className="app-content">
             {/* 对话切换弹窗 */}

@@ -24,6 +24,7 @@ google-genai>=1.0.0      # Google Gemini SDK
 openai>=1.0.0            # OpenAI SDK (也用于 DeepSeek)
 anthropic>=0.40.0        # Anthropic Claude SDK
 ollama>=0.4.0            # Ollama SDK
+xai-sdk>=1.0.0           # xAI 官方 SDK（Grok 图像走 gRPC，见 media_service）
 
 # Discord Bot（Chaya 接入 Discord）
 discord.py>=2.3.0

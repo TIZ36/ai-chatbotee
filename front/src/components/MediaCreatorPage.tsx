@@ -92,12 +92,14 @@ interface MediaItem {
   error_message?: string;
 }
 
-function inferMediaConfigCaps(model: string | undefined, caps?: { image: boolean; video: boolean }) {
+function inferMediaConfigCaps(model: string | undefined, name?: string, caps?: { image: boolean; video: boolean }) {
   if (caps?.image || caps?.video) return caps;
-  const lower = (model || '').toLowerCase();
+  const lower = `${model || ''} ${name || ''}`.toLowerCase();
+  const byImageKeyword = /image/.test(lower);
+  const byVideoKeyword = /(video|veo)/.test(lower);
   return {
-    image: lower.includes('grok-imagine') || lower.includes('dall-e') || lower.includes('gpt-image'),
-    video: lower.includes('grok-imagine') && lower.includes('video'),
+    image: byImageKeyword || lower.includes('grok-imagine') || lower.includes('dall-e') || lower.includes('gpt-image'),
+    video: byVideoKeyword || (lower.includes('grok-imagine') && lower.includes('video')),
   };
 }
 
@@ -147,7 +149,7 @@ function fileToMediaItem(file: File): Promise<MediaItem> {
 }
 
 /* ─── 样式常量 ─── */
-const tabBase = 'pb-2 text-sm font-medium transition-colors cursor-pointer select-none';
+const tabBase = 'pb-1.5 text-xs font-medium transition-colors cursor-pointer select-none';
 const tabInactive = `${tabBase} border-b-2 border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200`;
 const tabActive = `${tabBase} border-b-2 border-[var(--color-accent)] text-gray-900 dark:text-white`;
 
@@ -158,7 +160,7 @@ const btnPink = '!bg-[var(--color-secondary)] !text-white hover:!opacity-90 bord
 const textPrimary = 'text-gray-900 dark:text-white';
 const textMuted = 'text-gray-500 dark:text-gray-400';
 
-const inputClass = `w-full px-3 py-2 text-sm rounded-md border
+const inputClass = `w-full px-2 py-1 text-xs rounded-md border
   bg-white dark:bg-[#1a1a1a] border-gray-200 dark:border-[#333]
   focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]`;
 
@@ -433,29 +435,25 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
     }
   };
 
-  /* ─── 按 Tab 筛选可用 configs（使用 per-config capabilities, media_purpose 优先） ─── */
+  /* ─── 按 Tab 筛选可用 configs（自动按模型名关键字识别媒体能力） ─── */
   const currentConfigs = (() => {
     const out: Array<{
       config_id: string; name: string; model: string; provider: string;
       providerId: string; providerName: string;
       capabilities?: { image: boolean; video: boolean };
-      media_purpose?: boolean;
     }> = [];
     for (const p of providers) {
       for (const c of p.configs || []) {
-        const caps = inferMediaConfigCaps(c.model, (c as any).capabilities as { image: boolean; video: boolean } | undefined);
-        const isMediaPurpose = !!(c as any).media_purpose;
+        const caps = inferMediaConfigCaps(c.model, c.name, (c as any).capabilities as { image: boolean; video: boolean } | undefined);
         const isImage = caps ? caps.image : !!(p.image?.generate || p.image?.edit);
         const isVideo = caps ? caps.video : !!p.video?.submit;
         if (createTab === 'image' && isImage) {
-          out.push({ ...c, providerId: p.id, providerName: p.name, capabilities: caps, media_purpose: isMediaPurpose });
+          out.push({ ...c, providerId: p.id, providerName: p.name, capabilities: caps });
         } else if (createTab === 'video' && isVideo) {
-          out.push({ ...c, providerId: p.id, providerName: p.name, capabilities: caps, media_purpose: isMediaPurpose });
+          out.push({ ...c, providerId: p.id, providerName: p.name, capabilities: caps });
         }
       }
     }
-    // 排序：media_purpose 优先
-    out.sort((a, b) => (b.media_purpose ? 1 : 0) - (a.media_purpose ? 1 : 0));
     return out;
   })();
 
@@ -1131,14 +1129,14 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
 
   const mainContent = (
     <>
-      <div className="chatu-page chatu-page-one-screen h-full w-full flex flex-col min-h-0 px-2 py-1.5 sm:px-4 md:px-5 lg:px-6 max-w-[1360px] mx-auto w-full box-border">
+      <div className="chatu-page chatu-page-one-screen h-full w-full flex flex-col min-h-0 px-1 py-1 sm:px-2 md:px-3 lg:px-4 max-w-none mx-auto w-full box-border">
         <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
         {/* ════════ 创作区 ════════ */}
         <Card title="创作区" variant="persona" size="default" className="media-create-card flex-1 min-h-0 flex flex-col overflow-hidden">
-          <div className="flex-1 min-h-0 flex flex-col overflow-hidden space-y-4">
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden space-y-2.5">
             {/* Tab（仅 both 模式显示） */}
             {mode === 'both' && (
-              <div className="flex gap-6 border-b border-gray-200 dark:border-[#333]">
+              <div className="flex gap-4 border-b border-gray-200 dark:border-[#333]">
                 <button type="button" className={createTab === 'chat' ? tabActive : tabInactive} onClick={() => setCreateTab('chat')}>
                   <span className="flex items-center gap-1.5"><MessageCircle className="w-4 h-4" /> 聊天</span>
                 </button>
@@ -1155,7 +1153,7 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
             {createTab === 'chat' && (
               <div className="media-create-layout flex-1 min-h-0 overflow-hidden">
                 <div className="media-create-left-col flex flex-col gap-4 min-w-0 min-h-0 overflow-y-auto no-scrollbar">
-                  <div className="prompt-and-ref-card rounded-2xl overflow-hidden flex flex-col flex-1 min-h-[200px] border border-[var(--border-default)] bg-[var(--surface-secondary)]">
+                  <div className="prompt-and-ref-card rounded-2xl overflow-hidden flex flex-col flex-1 min-h-[200px] bg-[var(--surface-secondary)]">
                     <div className="p-4 flex flex-col items-center justify-center flex-1 text-center">
                       <MessageCircle className="w-12 h-12 text-[var(--color-accent)] opacity-80 mb-3" />
                       <h3 className={`text-sm font-medium ${textPrimary} mb-1`}>聊天</h3>
@@ -1172,18 +1170,18 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
               <>
               <div className="media-create-layout flex-1 min-h-0 overflow-hidden">
                 {/* 左栏：参考图+描述 合体 → 自定义提示词 → 图片尺寸；移动端底部留空避免被 FAB 遮挡 */}
-                <div className={`media-create-left-col flex flex-col gap-3 min-w-0 min-h-0 overflow-y-auto no-scrollbar ${isMobile ? 'chatu-left-col-with-fab' : ''}`}>
+                <div className={`media-create-left-col flex flex-col gap-2 min-w-0 min-h-0 overflow-y-auto no-scrollbar ${isMobile ? 'chatu-left-col-with-fab' : ''}`}>
                   {/* 生成面板：描述在上、粘贴在下，生成按钮在右上角 */}
                   <div
                     ref={dropZoneRef}
-                    className={`prompt-and-ref-card rounded-xl overflow-hidden flex flex-col flex-1 min-h-[240px] sm:min-h-[260px] md:min-h-[280px] relative ${dragOver ? 'ring-2 ring-[var(--color-accent)]/30' : ''}`}
+                    className={`prompt-and-ref-card rounded-xl overflow-hidden flex flex-col flex-1 min-h-[220px] sm:min-h-[240px] md:min-h-[260px] relative ${dragOver ? 'ring-2 ring-[var(--color-accent)]/30' : ''}`}
                     onDragOver={onDragOver}
                     onDragLeave={onDragLeave}
                     onDrop={onDrop}
                   >
                     {/* 上方：描述你的画面，文字区全宽；底部：模型+生成按钮栏，不显示文字 */}
-                    <div className="prompt-and-ref-card__prompt flex-1 min-h-0 flex flex-col p-2.5">
-                      <label className="media-create-prompt-label flex items-center gap-1 mb-1 text-sm flex-shrink-0">
+                    <div className="prompt-and-ref-card__prompt flex-1 min-h-0 flex flex-col p-2">
+                      <label className="media-create-prompt-label flex items-center gap-1 mb-1 text-xs flex-shrink-0">
                         <Wand2 className="w-3.5 h-3.5 text-[var(--color-accent)]" />
                         描述你的画面
                       </label>
@@ -1191,8 +1189,8 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
                       <div className="flex-1 min-h-0 flex flex-col">
                         <textarea
                           placeholder={refImages.length > 0 ? '描述你希望对图片进行的修改或风格变换...' : '描述你想要的画面...'}
-                          className={`${inputClass} resize-none rounded-lg min-h-[80px] flex-1 min-w-0 overflow-y-auto !py-2 !px-2.5`}
-                          rows={3}
+                          className={`${inputClass} resize-none rounded-lg min-h-[140px] flex-1 min-w-0 overflow-y-auto !py-1.5 !px-2`}
+                          rows={6}
                           value={imgPrompt}
                           onChange={(e) => setImgPrompt(e.target.value)}
                           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleGenerate(); } }}
@@ -1200,11 +1198,11 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
                         {imgError && <p className="text-xs text-[var(--color-secondary)] mt-1 flex-shrink-0">{imgError}</p>}
                       </div>
                       {/* 底部按钮栏：自定义提示词(左) | 模型+生成(右)，简练笔触 */}
-                      <div className="flex-shrink-0 flex items-center justify-between gap-3 pt-3 mt-1 border-t border-[var(--border-subtle)] min-h-[48px]">
+                      <div className="flex-shrink-0 flex items-center justify-between gap-2 pt-1 mt-0.5 min-h-[38px]">
                         <div className="flex-1 min-w-0 flex items-center gap-2 overflow-x-auto no-scrollbar">
                           <button
                             type="button"
-                            className={`flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal transition-all ${showAddPrompt ? 'bg-[var(--color-secondary)]/15 text-[var(--color-secondary)]' : 'bg-transparent text-[var(--color-secondary)] hover:bg-[var(--color-secondary)]/10'}`}
+                            className={`flex-shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-normal transition-all ${showAddPrompt ? 'bg-[var(--color-secondary)]/15 text-[var(--color-secondary)]' : 'bg-transparent text-[var(--color-secondary)] hover:bg-[var(--color-secondary)]/10'}`}
                             onClick={() => { if (showAddPrompt) cancelEditPrompt(); else setShowAddPrompt(true); }}
                           >
                             {showAddPrompt ? <><X className="w-4 h-4" /> 取消</> : <><Plus className="w-4 h-4" /> 新建</>}
@@ -1217,7 +1215,7 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
                               </div>
                               <button
                                 type="button"
-                                className={`inline-flex items-center px-3 py-2 rounded-lg text-sm font-normal transition-all cursor-pointer select-none text-[var(--color-secondary)] bg-[var(--color-secondary)]/5 hover:bg-[var(--color-secondary)]/15 ${editingPromptId === cp.id ? 'ring-1 ring-[var(--color-secondary)]/25' : ''}`}
+                                className={`inline-flex items-center px-2.5 py-1.5 rounded-lg text-xs font-normal transition-all cursor-pointer select-none text-[var(--color-secondary)] bg-[var(--color-secondary)]/5 hover:bg-[var(--color-secondary)]/15 ${editingPromptId === cp.id ? 'ring-1 ring-[var(--color-secondary)]/25' : ''}`}
                                 onClick={() => applyPromptText(cp.text)}
                                 title={cp.text.slice(0, 60) + (cp.text.length > 60 ? '…' : '')}
                               >
@@ -1235,7 +1233,7 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
                             <Button
                               variant="outline"
                               size="sm"
-                              className={`media-create-model-btn !min-h-[36px] !h-9 !px-3 !text-sm !font-normal !min-w-0 ${btnSecondary}`}
+                              className={`media-create-model-btn !min-h-[32px] !h-8 !px-2.5 !text-xs !font-normal !min-w-0 ${btnSecondary}`}
                               onClick={() => setShowModelDialog(true)}
                             >
                               {activeConfig ? <span className="truncate max-w-[120px] sm:max-w-[140px]">{activeConfig.model || activeConfig.name}</span> : '选择模型'}
@@ -1243,7 +1241,7 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
                             </Button>
                           )}
                           <Button
-                            className={`media-create-create-btn !min-h-[36px] !h-9 !px-4 !text-sm !font-normal !min-w-0 ${refImages.length > 0 ? `media-create-create-btn--pink ${btnPink}` : btnPrimary}`}
+                            className={`media-create-create-btn !min-h-[32px] !h-8 !px-3 !text-xs !font-normal !min-w-0 ${refImages.length > 0 ? `media-create-create-btn--pink ${btnPink}` : btnPrimary}`}
                             size="sm"
                             disabled={!imgPrompt.trim() || !activeConfig}
                             onClick={handleGenerate}
@@ -1258,7 +1256,7 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
                         </div>
                       </div>
                       {showAddPrompt && (
-                        <div className="flex-shrink-0 rounded-lg bg-[var(--surface-secondary)] p-2 mt-2 space-y-2 border border-[var(--border-subtle)]">
+                        <div className="flex-shrink-0 rounded-lg bg-[var(--surface-secondary)] p-1.5 mt-1.5 space-y-1.5">
                           <div className="flex flex-col sm:flex-row gap-1.5">
                             <input type="text" placeholder="标签名" className={`${inputClass} !py-1 !text-xs flex-shrink-0`} style={{ width: '100px', maxWidth: '100%' }} value={newPromptLabel} onChange={(e) => setNewPromptLabel(e.target.value)} maxLength={20} autoFocus />
                             <input type="text" placeholder="提示词内容" className={`${inputClass} !py-1 !text-xs flex-1 min-w-0`} value={newPromptText} onChange={(e) => setNewPromptText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCustomPrompt(); } }} />
@@ -1273,7 +1271,7 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
                     </div>
 
                     {/* 下方：粘贴/上传参考图面板 */}
-                    <div className="prompt-and-ref-card__images flex-shrink-0 min-h-0 py-1.5 px-2 sm:px-2.5 border-t border-[var(--border-subtle)] overflow-hidden relative">
+                    <div className="prompt-and-ref-card__images flex-shrink-0 min-h-0 py-1 px-1.5 sm:px-2 overflow-hidden relative">
                       {refImages.length > 0 ? (
                         <>
                           <div className="flex gap-1.5 flex-wrap max-h-[160px] overflow-y-auto overflow-x-hidden no-scrollbar min-w-0 pr-12">
@@ -1338,10 +1336,10 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
                   </div>
 
                   {/* 图片规格设置：宽高比 + 数量（模型选择已移至输入框内） */}
-                  <div className="image-spec-block rounded-xl p-2.5 sm:p-3 border border-[var(--border-default)] space-y-3">
+                  <div className="image-spec-block rounded-xl p-2 space-y-2">
                     <div className="flex items-center gap-2">
                       <Maximize2 className="w-5 h-5 text-[var(--color-accent)]" />
-                      <span className="text-sm font-semibold text-[var(--text-primary)]">图片规格设置</span>
+                      <span className="text-xs font-semibold text-[var(--text-primary)]">图片规格设置</span>
                     </div>
                     <ImageSizeSelector
                       value={imageSize}
@@ -1436,7 +1434,7 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
             {createTab === 'video' && (
               <>
               <div className="media-create-layout flex-1 min-h-0 overflow-hidden">
-                <div className={`media-create-left-col flex flex-col gap-3 min-w-0 min-h-0 overflow-y-auto no-scrollbar ${isMobile ? 'chatu-left-col-with-fab' : ''}`}>
+                <div className={`media-create-left-col flex flex-col gap-2 min-w-0 min-h-0 overflow-y-auto no-scrollbar ${isMobile ? 'chatu-left-col-with-fab' : ''}`}>
                   {providerLoading ? (
                     <div className={`text-sm ${textMuted} ${panelClass} p-3 rounded-xl`}><Loader2 className="w-4 h-4 animate-spin inline mr-2" /> 加载模型...</div>
                   ) : currentConfigs.length === 0 ? (
@@ -1444,14 +1442,14 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
                   ) : (
                   <div
                     ref={dropZoneRef}
-                    className={`prompt-and-ref-card rounded-xl overflow-hidden flex flex-col flex-1 min-h-[240px] sm:min-h-[260px] md:min-h-[280px] relative ${dragOver ? 'ring-2 ring-[var(--color-accent)]/30' : ''}`}
+                    className={`prompt-and-ref-card rounded-xl overflow-hidden flex flex-col flex-1 min-h-[220px] sm:min-h-[240px] md:min-h-[260px] relative ${dragOver ? 'ring-2 ring-[var(--color-accent)]/30' : ''}`}
                     onDragOver={onDragOver}
                     onDragLeave={onDragLeave}
                     onDrop={onDrop}
                   >
                     {/* 上方：描述视频场景，文字区全宽 */}
-                    <div className="prompt-and-ref-card__prompt flex-1 min-h-0 flex flex-col p-2.5">
-                      <label className="media-create-prompt-label flex items-center gap-1 mb-1 text-sm flex-shrink-0">
+                    <div className="prompt-and-ref-card__prompt flex-1 min-h-0 flex flex-col p-2">
+                      <label className="media-create-prompt-label flex items-center gap-1 mb-1 text-xs flex-shrink-0">
                         <Film className="w-3.5 h-3.5 text-[var(--color-accent)]" />
                         描述视频场景
                       </label>
@@ -1501,18 +1499,18 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
                       <div className="flex-1 min-h-0 flex flex-col">
                         <textarea
                           placeholder="描述视频场景、动作、氛围..."
-                          className={`${inputClass} resize-none rounded-lg min-h-[80px] flex-1 min-w-0 overflow-y-auto !py-2 !px-2.5`}
-                          rows={3}
+                          className={`${inputClass} resize-none rounded-lg min-h-[140px] flex-1 min-w-0 overflow-y-auto !py-1.5 !px-2`}
+                          rows={6}
                           value={videoPrompt}
                           onChange={(e) => setVideoPrompt(e.target.value)}
                         />
                       </div>
                       {/* 底部按钮栏：自定义提示词(左) | 模型+生成(右) */}
-                      <div className="flex-shrink-0 flex items-center justify-between gap-3 pt-3 mt-1 border-t border-[var(--border-subtle)] min-h-[48px]">
+                      <div className="flex-shrink-0 flex items-center justify-between gap-2 pt-1 mt-0.5 min-h-[38px]">
                         <div className="flex-1 min-w-0 flex items-center gap-2 overflow-x-auto no-scrollbar">
                           <button
                             type="button"
-                            className={`flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal transition-all ${showAddPrompt ? 'bg-[var(--color-secondary)]/15 text-[var(--color-secondary)]' : 'bg-transparent text-[var(--color-secondary)] hover:bg-[var(--color-secondary)]/10'}`}
+                            className={`flex-shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-normal transition-all ${showAddPrompt ? 'bg-[var(--color-secondary)]/15 text-[var(--color-secondary)]' : 'bg-transparent text-[var(--color-secondary)] hover:bg-[var(--color-secondary)]/10'}`}
                             onClick={() => { if (showAddPrompt) cancelEditPrompt(); else setShowAddPrompt(true); }}
                           >
                             {showAddPrompt ? <><X className="w-4 h-4" /> 取消</> : <><Plus className="w-4 h-4" /> 新建</>}
@@ -1523,22 +1521,22 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
                                 <button type="button" className="p-1.5 rounded-lg bg-black/90 text-[var(--color-accent)] hover:bg-[var(--color-accent)]/20" onClick={(e) => { e.stopPropagation(); startEditPrompt(cp); }} title="编辑"><PenLine className="w-3.5 h-3.5" /></button>
                                 <button type="button" className="p-1.5 rounded-lg bg-black/90 text-[var(--color-secondary)] hover:bg-[var(--color-secondary)]/20" onClick={(e) => { e.stopPropagation(); deleteCustomPrompt(cp.id); }} title="删除"><Trash2 className="w-3.5 h-3.5" /></button>
                               </div>
-                              <button type="button" className={`inline-flex items-center px-3 py-2 rounded-lg text-sm font-normal transition-all cursor-pointer select-none text-[var(--color-secondary)] bg-[var(--color-secondary)]/5 hover:bg-[var(--color-secondary)]/15 ${editingPromptId === cp.id ? 'ring-1 ring-[var(--color-secondary)]/25' : ''}`} onClick={() => applyPromptText(cp.text)} title={cp.text.slice(0, 60) + (cp.text.length > 60 ? '…' : '')}>{cp.label}</button>
+                              <button type="button" className={`inline-flex items-center px-2.5 py-1.5 rounded-lg text-xs font-normal transition-all cursor-pointer select-none text-[var(--color-secondary)] bg-[var(--color-secondary)]/5 hover:bg-[var(--color-secondary)]/15 ${editingPromptId === cp.id ? 'ring-1 ring-[var(--color-secondary)]/25' : ''}`} onClick={() => applyPromptText(cp.text)} title={cp.text.slice(0, 60) + (cp.text.length > 60 ? '…' : '')}>{cp.label}</button>
                             </div>
                           ))}
                         </div>
                         <div className="flex-shrink-0 flex items-center gap-2">
-                          <Button variant="outline" size="sm" className={`media-create-model-btn !min-h-[36px] !h-9 !px-3 !text-sm !font-normal !min-w-0 ${btnSecondary}`} onClick={() => setShowModelDialog(true)}>
+                          <Button variant="outline" size="sm" className={`media-create-model-btn !min-h-[32px] !h-8 !px-2.5 !text-xs !font-normal !min-w-0 ${btnSecondary}`} onClick={() => setShowModelDialog(true)}>
                             {activeConfig ? <span className="truncate max-w-[120px] sm:max-w-[140px]">{activeConfig.model || activeConfig.name}</span> : '选择模型'}
                             <ChevronDown className="w-4 h-4 opacity-60 flex-shrink-0 ml-1" />
                           </Button>
-                          <Button className={`media-create-create-btn !min-h-[36px] !h-9 !px-4 !text-sm !font-normal !min-w-0 ${btnPrimary}`} size="sm" disabled={videoLoading || (!videoPrompt.trim() && refImages.length === 0) || !activeConfig} onClick={handleVideoSubmit}>
+                          <Button className={`media-create-create-btn !min-h-[32px] !h-8 !px-3 !text-xs !font-normal !min-w-0 ${btnPrimary}`} size="sm" disabled={videoLoading || (!videoPrompt.trim() && refImages.length === 0) || !activeConfig} onClick={handleVideoSubmit}>
                             {videoLoading ? <><Loader2 className="w-4 h-4 animate-spin mr-1" /> 提交中...</> : <><Film className="w-4 h-4 mr-1" /> 生成视频</>}
                           </Button>
                         </div>
                       </div>
                       {showAddPrompt && (
-                        <div className="flex-shrink-0 rounded-lg bg-[var(--surface-secondary)] p-2 mt-2 space-y-2 border border-[var(--border-subtle)]">
+                        <div className="flex-shrink-0 rounded-lg bg-[var(--surface-secondary)] p-1.5 mt-1.5 space-y-1.5">
                           <div className="flex flex-col sm:flex-row gap-1.5">
                             <input type="text" placeholder="标签名" className={`${inputClass} !py-1 !text-xs flex-shrink-0`} style={{ width: '100px', maxWidth: '100%' }} value={newPromptLabel} onChange={(e) => setNewPromptLabel(e.target.value)} maxLength={20} autoFocus />
                             <input type="text" placeholder="提示词内容" className={`${inputClass} !py-1 !text-xs flex-1 min-w-0`} value={newPromptText} onChange={(e) => setNewPromptText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCustomPrompt(); } }} />
@@ -1555,7 +1553,7 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
                   )}
                 </div>
                 {/* 右栏：视频任务与输出 — 桌面端 md+ 显示，移动端用底部抽屉 */}
-                <div className="media-create-results-card min-w-0 min-h-0 flex flex-col overflow-hidden border border-[var(--border-default)] bg-[var(--surface-secondary)] rounded-xl hidden md:flex">
+                <div className="media-create-results-card min-w-0 min-h-0 flex flex-col overflow-hidden bg-[var(--surface-secondary)] rounded-xl hidden md:flex">
                   <h3 className="media-create-results-title"><Film className="w-4 h-4" /> 视频任务</h3>
                   {!videoTaskId && !videoError ? (
                     <div className="media-create-empty-state flex-1 flex flex-col items-center justify-center py-8 text-[var(--text-muted)]">
@@ -1752,7 +1750,6 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
                               title={c.model || c.name}
                               description={
                                 [
-                                  c.media_purpose ? '媒体专用' : null,
                                   caps?.image ? '生图' : null,
                                   caps?.video ? '生视频' : null,
                                 ].filter(Boolean).join(' · ') || c.providerName
