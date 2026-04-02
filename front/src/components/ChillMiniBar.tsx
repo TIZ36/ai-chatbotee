@@ -29,8 +29,6 @@ export const ChillMiniBar: React.FC<ChillMiniBarProps> = ({ suppress, onOpenChil
       role="region"
       aria-label="Chill 播放条"
     >
-      <div className="chill-mini-bar-grid" aria-hidden />
-      <div className="chill-mini-bar-shards" aria-hidden />
       <div className="chill-mini-bar-ambient" aria-hidden />
       <div className="chill-mini-bar-glow" aria-hidden />
       <div className="chill-mini-bar-inner">

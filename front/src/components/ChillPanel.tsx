@@ -5,6 +5,8 @@ import type { ChillRecentSource } from './ChillHeaderBar';
 import { Input } from './ui/Input';
 import { ScrollArea } from './ui/ScrollArea';
 
+const EMBED_LIST_MAX_H = 'calc(100vh - 340px)';
+
 export type ChillPanelTab = 'live' | 'search';
 
 export type ChillPanelProps = {
@@ -90,7 +92,10 @@ export const ChillPanel: React.FC<ChillPanelProps> = ({
       <div className={`chill-panel-body ${!isMobile ? 'chill-panel-body--grid' : ''}`}>
         <div className="chill-panel-main">
         {tab === 'live' && (
-          <ScrollArea className={`chill-panel-scroll ${embed ? 'chill-panel-scroll--embed' : 'h-[min(360px,42vh)]'}`}>
+          <div
+            className="chill-panel-list-scroll pr-1"
+            style={{ maxHeight: embed ? EMBED_LIST_MAX_H : 'min(360px, 42vh)' }}
+          >
             <div className="p-3 space-y-2 app-list-layout">
               {loadingLive && (
                 <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--niho-skyblue-gray)' }}>
@@ -127,12 +132,12 @@ export const ChillPanel: React.FC<ChillPanelProps> = ({
                 </button>
               ))}
             </div>
-          </ScrollArea>
+          </div>
         )}
 
         {tab === 'search' && (
-          <div className={`flex flex-col min-h-0 ${embed ? 'flex-1 h-full min-h-[200px]' : 'h-[min(360px,42vh)]'}`}>
-            <div className="flex gap-2 px-3 pt-1 pb-2">
+          <div className="flex flex-col min-h-0">
+            <div className="flex flex-shrink-0 gap-2 px-3 pt-1 pb-2">
               <Input
                 value={searchQuery}
                 onChange={(e) => onSearchQueryChange(e.target.value)}
@@ -151,7 +156,10 @@ export const ChillPanel: React.FC<ChillPanelProps> = ({
                 <Search className="w-4 h-4" style={{ color: 'var(--color-accent)' }} />
               </button>
             </div>
-            <ScrollArea className={`chill-panel-scroll ${embed ? 'chill-panel-scroll--embed' : 'flex-1 min-h-0'} pr-1`}>
+            <div
+              className="chill-panel-list-scroll pr-1"
+              style={{ maxHeight: embed ? EMBED_LIST_MAX_H : 'min(320px, 38vh)' }}
+            >
               <div className="px-3 pb-3 space-y-2 app-list-layout">
                 {searching && (
                   <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--niho-skyblue-gray)' }}>
@@ -205,7 +213,7 @@ export const ChillPanel: React.FC<ChillPanelProps> = ({
                     ),
                   )}
               </div>
-            </ScrollArea>
+            </div>
           </div>
         )}
         </div>

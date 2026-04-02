@@ -1,245 +1,195 @@
 <p align="center">
-  <img src="front/assets/app_logo_dark.png" alt="Chaya Logo" width="120" height="120">
+  <img src="front/assets/app_logo_dark.png" alt="Chaya" width="100" height="100">
 </p>
 
 <h1 align="center">Chaya</h1>
 
 <p align="center">
-  <strong>🦆 下一代 AI 智能体对话平台</strong>
+  <strong>Your Chill AI Workspace</strong><br>
+  <sub>Chat. Create. Chill. All in one place.</sub>
 </p>
 
 <p align="center">
-  多模型 · 多 Agent · MCP 工具 · 思考链 · 工作流
+  <img src="https://img.shields.io/badge/React-19-61dafb?style=flat-square&logo=react" alt="React 19">
+  <img src="https://img.shields.io/badge/Vite-7-646cff?style=flat-square&logo=vite" alt="Vite 7">
+  <img src="https://img.shields.io/badge/Flask-Python_3.10+-3776ab?style=flat-square&logo=flask" alt="Flask">
+  <img src="https://img.shields.io/badge/MCP-Protocol-00ff88?style=flat-square" alt="MCP">
+  <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT">
 </p>
 
 <p align="center">
-  <a href="#-功能特性">功能</a> •
-  <a href="#-快速开始">安装</a> •
-  <a href="#-使用指南">使用</a> •
-  <a href="#-技术架构">架构</a> •
-  <a href="#-贡献">贡献</a>
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
-  <img src="https://img.shields.io/badge/python-3.10+-green.svg" alt="Python">
-  <img src="https://img.shields.io/badge/node-18+-green.svg" alt="Node.js">
-  <img src="https://img.shields.io/badge/react-18-61dafb.svg" alt="React">
+  <a href="#-at-a-glance">At a Glance</a>&ensp;·&ensp;
+  <a href="#-features">Features</a>&ensp;·&ensp;
+  <a href="#-getting-started">Getting Started</a>&ensp;·&ensp;
+  <a href="#-architecture">Architecture</a>&ensp;·&ensp;
+  <a href="#-contributing">Contributing</a>
 </p>
 
 ---
 
-## ✨ 功能特性
+## At a Glance
 
-<table>
-<tr>
-<td width="50%">
+Chaya is a self-hosted AI workspace that brings together **intelligent chat**, **media creation**, and **ambient vibes** under a neon-noir cyberpunk interface. Connect your favorite LLMs, plug in MCP tools, define custom personas — and do it all with lofi beats playing in the background.
 
-### 🧠 多模型支持
-- OpenAI GPT-4 / GPT-4o
-- Anthropic Claude 3.5
-- DeepSeek (含 Reasoner 思考模型)
-- Google Gemini
-- Ollama 本地模型
+<p align="center">
+  <img src="docs/screenshots/chat.png" width="720" alt="Chaya Chat — multi-agent conversation with thinking chains">
+</p>
+<p align="center"><sub>Multi-agent chat with real-time thinking chains and MCP tool execution</sub></p>
 
-</td>
-<td width="50%">
+---
 
-### 🔧 MCP 工具集成
-- 连接任意 MCP 服务器
-- 自动工具发现与调用
-- 实时执行日志
-- 支持 OAuth 认证
+## Features
 
-</td>
-</tr>
-<tr>
-<td width="50%">
+### Chaya Chat — Multi-Model, Multi-Agent Conversations
 
-### 🤝 多 Agent 协作
-- 多 Agent 圆桌会议
-- 智能任务委派
-- 角色扮演与人设
-- 记忆与上下文管理
+Orchestrate conversations across GPT-4o, Claude, Gemini, DeepSeek, Grok, and local Ollama models. Run multi-agent roundtables, watch thinking chains unfold in real time, and let MCP tools handle the heavy lifting.
 
-</td>
-<td width="50%">
+- **Multi-provider LLM** — OpenAI / Anthropic / Google / DeepSeek / Grok / Nvidia / Ollama
+- **Multi-agent roundtable** — multiple AI actors collaborating in a single session
+- **MCP tool integration** — auto-discovery, OAuth, real-time execution logs
+- **Thinking chain visualization** — transparent reasoning, step by step
+- **Skill packs** — reusable prompt-based capabilities attached to agents
+- **TTS** — ElevenLabs-powered text-to-speech on any message
+- **Discord bridge** — per-channel actors with independent memory
 
-### 💭 思考链展示
-- 实时流式显示思考过程
-- 支持 DeepSeek Reasoner
-- 执行日志可视化
-- 决策过程透明
+<p align="center">
+  <img src="docs/screenshots/llm-config.png" width="720" alt="LLM provider configuration with multi-provider support">
+</p>
+<p align="center"><sub>Unified model registry — manage tokens, toggle models, one place</sub></p>
 
-</td>
-</tr>
-</table>
+---
 
-## 🎬 演示
+### Chatu — AI Media Studio
 
-> 💡 **提示**：添加你的产品截图或 GIF 到这里
+Generate images and videos with natural language. Paste reference images, pick aspect ratios, batch-generate variants, and push results straight to Google Drive.
 
-```
-┌─────────────────────────────────────────────────────┐
-│  🦆 Chaya - AI 对话界面                             │
-├─────────────────────────────────────────────────────┤
-│                                                     │
-│  👤 用户: 帮我搜索小红书上关于咖啡的笔记            │
-│                                                     │
-│  🤖 AI: [思考中...]                                 │
-│     └─ 💭 思考: 用户想要搜索小红书内容...           │
-│     └─ 🔧 调用: xiaohongshu.search_feeds            │
-│     └─ ✅ 完成: 找到 15 条相关笔记                   │
-│                                                     │
-│  📝 搜索结果:                                       │
-│  1. ☕ 手冲咖啡入门指南 (👍 2.3k)                   │
-│  2. 🏠 家用咖啡机推荐 (👍 1.8k)                     │
-│  ...                                                │
-│                                                     │
-└─────────────────────────────────────────────────────┘
-```
+- **Text-to-image / Image-to-image** — powered by Gemini, with more providers pluggable
+- **Video generation** — Veo, Runway (expandable)
+- **Gallery timeline** — browse outputs organized by date
+- **Google Drive sync** — one-click upload to your cloud
 
-## 🚀 快速开始
+<p align="center">
+  <img src="docs/screenshots/chatu.png" width="720" alt="Chatu — AI image and video creation studio">
+</p>
+<p align="center"><sub>Describe your scene, pick a ratio, hit generate</sub></p>
 
-### 环境要求
+---
 
-| 依赖 | 版本 | 说明 |
-|------|------|------|
-| Node.js | 18+ | 前端运行时 |
-| Python | 3.10+ | 后端运行时 |
-| MySQL | 8.0+ | 数据存储 |
-| Redis | 6.0+ | 缓存与消息 |
+### Chill — Ambient Radio
 
-### 一键启动
+A built-in lofi / ambient radio that streams YouTube live stations. Browse, search, favorite — and keep the music playing while you work in any other tab. Because good vibes are not optional.
+
+- **YouTube live streams** — curated lofi, jazz, synthwave, and more
+- **Global player** — music persists across page navigation
+- **Search & favorites** — build your own station list
+- **Mini bar** — always-visible playback controls in the header
+
+<p align="center">
+  <img src="docs/screenshots/chill.png" width="720" alt="Chill — ambient lofi radio player">
+</p>
+<p align="center"><sub>Stay in the zone. Lofi beats never stop.</sub></p>
+
+---
+
+### Persona System
+
+Define AI personalities with custom system prompts, voice presets, memory triggers, and behavioral toggles. Each persona is a full character profile — not just a system message.
+
+### Niho Theme
+
+A handcrafted neon cyberpunk design system. Pure black backgrounds, glowing green accents, mist-pink highlights, and a three-tier card elevation system built for focus.
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+| Dependency | Version | Purpose |
+|---|---|---|
+| Node.js | 18+ | Frontend runtime |
+| Python | 3.10+ | Backend runtime |
+| MySQL | 8.0+ | Data storage |
+| Redis | 6.0+ | Cache & messaging |
+
+### Quick Start
 
 ```bash
-# 克隆项目
-git clone https://github.com/your-username/ai-chatbotee.git
-cd ai-chatbotee
+git clone https://github.com/your-org/chaya.git
+cd chaya
 
-# 启动后端
+# Backend
 cd backend
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 python app.py
 
-# 启动前端（新终端）
-./start-front.sh
+# Frontend (new terminal)
+cd front
+pnpm install && pnpm dev
 ```
 
-访问 http://localhost:5177 开始使用 🎉
+Open **http://localhost:5177** and you're in.
 
-## 📖 使用指南
+### Configuration
 
-### 1️⃣ 配置 LLM
+1. **Add LLM providers** — Settings > Model Registry > add your API keys
+2. **Connect MCP servers** — Settings > MCP > paste server URLs
+3. **Set up a persona** — Persona tab > create or import character profiles
+4. **Start chatting** — pick an agent, pick a model, go
 
-进入「设置 → LLM 配置」添加你的 API 密钥：
+---
 
-```yaml
-# 支持的模型提供商
-- OpenAI (gpt-4, gpt-4o, gpt-3.5-turbo)
-- Anthropic (claude-3-5-sonnet, claude-3-opus)
-- DeepSeek (deepseek-chat, deepseek-reasoner)
-- Google (gemini-pro, gemini-1.5-pro)
-- Ollama (llama3, mistral, qwen...)
+## Architecture
+
+```
+chaya/
+├── backend/                 # Flask API server
+│   ├── api/                 # REST endpoints
+│   ├── services/
+│   │   ├── actor/           # Agent actor model & lifecycle
+│   │   ├── providers/       # LLM provider adapters
+│   │   ├── mcp/             # MCP client & auto-selection
+│   │   ├── chill/           # YouTube ambient service
+│   │   └── media/           # Image & video generation
+│   └── app.py
+│
+├── front/                   # React 19 + Vite 7 + TypeScript
+│   └── src/
+│       ├── components/      # UI — Workflow, Chatu, Chill, Agents...
+│       ├── services/        # API clients, context, state
+│       └── index.css        # Niho design system tokens
+│
+├── docs/                    # Additional documentation
+└── electron/                # Electron shell (experimental)
 ```
 
-### 2️⃣ 添加 MCP 服务
+**Frontend**: React 19, Vite 7, TypeScript, Tailwind CSS, Radix UI, MCP SDK
 
-进入「设置 → MCP 服务器」添加工具服务：
+**Backend**: Flask, Python 3.10+, MySQL, Redis, Actor-based agent runtime
+
+---
+
+## Contributing
+
+Contributions welcome. Fork, branch, PR — the usual flow.
 
 ```bash
-# 示例：小红书 MCP
-http://127.0.0.1:18060/mcp
-
-# 示例：Notion MCP  
-http://127.0.0.1:18061/mcp
+git checkout -b feature/your-idea
+git commit -m "add: your idea"
+git push origin feature/your-idea
 ```
 
-### 3️⃣ 开始对话
+Then open a Pull Request.
 
-创建新会话，选择 Agent，开始智能对话！
+---
 
-## 🏗 技术架构
+## License
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        Frontend                              │
-│         React + TypeScript + Vite + Tailwind CSS            │
-├─────────────────────────────────────────────────────────────┤
-│                         Backend                              │
-│                    Flask + Python 3.10+                      │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐          │
-│  │   Actor     │  │     LLM     │  │     MCP     │          │
-│  │   System    │  │  Providers  │  │   Client    │          │
-│  └─────────────┘  └─────────────┘  └─────────────┘          │
-├─────────────────────────────────────────────────────────────┤
-│                      Data Layer                              │
-│              MySQL 8.0+  │  Redis 6.0+                       │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## 📁 项目结构
-
-```
-ai-chatbotee/
-├── 📂 backend/              # Flask 后端
-│   ├── 📂 api/             # REST API
-│   ├── 📂 services/        # 业务逻辑
-│   │   ├── 📂 actor/       # Agent Actor 模型
-│   │   ├── 📂 providers/   # LLM 适配器
-│   │   └── 📂 mcp/         # MCP 工具服务
-│   └── 📄 app.py           # 入口文件
-├── 📂 front/                # React 前端
-│   └── 📂 src/
-│       ├── 📂 components/  # UI 组件
-│       └── 📂 services/    # 前端服务
-├── 📄 start-front.sh       # 前端启动脚本
-└── 📄 README.md
-```
-
-## 🤝 贡献
-
-欢迎贡献！请查看 [贡献指南](CONTRIBUTING.md)。
-
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add AmazingFeature'`)
-4. 推送分支 (`git push origin feature/AmazingFeature`)
-5. 提交 Pull Request
-
-## ☕ 支持项目
-
-如果这个项目对你有帮助，欢迎请我喝杯咖啡！
-
-<p align="center">
-  <a href="https://www.buymeacoffee.com/your-username">
-    <img src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=☕&slug=your-username&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" />
-  </a>
-</p>
-
-<p align="center">
-  <a href="https://afdian.net/a/your-username">
-    <img src="https://img.shields.io/badge/爱发电-支持我-946ce6?style=for-the-badge" alt="爱发电">
-  </a>
-</p>
-
-## ⭐ Star 历史
-
-如果你觉得这个项目有用，请给个 Star ⭐，这对我很重要！
-
-[![Star History Chart](https://api.star-history.com/svg?repos=your-username/ai-chatbotee&type=Date)](https://star-history.com/#your-username/ai-chatbotee&Date)
-
-## 📄 开源协议
-
-本项目基于 [MIT License](LICENSE) 开源。
+[MIT](LICENSE)
 
 ---
 
 <p align="center">
-  Made with ❤️ by <a href="https://github.com/your-username">Your Name</a>
-</p>
-
-<p align="center">
-  <a href="#top">⬆️ 回到顶部</a>
+  <sub>Built with good vibes and too much coffee.</sub>
 </p>
