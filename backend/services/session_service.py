@@ -69,6 +69,7 @@ class SessionService:
             avatar=data.get('avatar'),
             system_prompt=data.get('system_prompt'),
             media_output_path=data.get('media_output_path'),
+            ext=data.get('ext'),
             role_id=data.get('role_id'),
             role_version_id=data.get('role_version_id'),
             role_snapshot=data.get('role_snapshot'),

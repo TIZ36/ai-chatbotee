@@ -27,6 +27,7 @@ export interface PersonaSwitchDialogProps {
   onSwitchPersona: (presetId: string) => Promise<void>;
   /** 在详情页编辑并保存人设，持久化后 Chaya 会立即更新 */
   onSavePersona?: (preset: PersonaPreset) => Promise<void>;
+  onOpenPersonaSettings?: () => void;
   personaSwitchLoading?: boolean;
   personaSaveLoading?: boolean;
 }
@@ -38,6 +39,7 @@ export const PersonaSwitchDialog: React.FC<PersonaSwitchDialogProps> = ({
   currentPersonaId,
   onSwitchPersona,
   onSavePersona,
+  onOpenPersonaSettings,
   personaSwitchLoading = false,
   personaSaveLoading = false,
 }) => {
@@ -234,6 +236,22 @@ export const PersonaSwitchDialog: React.FC<PersonaSwitchDialogProps> = ({
                 点击人设查看详情，在详情页可切换使用
               </DialogDescription>
             </DialogHeader>
+
+            {onOpenPersonaSettings && (
+              <div className="px-1 pb-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={() => {
+                    onOpenChange(false);
+                    onOpenPersonaSettings();
+                  }}
+                >
+                  打开 Persona 管理
+                </Button>
+              </div>
+            )}
 
             <ScrollArea className="max-h-[60vh] overflow-auto no-scrollbar pr-1">
               <div className="space-y-0.5 py-0.5">

@@ -423,7 +423,8 @@ export async function deleteSession(session_id: string): Promise<void> {
     },
   });
   if (!response.ok) {
-    throw new Error(`Failed to delete session: ${response.statusText}`);
+    const errorData = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(errorData.error || `Failed to delete session: ${response.statusText}`);
   }
 }
 

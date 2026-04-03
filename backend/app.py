@@ -5422,21 +5422,50 @@ def list_sessions():
 
 @app.route("/api/sessions", methods=["POST", "OPTIONS"])
 def create_session():
-    """创建新 Topic。系统仅支持单一 Agent Chaya，不可通过此接口创建智能体。"""
+    """创建新会话（Topic / Agent）。"""
 
     try:
         from services.topic_service import get_topic_service
+        from services.session_service import SessionService
 
         data = request.get_json() or {}
-        # 系统仅支持 Chaya 一个智能体，不开放创建其他智能体
-        if data.get("session_type") == "agent":
-            return jsonify(
-                {
-                    "error": "系统仅支持 Chaya 一个智能体",
-                    "message": "请直接与 Chaya 对话，或在设置中切换人设、更换模型。",
-                }
-            ), 400
         owner_id = get_client_ip()  # 暂时用 IP 作为 User ID
+        session_type = data.get("session_type") or "memory"
+
+        # 支持直接创建 Agent：默认继承 Chaya 的核心能力配置（模型/系统提示词/头像/扩展），
+        # 但会话历史天然为空，记忆从 0 重新累计。
+        if session_type == "agent":
+            service = SessionService(get_mysql_connection)
+            chaya = service.get_session("agent_chaya") or {}
+
+            default_name = data.get("name") or data.get("title") or "新建 Agent"
+            agent_payload = {
+                "session_type": "agent",
+                "title": data.get("title") or default_name,
+                "name": default_name,
+                "llm_config_id": data.get("llm_config_id")
+                or chaya.get("llm_config_id"),
+                "avatar": data.get("avatar")
+                if "avatar" in data
+                else chaya.get("avatar"),
+                "system_prompt": data.get("system_prompt")
+                if "system_prompt" in data
+                else chaya.get("system_prompt"),
+                "media_output_path": data.get("media_output_path")
+                if "media_output_path" in data
+                else chaya.get("media_output_path"),
+            }
+
+            # ext 允许显式覆盖；未传时沿用 Chaya 的 ext，确保能力配置一致
+            if "ext" in data:
+                agent_payload["ext"] = data.get("ext")
+            elif isinstance(chaya.get("ext"), dict):
+                inherited_ext = dict(chaya.get("ext"))
+                inherited_ext.pop("currentPersonaId", None)
+                agent_payload["ext"] = inherited_ext
+
+            created = service.create_agent(agent_payload, creator_ip=owner_id)
+            return jsonify(created), 201
 
         # 使用 TopicService 创建
         topic = get_topic_service().create_topic(data, owner_id, creator_ip=owner_id)
@@ -5494,6 +5523,9 @@ def delete_session(session_id):
     """删除会话及其所有消息"""
 
     try:
+        if session_id == "agent_chaya":
+            return jsonify({"error": "Default agent cannot be deleted"}), 400
+
         conn = get_mysql_connection()
         if not conn:
             return jsonify({"error": "MySQL not available"}), 503
@@ -5502,16 +5534,82 @@ def delete_session(session_id):
         try:
             cursor = conn.cursor()
 
+            # 先确认会话是否存在（删除接口做成幂等：不存在也清理残留配置并返回成功）
+            cursor.execute(
+                "SELECT session_id, session_type FROM sessions WHERE session_id = %s LIMIT 1",
+                (session_id,),
+            )
+            session_row = cursor.fetchone()
+
+            # 防止被其它会话/绑定引用导致删除失败：先解除引用
+            # 1) 会话角色引用（若存在 role_id 外键或业务引用）
+            cursor.execute(
+                """
+                UPDATE sessions
+                SET role_id = NULL,
+                    role_version_id = NULL,
+                    role_snapshot = NULL,
+                    role_applied_at = NULL,
+                    updated_at = NOW()
+                WHERE role_id = %s
+                """,
+                (session_id,),
+            )
+
+            # 2) Discord 频道绑定到该 Agent 时，回退到默认 Agent
+            cursor.execute(
+                """
+                UPDATE discord_channels
+                SET linked_agent_id = 'agent_chaya',
+                    updated_at = NOW()
+                WHERE linked_agent_id = %s
+                """,
+                (session_id,),
+            )
+
+            # 3) 删除以该会话作为“频道专属会话”的 Discord 绑定，避免孤儿配置
+            cursor.execute(
+                "DELETE FROM discord_channels WHERE session_id = %s",
+                (session_id,),
+            )
+
+            # 4) 清理会话参与者中把该会话当作参与者的记录（participant_id 非外键）
+            cursor.execute(
+                "DELETE FROM session_participants WHERE participant_id = %s",
+                (session_id,),
+            )
+
+            # 5) 清理角色版本与技能分配等配置（兼容老库无外键场景）
+            cursor.execute(
+                "DELETE FROM role_versions WHERE role_id = %s", (session_id,)
+            )
+            cursor.execute(
+                "DELETE FROM skill_pack_assignments WHERE target_session_id = %s",
+                (session_id,),
+            )
+            cursor.execute(
+                "UPDATE skill_packs SET source_session_id = NULL WHERE source_session_id = %s",
+                (session_id,),
+            )
+
             # 删除会话（由于外键约束，会自动删除关联的消息和总结）
             cursor.execute("DELETE FROM sessions WHERE session_id = %s", (session_id,))
+            deleted_rows = cursor.rowcount
             conn.commit()
 
-            if cursor.rowcount == 0:
-                return jsonify({"error": "Session not found"}), 404
+            if deleted_rows > 0:
+                print(f"[Session API] Deleted session: {session_id}")
+                return jsonify({"message": "Session deleted successfully"})
 
-            print(f"[Session API] Deleted session: {session_id}")
-
-            return jsonify({"message": "Session deleted successfully"})
+            print(
+                f"[Session API] Session not found, cleaned dangling configs: {session_id}"
+            )
+            return jsonify(
+                {
+                    "message": "Session already deleted; dangling configs cleaned",
+                    "session_id": session_id,
+                }
+            )
 
         finally:
             if cursor:
@@ -7608,16 +7706,17 @@ def update_session_media_output_path(session_id):
 
 # ==================== 样式预设 API ====================
 
+
 @app.route("/api/media/style-presets", methods=["GET", "OPTIONS"])
 def get_style_presets():
     """获取作图风格预设（支持多源）
-    
+
     Query Parameters:
       - source: 'all' | 'local' | 'civitai' | 'lexica' (default: 'all')
       - query: 搜索关键词 (default: '')
       - limit: 返回数量 (default: 20, max: 50)
       - page: 分页号 (default: 1)
-    
+
     Response:
     {
       "presets": [
@@ -7639,19 +7738,19 @@ def get_style_presets():
         return handle_cors_preflight()
 
     try:
-        source = request.args.get('source', 'all')
-        query = request.args.get('query', '')
-        limit = min(int(request.args.get('limit', 20)), 50)
-        page = max(int(request.args.get('page', 1)), 1)
+        source = request.args.get("source", "all")
+        query = request.args.get("query", "")
+        limit = min(int(request.args.get("limit", 20)), 50)
+        page = max(int(request.args.get("page", 1)), 1)
 
         presets = []
 
         # 1. 本地预设
-        if source in ('all', 'local'):
+        if source in ("all", "local"):
             presets.extend(_get_local_style_presets())
 
         # 2. Civitai 预设（可选，需要 API key）
-        if source in ('all', 'civitai'):
+        if source in ("all", "civitai"):
             try:
                 civitai_presets = _fetch_civitai_style_presets(query, limit)
                 presets.extend(civitai_presets)
@@ -7659,7 +7758,7 @@ def get_style_presets():
                 print(f"[Style Presets] Warning: Failed to fetch Civitai presets: {e}")
 
         # 3. Lexica 预设
-        if source in ('all', 'lexica'):
+        if source in ("all", "lexica"):
             try:
                 lexica_presets = _fetch_lexica_style_presets(query, limit)
                 presets.extend(lexica_presets)
@@ -7671,13 +7770,15 @@ def get_style_presets():
         end_idx = start_idx + limit
         page_presets = presets[start_idx:end_idx]
 
-        return jsonify({
-            "presets": page_presets,
-            "total": len(presets),
-            "page": page,
-            "has_more": end_idx < len(presets),
-            "source": source
-        }), 200
+        return jsonify(
+            {
+                "presets": page_presets,
+                "total": len(presets),
+                "page": page,
+                "has_more": end_idx < len(presets),
+                "source": source,
+            }
+        ), 200
 
     except Exception as e:
         print(f"[Style Presets] Error: {e}")
@@ -7694,7 +7795,7 @@ def _get_local_style_presets():
             "text": "以高质量日式动漫风格绘制，线条清晰，色彩鲜艳，",
             "source": "local",
             "color": "secondary",
-            "tags": ["anime", "manga", "japanese"]
+            "tags": ["anime", "manga", "japanese"],
         },
         {
             "id": "local_2",
@@ -7702,7 +7803,7 @@ def _get_local_style_presets():
             "text": "赛博朋克风格，霓虹灯光效果，暗色调城市背景，未来科技感，",
             "source": "local",
             "color": "accent",
-            "tags": ["cyberpunk", "neon", "scifi"]
+            "tags": ["cyberpunk", "neon", "scifi"],
         },
         {
             "id": "local_3",
@@ -7710,7 +7811,7 @@ def _get_local_style_presets():
             "text": "水彩画风格，笔触柔和，色彩晕染过渡自然，纸质质感，",
             "source": "local",
             "color": "highlight",
-            "tags": ["watercolor", "painting", "art"]
+            "tags": ["watercolor", "painting", "art"],
         },
         {
             "id": "local_4",
@@ -7718,7 +7819,7 @@ def _get_local_style_presets():
             "text": "专业摄影写实风格，高清 8K 画质，自然光照，浅景深，",
             "source": "local",
             "color": "accent",
-            "tags": ["photography", "realistic", "portrait"]
+            "tags": ["photography", "realistic", "portrait"],
         },
         {
             "id": "local_5",
@@ -7726,7 +7827,7 @@ def _get_local_style_presets():
             "text": "古典油画风格，丰富的笔触质感，温暖的色调，戏剧性光影，",
             "source": "local",
             "color": "highlight",
-            "tags": ["oil painting", "classical", "art"]
+            "tags": ["oil painting", "classical", "art"],
         },
         {
             "id": "local_6",
@@ -7734,7 +7835,7 @@ def _get_local_style_presets():
             "text": "像素艺术风格，16-bit 复古游戏画风，清晰的像素边缘，",
             "source": "local",
             "color": "secondary",
-            "tags": ["pixel art", "retro", "8bit"]
+            "tags": ["pixel art", "retro", "8bit"],
         },
         {
             "id": "local_7",
@@ -7742,7 +7843,7 @@ def _get_local_style_presets():
             "text": "现代扁平矢量插画风格，简洁几何形状，明亮纯色，无阴影，",
             "source": "local",
             "color": "accent",
-            "tags": ["flat design", "illustration", "vector"]
+            "tags": ["flat design", "illustration", "vector"],
         },
         {
             "id": "local_8",
@@ -7750,7 +7851,7 @@ def _get_local_style_presets():
             "text": "高质量 3D 渲染风格，柔和光照，细腻材质，Blender/C4D 质感，",
             "source": "local",
             "color": "secondary",
-            "tags": ["3d", "rendering", "cgi"]
+            "tags": ["3d", "rendering", "cgi"],
         },
         {
             "id": "local_9",
@@ -7758,7 +7859,7 @@ def _get_local_style_presets():
             "text": "黑白铅笔素描风格，精细的线条与阴影，手绘质感，",
             "source": "local",
             "color": "highlight",
-            "tags": ["sketch", "drawing", "pencil"]
+            "tags": ["sketch", "drawing", "pencil"],
         },
         {
             "id": "local_10",
@@ -7766,7 +7867,7 @@ def _get_local_style_presets():
             "text": "传统中国水墨画风格，留白意境，墨色浓淡变化，宣纸质感，",
             "source": "local",
             "color": "accent",
-            "tags": ["chinese art", "ink", "traditional"]
+            "tags": ["chinese art", "ink", "traditional"],
         },
     ]
 
@@ -7779,7 +7880,8 @@ def _fetch_civitai_style_presets(query, limit):
     - 可选环境变量: CIVITAI_API_KEY（部分接口不强制）
     """
     import os
-    api_key = (os.getenv('CIVITAI_API_KEY') or '').strip()
+
+    api_key = (os.getenv("CIVITAI_API_KEY") or "").strip()
 
     try:
         cache_key = f"civitai_presets:{query}:{limit}"
@@ -7814,7 +7916,9 @@ def _fetch_civitai_style_presets(query, limit):
                 continue
             preset = {
                 "id": f"civitai_{img.get('id', '')}",
-                "label": (prompt.strip()[:60] + ("..." if len(prompt.strip()) > 60 else "")),
+                "label": (
+                    prompt.strip()[:60] + ("..." if len(prompt.strip()) > 60 else "")
+                ),
                 "text": prompt.strip(),
                 "source": "civitai",
                 "color": "accent",
@@ -7847,11 +7951,7 @@ def _fetch_lexica_style_presets(query, limit):
         url = "https://lexica.art/api/v1/search"
         search_query = query or "beautiful art style"
 
-        resp = requests.get(
-            url,
-            params={"q": search_query},
-            timeout=10
-        )
+        resp = requests.get(url, params={"q": search_query}, timeout=10)
         resp.raise_for_status()
         data = resp.json()
 
@@ -7889,6 +7989,7 @@ def get_service_cache():
     """获取服务层缓存实例"""
     try:
         from services.cache import style_preset_cache
+
         return style_preset_cache
     except ImportError:
         return None
@@ -8061,15 +8162,39 @@ def apply_role_to_session(session_id):
 
 @app.route("/api/sessions/<session_id>/upgrade-to-agent", methods=["PUT", "OPTIONS"])
 def upgrade_to_agent(session_id):
-    """升级记忆体为智能体。系统仅支持单一 Agent Chaya，此接口仅提示用户使用人设/模型设置。"""
+    """升级会话为智能体。"""
 
-    # 系统仅支持 Chaya 一个智能体，不开放创建其他智能体
-    return jsonify(
-        {
-            "error": "系统仅支持 Chaya 一个智能体",
-            "message": "请直接与 Chaya 对话，或在设置中切换人设、更换模型。",
+    try:
+        from services.session_service import SessionService
+
+        data = request.get_json() or {}
+        service = SessionService(get_mysql_connection)
+        existing = service.get_session(session_id)
+        if not existing:
+            return jsonify({"error": "Session not found"}), 404
+
+        payload = {
+            "session_type": "agent",
+            "name": data.get("name") or existing.get("name") or existing.get("title"),
+            "avatar": data.get("avatar")
+            if "avatar" in data
+            else existing.get("avatar"),
+            "system_prompt": data.get("system_prompt")
+            if "system_prompt" in data
+            else existing.get("system_prompt"),
+            "llm_config_id": data.get("llm_config_id")
+            if "llm_config_id" in data
+            else existing.get("llm_config_id"),
         }
-    ), 400
+
+        updated = service.update_session(session_id, payload)
+        if not updated:
+            return jsonify({"error": "Failed to upgrade session"}), 500
+        return jsonify(updated), 200
+    except Exception as e:
+        print(f"[Session API] Error upgrading to agent: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/agents", methods=["GET", "OPTIONS"])
@@ -8087,8 +8212,6 @@ def list_agents():
         try:
             cursor = conn.cursor(pymysql.cursors.DictCursor)
 
-            # 系统仅支持单一 Agent Chaya，只返回 Chaya
-            CHAYA_ID = "agent_chaya"
             try:
                 cursor.execute(
                     """
@@ -8108,10 +8231,9 @@ def list_agents():
                         (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.session_id) as message_count
                     FROM sessions s
                     LEFT JOIN role_versions rv ON rv.role_id = s.session_id AND rv.is_current = 1
-                    WHERE s.session_type = 'agent' AND s.session_id = %s
+                    WHERE s.session_type = 'agent'
                     ORDER BY s.updated_at DESC, s.created_at DESC
-                """,
-                    (CHAYA_ID,),
+                """
                 )
             except Exception as join_error:
                 print(
@@ -8134,10 +8256,9 @@ def list_agents():
                         s.last_message_at,
                         (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.session_id) as message_count
                     FROM sessions s
-                    WHERE s.session_type = 'agent' AND s.session_id = %s
+                    WHERE s.session_type = 'agent'
                     ORDER BY s.updated_at DESC, s.created_at DESC
-                """,
-                    (CHAYA_ID,),
+                """
                 )
 
             agents = []
@@ -9517,7 +9638,9 @@ def create_sop_skill_pack():
                     (assign_to_session_id,),
                 )
                 sess_row = cursor.fetchone()
-                target_type = (sess_row.get("session_type") if sess_row else None) or "memory"
+                target_type = (
+                    sess_row.get("session_type") if sess_row else None
+                ) or "memory"
 
                 assignment_id = str(uuid.uuid4())
                 cursor.execute(
@@ -11406,8 +11529,6 @@ def list_session_executions(session_id):
         print(f"[Message Execution API] Error listing session executions: {e}")
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-
-
 
 
 if __name__ == "__main__":

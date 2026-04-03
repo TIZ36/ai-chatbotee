@@ -3,7 +3,7 @@ import {
   Bot, Loader, Volume2, Plus, Brain, Sparkles, Zap,
   MessageSquare, Pencil
 } from 'lucide-react';
-import { getAgents, Session } from '../services/sessionApi';
+import { getAgents, Session, getSession } from '../services/sessionApi';
 import { updateRoleProfile } from '../services/roleApi';
 import type { PersonaPreset, VoicePreset } from '../services/roleApi';
 import AgentPersonaDialog from './AgentPersonaDialog';
@@ -27,7 +27,11 @@ const PERSONA_SECTIONS: Array<{
   { id: 'persona-switches', label: '人格能力开关' },
 ];
 
-const AgentsPage: React.FC = () => {
+interface AgentsPageProps {
+  sessionId?: string | null;
+}
+
+const AgentsPage: React.FC<AgentsPageProps> = ({ sessionId }) => {
   const [agents, setAgents] = useState<Session[]>([]);
   const [isLoadingAgents, setIsLoadingAgents] = useState(true);
   const [personaEditAgent, setPersonaEditAgent] = useState<Session | null>(null);
@@ -43,9 +47,13 @@ const AgentsPage: React.FC = () => {
     'persona-presets' | 'voice-presets' | 'persona-switches'
   >('persona-presets');
 
-  const chaya = agents.find((a) => a.session_id === CHAYA_ID) ?? null;
-  const personaPresets: PersonaPreset[] = (chaya?.ext as any)?.personaPresets ?? [];
-  const voicePresets: VoicePreset[] = (chaya?.ext as any)?.voicePresets ?? [];
+  const currentAgent = sessionId
+    ? (agents.find((a) => a.session_id === sessionId) ?? null)
+    : null;
+  const sharedPersonaOwner = agents.find((a) => a.session_id === CHAYA_ID) ?? null;
+  const editableAgent = currentAgent ?? sharedPersonaOwner;
+  const personaPresets: PersonaPreset[] = (sharedPersonaOwner?.ext as any)?.personaPresets ?? [];
+  const voicePresets: VoicePreset[] = (sharedPersonaOwner?.ext as any)?.voicePresets ?? [];
 
   const loadAgents = useCallback(async () => {
     try {
@@ -64,8 +72,29 @@ const AgentsPage: React.FC = () => {
   }, [loadAgents]);
 
   useEffect(() => {
-    if (chaya?.ext?.persona) {
-      const p = chaya.ext.persona as any;
+    if (!sessionId || sessionId === CHAYA_ID) return;
+    setIsLoadingAgents(true);
+    getSession(sessionId)
+      .then((session) => {
+        setAgents((prev) => {
+          const exists = prev.some((a) => a.session_id === sessionId);
+          if (exists) {
+            return prev.map((a) => (a.session_id === sessionId ? session : a));
+          }
+          return [session, ...prev];
+        });
+      })
+      .catch((error) => {
+        console.error('[AgentsPage] Failed to load current agent:', error);
+      })
+      .finally(() => {
+        setIsLoadingAgents(false);
+      });
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (editableAgent?.ext?.persona) {
+      const p = editableAgent.ext.persona as any;
       setPersonaConfig({
         voice: p.voice || defaultPersonaConfig.voice,
         thinking: p.thinking || defaultPersonaConfig.thinking,
@@ -75,7 +104,7 @@ const AgentsPage: React.FC = () => {
         skillTriggerEnabled: p.skillTriggerEnabled !== false,
       });
     }
-  }, [chaya?.session_id, chaya?.ext?.persona]);
+  }, [editableAgent?.session_id, editableAgent?.ext?.persona]);
 
   const handleTogglePersona = async (
     field: keyof AgentPersonaFullConfig,
@@ -85,7 +114,8 @@ const AgentsPage: React.FC = () => {
     setPersonaConfig(next);
     setPersonaSaving(true);
     try {
-      await updateRoleProfile(CHAYA_ID, {
+      if (!editableAgent) return;
+      await updateRoleProfile(editableAgent.session_id, {
         persona: next,
         reason: 'persona_toggle',
       });
@@ -104,15 +134,15 @@ const AgentsPage: React.FC = () => {
 
   const openPersonaDialog = (tab: 'basic' | 'persona') => {
     setPersonaDialogInitialTab(tab);
-    setPersonaEditAgent(chaya ?? null);
+    setPersonaEditAgent(editableAgent ?? null);
   };
 
   const savePersonaPresets = async (nextList: PersonaPreset[]) => {
-    if (!chaya) return;
+    if (!sharedPersonaOwner) return;
     setPresetSaving(true);
     try {
-      const ext = { ...(chaya.ext || {}), personaPresets: nextList };
-      await updateRoleProfile(CHAYA_ID, { ext });
+      const ext = { ...(sharedPersonaOwner.ext || {}), personaPresets: nextList };
+      await updateRoleProfile(sharedPersonaOwner.session_id, { ext });
       await loadAgents();
       toast({ title: '人设预设已保存', variant: 'success' });
     } catch (e) {
@@ -123,11 +153,11 @@ const AgentsPage: React.FC = () => {
   };
 
   const saveVoicePresets = async (nextList: VoicePreset[]) => {
-    if (!chaya) return;
+    if (!sharedPersonaOwner) return;
     setPresetSaving(true);
     try {
-      const ext = { ...(chaya.ext || {}), voicePresets: nextList };
-      await updateRoleProfile(CHAYA_ID, { ext });
+      const ext = { ...(sharedPersonaOwner.ext || {}), voicePresets: nextList };
+      await updateRoleProfile(sharedPersonaOwner.session_id, { ext });
       await loadAgents();
       toast({ title: '音色预设已保存', variant: 'success' });
     } catch (e) {
@@ -354,7 +384,7 @@ const AgentsPage: React.FC = () => {
               <Loader className="w-6 h-6 animate-spin mr-2" />
               加载中…
             </div>
-          ) : !chaya ? (
+          ) : !editableAgent ? (
             <div className="flex flex-col items-center justify-center py-16 text-center max-w-md mx-auto">
               <Bot className="w-10 h-10 text-[var(--text-muted)] mb-3 opacity-60" />
               <p className="text-sm text-[var(--text-secondary)]">
@@ -365,7 +395,7 @@ const AgentsPage: React.FC = () => {
             <div className="max-w-6xl mx-auto w-full space-y-3">
               <div className="app-card-item app-card-pad-sm flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-[var(--text-primary)]">Chaya Persona 配置</div>
+                  <div className="text-sm font-semibold text-[var(--text-primary)]">{(editableAgent?.name || editableAgent?.title || 'Agent')} Persona 配置</div>
                   <div className="text-xs text-[var(--text-secondary)] mt-1">
                     管理人设与音色预设、能力开关与快捷操作
                   </div>

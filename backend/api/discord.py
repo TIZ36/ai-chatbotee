@@ -28,12 +28,22 @@ def _svc() -> DiscordService:
 def get_status():
     """Bot 运行状态（在线、服务器数、绑定频道数）"""
     try:
+        agent_id = (request.args.get("agent_id") or "").strip() or "agent_chaya"
         svc = _svc()
         info = svc.get_bot_info()
-        info["running"] = svc.is_running()
+        owner_agent_id = svc.get_owner_agent_id()
+        running_for_agent = svc.is_running() and owner_agent_id == agent_id
+        info["running"] = running_for_agent
+        info["owner_agent_id"] = owner_agent_id
+        info["configured"] = DiscordService.has_persisted_token(agent_id)
+        if not running_for_agent:
+            info["online"] = False
+            info["username"] = None
+            info["guilds"] = 0
         try:
+            repo = DiscordChannelRepository(get_mysql_connection)
             info["bound_channels"] = len(
-                DiscordChannelRepository(get_mysql_connection).list_all(enabled_only=True)
+                repo.list_by_agent_id(agent_id, enabled_only=True)
             )
         except Exception:
             info["bound_channels"] = 0
@@ -57,7 +67,7 @@ def get_discord_config():
 
 
 def _apply_default_llm_to_discord_sessions_without_model(default_llm_config_id: str):
-    """将默认模型应用到所有尚未配置 LLM 的 Discord 频道会话，避免之前绑定的频道报错"""
+    """将默认模型应用到所有尚未配置 LLM 的已绑定 Agent。"""
     if not default_llm_config_id:
         return
     conn = get_mysql_connection()
@@ -68,7 +78,7 @@ def _apply_default_llm_to_discord_sessions_without_model(default_llm_config_id: 
         cur.execute(
             """
             UPDATE sessions s
-            INNER JOIN discord_channels d ON s.session_id = d.session_id
+            INNER JOIN discord_channels d ON s.session_id = d.linked_agent_id
             SET s.llm_config_id = %s, s.updated_at = NOW()
             WHERE (s.llm_config_id IS NULL OR s.llm_config_id = '')
             """,
@@ -79,7 +89,9 @@ def _apply_default_llm_to_discord_sessions_without_model(default_llm_config_id: 
         cur.close()
         conn.close()
         if n:
-            print(f"[Discord API] 已为 {n} 个未配置模型的 Discord 会话应用默认模型: {default_llm_config_id}")
+            print(
+                f"[Discord API] 已为 {n} 个未配置模型的 Discord 会话应用默认模型: {default_llm_config_id}"
+            )
     except Exception as e:
         print(f"[Discord API] 批量应用默认模型失败: {e}")
         if conn:
@@ -91,7 +103,9 @@ def update_discord_config():
     """更新 Discord 应用配置（如默认模型），立即持久化到表；并为尚未配置模型的已绑定频道会话批量应用该默认"""
     try:
         data = request.get_json(silent=True) or {}
-        default_llm_config_id = (data.get("default_llm_config_id") or "").strip() or None
+        default_llm_config_id = (
+            data.get("default_llm_config_id") or ""
+        ).strip() or None
         repo = DiscordAppConfigRepository(get_mysql_connection)
         repo.set_default_llm_config_id(default_llm_config_id)
         if default_llm_config_id:
@@ -110,19 +124,25 @@ def list_channels():
     try:
         repo = DiscordChannelRepository(get_mysql_connection)
         enabled_only = request.args.get("enabled_only", "false").lower() == "true"
-        channels = repo.list_all(enabled_only=enabled_only)
+        agent_id = (request.args.get("agent_id") or "").strip()
+        channels = (
+            repo.list_by_agent_id(agent_id, enabled_only=enabled_only)
+            if agent_id
+            else repo.list_all(enabled_only=enabled_only)
+        )
 
         if not channels:
             return jsonify({"channels": []})
 
-        # 批量查询消息统计（一条 SQL，不再循环）
-        session_ids = [c.session_id for c in channels]
-        stats = _batch_message_stats(session_ids)
+        # 批量查询消息统计（基于绑定 Agent 会话）
+        agent_session_ids = [c.linked_agent_id or c.session_id for c in channels]
+        stats = _batch_message_stats(agent_session_ids)
 
         out = []
         for c in channels:
             d = c.to_dict()
-            s = stats.get(c.session_id, {})
+            stat_session_id = c.linked_agent_id or c.session_id
+            s = stats.get(stat_session_id, {})
             d["message_count"] = s.get("cnt", 0)
             d["last_message_at"] = s.get("last_at")
             out.append(d)
@@ -141,6 +161,7 @@ def _batch_message_stats(session_ids: list) -> dict:
         return {}
     try:
         import pymysql
+
         cur = conn.cursor(pymysql.cursors.DictCursor)
         placeholders = ",".join(["%s"] * len(session_ids))
         cur.execute(
@@ -180,7 +201,7 @@ def _resolve_discord_default_llm_config_id():
 
 @discord_bp.route("/channels", methods=["POST"])
 def bind_channel():
-    """手动绑定频道（自动创建专属会话）"""
+    """手动绑定频道（绑定到已有 Agent，不创建新会话）"""
     try:
         data = request.get_json() or {}
         channel_id = data.get("channel_id")
@@ -189,6 +210,7 @@ def bind_channel():
 
         cfg = getattr(_svc(), "_config", {}) or {}
         default_llm = _resolve_discord_default_llm_config_id()
+        linked_agent_id = (data.get("linked_agent_id") or "").strip() or "agent_chaya"
         binding = ensure_channel_session(
             get_mysql_connection,
             channel_id=str(channel_id),
@@ -196,9 +218,12 @@ def bind_channel():
             channel_name=str(data.get("channel_name", "")),
             guild_name=str(data.get("guild_name", "")),
             config_override=data.get("config_override"),
-            default_trigger_mode=data.get("trigger_mode") or cfg.get("default_trigger_mode") or "mention",
+            default_trigger_mode=data.get("trigger_mode")
+            or cfg.get("default_trigger_mode")
+            or "mention",
             default_llm_config_id=default_llm,
             session_id_prefix=cfg.get("session_id_prefix") or "dc",
+            linked_agent_id=linked_agent_id,
         )
         if not binding:
             return jsonify({"error": "Failed to create binding"}), 500
@@ -208,63 +233,18 @@ def bind_channel():
 
 
 def _sync_channel_session_llm(channel_id: str, config_override: dict):
-    """将频道的 config_override.llm_config_id 同步到 sessions 表，使 Actor 立即使用该模型；未设置时用应用默认"""
-    repo = DiscordChannelRepository(get_mysql_connection)
-    binding = repo.find_by_channel_id(channel_id)
-    if not binding or not binding.session_id:
-        return
-    llm_id = (config_override or {}).get("llm_config_id")
-    if not (llm_id and str(llm_id).strip()):
-        llm_id = DiscordAppConfigRepository(get_mysql_connection).get_default_llm_config_id()
-    conn = get_mysql_connection()
-    if not conn:
-        return
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            "UPDATE sessions SET llm_config_id = %s, updated_at = NOW() WHERE session_id = %s",
-            (llm_id or None, binding.session_id),
-        )
-        conn.commit()
-        cur.close()
-        conn.close()
-    except Exception as e:
-        print(f"[Discord API] 同步 session llm_config_id 失败: {e}")
-        if conn:
-            conn.close()
+    """已废弃：Discord 绑定共享现有 Agent，会话模型不再由频道覆盖直接改写。"""
+    return
 
 
 def _sync_channel_session_persona(channel_id: str, config_override: dict):
-    """将频道的 config_override.system_prompt 同步到 sessions 表，使人设立即生效；并触发运行中 Actor 重载配置（仅当请求中显式带了 system_prompt 时同步）"""
-    co = config_override or {}
-    if "system_prompt" not in co:
-        return
-    repo = DiscordChannelRepository(get_mysql_connection)
-    binding = repo.find_by_channel_id(channel_id)
-    if not binding or not binding.session_id:
-        return
-    system_prompt = co.get("system_prompt")
-    conn = get_mysql_connection()
-    if not conn:
-        return
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            "UPDATE sessions SET system_prompt = %s, updated_at = NOW() WHERE session_id = %s",
-            (system_prompt, binding.session_id),
-        )
-        conn.commit()
-        cur.close()
-        conn.close()
-        try:
-            from services.actor import ActorManager
-            ActorManager.get_instance().reload_actor_config(binding.session_id)
-        except Exception as e:
-            print(f"[Discord API] 触发 Actor 重载配置失败: {e}")
-    except Exception as e:
-        print(f"[Discord API] 同步 session system_prompt 失败: {e}")
-        if conn:
-            conn.close()
+    """已废弃：Discord 绑定共享现有 Agent，会话人设不再由频道覆盖直接改写。"""
+    return
+
+
+def _sync_channel_session_from_linked_agent(channel_id: str):
+    """已废弃：不再存在频道专属 session，同步逻辑无需执行。"""
+    return
 
 
 @discord_bp.route("/channels/<channel_id>", methods=["PUT"])
@@ -279,15 +259,18 @@ def update_channel(channel_id):
         data = request.get_json() or {}
         updates = {
             k: data[k]
-            for k in ("trigger_mode", "enabled", "config_override", "channel_name", "guild_name")
+            for k in (
+                "trigger_mode",
+                "enabled",
+                "config_override",
+                "channel_name",
+                "guild_name",
+                "linked_agent_id",
+            )
             if k in data
         }
         if updates:
             repo.update(channel_id, **updates)
-            if "config_override" in updates and isinstance(updates["config_override"], dict):
-                co = updates["config_override"]
-                _sync_channel_session_llm(channel_id, co)
-                _sync_channel_session_persona(channel_id, co)
 
         updated = repo.find_by_channel_id(channel_id)
         return jsonify(updated.to_dict() if updated else existing.to_dict())
@@ -311,6 +294,7 @@ def unbind_channel(channel_id):
         if data.get("delete_session") and session_id:
             try:
                 from models.session import SessionRepository
+
                 SessionRepository(get_mysql_connection).delete(session_id)
             except Exception as e:
                 print(f"[Discord API] 删除会话失败: {e}")
@@ -328,26 +312,54 @@ def start_bot():
     """手动启动 Bot（token 来源：body > 持久化文件 > config.yaml）。body 传入 token 时会持久化，重启后可不依赖 config 自动启动。"""
     try:
         svc = _svc()
-        if svc.is_running():
-            return jsonify({"ok": True, "message": "Bot already running", "info": svc.get_bot_info()})
-
         data = request.get_json(silent=True) or {}
+        agent_id = (data.get("agent_id") or "").strip() or "agent_chaya"
+
+        if svc.is_running():
+            if svc.get_owner_agent_id() != agent_id:
+                return jsonify(
+                    {
+                        "error": "Discord Bot 已被其他 Agent 占用，请先停止当前 Bot",
+                        "owner_agent_id": svc.get_owner_agent_id(),
+                    }
+                ), 409
+            return jsonify(
+                {
+                    "ok": True,
+                    "message": "Bot already running",
+                    "info": svc.get_bot_info(),
+                }
+            )
+
         token_from_body = (data.get("bot_token") or "").strip()
         token = token_from_body
         if not token:
-            token = DiscordService.get_persisted_token()
+            token = DiscordService.get_persisted_token(agent_id)
         if not token:
             cfg = getattr(svc, "_config", {}) or {}
             token = (cfg.get("bot_token") or "").strip()
         if not token:
-            return jsonify({"error": "bot_token required (body、持久化文件或 config.yaml discord.bot_token)"}), 400
+            return jsonify(
+                {
+                    "error": "bot_token required (body、持久化文件或 config.yaml discord.bot_token)"
+                }
+            ), 400
 
-        ok = svc.start(token)
+        token_owner = DiscordService.find_token_owner(token)
+        if token_owner and token_owner != agent_id:
+            return jsonify(
+                {
+                    "error": "该 Bot Token 已绑定到其他 Agent，不能复用",
+                    "owner_agent_id": token_owner,
+                }
+            ), 409
+
+        ok = svc.start(token, owner_agent_id=agent_id)
         if not ok:
             return jsonify({"error": "启动失败（检查 token 或安装 discord.py）"}), 500
         # 前端录入的 token 持久化，重启后 auto_start 时可用
         if token_from_body:
-            DiscordService.persist_token(token_from_body)
+            DiscordService.persist_token(agent_id, token_from_body)
         return jsonify({"ok": True, "message": "Bot 正在启动，请稍后查询 /status"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500

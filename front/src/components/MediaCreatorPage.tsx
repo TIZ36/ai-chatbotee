@@ -149,7 +149,7 @@ function fileToMediaItem(file: File): Promise<MediaItem> {
 }
 
 /* ─── 样式常量 ─── */
-const tabBase = 'pb-1.5 text-xs font-medium transition-colors cursor-pointer select-none';
+const tabBase = 'pb-1 text-[11px] font-medium transition-colors cursor-pointer select-none';
 const tabInactive = `${tabBase} border-b-2 border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200`;
 const tabActive = `${tabBase} border-b-2 border-[var(--color-accent)] text-gray-900 dark:text-white`;
 
@@ -1129,14 +1129,14 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
 
   const mainContent = (
     <>
-      <div className="chatu-page chatu-page-one-screen h-full w-full flex flex-col min-h-0 px-1 py-1 sm:px-2 md:px-3 lg:px-4 max-w-none mx-auto w-full box-border">
+      <div className="chatu-page chatu-page-one-screen chatu-compact h-full w-full flex flex-col min-h-0 px-1 py-1 sm:px-2 md:px-3 lg:px-4 max-w-none mx-auto w-full box-border">
         <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
         {/* ════════ 创作区 ════════ */}
-        <Card title="创作区" variant="persona" size="default" className="media-create-card flex-1 min-h-0 flex flex-col overflow-hidden">
-          <div className="flex-1 min-h-0 flex flex-col overflow-hidden space-y-2.5">
+        <Card variant="persona" size="default" className="media-create-card flex-1 min-h-0 flex flex-col overflow-hidden">
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden space-y-1.5">
             {/* Tab（仅 both 模式显示） */}
             {mode === 'both' && (
-              <div className="flex gap-4 border-b border-gray-200 dark:border-[#333]">
+              <div className="flex gap-3">
                 <button type="button" className={createTab === 'chat' ? tabActive : tabInactive} onClick={() => setCreateTab('chat')}>
                   <span className="flex items-center gap-1.5"><MessageCircle className="w-4 h-4" /> 聊天</span>
                 </button>
@@ -1153,7 +1153,7 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
             {createTab === 'chat' && (
               <div className="media-create-layout flex-1 min-h-0 overflow-hidden">
                 <div className="media-create-left-col flex flex-col gap-4 min-w-0 min-h-0 overflow-y-auto no-scrollbar">
-                  <div className="prompt-and-ref-card rounded-2xl overflow-hidden flex flex-col flex-1 min-h-[200px] bg-[var(--surface-secondary)]">
+                  <div className="prompt-and-ref-card rounded-2xl overflow-visible flex flex-col flex-1 min-h-[200px] bg-[var(--surface-secondary)]">
                     <div className="p-4 flex flex-col items-center justify-center flex-1 text-center">
                       <MessageCircle className="w-12 h-12 text-[var(--color-accent)] opacity-80 mb-3" />
                       <h3 className={`text-sm font-medium ${textPrimary} mb-1`}>聊天</h3>
@@ -1174,7 +1174,7 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
                   {/* 生成面板：描述在上、粘贴在下，生成按钮在右上角 */}
                   <div
                     ref={dropZoneRef}
-                    className={`prompt-and-ref-card rounded-xl overflow-hidden flex flex-col flex-1 min-h-[220px] sm:min-h-[240px] md:min-h-[260px] relative ${dragOver ? 'ring-2 ring-[var(--color-accent)]/30' : ''}`}
+                    className={`prompt-and-ref-card rounded-xl overflow-visible flex flex-col flex-1 min-h-[220px] sm:min-h-[240px] md:min-h-[260px] relative ${dragOver ? 'ring-2 ring-[var(--color-accent)]/30' : ''}`}
                     onDragOver={onDragOver}
                     onDragLeave={onDragLeave}
                     onDrop={onDrop}
@@ -1442,7 +1442,7 @@ const MediaCreatorPage: React.FC<MediaCreatorPageProps> = ({ embedded = false, m
                   ) : (
                   <div
                     ref={dropZoneRef}
-                    className={`prompt-and-ref-card rounded-xl overflow-hidden flex flex-col flex-1 min-h-[220px] sm:min-h-[240px] md:min-h-[260px] relative ${dragOver ? 'ring-2 ring-[var(--color-accent)]/30' : ''}`}
+                    className={`prompt-and-ref-card rounded-xl overflow-visible flex flex-col flex-1 min-h-[220px] sm:min-h-[240px] md:min-h-[260px] relative ${dragOver ? 'ring-2 ring-[var(--color-accent)]/30' : ''}`}
                     onDragOver={onDragOver}
                     onDragLeave={onDragLeave}
                     onDrop={onDrop}

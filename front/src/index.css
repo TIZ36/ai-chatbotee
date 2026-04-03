@@ -174,20 +174,27 @@
 [data-skin="light"] .chatu-page .prompt-and-ref-card,
 [data-skin="light"] .chatu-page .my-prompts-block {
   background: #ffffff !important;
-  border: 1px solid #e2e8f0 !important;
+  border: 1px dashed #cbd5e1 !important;
   box-shadow: var(--card-shadow) !important;
 }
 [data-skin="light"] .chatu-page .media-create-results-card,
 [data-skin="light"] .chatu-page .media-create-gallery {
   background: #ffffff !important;
-  border: 1px solid #e2e8f0 !important;
+  border: 1px dashed #cbd5e1 !important;
   box-shadow: var(--card-shadow) !important;
 }
 [data-skin="light"] .image-size-block,
 [data-skin="light"] .image-spec-block {
   background: #fafbfc !important;
-  border: 1px solid #e2e8f0 !important;
+  border: 1px dashed #cbd5e1 !important;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+/* 图片规格设置：去掉内部二级虚线框，仅保留外层分组框 */
+[data-skin="light"] .chatu-page .image-spec-block .image-size-block {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
 }
 [data-skin="light"] .dashboard-sidebar {
   background: #fafbfc !important;
@@ -216,7 +223,7 @@
 
 /* 根字号随视口动态缩放（小屏不挤、大屏更易读） */
 html {
-  font-size: clamp(15px, 1rem + 0.25vw, 20px);
+  font-size: clamp(14px, 0.9rem + 0.2vw, 17px);
 }
 
 /* 移动端基础：触摸高亮、防止误触缩放 */
@@ -999,6 +1006,65 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   display: inline;
 }
 
+/* Agent 列表头与右侧二级菜单严格等高 */
+:root {
+  --agent-subnav-height: 50px;
+}
+
+.agent-panel-subnav {
+  min-height: var(--agent-subnav-height);
+  height: var(--agent-subnav-height);
+  justify-content: space-between;
+}
+
+.agent-panel-subnav .app-bubble-tabs {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-list-header {
+  min-height: var(--agent-subnav-height);
+  height: var(--agent-subnav-height);
+  padding: 0 12px;
+}
+
+.agent-subnav-profile {
+  margin-right: 10px;
+  padding: 4px 8px;
+  border-radius: 9999px;
+  border: 1px solid var(--border-default);
+  background: var(--surface-tertiary);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  max-width: 180px;
+}
+
+.agent-subnav-profile-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  background: var(--surface-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.agent-subnav-profile-name {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-subnav-profile:hover .agent-subnav-profile-name {
+  color: var(--text-primary);
+}
+
 /* Chaya 主面板上方工具条（开关展位，位于气泡 Tab 与聊天内容之间） */
 .chaya-panel-toolbar {
   flex-shrink: 0;
@@ -1022,11 +1088,88 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 }
 .chaya-panel-toolbar-slots {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 8px;
   width: 100%;
+  min-width: 0;
+}
+.chaya-agent-tab-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.chaya-agent-tab-strip::-webkit-scrollbar {
+  display: none;
+}
+.chaya-agent-tab {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 180px;
+  padding: 6px 10px;
+  border-radius: 10px 10px 0 0;
+  border: 1px solid var(--border-default);
+  border-bottom-color: transparent;
+  background: var(--surface-primary);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1;
+  transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+.chaya-agent-tab:hover {
+  color: var(--text-primary);
+}
+.chaya-agent-tab.is-active {
+  color: var(--color-accent);
+  border-color: rgba(0, 255, 136, 0.28);
+  border-bottom-color: transparent;
+  background: color-mix(in srgb, var(--color-accent) 8%, var(--surface-primary));
+}
+.chaya-agent-tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chaya-agent-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  color: inherit;
+}
+.chaya-agent-tab-close:hover {
+  background: rgba(148, 163, 184, 0.2);
+}
+.chaya-agent-tab-add {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  border: 1px dashed var(--border-default);
+  background: transparent;
+  color: var(--text-muted);
+  transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+.chaya-agent-tab-add:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  background: var(--color-accent-bg);
+}
+.chaya-agent-tab-add:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 .chaya-panel-toolbar-item {
   display: inline-flex;
@@ -1043,6 +1186,22 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 [data-skin="niho"] .chaya-panel-toolbar-item {
   border-color: rgba(255, 255, 255, 0.1);
   background: #000;
+}
+[data-skin="niho"] .chaya-agent-tab {
+  background: #000;
+  border-color: var(--niho-text-border);
+  border-bottom-color: transparent;
+}
+[data-skin="niho"] .chaya-agent-tab.is-active {
+  background: rgba(0, 255, 136, 0.08);
+  border-color: rgba(0, 255, 136, 0.35);
+  border-bottom-color: transparent;
+}
+[data-skin="niho"] .chaya-agent-tab-add {
+  border-color: var(--niho-text-border);
+}
+[data-skin="niho"] .chaya-agent-tab-add:hover {
+  border-color: rgba(0, 255, 136, 0.4);
 }
 .chaya-panel-toolbar-item-label {
   font-size: 11px;
@@ -1159,6 +1318,14 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+[data-skin="niho"] .app-content {
+  background: #000;
+}
+
+[data-skin="light"] .app-content {
+  background: #fff;
 }
 
 /* ========================================
@@ -2177,6 +2344,7 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   top: 100%;
   z-index: 35;
   max-height: min(420px, 55vh);
+  height: min(420px, 55vh);
   display: flex;
   flex-direction: column;
   border-bottom: 1px solid var(--niho-text-border);
@@ -2295,8 +2463,10 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 .chill-panel-body--grid {
   display: grid;
   grid-template-columns: 1fr 200px;
+  grid-template-rows: 1fr;
   gap: 0;
   align-items: stretch;
+  overflow: hidden;
 }
 
 .chill-panel-main {
@@ -2305,10 +2475,13 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  max-height: 100%;
 }
 
 .chill-panel-side {
   max-height: min(360px, 42vh);
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .chill-panel--mobile .chill-panel-body--grid {
@@ -2324,7 +2497,8 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   z-index: 1;
   flex: 1;
   min-height: 0;
-  max-height: none !important;
+  max-height: min(420px, 55vh) !important;
+  height: min(420px, 55vh);
   box-shadow: none;
   border-radius: 12px;
   border: 1px solid var(--niho-text-border);
@@ -2333,11 +2507,13 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 
 .chill-panel--embed .chill-panel-body {
   height: 100%;
+  max-height: 100%;
   overflow: hidden;
 }
 
 .chill-panel--embed .chill-panel-main {
   height: 100%;
+  max-height: 100%;
 }
 
 .chill-panel--embed .chill-panel-side {
@@ -2346,7 +2522,15 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 
 .chill-panel-list-scroll {
   overflow-y: auto;
+  overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
+}
+
+.chill-panel-list-scroll--fill {
+  flex: 1;
+  height: 0;
+  min-height: 0;
+  max-height: 100%;
 }
 
 .chill-panel-list-scroll::-webkit-scrollbar {
@@ -2646,7 +2830,7 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 /* ========== 生图/生视频 Nano Banana 2 风格布局 ========== */
 /* 创作区卡片：收紧内边距，扩大创作+图库显示区域 */
 .media-create-card > div:last-child {
-  padding: 0.25rem 0.5rem 0.2rem !important;
+  padding: 0.15rem 0.4rem 0.15rem !important;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -2655,7 +2839,7 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 }
 /* Tailwind 断点：xs <640, sm 640, md 768, lg 1024, xl 1280 */
 .media-create-layout {
-  --chatu-gap: 0.5rem;
+  --chatu-gap: 0.4rem;
   --chatu-padding-x: 0.2rem;
   display: grid;
   grid-template-columns: 1fr;
@@ -2663,7 +2847,7 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   max-width: 100%;
   width: 100%;
   margin: 0;
-  padding: 0.2rem var(--chatu-padding-x) 0.2rem;
+  padding: 0.1rem var(--chatu-padding-x) 0.1rem;
   min-height: 0;
   height: 100%;
   box-sizing: border-box;
@@ -2760,14 +2944,14 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 .media-create-results-card {
   background: var(--surface-secondary);
   border: none;
-  border-radius: 12px;
-  padding: 0.5rem 0.625rem 0.2rem;
+  border-radius: 14px;
+  padding: 0.35rem 0.45rem 0.2rem;
   min-height: clamp(180px, 40dvh, 320px);
   display: flex;
   flex-direction: column;
   min-width: 0;
   box-sizing: border-box;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.08);
 }
 .chatu-page-one-screen .media-create-results-card {
   min-height: 0;
@@ -3069,7 +3253,8 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 .chatu-page .prompt-and-ref-card {
   border: none;
   background: var(--surface-secondary);
-  box-shadow: none;
+  border-radius: 14px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.08);
 }
 .chatu-page .prompt-and-ref-card__images {
   border-top-width: 0;
@@ -3103,9 +3288,10 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 }
 
 .chatu-page .my-prompts-block {
-  border: 1px solid var(--border-subtle);
+  border: none;
   background: color-mix(in srgb, var(--color-secondary) 8%, transparent);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  border-radius: 12px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.06);
 }
 .chatu-page .my-prompts-block .rounded-lg.border {
   border-color: transparent;
@@ -3123,6 +3309,8 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 .chatu-page .media-create-results-card.media-create-gallery {
   border: none;
   background: var(--surface-secondary);
+  border-radius: 14px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.08);
 }
 .chatu-page .media-create-gallery-main {
   border: none !important;
@@ -3165,6 +3353,63 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 .chatu-page .media-create-gallery .media-create-thumb-grid button.aspect-square[data-active] {
   opacity: 1;
   box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+/* 生图/生视频：紧凑布局 + JetBrains Mono + 小字号 */
+.chatu-page.chatu-compact,
+.chatu-page.chatu-compact * {
+  font-family: "JetBrains Mono", var(--font-mono), ui-monospace, monospace;
+}
+
+.chatu-page.chatu-compact {
+  font-size: 12px;
+  padding-top: max(0.35rem, env(safe-area-inset-top, 0px));
+}
+
+.chatu-page.chatu-compact .media-create-layout {
+  --chatu-gap: 0.3rem;
+  padding-top: 0.2rem;
+  padding-bottom: 0.05rem;
+}
+
+.chatu-page.chatu-compact .media-create-card > div:last-child {
+  padding-top: 0.35rem !important;
+}
+
+.chatu-page.chatu-compact .media-create-left-col {
+  gap: 0.35rem !important;
+}
+
+[data-skin="light"] .chatu-page.chatu-compact .prompt-and-ref-card,
+[data-skin="light"] .chatu-page.chatu-compact .my-prompts-block,
+[data-skin="light"] .chatu-page.chatu-compact .image-size-block,
+[data-skin="light"] .chatu-page.chatu-compact .image-spec-block,
+[data-skin="light"] .chatu-page.chatu-compact .media-create-results-card.media-create-gallery {
+  margin: 0.18rem 0 !important;
+}
+
+.chatu-page.chatu-compact .media-create-prompt-label,
+.chatu-page.chatu-compact .media-create-results-title,
+.chatu-page.chatu-compact .media-create-day-segment-header {
+  font-size: 11px !important;
+}
+
+.chatu-page.chatu-compact textarea,
+.chatu-page.chatu-compact input,
+.chatu-page.chatu-compact button,
+.chatu-page.chatu-compact select,
+.chatu-page.chatu-compact .text-xs {
+  font-size: 11px !important;
+}
+
+.chatu-page.chatu-compact button,
+.chatu-page.chatu-compact .media-create-model-btn,
+.chatu-page.chatu-compact .media-create-create-btn,
+.chatu-page.chatu-compact .workflow-composer-send-btn {
+  font-family: "JetBrains Mono", var(--font-mono), ui-monospace, monospace !important;
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
+  line-height: 1.2 !important;
 }
 /* ========== Niho 卡片体积系统 (Card Elevation System) ========== */
 /*
@@ -4213,6 +4458,7 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 
 .workflow-chat-input-area {
   background: transparent !important;
+  border-top: none !important;
 }
 
 /* 聊天输入框重排：上输入区 + 下工具栏（参考新稿） */
@@ -4230,13 +4476,15 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   order: 2;
   border-top: 1px solid rgba(0, 0, 0, 0.06);
   margin-top: 2px;
-  min-height: 34px;
+  min-height: auto;
   padding-top: 4px !important;
   padding-bottom: 4px !important;
 }
 
 .workflow-composer-textarea {
-  min-height: 48px !important;
+  min-height: unset !important;
+  max-height: unset !important;
+  overflow-y: auto !important;
   font-size: 13px !important;
 }
 
@@ -4283,7 +4531,7 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 }
 
 [data-skin="niho"] .workflow-chat-input-area {
-  border-top-color: rgba(255, 255, 255, 0.06) !important;
+  border-top: none !important;
 }
 [data-skin="niho"] .workflow-composer-toolbar {
   border-top-color: var(--niho-text-border) !important;
@@ -4315,7 +4563,7 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
     0 0 0 rgba(0, 0, 0, 0) !important;
 }
 [data-skin="light"] .workflow-chat-input-area {
-  border-top-color: #f0f0f0 !important;
+  border-top: none !important;
 }
 [data-skin="light"] .workflow-composer-toolbar {
   border-top-color: #f0f0f0 !important;
@@ -4323,6 +4571,41 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 
 .workflow-chat-header {
   background: transparent !important;
+}
+
+/* Chaya 聊天紧凑视图 + 正常字号 */
+[data-chaya-view="compact"] {
+  --chat-message-font-size: 11.5px;
+  --chat-message-line-height: 1.4;
+}
+[data-chaya-view="compact"] .workflow-chat-messages {
+  padding-top: 0.3rem;
+  padding-bottom: 0.3rem;
+}
+[data-chaya-view="compact"] .workflow-chat-messages > * {
+  margin-top: 0.25rem !important;
+  margin-bottom: 0.25rem !important;
+}
+[data-chaya-view="compact"] .workflow-chat-header {
+  padding-top: 0.25rem !important;
+  padding-bottom: 0.25rem !important;
+}
+[data-chaya-view="compact"] .workflow-chat-input-area {
+  padding-top: 0.25rem !important;
+  padding-bottom: 0.25rem !important;
+}
+[data-chaya-view="compact"] .workflow-composer-textarea {
+  min-height: unset !important;
+  max-height: unset !important;
+  overflow-y: auto !important;
+  font-size: 11.5px !important;
+}
+[data-chaya-view="compact"] .message-bubble-user,
+[data-chaya-view="compact"] .message-bubble-assistant,
+[data-chaya-view="compact"] .message-bubble-tool,
+[data-chaya-view="compact"] .message-bubble-system {
+  padding-top: 0.3rem !important;
+  padding-bottom: 0.3rem !important;
 }
 [data-skin="niho"] .workflow-chat-header {
   border-bottom-color: rgba(255, 255, 255, 0.06) !important;
@@ -6479,11 +6762,11 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 
   /* Markdown 内容样式优化 */
   .markdown-content {
-    @apply text-[15px] leading-relaxed;
+    @apply text-[13px] leading-normal;
   }
 
   .markdown-content p {
-    @apply mb-3 last:mb-0;
+    @apply mb-1.5 last:mb-0;
   }
 
   /* 确保第一个元素顶部对齐（无顶部边距） */
@@ -6497,24 +6780,24 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
   .markdown-content h4,
   .markdown-content h5,
   .markdown-content h6 {
-    @apply font-bold mt-4 mb-3 first:mt-0;
+    @apply font-bold mt-2 mb-1.5 first:mt-0;
   }
 
   .markdown-content h1 {
-    @apply text-2xl;
+    @apply text-lg;
   }
 
   .markdown-content h2 {
-    @apply text-xl;
+    @apply text-base;
   }
 
   .markdown-content h3 {
-    @apply text-lg;
+    @apply text-sm;
   }
 
   .markdown-content ul,
   .markdown-content ol {
-    @apply mb-3 space-y-1 ml-4;
+    @apply mb-1.5 space-y-1 ml-4;
   }
 
   .markdown-content ul {
@@ -6539,15 +6822,57 @@ html[data-mobile="true"][data-skin="niho"] .chatee-dialog-content {
 
   .markdown-content th,
   .markdown-content td {
-    @apply border border-gray-300 dark:border-[#404040] px-3 py-2;
+    @apply border border-gray-300 dark:border-[#404040] px-2 py-1.5;
   }
 
   .markdown-content th {
     @apply bg-gray-100 dark:bg-[#363636] font-semibold;
   }
 
+  [data-skin="niho"] .markdown-content table {
+    background: #000 !important;
+    border: 1px solid rgba(0, 255, 136, 0.18) !important;
+  }
+
+  [data-skin="niho"] .markdown-content thead {
+    background: #0a0a0a !important;
+    border-bottom: 1px solid rgba(0, 255, 136, 0.15) !important;
+  }
+
+  [data-skin="niho"] .markdown-content th {
+    color: var(--niho-skyblue-gray) !important;
+  }
+
+  [data-skin="niho"] .markdown-content tbody tr {
+    border-bottom: 1px solid rgba(0, 255, 136, 0.08) !important;
+  }
+
+  [data-skin="niho"] .markdown-content tbody tr:hover {
+    background: rgba(0, 255, 136, 0.06) !important;
+  }
+
   .markdown-content hr {
     @apply my-4 border-gray-300 dark:border-[#404040];
+  }
+
+  .workflow-composer-prompts {
+    @apply flex flex-wrap gap-1.5 px-1.5 pb-1.5;
+  }
+
+  .workflow-composer-prompt {
+    @apply text-[11px] px-2 py-1 rounded-md border border-gray-200 dark:border-[#404040] text-gray-600 dark:text-[#c0c0c0] hover:text-gray-800 dark:hover:text-[#f0f0f0] hover:border-gray-300 dark:hover:border-[#606060] transition-colors;
+  }
+
+  [data-skin="niho"] .workflow-composer-prompt {
+    background: #000 !important;
+    border: 1px solid rgba(0, 255, 136, 0.18) !important;
+    color: var(--niho-skyblue-gray) !important;
+  }
+
+  [data-skin="niho"] .workflow-composer-prompt:hover {
+    border-color: rgba(0, 255, 136, 0.35) !important;
+    color: #e8f5f0 !important;
+    background: rgba(0, 255, 136, 0.06) !important;
   }
 
   /* ========================================

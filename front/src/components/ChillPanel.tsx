@@ -5,8 +5,6 @@ import type { ChillRecentSource } from './ChillHeaderBar';
 import { Input } from './ui/Input';
 import { ScrollArea } from './ui/ScrollArea';
 
-const EMBED_LIST_MAX_H = 'calc(100vh - 340px)';
-
 export type ChillPanelTab = 'live' | 'search';
 
 export type ChillPanelProps = {
@@ -92,11 +90,9 @@ export const ChillPanel: React.FC<ChillPanelProps> = ({
       <div className={`chill-panel-body ${!isMobile ? 'chill-panel-body--grid' : ''}`}>
         <div className="chill-panel-main">
         {tab === 'live' && (
-          <div
-            className="chill-panel-list-scroll pr-1"
-            style={{ maxHeight: embed ? EMBED_LIST_MAX_H : 'min(360px, 42vh)' }}
-          >
-            <div className="p-3 space-y-2 app-list-layout">
+          <div className="flex flex-col min-h-0 flex-1">
+            <div className="chill-panel-list-scroll chill-panel-list-scroll--fill pr-1">
+              <div className="p-3 space-y-2 app-list-layout">
               {loadingLive && (
                 <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--niho-skyblue-gray)' }}>
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -131,12 +127,13 @@ export const ChillPanel: React.FC<ChillPanelProps> = ({
                   <span className="chill-pill chill-pill--live flex-shrink-0">LIVE</span>
                 </button>
               ))}
+              </div>
             </div>
           </div>
         )}
 
         {tab === 'search' && (
-          <div className="flex flex-col min-h-0">
+          <div className="flex flex-col min-h-0 flex-1">
             <div className="flex flex-shrink-0 gap-2 px-3 pt-1 pb-2">
               <Input
                 value={searchQuery}
@@ -157,8 +154,7 @@ export const ChillPanel: React.FC<ChillPanelProps> = ({
               </button>
             </div>
             <div
-              className="chill-panel-list-scroll pr-1"
-              style={{ maxHeight: embed ? EMBED_LIST_MAX_H : 'min(320px, 38vh)' }}
+              className="chill-panel-list-scroll chill-panel-list-scroll--fill pr-1"
             >
               <div className="px-3 pb-3 space-y-2 app-list-layout">
                 {searching && (

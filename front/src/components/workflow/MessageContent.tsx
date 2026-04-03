@@ -487,7 +487,7 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
           const cleanContent = sanitizeThinkTags(rawContent);
           
           return (
-            <div className="prose prose-sm dark:prose-invert max-w-none text-gray-900 dark:text-[#ffffff] markdown-content text-xs [&>:first-child]:mt-0">
+            <div className="max-w-none text-gray-900 dark:text-[#ffffff] markdown-content [&>:first-child]:mt-0">
               {/* 渲染提取出的嵌入图片 */}
               {embeddedImages.length > 0 && (
                 <div className="mb-3 space-y-3">
@@ -740,7 +740,7 @@ const MessageContentInner: React.FC<MessageContentProps> = ({
           );
         })()
       ) : (
-        <div className="text-[15px] leading-relaxed whitespace-pre-wrap break-words text-gray-900 dark:text-[#ffffff]">
+        <div className="text-[var(--chat-message-font-size,12px)] leading-[var(--chat-message-line-height,1.5)] whitespace-pre-wrap break-words text-gray-900 dark:text-[#ffffff]">
           {message.content}
         </div>
       )}

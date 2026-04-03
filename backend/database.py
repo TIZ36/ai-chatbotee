@@ -16,35 +16,36 @@ mysql_config = None
 redis_client = None
 redis_config = None
 
+
 def init_mysql(config: dict) -> Tuple[bool, Optional[str]]:
     """
     初始化MySQL连接池并创建表
-    
+
     Returns:
         (success: bool, error_message: Optional[str])
     """
     global mysql_pool, mysql_config
-    
-    mysql_config = config.get('mysql', {})
-    
-    if not mysql_config.get('enabled', False):
+
+    mysql_config = config.get("mysql", {})
+
+    if not mysql_config.get("enabled", False):
         print("MySQL is disabled in config")
         return True, None
-    
+
     try:
         import pymysql
         from dbutils.pooled_db import PooledDB
-        
-        host = mysql_config.get('host', 'localhost')
-        port = mysql_config.get('port', 3306)
-        user = mysql_config.get('user', 'root')
-        password = mysql_config.get('password', '')
-        database = mysql_config.get('database', 'youtube_downloader')
-        charset = mysql_config.get('charset', 'utf8mb4')
-        pool_size = mysql_config.get('pool_size', 10)
-        
+
+        host = mysql_config.get("host", "localhost")
+        port = mysql_config.get("port", 3306)
+        user = mysql_config.get("user", "root")
+        password = mysql_config.get("password", "")
+        database = mysql_config.get("database", "youtube_downloader")
+        charset = mysql_config.get("charset", "utf8mb4")
+        pool_size = mysql_config.get("pool_size", 10)
+
         print(f"Connecting to MySQL at {host}:{port}...")
-        
+
         # 先连接MySQL服务器（不指定数据库）创建数据库
         try:
             conn = pymysql.connect(
@@ -53,38 +54,40 @@ def init_mysql(config: dict) -> Tuple[bool, Optional[str]]:
                 user=user,
                 password=password,
                 charset=charset,
-                connect_timeout=10
+                connect_timeout=10,
             )
             cursor = conn.cursor()
-            
+
             # 检查数据库是否存在，不存在则创建
             cursor.execute(f"SHOW DATABASES LIKE '{database}'")
             if not cursor.fetchone():
                 print(f"Database '{database}' does not exist, creating...")
-                cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{database}` CHARACTER SET {charset} COLLATE {charset}_unicode_ci")
+                cursor.execute(
+                    f"CREATE DATABASE IF NOT EXISTS `{database}` CHARACTER SET {charset} COLLATE {charset}_unicode_ci"
+                )
                 print(f"Database '{database}' created successfully")
-            
+
             cursor.close()
             conn.close()
-            
+
         except pymysql.Error as e:
             error_msg = f"MySQL connection error: {e}"
             print(f"✗ {error_msg}")
             return False, error_msg
-        
+
         # 创建连接池
         print(f"Creating MySQL connection pool (size={pool_size})...")
-        
+
         mysql_pool = PooledDB(
-            creator=pymysql,              # 使用pymysql作为数据库连接库
-            maxconnections=pool_size,     # 连接池最大连接数
-            mincached=2,                   # 初始化时至少创建的空闲连接
-            maxcached=5,                   # 连接池中最多闲置的连接数
-            maxshared=0,                   # 不共享连接（0表示每个线程独立连接）
-            blocking=True,                 # 连接池满时阻塞等待，而不是报错
-            maxusage=None,                 # 单个连接最多被重复使用的次数（None表示无限制）
-            setsession=[],                 # 开始会话前执行的命令列表
-            ping=1,                        # ping MySQL服务端，检查连接是否可用（0=不ping，1=默认ping，2=乐观ping，4=悲观ping）
+            creator=pymysql,  # 使用pymysql作为数据库连接库
+            maxconnections=pool_size,  # 连接池最大连接数
+            mincached=2,  # 初始化时至少创建的空闲连接
+            maxcached=5,  # 连接池中最多闲置的连接数
+            maxshared=0,  # 不共享连接（0表示每个线程独立连接）
+            blocking=True,  # 连接池满时阻塞等待，而不是报错
+            maxusage=None,  # 单个连接最多被重复使用的次数（None表示无限制）
+            setsession=[],  # 开始会话前执行的命令列表
+            ping=1,  # ping MySQL服务端，检查连接是否可用（0=不ping，1=默认ping，2=乐观ping，4=悲观ping）
             host=host,
             port=port,
             user=user,
@@ -94,20 +97,20 @@ def init_mysql(config: dict) -> Tuple[bool, Optional[str]]:
             autocommit=True,
             connect_timeout=10,
             read_timeout=30,
-            write_timeout=30
+            write_timeout=30,
         )
-        
+
         print(f"✓ MySQL connection pool created successfully (pool_size={pool_size})")
-        
+
         # 创建表
         create_tables()
-        
+
         return True, None
-        
+
     except ImportError as e:
-        if 'dbutils' in str(e).lower():
+        if "dbutils" in str(e).lower():
             error_msg = "DBUtils is not installed. Install it with: pip install DBUtils"
-        elif 'pymysql' in str(e):
+        elif "pymysql" in str(e):
             error_msg = "pymysql is not installed. Install it with: pip install pymysql"
         else:
             error_msg = f"Import error: {e}"
@@ -117,28 +120,33 @@ def init_mysql(config: dict) -> Tuple[bool, Optional[str]]:
         error_msg = f"MySQL pool initialization error: {e}"
         print(f"✗ {error_msg}")
         import traceback
+
         traceback.print_exc()
         return False, error_msg
+
 
 def create_tables():
     """创建必要的数据库表"""
     conn = get_mysql_connection()
     if not conn:
         return
-    
+
     try:
         cursor = conn.cursor()
-        
+
         # ==================== 辅助函数：确保列存在 ====================
         def _ensure_column(table: str, column: str, ddl: str, log_name: str):
             try:
-                cursor.execute(f"""
+                cursor.execute(
+                    f"""
                     SELECT COUNT(*)
                     FROM information_schema.COLUMNS
                     WHERE TABLE_SCHEMA = DATABASE()
                       AND TABLE_NAME = %s
                       AND COLUMN_NAME = %s
-                """, (table, column))
+                """,
+                    (table, column),
+                )
                 exists = cursor.fetchone()[0] > 0
                 if exists:
                     print(f"  ✓ Column '{log_name}' already exists in '{table}'")
@@ -149,7 +157,7 @@ def create_tables():
                 print(f"  ✓ Column '{log_name}' added to '{table}' table")
             except Exception as e:
                 print(f"  ⚠️ Warning: Failed to add '{log_name}' column to {table}: {e}")
-        
+
         # 下载相关表已移除（工作流工具不需要）
         # LLM配置表
         create_llm_configs_table = """
@@ -174,22 +182,22 @@ def create_tables():
             INDEX `idx_created_at` (`created_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='LLM配置表';
         """
-        
+
         cursor.execute(create_llm_configs_table)
         print("✓ Table 'llm_configs' created/verified successfully")
 
         # 迁移：为 llm_configs 添加 shortname 列（如果不存在）
         _ensure_column(
-            'llm_configs',
-            'shortname',
+            "llm_configs",
+            "shortname",
             """
                 ALTER TABLE `llm_configs`
                 ADD COLUMN `shortname` VARCHAR(50) DEFAULT NULL COMMENT '短名称'
                 AFTER `name`
             """,
-            'shortname',
+            "shortname",
         )
-        
+
         # 迁移：扩展 model 字段长度（从 VARCHAR(255) 改为 TEXT，支持更长的模型名称）
         try:
             cursor.execute("""
@@ -204,8 +212,10 @@ def create_tables():
                 data_type = result[0]
                 max_length = result[1]
                 # 如果是 VARCHAR 且长度小于等于 255，则扩展为 TEXT
-                if data_type == 'varchar' and (max_length is None or max_length <= 255):
-                    print("  → Extending 'model' column from VARCHAR(255) to TEXT for longer model names...")
+                if data_type == "varchar" and (max_length is None or max_length <= 255):
+                    print(
+                        "  → Extending 'model' column from VARCHAR(255) to TEXT for longer model names..."
+                    )
                     cursor.execute("""
                         ALTER TABLE `llm_configs`
                         MODIFY COLUMN `model` TEXT DEFAULT NULL COMMENT '模型名称'
@@ -213,20 +223,23 @@ def create_tables():
                     conn.commit()
                     print("  ✓ Column 'model' extended to TEXT")
                 else:
-                    print(f"  ✓ Column 'model' is already {data_type}" + (f"({max_length})" if max_length else ""))
+                    print(
+                        f"  ✓ Column 'model' is already {data_type}"
+                        + (f"({max_length})" if max_length else "")
+                    )
         except Exception as e:
             print(f"  ⚠️ Warning: Failed to extend 'model' column: {e}")
-        
+
         # 迁移：添加 supplier 字段（Token/计费归属，如 nvidia、openai）；不再使用 subprovider 避免歧义
         _ensure_column(
-            'llm_configs',
-            'supplier',
+            "llm_configs",
+            "supplier",
             """
                 ALTER TABLE `llm_configs`
                 ADD COLUMN `supplier` VARCHAR(100) DEFAULT NULL COMMENT 'Token/计费归属供应商（如 nvidia, openai）'
                 AFTER `provider`
             """,
-            'supplier',
+            "supplier",
         )
         try:
             cursor.execute("""
@@ -234,7 +247,9 @@ def create_tables():
                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'llm_configs' AND INDEX_NAME = 'idx_supplier'
             """)
             if cursor.fetchone()[0] == 0:
-                cursor.execute("ALTER TABLE `llm_configs` ADD INDEX `idx_supplier` (`supplier`)")
+                cursor.execute(
+                    "ALTER TABLE `llm_configs` ADD INDEX `idx_supplier` (`supplier`)"
+                )
                 conn.commit()
                 print("  ✓ Added index 'idx_supplier' to 'llm_configs' table")
         except Exception as e:
@@ -302,20 +317,20 @@ def create_tables():
             INDEX `idx_is_system` (`is_system`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='LLM供应商表';
         """
-        
+
         cursor.execute(create_llm_providers_table)
         print("✓ Table 'llm_providers' created/verified successfully")
 
         # 迁移：为 llm_providers 添加 supplier 列（如果不存在）
         _ensure_column(
-            'llm_providers',
-            'supplier',
+            "llm_providers",
+            "supplier",
             """
                 ALTER TABLE `llm_providers`
                 ADD COLUMN `supplier` VARCHAR(100) DEFAULT NULL COMMENT 'Token/计费归属供应商（如 nvidia, openai）'
                 AFTER `provider_id`
             """,
-            'supplier',
+            "supplier",
         )
         try:
             cursor.execute("""
@@ -323,9 +338,13 @@ def create_tables():
                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'llm_providers' AND INDEX_NAME = 'idx_provider_supplier'
             """)
             if cursor.fetchone()[0] == 0:
-                cursor.execute("ALTER TABLE `llm_providers` ADD INDEX `idx_provider_supplier` (`supplier`)")
+                cursor.execute(
+                    "ALTER TABLE `llm_providers` ADD INDEX `idx_provider_supplier` (`supplier`)"
+                )
                 conn.commit()
-                print("  ✓ Added index 'idx_provider_supplier' to 'llm_providers' table")
+                print(
+                    "  ✓ Added index 'idx_provider_supplier' to 'llm_providers' table"
+                )
         except Exception as e:
             print(f"  ⚠️ Warning: Failed to add index 'idx_provider_supplier': {e}")
         # 回填 supplier：为空时使用 provider_id
@@ -342,14 +361,14 @@ def create_tables():
             print(f"  ⚠️ Warning: Failed to backfill supplier in llm_providers: {e}")
 
         _ensure_column(
-            'llm_providers',
-            'sort_order',
+            "llm_providers",
+            "sort_order",
             """
                 ALTER TABLE `llm_providers`
                 ADD COLUMN `sort_order` INT NOT NULL DEFAULT 0 COMMENT '列表显示顺序（越小越靠前，Chaya 选模型 Tab 同序）'
                 AFTER `metadata`
             """,
-            'sort_order',
+            "sort_order",
         )
         try:
             cursor.execute(
@@ -370,7 +389,9 @@ def create_tables():
                 conn.commit()
                 print("  ✓ Backfilled llm_providers.sort_order (ROW_NUMBER)")
         except Exception as e:
-            print(f"  ⚠️ Warning: ROW_NUMBER backfill for sort_order failed ({e}), trying sequential update...")
+            print(
+                f"  ⚠️ Warning: ROW_NUMBER backfill for sort_order failed ({e}), trying sequential update..."
+            )
             try:
                 cursor.execute(
                     "SELECT provider_id FROM llm_providers ORDER BY is_system DESC, name ASC"
@@ -382,7 +403,9 @@ def create_tables():
                         (i, pid),
                     )
                 conn.commit()
-                print(f"  ✓ Backfilled llm_providers.sort_order (sequential, {len(ids)} rows)")
+                print(
+                    f"  ✓ Backfilled llm_providers.sort_order (sequential, {len(ids)} rows)"
+                )
             except Exception as e2:
                 print(f"  ⚠️ Warning: Failed to backfill sort_order: {e2}")
 
@@ -390,61 +413,67 @@ def create_tables():
         try:
             system_providers = [
                 {
-                    'provider_id': 'openai',
-                    'name': 'OpenAI',
-                    'provider_type': 'openai',
-                    'default_api_url': 'https://api.openai.com/v1/chat/completions',
+                    "provider_id": "openai",
+                    "name": "OpenAI",
+                    "provider_type": "openai",
+                    "default_api_url": "https://api.openai.com/v1/chat/completions",
                 },
                 {
-                    'provider_id': 'anthropic',
-                    'name': 'Anthropic (Claude)',
-                    'provider_type': 'anthropic',
-                    'default_api_url': 'https://api.anthropic.com/v1/messages',
+                    "provider_id": "anthropic",
+                    "name": "Anthropic (Claude)",
+                    "provider_type": "anthropic",
+                    "default_api_url": "https://api.anthropic.com/v1/messages",
                 },
                 {
-                    'provider_id': 'gemini',
-                    'name': 'Google Gemini',
-                    'provider_type': 'gemini',
-                    'default_api_url': 'https://generativelanguage.googleapis.com/v1beta',
+                    "provider_id": "gemini",
+                    "name": "Google Gemini",
+                    "provider_type": "gemini",
+                    "default_api_url": "https://generativelanguage.googleapis.com/v1beta",
                 },
                 {
-                    'provider_id': 'deepseek',
-                    'name': 'DeepSeek',
-                    'provider_type': 'deepseek',
-                    'default_api_url': 'https://api.deepseek.com/v1/chat/completions',
+                    "provider_id": "deepseek",
+                    "name": "DeepSeek",
+                    "provider_type": "deepseek",
+                    "default_api_url": "https://api.deepseek.com/v1/chat/completions",
                 },
                 {
-                    'provider_id': 'ollama',
-                    'name': 'Ollama',
-                    'provider_type': 'ollama',
-                    'default_api_url': 'http://localhost:11434',
+                    "provider_id": "ollama",
+                    "name": "Ollama",
+                    "provider_type": "ollama",
+                    "default_api_url": "http://localhost:11434",
                 },
             ]
             for idx, provider in enumerate(system_providers, start=1):
-                cursor.execute("SELECT COUNT(*) FROM llm_providers WHERE provider_id = %s", (provider['provider_id'],))
+                cursor.execute(
+                    "SELECT COUNT(*) FROM llm_providers WHERE provider_id = %s",
+                    (provider["provider_id"],),
+                )
                 exists = cursor.fetchone()[0] > 0
                 if not exists:
-                    cursor.execute("""
+                    cursor.execute(
+                        """
                         INSERT INTO llm_providers
                         (provider_id, supplier, name, provider_type, is_system, override_url, default_api_url, logo_theme, metadata, sort_order)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """, (
-                        provider['provider_id'],
-                        provider['provider_id'],
-                        provider['name'],
-                        provider['provider_type'],
-                        1,
-                        0,
-                        provider['default_api_url'],
-                        'auto',
-                        None,
-                        idx,
-                    ))
+                    """,
+                        (
+                            provider["provider_id"],
+                            provider["provider_id"],
+                            provider["name"],
+                            provider["provider_type"],
+                            1,
+                            0,
+                            provider["default_api_url"],
+                            "auto",
+                            None,
+                            idx,
+                        ),
+                    )
                     conn.commit()
                     print(f"  ✓ Inserted system provider: {provider['name']}")
         except Exception as e:
             print(f"  ⚠️ Warning: Failed to init system providers: {e}")
-        
+
         # MCP服务器配置表
         create_mcp_servers_table = """
         CREATE TABLE IF NOT EXISTS `mcp_servers` (
@@ -465,10 +494,10 @@ def create_tables():
             INDEX `idx_created_at` (`created_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='MCP服务器配置表';
         """
-        
+
         cursor.execute(create_mcp_servers_table)
         print("✓ Table 'mcp_servers' created/verified successfully")
-        
+
         # 迁移：为已存在的表添加 ext 列（如果不存在）
         try:
             cursor.execute("""
@@ -479,7 +508,7 @@ def create_tables():
                 AND COLUMN_NAME = 'ext'
             """)
             ext_column_exists = cursor.fetchone()[0] > 0
-            
+
             if not ext_column_exists:
                 print("  → Adding 'ext' column to 'mcp_servers' table...")
                 cursor.execute("""
@@ -537,7 +566,7 @@ def create_tables():
         """
         cursor.execute(create_mcp_market_items_table)
         print("✓ Table 'mcp_market_items' created/verified successfully")
-        
+
         # 创建 OAuth tokens 表
         create_oauth_tokens_table = """
         CREATE TABLE IF NOT EXISTS `oauth_tokens` (
@@ -557,10 +586,10 @@ def create_tables():
             INDEX `idx_expires_at` (`expires_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='OAuth Token存储表';
         """
-        
+
         cursor.execute(create_oauth_tokens_table)
         print("✓ Table 'oauth_tokens' created/verified successfully")
-        
+
         # Notion 注册信息表
         create_notion_registrations_table = """
         CREATE TABLE IF NOT EXISTS `notion_registrations` (
@@ -582,10 +611,10 @@ def create_tables():
             INDEX `idx_created_at` (`created_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Notion MCP 注册信息表';
         """
-        
+
         cursor.execute(create_notion_registrations_table)
         print("✓ Table 'notion_registrations' created/verified successfully")
-        
+
         # 迁移：为 oauth_tokens 表添加 notion_registration_id 字段（如果不存在）
         try:
             cursor.execute("""
@@ -596,9 +625,11 @@ def create_tables():
                 AND COLUMN_NAME = 'notion_registration_id'
             """)
             notion_reg_id_column_exists = cursor.fetchone()[0] > 0
-            
+
             if not notion_reg_id_column_exists:
-                print("  → Adding 'notion_registration_id' column to 'oauth_tokens' table...")
+                print(
+                    "  → Adding 'notion_registration_id' column to 'oauth_tokens' table..."
+                )
                 cursor.execute("""
                     ALTER TABLE `oauth_tokens` 
                     ADD COLUMN `notion_registration_id` INT DEFAULT NULL COMMENT '关联的 Notion 注册信息 ID' 
@@ -612,8 +643,10 @@ def create_tables():
             else:
                 print("  ✓ Column 'notion_registration_id' already exists")
         except Exception as e:
-            print(f"  ⚠ Warning: Could not check/add 'notion_registration_id' column: {e}")
-        
+            print(
+                f"  ⚠ Warning: Could not check/add 'notion_registration_id' column: {e}"
+            )
+
         # 工作流配置表
         create_workflows_table = """
         CREATE TABLE IF NOT EXISTS `workflows` (
@@ -628,10 +661,10 @@ def create_tables():
             INDEX `idx_created_at` (`created_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流配置表';
         """
-        
+
         cursor.execute(create_workflows_table)
         print("✓ Table 'workflows' created/verified successfully")
-        
+
         # 会话表
         create_sessions_table = """
         CREATE TABLE IF NOT EXISTS `sessions` (
@@ -654,18 +687,30 @@ def create_tables():
             INDEX `idx_last_message_at` (`last_message_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会话/Topic表';
         """
-        
+
         cursor.execute(create_sessions_table)
         print("✓ Table 'sessions' created/verified successfully")
 
         # 迁移：确保 sessions 表拥有必要的列
-        _ensure_column('sessions', 'session_type', 
-                      "ALTER TABLE `sessions` ADD COLUMN `session_type` VARCHAR(50) DEFAULT 'memory' AFTER `avatar` ", 'session_type')
-        _ensure_column('sessions', 'owner_id', 
-                      "ALTER TABLE `sessions` ADD COLUMN `owner_id` VARCHAR(100) DEFAULT NULL AFTER `session_type` ", 'owner_id')
-        _ensure_column('sessions', 'ext', 
-                      "ALTER TABLE `sessions` ADD COLUMN `ext` JSON DEFAULT NULL AFTER `owner_id` ", 'ext')
-        
+        _ensure_column(
+            "sessions",
+            "session_type",
+            "ALTER TABLE `sessions` ADD COLUMN `session_type` VARCHAR(50) DEFAULT 'memory' AFTER `avatar` ",
+            "session_type",
+        )
+        _ensure_column(
+            "sessions",
+            "owner_id",
+            "ALTER TABLE `sessions` ADD COLUMN `owner_id` VARCHAR(100) DEFAULT NULL AFTER `session_type` ",
+            "owner_id",
+        )
+        _ensure_column(
+            "sessions",
+            "ext",
+            "ALTER TABLE `sessions` ADD COLUMN `ext` JSON DEFAULT NULL AFTER `owner_id` ",
+            "ext",
+        )
+
         # 会话参与者表
         create_session_participants_table = """
         CREATE TABLE IF NOT EXISTS `session_participants` (
@@ -684,7 +729,7 @@ def create_tables():
         """
         cursor.execute(create_session_participants_table)
         print("✓ Table 'session_participants' created/verified successfully")
-        
+
         # 迁移：为已存在的表添加 name 列（如果不存在）
         try:
             cursor.execute("""
@@ -695,7 +740,7 @@ def create_tables():
                 AND COLUMN_NAME = 'name'
             """)
             name_column_exists = cursor.fetchone()[0] > 0
-            
+
             if not name_column_exists:
                 print("  → Adding 'name' column to 'sessions' table...")
                 cursor.execute("""
@@ -707,7 +752,7 @@ def create_tables():
                 print("  ✓ Column 'name' added to 'sessions' table")
         except Exception as e:
             print(f"  ⚠️ Warning: Failed to add 'name' column: {e}")
-        
+
         # 迁移：为已存在的表添加 system_prompt 列（用于存储会话人设）
         try:
             cursor.execute("""
@@ -718,7 +763,7 @@ def create_tables():
                 AND COLUMN_NAME = 'system_prompt'
             """)
             system_prompt_exists = cursor.fetchone()[0] > 0
-            
+
             if not system_prompt_exists:
                 print("  → Adding 'system_prompt' column to 'sessions' table...")
                 cursor.execute("""
@@ -731,7 +776,7 @@ def create_tables():
                 print("  ✓ Column 'system_prompt' already exists")
         except Exception as e:
             print(f"  ⚠️ Warning: Failed to add 'system_prompt' column: {e}")
-        
+
         # 迁移：为已存在的表添加 session_type 列（会话类型：temporary/memory/agent）
         try:
             cursor.execute("""
@@ -742,7 +787,7 @@ def create_tables():
                 AND COLUMN_NAME = 'session_type'
             """)
             session_type_exists = cursor.fetchone()[0] > 0
-            
+
             if not session_type_exists:
                 print("  → Adding 'session_type' column to 'sessions' table...")
                 cursor.execute("""
@@ -756,7 +801,7 @@ def create_tables():
                 print("  ✓ Column 'session_type' already exists")
         except Exception as e:
             print(f"  ⚠️ Warning: Failed to add 'session_type' column: {e}")
-        
+
         # 迁移：为已存在的表添加或修改 avatar 列（如果不存在或类型不对）
         try:
             cursor.execute("""
@@ -767,7 +812,7 @@ def create_tables():
                 AND COLUMN_NAME = 'avatar'
             """)
             avatar_column = cursor.fetchone()
-            
+
             if not avatar_column:
                 # 列不存在，添加它
                 print("  → Adding 'avatar' column to 'sessions' table...")
@@ -780,9 +825,11 @@ def create_tables():
             else:
                 # 列存在，检查类型是否为 MEDIUMTEXT
                 column_type = avatar_column[0].upper()
-                if 'TEXT' in column_type and 'MEDIUMTEXT' not in column_type:
+                if "TEXT" in column_type and "MEDIUMTEXT" not in column_type:
                     # 如果是 TEXT 类型，修改为 MEDIUMTEXT
-                    print("  → Updating 'avatar' column type from TEXT to MEDIUMTEXT...")
+                    print(
+                        "  → Updating 'avatar' column type from TEXT to MEDIUMTEXT..."
+                    )
                     cursor.execute("""
                         ALTER TABLE `sessions` 
                         MODIFY COLUMN `avatar` MEDIUMTEXT DEFAULT NULL COMMENT '机器人头像（base64编码）'
@@ -792,7 +839,7 @@ def create_tables():
                     print("  ✓ Column 'avatar' already exists with correct type")
         except Exception as e:
             print(f"  ⚠ Warning: Could not check/add 'avatar' column: {e}")
-        
+
         # 迁移：为 sessions 表添加 media_output_path 列（用于保存生成的媒体文件）
         try:
             cursor.execute("""
@@ -803,7 +850,7 @@ def create_tables():
                 AND COLUMN_NAME = 'media_output_path'
             """)
             media_output_path_exists = cursor.fetchone()[0] > 0
-            
+
             if not media_output_path_exists:
                 print("  → Adding 'media_output_path' column to 'sessions' table...")
                 cursor.execute("""
@@ -816,95 +863,97 @@ def create_tables():
             else:
                 print("  ✓ Column 'media_output_path' already exists in 'sessions'")
         except Exception as e:
-            print(f"  ⚠️ Warning: Failed to add 'media_output_path' column to sessions: {e}")
+            print(
+                f"  ⚠️ Warning: Failed to add 'media_output_path' column to sessions: {e}"
+            )
 
         # ==================== 消息执行记录扩展（存过程日志与原始结构化结果） ====================
         # 说明：
         # - logs: 过程日志数组（JSON 字符串），用于前端“会话扩展面板”回放
         # - raw_result: 原始结构化结果（JSON 字符串），用于保存 MCP 多媒体 content[]（含 base64 图片）
         _ensure_column(
-            'message_executions',
-            'logs',
+            "message_executions",
+            "logs",
             """
                 ALTER TABLE `message_executions`
                 ADD COLUMN `logs` LONGTEXT DEFAULT NULL COMMENT '执行过程日志（JSON数组字符串）'
                 AFTER `error_message`
             """,
-            'logs',
+            "logs",
         )
         _ensure_column(
-            'message_executions',
-            'raw_result',
+            "message_executions",
+            "raw_result",
             """
                 ALTER TABLE `message_executions`
                 ADD COLUMN `raw_result` LONGTEXT DEFAULT NULL COMMENT '原始结构化结果（JSON字符串，可能包含多媒体base64）'
                 AFTER `logs`
             """,
-            'raw_result',
+            "raw_result",
         )
 
         _ensure_column(
-            'sessions',
-            'role_id',
+            "sessions",
+            "role_id",
             """
                 ALTER TABLE `sessions`
                 ADD COLUMN `role_id` VARCHAR(100) DEFAULT NULL COMMENT '应用的角色ID（对应 sessions.session_id，session_type=agent）'
                 AFTER `session_type`
             """,
-            'role_id',
+            "role_id",
         )
         _ensure_column(
-            'sessions',
-            'role_version_id',
+            "sessions",
+            "role_version_id",
             """
                 ALTER TABLE `sessions`
                 ADD COLUMN `role_version_id` VARCHAR(100) DEFAULT NULL COMMENT '锁定的角色版本ID（用于可复盘/回放）'
                 AFTER `role_id`
             """,
-            'role_version_id',
+            "role_version_id",
         )
         _ensure_column(
-            'sessions',
-            'role_snapshot',
+            "sessions",
+            "role_snapshot",
             """
                 ALTER TABLE `sessions`
                 ADD COLUMN `role_snapshot` JSON DEFAULT NULL COMMENT '应用角色时的快照（用于审计/回放）'
                 AFTER `role_version_id`
             """,
-            'role_snapshot',
+            "role_snapshot",
         )
         _ensure_column(
-            'sessions',
-            'role_applied_at',
+            "sessions",
+            "role_applied_at",
             """
                 ALTER TABLE `sessions`
                 ADD COLUMN `role_applied_at` DATETIME DEFAULT NULL COMMENT '应用角色时间'
                 AFTER `role_snapshot`
             """,
-            'role_applied_at',
+            "role_applied_at",
         )
         _ensure_column(
-            'sessions',
-            'creator_ip',
+            "sessions",
+            "creator_ip",
             """
                 ALTER TABLE `sessions`
                 ADD COLUMN `creator_ip` VARCHAR(45) DEFAULT NULL COMMENT '创建者IP地址（用于agent过滤）'
                 AFTER `role_applied_at`
             """,
-            'creator_ip',
+            "creator_ip",
         )
 
         _ensure_column(
-            'sessions',
-            'ext',
+            "sessions",
+            "ext",
             """
                 ALTER TABLE `sessions`
                 ADD COLUMN `ext` JSON DEFAULT NULL COMMENT '扩展配置（存储 persona 等）'
                 AFTER `creator_ip`
             """,
-            'ext',
+            "ext",
         )
-        
+
         try:
             cursor.execute("""
                 SELECT COUNT(*)
@@ -971,7 +1020,9 @@ def create_tables():
                 cursor.execute(create_role_versions_table_no_fk)
                 print("  ✓ Table 'role_versions' created without FK")
             except Exception as e2:
-                print(f"  ⚠️ Warning: Failed to create 'role_versions' table without FK: {e2}")
+                print(
+                    f"  ⚠️ Warning: Failed to create 'role_versions' table without FK: {e2}"
+                )
 
         # 消息表
         create_messages_table = """
@@ -1001,17 +1052,42 @@ def create_tables():
             FOREIGN KEY (`session_id`) REFERENCES `sessions`(`session_id`) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='消息表';
         """
-        
+
         cursor.execute(create_messages_table)
         print("✓ Table 'messages' created/verified successfully")
 
         # 迁移：为 messages 表添加新列
-        _ensure_column('messages', 'sender_id', "ALTER TABLE `messages` ADD COLUMN `sender_id` VARCHAR(100) DEFAULT NULL AFTER `role` ", 'sender_id')
-        _ensure_column('messages', 'sender_type', "ALTER TABLE `messages` ADD COLUMN `sender_type` VARCHAR(20) DEFAULT 'user' AFTER `sender_id` ", 'sender_type')
-        _ensure_column('messages', 'mentions', "ALTER TABLE `messages` ADD COLUMN `mentions` JSON DEFAULT NULL AFTER `tool_calls` ", 'mentions')
-        _ensure_column('messages', 'reply_to_message_id', "ALTER TABLE `messages` ADD COLUMN `reply_to_message_id` VARCHAR(100) DEFAULT NULL AFTER `mentions` ", 'reply_to_message_id')
-        _ensure_column('messages', 'is_raise_hand', "ALTER TABLE `messages` ADD COLUMN `is_raise_hand` TINYINT(1) DEFAULT 0 AFTER `reply_to_message_id` ", 'is_raise_hand')
-        
+        _ensure_column(
+            "messages",
+            "sender_id",
+            "ALTER TABLE `messages` ADD COLUMN `sender_id` VARCHAR(100) DEFAULT NULL AFTER `role` ",
+            "sender_id",
+        )
+        _ensure_column(
+            "messages",
+            "sender_type",
+            "ALTER TABLE `messages` ADD COLUMN `sender_type` VARCHAR(20) DEFAULT 'user' AFTER `sender_id` ",
+            "sender_type",
+        )
+        _ensure_column(
+            "messages",
+            "mentions",
+            "ALTER TABLE `messages` ADD COLUMN `mentions` JSON DEFAULT NULL AFTER `tool_calls` ",
+            "mentions",
+        )
+        _ensure_column(
+            "messages",
+            "reply_to_message_id",
+            "ALTER TABLE `messages` ADD COLUMN `reply_to_message_id` VARCHAR(100) DEFAULT NULL AFTER `mentions` ",
+            "reply_to_message_id",
+        )
+        _ensure_column(
+            "messages",
+            "is_raise_hand",
+            "ALTER TABLE `messages` ADD COLUMN `is_raise_hand` TINYINT(1) DEFAULT 0 AFTER `reply_to_message_id` ",
+            "is_raise_hand",
+        )
+
         # 迁移：为已存在的表添加 acc_token 列（如果不存在）
         try:
             cursor.execute("""
@@ -1022,7 +1098,7 @@ def create_tables():
                 AND COLUMN_NAME = 'acc_token'
             """)
             acc_token_column_exists = cursor.fetchone()[0] > 0
-            
+
             if not acc_token_column_exists:
                 print("  → Adding 'acc_token' column to 'messages' table...")
                 cursor.execute("""
@@ -1035,7 +1111,7 @@ def create_tables():
                 print("  ✓ Column 'acc_token' already exists")
         except Exception as e:
             print(f"  ⚠ Warning: Could not check/add 'acc_token' column: {e}")
-        
+
         # 迁移：为已存在的表添加 ext 列（如果不存在）- 用于存储扩展数据
         # 如 Gemini 的 thoughtSignature、模型信息、thinking配置等
         try:
@@ -1047,7 +1123,7 @@ def create_tables():
                 AND COLUMN_NAME = 'ext'
             """)
             ext_column_exists = cursor.fetchone()[0] > 0
-            
+
             if not ext_column_exists:
                 print("  → Adding 'ext' column to 'messages' table...")
                 cursor.execute("""
@@ -1060,7 +1136,7 @@ def create_tables():
                 print("  ✓ Column 'ext' already exists")
         except Exception as e:
             print(f"  ⚠ Warning: Could not check/add 'ext' column: {e}")
-        
+
         # 迁移：为已存在的表添加 mcpdetail 列（如果不存在）- 用于存储 MCP 执行详情
         try:
             cursor.execute("""
@@ -1071,7 +1147,7 @@ def create_tables():
                 AND COLUMN_NAME = 'mcpdetail'
             """)
             mcpdetail_column_exists = cursor.fetchone()[0] > 0
-            
+
             if not mcpdetail_column_exists:
                 print("  → Adding 'mcpdetail' column to 'messages' table...")
                 cursor.execute("""
@@ -1084,7 +1160,7 @@ def create_tables():
                 print("  ✓ Column 'mcpdetail' already exists")
         except Exception as e:
             print(f"  ⚠ Warning: Could not check/add 'mcpdetail' column: {e}")
-        
+
         # 迁移：将 messages 表的 content 字段升级为 LONGTEXT（支持存储大型内容如 base64 图片）
         try:
             cursor.execute("""
@@ -1095,12 +1171,14 @@ def create_tables():
                 AND COLUMN_NAME = 'content'
             """)
             result = cursor.fetchone()
-            
+
             if result:
-                current_type = result[0].upper() if result[0] else ''
+                current_type = result[0].upper() if result[0] else ""
                 # 如果不是 LONGTEXT，则升级
-                if 'LONGTEXT' not in current_type:
-                    print(f"  → Upgrading 'content' column in 'messages' table from {current_type} to LONGTEXT...")
+                if "LONGTEXT" not in current_type:
+                    print(
+                        f"  → Upgrading 'content' column in 'messages' table from {current_type} to LONGTEXT..."
+                    )
                     cursor.execute("""
                         ALTER TABLE `messages` 
                         MODIFY COLUMN `content` LONGTEXT NOT NULL COMMENT '消息内容（支持大型内容如 base64 图片）'
@@ -1111,7 +1189,7 @@ def create_tables():
                     print("  ✓ Column 'content' is already LONGTEXT")
         except Exception as e:
             print(f"  ⚠ Warning: Could not upgrade 'content' column: {e}")
-        
+
         # 总结表
         create_summaries_table = """
         CREATE TABLE IF NOT EXISTS `summaries` (
@@ -1129,10 +1207,10 @@ def create_tables():
             FOREIGN KEY (`session_id`) REFERENCES `sessions`(`session_id`) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='总结表';
         """
-        
+
         cursor.execute(create_summaries_table)
         print("✓ Table 'summaries' created/verified successfully")
-        
+
         # 消息执行记录表
         create_message_executions_table = """
         CREATE TABLE IF NOT EXISTS `message_executions` (
@@ -1158,7 +1236,7 @@ def create_tables():
             FOREIGN KEY (`message_id`) REFERENCES `messages`(`message_id`) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='消息执行记录表';
         """
-        
+
         cursor.execute(create_message_executions_table)
         print("✓ Table 'message_executions' created/verified successfully")
 
@@ -1166,41 +1244,50 @@ def create_tables():
         # 使用 _ensure_column 助手安全添加新列
         def _ensure_exec_column(column: str, ddl: str, log_name: str):
             try:
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT COUNT(*)
                     FROM information_schema.COLUMNS
                     WHERE TABLE_SCHEMA = DATABASE()
                       AND TABLE_NAME = 'message_executions'
                       AND COLUMN_NAME = %s
-                """, (column,))
+                """,
+                    (column,),
+                )
                 exists = cursor.fetchone()[0] > 0
                 if exists:
-                    print(f"  ✓ Column '{log_name}' already exists in 'message_executions'")
+                    print(
+                        f"  ✓ Column '{log_name}' already exists in 'message_executions'"
+                    )
                     return
-                print(f"  → Adding '{log_name}' column to 'message_executions' table...")
+                print(
+                    f"  → Adding '{log_name}' column to 'message_executions' table..."
+                )
                 cursor.execute(ddl)
                 conn.commit()
                 print(f"  ✓ Column '{log_name}' added to 'message_executions' table")
             except Exception as e:
-                print(f"  ⚠️ Warning: Failed to add '{log_name}' column to message_executions: {e}")
+                print(
+                    f"  ⚠️ Warning: Failed to add '{log_name}' column to message_executions: {e}"
+                )
 
         _ensure_exec_column(
-            'logs',
+            "logs",
             """
                 ALTER TABLE `message_executions`
                 ADD COLUMN `logs` LONGTEXT DEFAULT NULL COMMENT '执行过程日志（JSON 数组）'
                 AFTER `error_message`
             """,
-            'logs',
+            "logs",
         )
         _ensure_exec_column(
-            'raw_result',
+            "raw_result",
             """
                 ALTER TABLE `message_executions`
                 ADD COLUMN `raw_result` LONGTEXT DEFAULT NULL COMMENT '原始结构化结果（JSON，用于展示 MCP 多媒体 content[]）'
                 AFTER `logs`
             """,
-            'raw_result',
+            "raw_result",
         )
 
         # ==================== Research 相关表 ====================
@@ -1280,6 +1367,7 @@ def create_tables():
             `guild_name` VARCHAR(255) DEFAULT NULL COMMENT '服务器名',
             `channel_name` VARCHAR(255) DEFAULT NULL COMMENT '频道名',
             `session_id` VARCHAR(100) NOT NULL COMMENT '专属 Chaya 会话 ID',
+            `linked_agent_id` VARCHAR(100) NOT NULL DEFAULT 'agent_chaya' COMMENT '当前绑定的 Agent 会话 ID',
             `enabled` TINYINT(1) DEFAULT 1 COMMENT '是否启用',
             `trigger_mode` VARCHAR(20) DEFAULT 'mention' COMMENT 'mention / all',
             `config_override` JSON DEFAULT NULL COMMENT '按频道覆盖 system_prompt / llm_config_id 等',
@@ -1288,11 +1376,18 @@ def create_tables():
             PRIMARY KEY (`channel_id`),
             UNIQUE KEY `uniq_session_id` (`session_id`),
             INDEX `idx_guild_id` (`guild_id`),
-            INDEX `idx_session_id` (`session_id`)
+            INDEX `idx_session_id` (`session_id`),
+            INDEX `idx_linked_agent_id` (`linked_agent_id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Discord 频道绑定';
         """
         cursor.execute(create_discord_channels_table)
         print("✓ Table 'discord_channels' created/verified successfully")
+        _ensure_column(
+            "discord_channels",
+            "linked_agent_id",
+            "ALTER TABLE `discord_channels` ADD COLUMN `linked_agent_id` VARCHAR(100) NOT NULL DEFAULT 'agent_chaya' COMMENT '当前绑定的 Agent 会话 ID' AFTER `session_id`",
+            "linked_agent_id",
+        )
 
         # Discord 应用级配置（单行：默认模型等，前端录入持久化）
         create_discord_app_config_table = """
@@ -1304,14 +1399,12 @@ def create_tables():
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Discord 应用配置';
         """
         cursor.execute(create_discord_app_config_table)
-        cursor.execute(
-            "INSERT IGNORE INTO discord_app_config (id) VALUES (1)"
-        )
+        cursor.execute("INSERT IGNORE INTO discord_app_config (id) VALUES (1)")
         conn.commit()
         print("✓ Table 'discord_app_config' created/verified successfully")
 
         # ==================== 技能包相关表 ====================
-        
+
         # 技能包表
         create_skill_packs_table = """
         CREATE TABLE IF NOT EXISTS `skill_packs` (
@@ -1329,23 +1422,26 @@ def create_tables():
             INDEX `idx_created_at` (`created_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='技能包表';
         """
-        
+
         cursor.execute(create_skill_packs_table)
         print("✓ Table 'skill_packs' created/verified successfully")
-        
+
         # 迁移：为 skill_packs 表添加 ext 字段（如果不存在）
-        _ensure_column('skill_packs', 'ext', 
-                      "ALTER TABLE `skill_packs` ADD COLUMN `ext` JSON DEFAULT NULL COMMENT '扩展数据（processSteps执行轨迹等）' AFTER `source_messages`", 
-                      'ext')
+        _ensure_column(
+            "skill_packs",
+            "ext",
+            "ALTER TABLE `skill_packs` ADD COLUMN `ext` JSON DEFAULT NULL COMMENT '扩展数据（processSteps执行轨迹等）' AFTER `source_messages`",
+            "ext",
+        )
 
         # 迁移：结构化步骤列（Actor 编排 MCP 等；与 actor_base._load_skill_packs 查询一致）
         _ensure_column(
-            'skill_packs',
-            'process_steps',
+            "skill_packs",
+            "process_steps",
             "ALTER TABLE `skill_packs` ADD COLUMN `process_steps` JSON NULL COMMENT '结构化执行步骤 JSON' AFTER `summary`",
-            'process_steps',
+            "process_steps",
         )
-        
+
         # 技能包分配表（多对多关系：技能包与记忆体/智能体）
         create_skill_pack_assignments_table = """
         CREATE TABLE IF NOT EXISTS `skill_pack_assignments` (
@@ -1364,10 +1460,10 @@ def create_tables():
             FOREIGN KEY (`target_session_id`) REFERENCES `sessions`(`session_id`) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='技能包分配表';
         """
-        
+
         cursor.execute(create_skill_pack_assignments_table)
         print("✓ Table 'skill_pack_assignments' created/verified successfully")
-        
+
         # 自定义维度选项表
         create_role_dimension_options_table = """
         CREATE TABLE IF NOT EXISTS `role_dimension_options` (
@@ -1384,49 +1480,50 @@ def create_tables():
             UNIQUE KEY `uk_dimension_role_value` (`dimension_type`, `role_type`, `option_value`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='角色生成器自定义维度选项表';
         """
-        
+
         cursor.execute(create_role_dimension_options_table)
         print("✓ Table 'role_dimension_options' created/verified successfully")
-        
+
         cursor.close()
         conn.close()  # 归还连接到连接池
-        
+
     except Exception as e:
         print(f"✗ Error creating tables: {e}")
         if conn:
             conn.close()  # 确保连接被归还
         raise
 
+
 def init_redis(config: dict) -> Tuple[bool, Optional[str]]:
     """
     初始化Redis连接
-    
+
     Returns:
         (success: bool, error_message: Optional[str])
     """
     global redis_client, redis_config
-    
-    redis_config = config.get('redis', {})
-    
-    if not redis_config.get('enabled', False):
+
+    redis_config = config.get("redis", {})
+
+    if not redis_config.get("enabled", False):
         print("Redis is disabled in config")
         return True, None
-    
+
     try:
         import redis
     except ImportError:
         error_msg = "redis is not installed. Install it with: pip install redis"
         print(f"✗ {error_msg}")
         return False, error_msg
-    
+
     try:
-        host = redis_config.get('host', 'localhost')
-        port = redis_config.get('port', 6379)
-        password = redis_config.get('password', '')
-        db = redis_config.get('db', 0)
-        
+        host = redis_config.get("host", "localhost")
+        port = redis_config.get("port", 6379)
+        password = redis_config.get("password", "")
+        db = redis_config.get("db", 0)
+
         print(f"Connecting to Redis at {host}:{port}...")
-        
+
         # 创建Redis连接（注意：如果 ping 失败，需要回滚 redis_client，避免留下"半初始化"的客户端）
         redis_client = redis.Redis(
             host=host,
@@ -1435,16 +1532,16 @@ def init_redis(config: dict) -> Tuple[bool, Optional[str]]:
             db=db,
             decode_responses=True,
             socket_connect_timeout=5,
-            socket_timeout=5
+            socket_timeout=5,
         )
-        
+
         # 测试连接
         redis_client.ping()
-        
+
         print(f"✓ Redis connected successfully (db={db})")
-        
+
         return True, None
-        
+
     except redis.AuthenticationError as e:
         redis_client = None
         error_msg = f"Redis认证失败: {e}. 请检查配置文件中的密码是否正确，如果Redis未设置密码，请将password设置为空字符串"
@@ -1461,16 +1558,17 @@ def init_redis(config: dict) -> Tuple[bool, Optional[str]]:
         print(f"✗ {error_msg}")
         return False, error_msg
 
+
 def check_connections() -> Tuple[bool, bool]:
     """
     检查MySQL和Redis连接状态
-    
+
     Returns:
         (mysql_ok: bool, redis_ok: bool)
     """
     mysql_ok = False
     redis_ok = False
-    
+
     # 检查MySQL连接池
     if mysql_pool:
         conn = None
@@ -1486,7 +1584,7 @@ def check_connections() -> Tuple[bool, bool]:
         finally:
             if conn:
                 conn.close()  # 归还到连接池
-    
+
     # 检查Redis
     if redis_client:
         try:
@@ -1494,26 +1592,27 @@ def check_connections() -> Tuple[bool, bool]:
             redis_ok = True
         except:
             redis_ok = False
-    
+
     return mysql_ok, redis_ok
+
 
 def get_mysql_connection():
     """
     从连接池获取MySQL连接
-    
+
     Returns:
         MySQL连接对象，使用完毕后需要调用 close() 归还到连接池
         如果MySQL未启用或连接池不可用则返回None
     """
     global mysql_pool, mysql_config
-    
-    if not mysql_config or not mysql_config.get('enabled', False):
+
+    if not mysql_config or not mysql_config.get("enabled", False):
         return None
-    
+
     if mysql_pool is None:
         print("[MySQL Pool] Connection pool is not initialized")
         return None
-    
+
     try:
         # 从连接池获取连接
         # DBUtils 的 PooledDB 会自动：
@@ -1522,18 +1621,22 @@ def get_mysql_connection():
         # 3. 管理连接的生命周期
         conn = mysql_pool.connection()
         return conn
-        
+
     except Exception as e:
         print(f"[MySQL Pool] Error getting connection from pool: {e}")
         import traceback
+
         traceback.print_exc()
         return None
+
 
 def get_redis_client():
     """获取Redis客户端"""
     return redis_client
 
+
 # ==================== OAuth 配置缓存（使用 Redis）====================
+
 
 def save_oauth_config(state: str, config: dict, ttl: int = 600) -> bool:
     """
@@ -1544,26 +1647,33 @@ def save_oauth_config(state: str, config: dict, ttl: int = 600) -> bool:
         if not redis_client:
             print("[OAuth Cache] Redis not available, cannot save OAuth config")
             return False
-        
+
         import json
+
         key = f"oauth:config:{state}"
         value = json.dumps(config)
-        
+
         if ttl is None:
             # 永不过期
             redis_client.set(key, value)
-            print(f"[OAuth Cache] Saved OAuth config for state: {state[:20]}... (永不过期)")
+            print(
+                f"[OAuth Cache] Saved OAuth config for state: {state[:20]}... (永不过期)"
+            )
         else:
             # 设置过期时间
             redis_client.setex(key, ttl, value)
-            print(f"[OAuth Cache] Saved OAuth config for state: {state[:20]}... (TTL: {ttl}s)")
-        
+            print(
+                f"[OAuth Cache] Saved OAuth config for state: {state[:20]}... (TTL: {ttl}s)"
+            )
+
         return True
     except Exception as e:
         print(f"[OAuth Cache] Error saving OAuth config: {e}")
         import traceback
+
         traceback.print_exc()
         return False
+
 
 def get_oauth_config(state: str) -> Optional[dict]:
     """从 Redis 获取 OAuth 配置"""
@@ -1571,15 +1681,16 @@ def get_oauth_config(state: str) -> Optional[dict]:
         if not redis_client:
             print("[OAuth Cache] Redis not available, cannot get OAuth config")
             return None
-        
+
         import json
+
         key = f"oauth:config:{state}"
         value = redis_client.get(key)
-        
+
         if value:
             # 处理 bytes 或 str 类型
             if isinstance(value, bytes):
-                value = value.decode('utf-8')
+                value = value.decode("utf-8")
             config = json.loads(value)
             print(f"[OAuth Cache] Retrieved OAuth config for state: {state[:20]}...")
             return config
@@ -1589,15 +1700,17 @@ def get_oauth_config(state: str) -> Optional[dict]:
     except Exception as e:
         print(f"[OAuth Cache] Error getting OAuth config: {e}")
         import traceback
+
         traceback.print_exc()
         return None
+
 
 def delete_oauth_config(state: str) -> bool:
     """删除 OAuth 配置"""
     try:
         if not redis_client:
             return False
-        
+
         key = f"oauth:config:{state}"
         deleted = redis_client.delete(key)
         if deleted:
@@ -1607,7 +1720,9 @@ def delete_oauth_config(state: str) -> bool:
         print(f"[OAuth Cache] Error deleting OAuth config: {e}")
         return False
 
+
 # ==================== OAuth Token 管理（使用 Redis）====================
+
 
 def get_oauth_token(mcp_url: str) -> Optional[dict]:
     """从 Redis 获取 OAuth token"""
@@ -1615,15 +1730,16 @@ def get_oauth_token(mcp_url: str) -> Optional[dict]:
         if not redis_client:
             print("[OAuth Token] Redis not available, cannot get token")
             return None
-        
+
         import json
+
         key = f"oauth:token:{mcp_url}"
         value = redis_client.get(key)
-        
+
         if value:
             # 处理 bytes 或 str 类型
             if isinstance(value, bytes):
-                value = value.decode('utf-8')
+                value = value.decode("utf-8")
             token_info = json.loads(value)
             print(f"[OAuth Token] Retrieved token for MCP: {mcp_url[:50]}...")
             return token_info
@@ -1633,8 +1749,10 @@ def get_oauth_token(mcp_url: str) -> Optional[dict]:
     except Exception as e:
         print(f"[OAuth Token] Error getting token: {e}")
         import traceback
+
         traceback.print_exc()
         return None
+
 
 def save_oauth_token(mcp_url: str, token_info: dict) -> bool:
     """保存 OAuth token 到 Redis 和 MySQL"""
@@ -1642,25 +1760,26 @@ def save_oauth_token(mcp_url: str, token_info: dict) -> bool:
         # 保存到 Redis
         if redis_client:
             import json
+
             key = f"oauth:token:{mcp_url}"
             value = json.dumps(token_info)
             redis_client.set(key, value)  # 永不过期
             print(f"[OAuth Token] Saved token to Redis for MCP: {mcp_url[:50]}...")
-        
+
         # 保存到 MySQL
-        client_id = token_info.get('client_id')
+        client_id = token_info.get("client_id")
         if client_id and mysql_pool:
             try:
                 conn = mysql_pool.connection()
                 cursor = conn.cursor()
-                
-                access_token = token_info.get('access_token')
-                refresh_token = token_info.get('refresh_token')
-                token_type = token_info.get('token_type', 'bearer')
-                expires_in = token_info.get('expires_in')
-                expires_at = token_info.get('expires_at')
-                scope = token_info.get('scope', '')
-                
+
+                access_token = token_info.get("access_token")
+                refresh_token = token_info.get("refresh_token")
+                token_type = token_info.get("token_type", "bearer")
+                expires_in = token_info.get("expires_in")
+                expires_at = token_info.get("expires_at")
+                scope = token_info.get("scope", "")
+
                 # 使用 INSERT ... ON DUPLICATE KEY UPDATE 实现 upsert
                 sql = """
                 INSERT INTO `oauth_tokens` 
@@ -1676,150 +1795,176 @@ def save_oauth_token(mcp_url: str, token_info: dict) -> bool:
                     `mcp_url` = VALUES(`mcp_url`),
                     `updated_at` = CURRENT_TIMESTAMP
                 """
-                cursor.execute(sql, (
-                    client_id,
-                    access_token,
-                    refresh_token,
-                    token_type,
-                    expires_in,
-                    expires_at,
-                    scope,
-                    mcp_url
-                ))
+                cursor.execute(
+                    sql,
+                    (
+                        client_id,
+                        access_token,
+                        refresh_token,
+                        token_type,
+                        expires_in,
+                        expires_at,
+                        scope,
+                        mcp_url,
+                    ),
+                )
                 conn.commit()
                 cursor.close()
                 conn.close()
-                print(f"[OAuth Token] Saved token to MySQL for client_id: {client_id[:10]}...")
+                print(
+                    f"[OAuth Token] Saved token to MySQL for client_id: {client_id[:10]}..."
+                )
             except Exception as e:
                 print(f"[OAuth Token] Error saving token to MySQL: {e}")
                 import traceback
+
                 traceback.print_exc()
-        
+
         return True
     except Exception as e:
         print(f"[OAuth Token] Error saving token: {e}")
         return False
 
+
 def is_token_expired(token_info: dict) -> bool:
     """检查 token 是否过期"""
     if not token_info:
         return True
-    
-    expires_at = token_info.get('expires_at')
+
+    expires_at = token_info.get("expires_at")
     if not expires_at:
         return False  # 没有过期时间，认为永不过期
-    
+
     import time
+
     return time.time() >= expires_at
 
-def refresh_oauth_token(mcp_url: str, token_info: dict, oauth_config: dict) -> Optional[dict]:
+
+def refresh_oauth_token(
+    mcp_url: str, token_info: dict, oauth_config: dict
+) -> Optional[dict]:
     """刷新 OAuth token（通用，支持所有 MCP 服务器）"""
     try:
         import requests
         import time
-        
-        refresh_token = token_info.get('refresh_token')
+
+        refresh_token = token_info.get("refresh_token")
         if not refresh_token:
             print(f"[OAuth Token] No refresh_token available for {mcp_url[:50]}...")
             return None
-        
-        resource = oauth_config.get('resource')
+
+        resource = oauth_config.get("resource")
         # 对于 Notion，使用专用模块
-        is_notion = resource and 'mcp.notion.com' in resource
+        is_notion = resource and "mcp.notion.com" in resource
         if is_notion:
             try:
                 # 从 token_info 中获取 client_id
-                client_id = token_info.get('client_id')
-                
+                client_id = token_info.get("client_id")
+
                 # 动态导入 config（避免循环依赖）
                 import sys
                 from pathlib import Path
-                config_path = Path(__file__).parent.parent / 'config.yaml'
+
+                config_path = Path(__file__).parent.parent / "config.yaml"
                 import yaml
-                with open(config_path, 'r', encoding='utf-8') as f:
+
+                with open(config_path, "r", encoding="utf-8") as f:
                     app_config = yaml.safe_load(f)
-                
+
                 from mcp_server.well_known.notion import refresh_notion_token
+
                 # 传递 client_id 以便从数据库读取注册信息
-                new_token_info = refresh_notion_token(app_config, refresh_token, mcp_url, client_id)
+                new_token_info = refresh_notion_token(
+                    app_config, refresh_token, mcp_url, client_id
+                )
                 if new_token_info:
                     print(f"[OAuth Token] ✅ Notion token refreshed successfully")
                 return new_token_info
             except Exception as e:
-                print(f"[OAuth Token] ⚠️ Notion-specific refresh failed, falling back to generic: {e}")
+                print(
+                    f"[OAuth Token] ⚠️ Notion-specific refresh failed, falling back to generic: {e}"
+                )
                 # 如果 Notion 专用刷新失败，继续使用通用逻辑
-        
+
         # 通用 token 刷新逻辑
-        token_endpoint = oauth_config.get('token_endpoint')
-        client_id = oauth_config.get('client_id')
-        client_secret = oauth_config.get('client_secret', '')
-        token_endpoint_auth_methods = oauth_config.get('token_endpoint_auth_methods_supported', ['none'])
-        
+        token_endpoint = oauth_config.get("token_endpoint")
+        client_id = oauth_config.get("client_id")
+        client_secret = oauth_config.get("client_secret", "")
+        token_endpoint_auth_methods = oauth_config.get(
+            "token_endpoint_auth_methods_supported", ["none"]
+        )
+
         if not token_endpoint:
             print(f"[OAuth Token] No token_endpoint in config")
             return None
-        
+
         print(f"[OAuth Token] Refreshing token for {mcp_url[:50]}...")
-        
+
         headers = {
-            'Content-Type': 'application/x-www-form-urlencoded',
+            "Content-Type": "application/x-www-form-urlencoded",
         }
-        
+
         payload = {
-            'grant_type': 'refresh_token',
-            'refresh_token': refresh_token,
-            'client_id': client_id,
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": client_id,
         }
-        
+
         # 根据认证方式选择
-        if 'client_secret_basic' in token_endpoint_auth_methods and client_secret:
+        if "client_secret_basic" in token_endpoint_auth_methods and client_secret:
             import base64
+
             auth_string = f"{client_id}:{client_secret}"
-            auth_bytes = auth_string.encode('utf-8')
-            auth_b64 = base64.b64encode(auth_bytes).decode('utf-8')
-            headers['Authorization'] = f'Basic {auth_b64}'
-        elif 'client_secret_post' in token_endpoint_auth_methods and client_secret:
-            payload['client_secret'] = client_secret
-        
+            auth_bytes = auth_string.encode("utf-8")
+            auth_b64 = base64.b64encode(auth_bytes).decode("utf-8")
+            headers["Authorization"] = f"Basic {auth_b64}"
+        elif "client_secret_post" in token_endpoint_auth_methods and client_secret:
+            payload["client_secret"] = client_secret
+
         if resource:
-            payload['resource'] = resource
-        
-        response = requests.post(token_endpoint, data=payload, headers=headers, timeout=30)
-        
+            payload["resource"] = resource
+
+        response = requests.post(
+            token_endpoint, data=payload, headers=headers, timeout=30
+        )
+
         if not response.ok:
             print(f"[OAuth Token] ❌ Token refresh failed: {response.status_code}")
             return None
-        
+
         new_token_data = response.json()
-        new_access_token = new_token_data.get('access_token')
-        new_refresh_token = new_token_data.get('refresh_token', refresh_token)  # 如果没有新的，使用旧的
-        expires_in = new_token_data.get('expires_in')
-        
+        new_access_token = new_token_data.get("access_token")
+        new_refresh_token = new_token_data.get(
+            "refresh_token", refresh_token
+        )  # 如果没有新的，使用旧的
+        expires_in = new_token_data.get("expires_in")
+
         if not new_access_token:
             print(f"[OAuth Token] ❌ No access_token in refresh response")
             return None
-        
+
         # 保留原有的client_id和其他字段
-        client_id = token_info.get('client_id')
+        client_id = token_info.get("client_id")
         new_token_info = {
-            'client_id': client_id,  # 保留client_id
-            'access_token': new_access_token,
-            'refresh_token': new_refresh_token,
-            'token_type': new_token_data.get('token_type', 'bearer'),
-            'expires_in': expires_in,
-            'expires_at': int(time.time()) + expires_in if expires_in else None,
-            'scope': new_token_data.get('scope', ''),
-            'mcp_url': mcp_url,
+            "client_id": client_id,  # 保留client_id
+            "access_token": new_access_token,
+            "refresh_token": new_refresh_token,
+            "token_type": new_token_data.get("token_type", "bearer"),
+            "expires_in": expires_in,
+            "expires_at": int(time.time()) + expires_in if expires_in else None,
+            "scope": new_token_data.get("scope", ""),
+            "mcp_url": mcp_url,
         }
-        
+
         # 保存新 token（会同时保存到Redis和MySQL）
         save_oauth_token(mcp_url, new_token_info)
         print(f"[OAuth Token] ✅ Token refreshed successfully")
-        
+
         return new_token_info
-        
+
     except Exception as e:
         print(f"[OAuth Token] ❌ Error refreshing token: {e}")
         import traceback
+
         traceback.print_exc()
         return None

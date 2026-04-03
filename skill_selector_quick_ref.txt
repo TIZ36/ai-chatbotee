@@ -1,0 +1,257 @@
+================================================================================
+SKILL SELECTOR - QUICK REFERENCE GUIDE
+================================================================================
+
+FILE: /Users/lilithgames/aiproj/chaya/front/src/components/Workflow.tsx
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STATE VARIABLES (Lines 229-231)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+const [showSkillSelector, setShowSkillSelector] = useState(false);
+const [skillSelectorIndex, setSkillSelectorIndex] = useState(0);
+const [skillTriggeredBySlash, setSkillTriggeredBySlash] = useState(false);
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+RENDERING LOCATION (Lines 6074-6156)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{showSkillSelector && (
+  <div
+    className="absolute bottom-full left-0 mb-1 z-[190] bg-white dark:bg-[#2d2d2d] 
+                border border-gray-300 dark:border-[#404040] rounded-lg shadow-lg 
+                overflow-y-auto at-selector-container"
+    style={{
+      minWidth: '220px',
+      maxWidth: '320px',
+      maxHeight: '256px',
+    }}
+  >
+    {/* Header + Items */}
+  </div>
+)}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TRIGGER 1: BUTTON (Line 5626)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Shown when: !isLoading && selectedSkillPackIds.length === 0
+
+<button onClick={() => {
+  setShowSkillSelector((v) => !v);
+  setSkillSelectorIndex(0);
+  setSkillTriggeredBySlash(false);
+}}>
+  <Package className="w-3 h-3" />
+  <span>选择 Skill</span>
+</button>
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TRIGGER 2: SLASH KEY (Line 4907)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+if (e.key === '/' && !showAtSelector) {
+  if (!showSkillSelector) {
+    setShowSkillSelector(true);
+    setSkillTriggeredBySlash(true);
+    setSkillSelectorIndex(0);
+  }
+}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+KEYBOARD NAVIGATION (Lines 4919-4970)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ArrowDown:   skillSelectorIndex = (prev + 1) % allSkillPacks.length
+ArrowUp:     skillSelectorIndex = (prev - 1 < 0) ? length - 1 : prev - 1
+Enter:       Select skill at skillSelectorIndex, close selector
+Backspace:   Close if skillTriggeredBySlash, remove "/" from input
+Space:       Close if skillTriggeredBySlash, keep "/" in input
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CSS CLASSES BREAKDOWN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Container Classes:
+  absolute         → Position: absolute
+  bottom-full      → bottom: 100% (appears above parent)
+  left-0           → left: 0 (left-aligned)
+  mb-1             → margin-bottom: 0.25rem
+  z-[190]          → z-index: 190
+  bg-white         → Background (light mode)
+  dark:bg-[#2d2d2d] → Background (dark mode)
+  border           → Border styling
+  border-gray-300  → Border color (light)
+  dark:border-[#404040] → Border color (dark)
+  rounded-lg       → border-radius: 0.5rem
+  shadow-lg        → box-shadow (elevated)
+  overflow-y-auto  → Vertical scrolling
+
+Item Button Classes (Active/Cursor/Default):
+  ACTIVE:  bg-emerald-500/10 border-l-2 border-emerald-500 text-emerald-500
+  CURSOR:  bg-gray-100 dark:bg-gray-700
+  DEFAULT: hover:bg-gray-100 dark:hover:bg-gray-700
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DIMENSIONS & SIZING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+minWidth:   220px
+maxWidth:   320px
+maxHeight:  256px (scrollable beyond)
+
+Header Padding:   p-2 (0.5rem)
+Item Padding:     px-3 py-2 (0.75rem horizontal, 0.5rem vertical)
+Border Spacing:   mb-1 (0.25rem between popover and input)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SELECTION FLOW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+User selects skill (click or Enter):
+  1. setSelectedComponents([
+       { type: 'skillpack', id: sp.skill_pack_id, name: sp.name }
+     ])
+  2. setShowSkillSelector(false)
+  3. If skillTriggeredBySlash: remove "/" from input
+
+This updates selectedSkillPackIds (derived from selectedComponents):
+  const selectedSkillPackIds = new Set(
+    selectedComponents
+      .filter(c => c.type === 'skillpack')
+      .map(c => c.id)
+  );
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+VISIBILITY CONDITIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Selector is shown when:
+  ✓ showSkillSelector === true
+
+Button is shown when:
+  ✓ !isLoading
+  ✓ selectedSkillPackIds.length === 0
+
+Button is hidden when:
+  ✗ isLoading === true
+  ✗ selectedSkillPackIds.length > 0
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ITEM RENDERING (Lines 6106-6152)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+allSkillPacks.map((sp, index) => {
+  const active = selectedSkillPackIds.has(sp.skill_pack_id);
+  const isCursor = index === skillSelectorIndex;
+  
+  return (
+    <button>
+      <div class="flex flex-col min-w-0">
+        <span class="truncate">{sp.name}</span>
+        {sp.summary && <span class="text-[11px] ...">{sp.summary}</span>}
+      </div>
+      {active && <Check className="w-3 h-3" />}
+    </button>
+  );
+})
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EVENT HANDLING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+onMouseDown={(e) => {
+  e.preventDefault();
+  e.stopPropagation();
+}}
+onMouseUp={(e) => {
+  e.preventDefault();
+  e.stopPropagation();
+}}
+
+Purpose: Prevent event bubbling when interacting with selector
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DARK MODE SUPPORT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Light Mode (Default):
+  bg-white
+  border-gray-300
+  text-gray-700 / gray-500 / gray-900
+  bg-gray-100 (hover/cursor)
+
+Dark Mode (dark: prefix):
+  bg-[#2d2d2d]
+  border-[#404040]
+  text-[#ffffff] / [#b0b0b0] / [#f5f5f5]
+  bg-gray-700 (hover/cursor)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Z-INDEX LAYERING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+z-[200] = @ 符号选择器      (Higher - gets priority)
+z-[190] = Skill 选择器      (Lower - below @ selector)
+z-[?]   = Other UI elements
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+COMMON MODIFICATIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+To change positioning (from bottom-full to other position):
+  bottom-full → top-full     (position below instead)
+  bottom-full → bottom-0     (position at container bottom)
+  mb-1        → mt-1         (if positioning changes)
+
+To change width:
+  minWidth: '220px' → minWidth: '200px'
+  maxWidth: '320px' → maxWidth: '400px'
+
+To change height/scrolling:
+  maxHeight: '256px' → maxHeight: '400px'
+  overflow-y-auto → overflow-hidden (no scrolling)
+
+To change colors:
+  bg-white dark:bg-[#2d2d2d] → bg-gray-50 dark:bg-[#1a1a1a]
+  border-gray-300 → border-blue-300
+
+To change z-index:
+  z-[190] → z-[195] (increase for higher priority)
+  z-[190] → z-[50]  (decrease for lower priority)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TESTING SCENARIOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Button Trigger:
+   - Click "选择 Skill" button → selector should appear above input
+   - Click again → selector should close
+   - Check z-index, positioning, width
+
+2. Slash Trigger:
+   - Type "/" → selector should appear
+   - Type more "/" → should only show one
+   - Press Backspace → selector closes, "/" removed
+   - Press Space → selector closes, "/" kept
+
+3. Keyboard Navigation:
+   - ArrowDown → cursor moves down, wraps to top
+   - ArrowUp → cursor moves up, wraps to bottom
+   - Enter → selects item, closes selector
+
+4. Item Selection:
+   - Click item → becomes active (green), selector closes
+   - Button disappears (skill selected)
+   - Click button again → selector opens, shows same item as active
+
+5. Dark Mode:
+   - Check background colors change
+   - Check border colors change
+   - Check text colors are readable
+
+6. Responsive:
+   - Width stays between 220px-320px
+   - Height scrolls if more items added
+   - Positioning stays absolute bottom-full left-0
+

@@ -23,7 +23,11 @@ import {
 /**
  * 技能录入：技能包列表与基础维护（新建仍主要在 Chaya 对话流中完成）
  */
-const SkillPackEntryPage: React.FC = () => {
+interface SkillPackEntryPageProps {
+  sessionId?: string;
+}
+
+const SkillPackEntryPage: React.FC<SkillPackEntryPageProps> = ({ sessionId }) => {
   const [list, setList] = useState<SkillPack[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -186,6 +190,11 @@ const SkillPackEntryPage: React.FC = () => {
               </Button>
             </div>
           </div>
+          {sessionId ? (
+            <div className="app-card-item app-card-pad-sm text-xs text-[var(--text-secondary)]">
+              当前 Agent：<code className="px-1 py-0.5 rounded bg-gray-100 dark:bg-[#222]">{sessionId}</code>
+            </div>
+          ) : null}
           <div className="app-card-item app-card-pad-sm">
             {loading ? (
               <div className="flex items-center justify-center py-16 text-[var(--text-muted)]">

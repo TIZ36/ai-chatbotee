@@ -5,6 +5,8 @@ server:
   url: http://localhost:3001
   cors_origins:
     - http://localhost:5177
+    # 浏览器用 127.0.0.1 打开前端时 Origin 与 localhost 不同，需单独列出
+    - http://127.0.0.1:5177
     - http://localhost:3000
     # Electron file:// 等场景下 fetch 可能携带 Origin: null
     - "null"
@@ -36,11 +38,40 @@ notion:
 
 mcp:
   proxy_timeout: 90
+  # 聊天中何时、选哪些 MCP（后端 Actor / ChatAgent）
+  # 显式传 ext.mcp_servers 时始终优先；以下为未选手动列表时的自动策略
+  chat:
+    auto_select: true
+    max_servers: 2
+    # 用户输入与 MCP 名称/描述/metadata.keywords 的匹配分阈值（越高越保守）
+    min_score: 2
+    min_message_length: 6
+    # 纯寒暄短句不自动走 MCP，减少无效 tools/list
+    skip_greeting: true
+    # 命中任一则在无分数匹配时仍取排序靠前的若干 MCP（兜底）
+    intent_patterns:
+      - "notion"
+      - "\\bmcp\\b"
+      - "工具"
+      - "fetch"
+      - "查询"
+      - "查一下"
+      - "搜索"
+      - "调用"
+      - "执行"
 
 research:
   upload_max_mb: 512
   max_form_memory_mb: 64
   max_form_parts: 20000
+
+# YouTube Data API v3（Chill 氛围音频，Key 仅后端使用）
+youtube:
+  api_key: "AIzaSyCr9BHXUglKPU3bwLADWa7j_811UiyvIS4"
+  # 可选：监控这些频道的当前直播（频道 ID，以 UC 开头）
+  default_live_channel_ids: []
+  # 无配置频道时用于搜索直播的关键词
+  fallback_live_search_query: "lofi hip hop radio live"
 
 # 媒体生成按供应商配置（API Key 等）
 media:
@@ -63,7 +94,7 @@ google_drive:
 # TTS (Text-to-Speech) 配置
 tts:
   elevenlabs:
-    api_key: "sk_30ed4d6550aada0e358425ced4c438b3d818daa628ea45e4"
+    api_key: ""
     api_base: "https://api.elevenlabs.io/v1"
     default_model: "eleven_multilingual_v2"
     default_voice_id: ""
@@ -78,7 +109,6 @@ discord:
   default_trigger_mode: "mention"    # 默认触发方式：mention（仅 @ 回复）/ all（所有消息回复）
   default_llm_config_id: ""         # 自动创建 session 时使用的 LLM（空则继承 agent_chaya）
   max_response_length: 1900          # 单条 Discord 消息字数上限（留余量）
-  session_id_prefix: "dc"            # 自动创建的 session_id 前缀
 
 # 默认 Agent Chaya 配置
 chaya:

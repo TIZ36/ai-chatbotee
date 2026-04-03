@@ -3,13 +3,14 @@ Discord Bot 服务：桥接 Discord ↔ Chaya Actor 管道
 
 设计原则：
   - Bot 只是消息桥接器，不含业务逻辑
-  - 每个频道独立 Actor + 独立消息历史
+  - 每个频道绑定到已有 Agent，共享该 Agent 消息历史
   - 通过 Redis Pub/Sub 异步接收 Actor 回复
 """
 
 import asyncio
 import json
 import os
+import hashlib
 import threading
 import time
 import traceback
@@ -17,9 +18,14 @@ from typing import Optional, Callable, Dict
 
 _TAG = "[Discord]"
 
+
 # 前端录入的 Token 持久化路径（backend/.discord_bot_token），重启后可不依赖 config 自动启动
 def _discord_token_path() -> str:
     return os.path.join(os.path.dirname(__file__), "..", ".discord_bot_token")
+
+
+def _discord_tokens_path() -> str:
+    return os.path.join(os.path.dirname(__file__), "..", ".discord_bot_tokens.json")
 
 
 class DiscordService:
@@ -38,10 +44,11 @@ class DiscordService:
         self._get_connection: Optional[Callable] = None
         self._session_id_prefix = "dc"
         self._max_len = 1900
-        # session_id → channel_id 内存缓存（避免 Redis 回复时每次查 DB）
+        # linked_agent_id(session_id) → channel_id 内存缓存（避免 Redis 回复时每次查 DB）
         self._session_to_channel: Dict[str, str] = {}
         # 上次启动失败原因（如 Token 无效），供状态接口返回、前端展示
         self._last_error: Optional[str] = None
+        self._owner_agent_id: Optional[str] = None
         # 流式回复状态：session_id -> { channel_id, message_id, content, last_sent_len, last_edit_time }
         self._stream_state: Dict[str, dict] = {}
         self._stream_lock = threading.Lock()
@@ -67,40 +74,89 @@ class DiscordService:
     # ━━━━━━━━━━━━━━━━ Token 持久化（前端录入后写入，重启可不依赖 config） ━━━━━━━━━━━━━━━━
 
     @staticmethod
-    def get_persisted_token() -> Optional[str]:
-        """读取持久化的 Bot Token（前端录入并启动成功后写入）。不存在或为空则返回 None。"""
-        path = _discord_token_path()
+    def _load_tokens_map() -> Dict[str, str]:
+        path = _discord_tokens_path()
         if not os.path.isfile(path):
-            return None
+            return {}
         try:
             with open(path, "r", encoding="utf-8") as f:
-                token = (f.read() or "").strip()
-            return token if token else None
+                data = json.load(f)
+            if not isinstance(data, dict):
+                return {}
+            out: Dict[str, str] = {}
+            for k, v in data.items():
+                if isinstance(k, str) and isinstance(v, str) and v.strip():
+                    out[k] = v.strip()
+            return out
         except Exception as e:
-            print(f"{_TAG} 读取持久化 Token 失败: {e}")
-            return None
+            print(f"{_TAG} 读取 Token 映射失败: {e}")
+            return {}
 
     @staticmethod
-    def persist_token(token: str) -> bool:
-        """将 Token 写入本地文件，重启后端后 auto_start 时可使用，无需写 config。"""
-        if not (token and token.strip()):
-            return False
-        path = _discord_token_path()
+    def _save_tokens_map(tokens: Dict[str, str]) -> bool:
+        path = _discord_tokens_path()
         try:
             with open(path, "w", encoding="utf-8") as f:
-                f.write(token.strip())
+                json.dump(tokens, f, ensure_ascii=False, indent=2)
             try:
                 os.chmod(path, 0o600)
             except Exception:
                 pass
             return True
         except Exception as e:
-            print(f"{_TAG} 持久化 Token 失败: {e}")
+            print(f"{_TAG} 写入 Token 映射失败: {e}")
             return False
+
+    @staticmethod
+    def get_persisted_token(agent_id: Optional[str] = None) -> Optional[str]:
+        """读取指定 Agent 的持久化 Bot Token。"""
+        aid = (agent_id or "agent_chaya").strip() or "agent_chaya"
+        tokens = DiscordService._load_tokens_map()
+        token = (tokens.get(aid) or "").strip()
+        if token:
+            return token
+
+        # 兼容历史单 token 文件，仅作为 agent_chaya 的回退
+        if aid == "agent_chaya":
+            legacy = _discord_token_path()
+            if os.path.isfile(legacy):
+                try:
+                    with open(legacy, "r", encoding="utf-8") as f:
+                        t = (f.read() or "").strip()
+                    return t if t else None
+                except Exception:
+                    return None
+        return None
+
+    @staticmethod
+    def persist_token(agent_id: str, token: str) -> bool:
+        """按 Agent 维度持久化 Bot Token。"""
+        aid = (agent_id or "agent_chaya").strip() or "agent_chaya"
+        tv = (token or "").strip()
+        if not tv:
+            return False
+        tokens = DiscordService._load_tokens_map()
+        tokens[aid] = tv
+        return DiscordService._save_tokens_map(tokens)
+
+    @staticmethod
+    def has_persisted_token(agent_id: str) -> bool:
+        return bool(DiscordService.get_persisted_token(agent_id))
+
+    @staticmethod
+    def find_token_owner(token: str) -> Optional[str]:
+        tv = (token or "").strip()
+        if not tv:
+            return None
+        tokens = DiscordService._load_tokens_map()
+        for aid, tk in tokens.items():
+            if tk == tv:
+                return aid
+        return None
 
     # ━━━━━━━━━━━━━━━━ 启停 ━━━━━━━━━━━━━━━━
 
-    def start(self, bot_token: str) -> bool:
+    def start(self, bot_token: str, owner_agent_id: str = "agent_chaya") -> bool:
         if not bot_token or self._running:
             return False
         try:
@@ -118,6 +174,7 @@ class DiscordService:
         self.bot = client
         self._running = True
         self._last_error = None
+        self._owner_agent_id = owner_agent_id
         svc = self  # closure 引用
 
         @client.event
@@ -162,7 +219,9 @@ class DiscordService:
         self._running = False
         if self.bot and self._loop:
             try:
-                asyncio.run_coroutine_threadsafe(self.bot.close(), self._loop).result(timeout=5)
+                asyncio.run_coroutine_threadsafe(self.bot.close(), self._loop).result(
+                    timeout=5
+                )
             except Exception:
                 pass
         self.bot = None
@@ -171,6 +230,7 @@ class DiscordService:
         with self._stream_lock:
             self._stream_state.clear()
         self._last_error = None
+        self._owner_agent_id = None
 
     def is_running(self) -> bool:
         return self._running and self.bot is not None
@@ -184,7 +244,11 @@ class DiscordService:
         out["online"] = not self.bot.is_closed()
         out["username"] = str(self.bot.user)
         out["guilds"] = len(self.bot.guilds) if self.bot.guilds else 0
+        out["owner_agent_id"] = self._owner_agent_id
         return out
+
+    def get_owner_agent_id(self) -> Optional[str]:
+        return self._owner_agent_id
 
     # ━━━━━━━━━━━━━━━━ 缓存 ━━━━━━━━━━━━━━━━
 
@@ -192,9 +256,11 @@ class DiscordService:
         """启动时加载所有绑定到内存缓存"""
         try:
             from models.discord_channel import DiscordChannelRepository
+
             repo = DiscordChannelRepository(self._get_connection)
             for dc in repo.list_all(enabled_only=True):
-                self._session_to_channel[dc.session_id] = dc.channel_id
+                cache_key = dc.linked_agent_id or dc.session_id
+                self._session_to_channel[cache_key] = dc.channel_id
             print(f"{_TAG} 缓存预热: {len(self._session_to_channel)} 个频道绑定")
         except Exception as e:
             print(f"{_TAG} 缓存预热失败: {e}")
@@ -222,29 +288,36 @@ class DiscordService:
 
             # ── 未绑定：auto_create + @Bot 时创建 ──
             if not binding:
-                if not (self._config.get("auto_create_session", True) and bot_mentioned):
+                if not (
+                    self._config.get("auto_create_session", True) and bot_mentioned
+                ):
                     return
                 # 默认模型：优先表（前端录入），其次 config.yaml
                 app_cfg = DiscordAppConfigRepository(self._get_connection)
                 default_llm = app_cfg.get_default_llm_config_id()
                 if not default_llm:
-                    default_llm = (self._config.get("default_llm_config_id") or "").strip() or None
+                    default_llm = (
+                        self._config.get("default_llm_config_id") or ""
+                    ).strip() or None
                 binding = ensure_channel_session(
                     self._get_connection,
                     channel_id=channel_id,
                     guild_id=guild_id,
                     channel_name=channel_name,
                     guild_name=guild_name,
-                    default_trigger_mode=self._config.get("default_trigger_mode") or "mention",
+                    default_trigger_mode=self._config.get("default_trigger_mode")
+                    or "mention",
                     default_llm_config_id=default_llm,
                     session_id_prefix=self._session_id_prefix,
+                    linked_agent_id="agent_chaya",
                 )
                 if not binding:
                     print(f"{_TAG} 自动创建频道会话失败: {channel_id}")
                     return
-                # 更新缓存
-                self._session_to_channel[binding.session_id] = channel_id
-                print(f"{_TAG} ✓ 新绑定 #{channel_name} → {binding.session_id}")
+                # 更新缓存（按绑定 agent 维度）
+                cache_key = binding.linked_agent_id or binding.session_id
+                self._session_to_channel[cache_key] = channel_id
+                print(f"{_TAG} ✓ 新绑定 #{channel_name} → {cache_key}")
 
             if not binding.enabled:
                 return
@@ -275,7 +348,8 @@ class DiscordService:
                 "discord_guild_id": guild_id,
                 "sender_name": message.author.display_name or str(message.author),
                 "sender_avatar": str(message.author.display_avatar.url)
-                if message.author.display_avatar else None,
+                if message.author.display_avatar
+                else None,
             }
             if attachments_data:
                 ext["attachments"] = attachments_data
@@ -283,14 +357,17 @@ class DiscordService:
                     content = "[附件]"
 
             # ── 发送 typing 指示 + 投递到 Actor 管道 ──
-            session_id = binding.session_id
+            session_id = binding.linked_agent_id or binding.session_id
             sender_id = f"discord:{message.author.id}"
 
             async with message.channel.typing():
                 await loop.run_in_executor(
                     None,
                     self._dispatch_to_actor,
-                    session_id, sender_id, content, ext,
+                    session_id,
+                    sender_id,
+                    content,
+                    ext,
                 )
 
         except Exception as e:
@@ -309,21 +386,27 @@ class DiscordService:
                 continue
             try:
                 import base64, requests as _req
+
                 resp = _req.get(att.url, timeout=15)
                 if resp.status_code == 200:
-                    result.append({
-                        "type": "image" if ct.startswith("image/") else "video",
-                        "mimeType": ct,
-                        "data": base64.b64encode(resp.content).decode("utf-8"),
-                    })
+                    result.append(
+                        {
+                            "type": "image" if ct.startswith("image/") else "video",
+                            "mimeType": ct,
+                            "data": base64.b64encode(resp.content).decode("utf-8"),
+                        }
+                    )
             except Exception as e:
                 print(f"{_TAG} 附件下载失败 {att.filename}: {e}")
         return result
 
-    def _dispatch_to_actor(self, session_id: str, sender_id: str, content: str, ext: dict):
+    def _dispatch_to_actor(
+        self, session_id: str, sender_id: str, content: str, ext: dict
+    ):
         """发送消息到 TopicService → 激活 Actor（同步，在线程池中调用）"""
         try:
             from services.topic_service import get_topic_service
+
             topic_svc = get_topic_service()
             msg = topic_svc.send_message(
                 topic_id=session_id,
@@ -356,12 +439,14 @@ class DiscordService:
             time.sleep(1)
 
         from database import get_redis_client
+
         rc = get_redis_client()
         if not rc:
             print(f"{_TAG} Redis 不可用，响应监听已禁用")
             return
 
-        pattern = f"topic:{self._session_id_prefix}_*"
+        # 现在 Discord 直接绑定已有 agent，会话 ID 不再限定 dc_* 前缀
+        pattern = "topic:*"
         ps = rc.pubsub()
         ps.psubscribe(pattern)
         print(f"{_TAG} Redis 监听已启动 pattern={pattern}")
@@ -372,14 +457,16 @@ class DiscordService:
                 if not raw or raw.get("type") != "pmessage":
                     continue
 
-                # channel → session_id（仅处理本 Bot 的 session 前缀）
+                # channel → session_id
                 ch = raw.get("channel")
                 if isinstance(ch, bytes):
                     ch = ch.decode("utf-8")
                 if not ch or not ch.startswith("topic:"):
                     continue
                 session_id = ch.replace("topic:", "", 1)
-                if not session_id.startswith(self._session_id_prefix):
+
+                # 仅处理已绑定到 Discord 的会话（linked_agent_id）
+                if not self._get_channel_id(session_id):
                     continue
 
                 # 解析 payload
@@ -409,7 +496,9 @@ class DiscordService:
                         continue
                     with self._stream_lock:
                         if session_id not in self._stream_state:
-                            msg_id = self._send_and_return_message_id(channel_id, "💭 思考中...")
+                            msg_id = self._send_and_return_message_id(
+                                channel_id, "💭 思考中..."
+                            )
                             if msg_id:
                                 self._stream_state[session_id] = {
                                     "channel_id": channel_id,
@@ -432,7 +521,9 @@ class DiscordService:
                     with self._stream_lock:
                         state = self._stream_state.get(session_id)
                         if not state:
-                            msg_id = self._send_and_return_message_id(channel_id, accumulated[:2000])
+                            msg_id = self._send_and_return_message_id(
+                                channel_id, accumulated[:2000]
+                            )
                             if msg_id:
                                 self._stream_state[session_id] = {
                                     "channel_id": channel_id,
@@ -444,11 +535,16 @@ class DiscordService:
                         else:
                             state["content"] = accumulated
                             need_edit = (
-                                (len(accumulated) - state["last_sent_len"]) >= self._stream_chunk_threshold
-                                or (now - state["last_edit_time"]) >= self._stream_edit_interval
-                            )
+                                len(accumulated) - state["last_sent_len"]
+                            ) >= self._stream_chunk_threshold or (
+                                now - state["last_edit_time"]
+                            ) >= self._stream_edit_interval
                             if need_edit:
-                                if self._edit_message(state["channel_id"], state["message_id"], accumulated[:2000]):
+                                if self._edit_message(
+                                    state["channel_id"],
+                                    state["message_id"],
+                                    accumulated[:2000],
+                                ):
                                     state["last_sent_len"] = min(len(accumulated), 2000)
                                     state["last_edit_time"] = now
                     continue
@@ -461,7 +557,11 @@ class DiscordService:
                     with self._stream_lock:
                         state = self._stream_state.pop(session_id, None)
                     if state:
-                        self._edit_message(state["channel_id"], state["message_id"], content[:2000] or "（无内容）")
+                        self._edit_message(
+                            state["channel_id"],
+                            state["message_id"],
+                            content[:2000] or "（无内容）",
+                        )
                         if len(content) > 2000:
                             for part in self._split(content[2000:], self._max_len):
                                 self._send(state["channel_id"], part)
@@ -495,12 +595,13 @@ class DiscordService:
     # ━━━━━━━━━━━━━━━━ 发回 Discord ━━━━━━━━━━━━━━━━
 
     def _get_channel_id(self, session_id: str) -> Optional[int]:
-        """根据 session_id 解析 Discord 频道 ID（带缓存）"""
+        """根据 linked_agent_id(session_id) 解析 Discord 频道 ID（带缓存）"""
         channel_id_str = self._session_to_channel.get(session_id)
         if not channel_id_str:
             from models.discord_channel import DiscordChannelRepository
+
             repo = DiscordChannelRepository(self._get_connection)
-            binding = repo.find_by_session_id(session_id)
+            binding = repo.find_by_linked_agent_id(session_id)
             if not binding:
                 return None
             channel_id_str = binding.channel_id
@@ -564,8 +665,9 @@ class DiscordService:
         if not channel_id_str:
             # 缓存未命中，查 DB
             from models.discord_channel import DiscordChannelRepository
+
             repo = DiscordChannelRepository(self._get_connection)
-            binding = repo.find_by_session_id(session_id)
+            binding = repo.find_by_linked_agent_id(session_id)
             if not binding:
                 return
             channel_id_str = binding.channel_id

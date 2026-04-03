@@ -10,18 +10,22 @@ type ChannelId = 'discord';
 
 const CHANNELS: { id: ChannelId; label: string }[] = [{ id: 'discord', label: 'Discord' }];
 
-const CommunicationPage: React.FC = () => {
+interface CommunicationPageProps {
+  sessionId?: string | null;
+}
+
+const CommunicationPage: React.FC<CommunicationPageProps> = ({ sessionId }) => {
   const [activeChannel, setActiveChannel] = useState<ChannelId>('discord');
   const [discordStatus, setDiscordStatus] = useState<DiscordStatus | null>(null);
 
   const refreshDiscordStatus = useCallback(async () => {
     try {
-      const s = await getDiscordStatus();
+      const s = await getDiscordStatus(sessionId || undefined);
       setDiscordStatus(s);
     } catch {
       setDiscordStatus(null);
     }
-  }, []);
+  }, [sessionId]);
 
   useEffect(() => {
     refreshDiscordStatus();
@@ -70,7 +74,7 @@ const CommunicationPage: React.FC = () => {
             <div className="persona-two-pane-content min-h-0 flex flex-col overflow-hidden">
               {activeChannel === 'discord' ? (
                 <div className="communication-page-channel-pane flex-1 min-h-0 overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--surface-secondary)]">
-                  <DiscordPanel embedded />
+                  <DiscordPanel embedded linkedAgentId={sessionId || undefined} />
                 </div>
               ) : null}
             </div>

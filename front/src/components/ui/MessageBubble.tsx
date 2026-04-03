@@ -101,8 +101,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     <div
       className={cn(bubbleClasses, className, `message-bubble-${role}`)}
       style={{
-        fontSize: role === 'assistant' || role === 'tool' ? '12px' : '12px',
-        lineHeight: role === 'assistant' || role === 'tool' ? '1.5' : '1.5',
+        fontSize: 'var(--chat-message-font-size, 12px)',
+        lineHeight: 'var(--chat-message-line-height, 1.5)',
         wordBreak: 'break-word',
         overflowWrap: 'break-word',
       }}
@@ -438,8 +438,8 @@ export const MessageBubbleContainer: React.FC<MessageBubbleContainerProps> = ({
     <div
       className={cn(bubbleClasses, className, `message-bubble-${role}`)}
       style={{
-        fontSize: role === 'assistant' || role === 'tool' ? '12px' : '12px',
-        lineHeight: role === 'assistant' || role === 'tool' ? '1.5' : '1.5',
+        fontSize: 'var(--chat-message-font-size, 12px)',
+        lineHeight: 'var(--chat-message-line-height, 1.5)',
         wordBreak: 'break-word',
         overflowWrap: 'break-word',
       }}
@@ -450,4 +450,3 @@ export const MessageBubbleContainer: React.FC<MessageBubbleContainerProps> = ({
 };
 
 export default MessageBubble;
-

@@ -62,9 +62,10 @@ const panelClass = 'rounded-lg border bg-gray-50 dark:bg-[#111] border-gray-200 
 interface DiscordPanelProps {
   /** 嵌入在 Chaya 子 tab 中，不包 PageLayout */
   embedded?: boolean;
+  linkedAgentId?: string;
 }
 
-const DiscordPanel: React.FC<DiscordPanelProps> = ({ embedded = true }) => {
+const DiscordPanel: React.FC<DiscordPanelProps> = ({ embedded = true, linkedAgentId }) => {
   const [status, setStatus] = useState<DiscordStatus | null>(null);
   const [channels, setChannels] = useState<DiscordChannelBinding[]>([]);
   const [loading, setLoading] = useState(true);
@@ -90,7 +91,7 @@ const DiscordPanel: React.FC<DiscordPanelProps> = ({ embedded = true }) => {
       const base = getBackendUrl();
       const [s, c, cfg, llmRes] = await Promise.all([
         getDiscordStatus(),
-        getDiscordChannels(false),
+        getDiscordChannels(false, linkedAgentId),
         getDiscordConfig().catch(() => ({ default_llm_config_id: '' })),
         fetch(`${base}/api/llm/configs`).then((r) => r.json()).catch(() => ({ configs: [] })),
       ]);
@@ -109,7 +110,7 @@ const DiscordPanel: React.FC<DiscordPanelProps> = ({ embedded = true }) => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [linkedAgentId]);
 
   useEffect(() => {
     load();
@@ -293,9 +294,14 @@ const DiscordPanel: React.FC<DiscordPanelProps> = ({ embedded = true }) => {
 
           {/* 已绑定频道：按服务器分组，频道归属在对应服务器下 */}
           <Card title="已绑定频道" variant="persona" size="relaxed" className={panelClass}>
+            {linkedAgentId && (
+              <div className="mb-2 text-xs text-[var(--text-secondary)]">
+                当前 Agent：<code className="px-1 py-0.5 rounded bg-gray-100 dark:bg-[#222]">{linkedAgentId}</code>
+              </div>
+            )}
             {channels.length === 0 ? (
               <p className={`text-sm ${textMuted} py-4`}>
-                暂无绑定。在 Discord 频道中 @Chaya 发送消息即可自动创建绑定（需在 config.yaml 开启 auto_create_session）。
+                 暂无绑定。在 Discord 频道中 @Chaya 发送消息即可自动创建绑定（需在 config.yaml 开启 auto_create_session）。
               </p>
             ) : (
               <div className="space-y-4">
@@ -414,6 +420,7 @@ const DiscordPanel: React.FC<DiscordPanelProps> = ({ embedded = true }) => {
                                 setSavingChannelId(c.channel_id);
                                 try {
                                   await updateDiscordChannel(c.channel_id, {
+                                    linked_agent_id: linkedAgentId,
                                     config_override: {
                                       ...c.config_override,
                                       system_prompt: (channelDrafts[c.channel_id] ?? draft).system_prompt.trim() || undefined,

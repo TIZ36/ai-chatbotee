@@ -4976,12 +4976,12 @@ const Workflow: React.FC<WorkflowProps> = ({
 
   return (
     <>
-    <div className="workflow-chat-outer h-full flex flex-col">
+    <div className="workflow-chat-outer h-full flex flex-col" data-chaya-view={currentSessionType === 'agent' ? 'compact' : undefined}>
       <div className="flex-1 flex min-h-0 justify-center">
         <div className="w-full flex-1 flex flex-col min-h-0 min-w-0">
         <div className="workflow-chat-panel flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
-          {/* Chaya 主界面不显示顶部 header（头像框与栏目），直接显示对话；SOP 入口移至输入框插件弹框 */}
-          {currentSessionId !== 'agent_chaya' && (
+          {/* Agent 聊天面板不显示顶部 header，头像与配置入口统一放在左侧 Agent 列表 */}
+          {false && (
           <div className="workflow-chat-header border-b border-gray-100 dark:border-[rgba(255,255,255,0.06)] px-4 py-2 flex-shrink-0">
           <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 min-h-9">
             {/* 左区：头像 */}
@@ -5466,7 +5466,7 @@ const Workflow: React.FC<WorkflowProps> = ({
         )}
 
         {/* 输入框（固定在底部，不再浮动） */}
-          <div className="flex-shrink-0 px-2 sm:px-4 pb-2 pt-2 border-t border-gray-100 dark:border-[rgba(255,255,255,0.06)] workflow-chat-input-area">
+          <div className="flex-shrink-0 px-2 sm:px-4 pb-2 pt-2 workflow-chat-input-area">
           <div 
             ref={floatingComposerRef}
             className={`${floatingComposerInnerClass.replace('absolute left-2 right-2 sm:left-4 sm:right-4 bottom-3', '')} relative transition-colors ${
@@ -5618,6 +5618,33 @@ const Workflow: React.FC<WorkflowProps> = ({
           {/* 工具栏：模型选择、插件、人设 */}
           <div className="workflow-composer-toolbar flex items-center justify-between px-2 py-1.5">
             <div className="flex items-center gap-0.5 flex-nowrap flex-1 min-w-0 overflow-hidden">
+              {/* 工具栏内 Skill tags（左侧优先显示） */}
+              {Array.from(selectedSkillPackIds).length > 0 && (
+                <div className="flex items-center gap-1 overflow-x-auto no-scrollbar min-w-0 max-w-full mr-1">
+                  {Array.from(selectedSkillPackIds).map((sid) => {
+                    const sp = allSkillPacks.find((p) => p.skill_pack_id === sid);
+                    const name = sp?.name || sid;
+                    return (
+                      <button
+                        key={sid}
+                        type="button"
+                        onClick={() => {
+                          setSelectedComponents((prev) =>
+                            prev.filter((c) => !(c.type === 'skillpack' && c.id === sid)),
+                          );
+                        }}
+                        className="inline-flex flex-shrink-0 items-center gap-1 px-1.5 py-0.5 rounded-full border border-emerald-500/60 bg-emerald-500/8 text-[11px] text-emerald-500 max-w-[160px] truncate"
+                        title={name}
+                      >
+                        <Package className="w-3 h-3" />
+                        <span className="truncate">{name}</span>
+                        <X className="w-3 h-3" />
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
               {/* Skill 选择按钮：底部插件栏左侧（仅在未选择 Skill 时显示） */}
               {!isLoading && Array.from(selectedSkillPackIds).length === 0 && (
                 <button
@@ -5652,13 +5679,15 @@ const Workflow: React.FC<WorkflowProps> = ({
                 attachedCount={attachedMedia.length}
               />
 
-              {/* 人设 - 点击后弹框切换（Chaya）或编辑人设（其他 Agent/话题）；Chaya 选中预设时按钮显示昵称（最多 5 字） */}
+              {/* 人设 - 预设列表共享（来自 Chaya），选中状态按当前 Agent 独立保存 */}
               {currentSessionType !== 'topic_general' && currentSessionId && (() => {
+                const activeSession = sessions.find(s => s.session_id === currentSessionId)
+                  || (currentSessionMeta?.session_id === currentSessionId ? currentSessionMeta : null);
                 const chayaSession = currentSessionId === 'agent_chaya'
                   ? (sessions.find(s => s.session_id === 'agent_chaya') || (currentSessionMeta?.session_id === 'agent_chaya' ? currentSessionMeta : null))
-                  : null;
+                  : (sessions.find(s => s.session_id === 'agent_chaya') || null);
                 const personaPresets: PersonaPreset[] = (chayaSession?.ext as any)?.personaPresets ?? [];
-                const currentPersonaId = (chayaSession?.ext as any)?.currentPersonaId as string | undefined;
+                const currentPersonaId = (activeSession?.ext as any)?.currentPersonaId as string | undefined;
                 const currentPreset = currentPersonaId ? personaPresets.find(p => p.id === currentPersonaId) : null;
                 const nickname = currentPreset?.nickname?.trim() || '';
                 const personaButtonLabel = nickname
@@ -5667,12 +5696,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                 return (
                   <button
                     onClick={() => {
-                      if (currentSessionId === 'agent_chaya') {
-                        setShowPersonaSwitchDialog(true);
-                      } else {
-                        setSystemPromptDraft(currentSystemPrompt || '');
-                        setIsEditingSystemPrompt(true);
-                      }
+                      setShowPersonaSwitchDialog(true);
                     }}
                     className={`niho-persona-btn ring-0 flex items-center space-x-1 px-1.5 py-0.5 rounded text-[11px] transition-all whitespace-nowrap ${
                       currentSystemPrompt
@@ -5806,33 +5830,6 @@ const Workflow: React.FC<WorkflowProps> = ({
                     </button>
                   </div>
                 ))}
-              </div>
-            )}
-            {/* 输入区上方 Skill tags（来自 selectedComponents 中的 skillpack） */}
-            {Array.from(selectedSkillPackIds).length > 0 && (
-              <div className="mb-1 flex flex-wrap gap-1">
-                {Array.from(selectedSkillPackIds).map((sid) => {
-                  const sp = allSkillPacks.find((p) => p.skill_pack_id === sid);
-                  const name = sp?.name || sid;
-                  return (
-                    <button
-                      key={sid}
-                      type="button"
-                      onClick={() => {
-                        // 取消选中该 skill（影响 ext.skill_packs）
-                        setSelectedComponents((prev) =>
-                          prev.filter((c) => !(c.type === 'skillpack' && c.id === sid)),
-                        );
-                      }}
-                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border border-emerald-500/60 bg-emerald-500/8 text-[11px] text-emerald-500 max-w-[160px] truncate"
-                      title={name}
-                    >
-                      <Package className="w-3 h-3" />
-                      <span className="truncate">{name}</span>
-                      <X className="w-3 h-3" />
-                    </button>
-                  );
-                })}
               </div>
             )}
 
@@ -6036,17 +6033,7 @@ const Workflow: React.FC<WorkflowProps> = ({
                     return;
                   }
                 }}
-              placeholder={
-                editingMessageId
-                  ? '编辑消息...'
-                  : !selectedLLMConfig
-                  ? '请先选择 LLM 模型...'
-                  : !isInputFocused
-                  ? '输入你的问题...'
-                  : selectedMcpServerIds.size > 0
-                    ? `输入你的任务，我可以使用 ${totalTools} 个工具帮助你完成...`
-                    : '输入你的问题，我会尽力帮助你...'
-              }
+              placeholder={editingMessageId ? '编辑消息...' : !selectedLLMConfig ? '请先选择 LLM 模型...' : '输入你的问题...'}
                   className={`workflow-composer-textarea flex-1 resize-none no-scrollbar overflow-y-auto transition-all duration-200 bg-transparent border-none focus:outline-none focus:ring-0 text-gray-900 dark:text-[#ffffff] placeholder-gray-400 dark:placeholder-[#606060] ${
                     isInputFocused ? 'px-2 py-2' : 'px-2 py-2'
                   } ${
@@ -6086,12 +6073,10 @@ const Workflow: React.FC<WorkflowProps> = ({
             {/* Skill 浮动选择器（按钮触发），参考 @ 选择器布局 */}
             {showSkillSelector && (
               <div
-                ref={selectorRef}
-                className="absolute bottom-full left-0 mb-1 z-[190] bg-white dark:bg-[#2d2d2d] border border-gray-300 dark:border-[#404040] rounded-lg shadow-lg overflow-y-auto at-selector-container"
-                style={{
-                  minWidth: '220px',
-                  maxWidth: '320px',
-                  maxHeight: '256px',
+                className="fixed inset-0 z-[260] flex items-center justify-center bg-black/30 px-3"
+                onClick={() => {
+                  setShowSkillSelector(false);
+                  setSkillTriggeredBySlash(false);
                 }}
                 onMouseDown={(e) => {
                   e.preventDefault();
@@ -6102,68 +6087,77 @@ const Workflow: React.FC<WorkflowProps> = ({
                   e.stopPropagation();
                 }}
               >
-                <div className="p-2 border-b border-gray-200 dark:border-[#404040]">
-                  <div className="text-xs font-semibold text-gray-700 dark:text-[#ffffff]">
-                    选择要激活的 Skill
-                  </div>
-                  <div className="mt-1 text-[11px] text-gray-500 dark:text-[#b0b0b0]">
-                    选中的 Skill 会在本轮对话中启用，并在消息中打标。
-                  </div>
-                </div>
-                <div className="py-1">
-                  {allSkillPacks.length === 0 ? (
-                    <div className="px-3 py-2 text-[12px] text-gray-500 dark:text-[#b0b0b0]">
-                      暂无技能包
+                <div
+                  ref={selectorRef}
+                  className="at-selector-container w-full max-w-[380px] bg-white dark:bg-[#2d2d2d] border border-gray-300 dark:border-[#404040] rounded-lg shadow-lg overflow-y-auto"
+                  style={{ maxHeight: 'min(70vh, 420px)' }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                  }}
+                >
+                  <div className="p-2 border-b border-gray-200 dark:border-[#404040]">
+                    <div className="text-xs font-semibold text-gray-700 dark:text-[#ffffff]">
+                      选择要激活的 Skill
                     </div>
-                  ) : (
-                    allSkillPacks.map((sp, index) => {
-                      const active = selectedSkillPackIds.has(sp.skill_pack_id);
-                      const isCursor = index === skillSelectorIndex;
-                      return (
-                        <button
-                          key={sp.skill_pack_id}
-                          type="button"
-                          onClick={() => {
-                            // 一次只支持一个 skill：替换为当前点击的 skill
-                            setSelectedComponents([
-                              { type: 'skillpack', id: sp.skill_pack_id, name: sp.name },
-                            ]);
-                            setShowSkillSelector(false);
-                            if (skillTriggeredBySlash) {
-                              setSkillTriggeredBySlash(false);
-                              // 去掉由 "/" 触发的前导斜杠
-                              setInput((prev) => {
-                                if (!inputRef.current) return prev.replace('/', '');
-                                const cursor = inputRef.current.selectionStart || 0;
-                                const before = prev.slice(0, cursor);
-                                const after = prev.slice(cursor);
-                                const lastSlash = before.lastIndexOf('/');
-                                if (lastSlash === -1) return prev.replace('/', '');
-                                return before.slice(0, lastSlash) + before.slice(lastSlash + 1) + after;
-                              });
-                            }
-                          }}
-                          className={`w-full px-3 py-2 flex items-center justify-between text-left text-sm ${
-                            active
-                              ? 'bg-emerald-500/10 border-l-2 border-emerald-500 text-emerald-500'
-                              : isCursor
-                              ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-[#f5f5f5]'
-                              : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-900 dark:text-[#f5f5f5]'
-                          }`}
-                        >
-                          <div className="flex flex-col min-w-0">
-                            <span className="truncate">{sp.name}</span>
-                            {sp.summary && (
-                              <span className="mt-0.5 text-[11px] text-gray-500 dark:text-[#b0b0b0] truncate">
-                                {sp.summary}
-                              </span>
-                            )}
-                          </div>
-                          {active && <Check className="w-3 h-3 flex-shrink-0" />}
-                        </button>
-                      );
-                    })
-                  )}
+                    <div className="mt-1 text-[11px] text-gray-500 dark:text-[#b0b0b0]">
+                      选中的 Skill 会在本轮对话中启用，并在消息中打标。
+                    </div>
+                  </div>
+                  <div className="py-1">
+                    {allSkillPacks.length === 0 ? (
+                      <div className="px-3 py-2 text-[12px] text-gray-500 dark:text-[#b0b0b0]">
+                        暂无技能包
+                      </div>
+                    ) : (
+                      allSkillPacks.map((sp, index) => {
+                        const active = selectedSkillPackIds.has(sp.skill_pack_id);
+                        const isCursor = index === skillSelectorIndex;
+                        return (
+                          <button
+                            key={sp.skill_pack_id}
+                            type="button"
+                            onClick={() => {
+                              // 一次只支持一个 skill：替换为当前点击的 skill
+                              setSelectedComponents([
+                                { type: 'skillpack', id: sp.skill_pack_id, name: sp.name },
+                              ]);
+                              setShowSkillSelector(false);
+                              if (skillTriggeredBySlash) {
+                                setSkillTriggeredBySlash(false);
+                                // 去掉由 "/" 触发的前导斜杠
+                                setInput((prev) => {
+                                  if (!inputRef.current) return prev.replace('/', '');
+                                  const cursor = inputRef.current.selectionStart || 0;
+                                  const before = prev.slice(0, cursor);
+                                  const after = prev.slice(cursor);
+                                  const lastSlash = before.lastIndexOf('/');
+                                  if (lastSlash === -1) return prev.replace('/', '');
+                                  return before.slice(0, lastSlash) + before.slice(lastSlash + 1) + after;
+                                });
+                              }
+                            }}
+                            className={`w-full px-3 py-2 flex items-center justify-between text-left text-sm ${
+                              active
+                                ? 'bg-emerald-500/10 border-l-2 border-emerald-500 text-emerald-500'
+                                : isCursor
+                                ? 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-[#f5f5f5]'
+                                : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-900 dark:text-[#f5f5f5]'
+                            }`}
+                          >
+                            <div className="flex flex-col min-w-0">
+                              <span className="truncate">{sp.name}</span>
+                              {sp.summary && (
+                                <span className="mt-0.5 text-[11px] text-gray-500 dark:text-[#b0b0b0] truncate">
+                                  {sp.summary}
+                                </span>
+                              )}
+                            </div>
+                            {active && <Check className="w-3 h-3 flex-shrink-0" />}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -6961,11 +6955,13 @@ const Workflow: React.FC<WorkflowProps> = ({
       onShowRoleGenerator={() => setShowRoleGenerator(true)}
     />
 
-    {/* 人设切换弹框（点击输入框上「人设」打开，仅 Chaya） */}
-    {currentSessionId === 'agent_chaya' && (() => {
+    {/* 人设切换弹框（预设列表共享，当前人设按 Agent 独立） */}
+    {currentSessionId && currentSessionType !== 'topic_general' && (() => {
+      const activeSession = sessions.find(s => s.session_id === currentSessionId)
+        || (currentSessionMeta?.session_id === currentSessionId ? currentSessionMeta : null);
       const chayaSession = sessions.find(s => s.session_id === 'agent_chaya') || (currentSessionMeta?.session_id === 'agent_chaya' ? currentSessionMeta : null);
       const personaPresets: PersonaPreset[] = (chayaSession?.ext as any)?.personaPresets ?? [];
-      const currentPersonaId = (chayaSession?.ext as any)?.currentPersonaId as string | undefined;
+      const currentPersonaId = (activeSession?.ext as any)?.currentPersonaId as string | undefined;
       return (
         <PersonaSwitchDialog
           open={showPersonaSwitchDialog}
@@ -6976,13 +6972,13 @@ const Workflow: React.FC<WorkflowProps> = ({
           personaSaveLoading={personaSaveLoading}
           onSwitchPersona={async (presetId) => {
             const preset = personaPresets.find(p => p.id === presetId);
-            if (!preset || !chayaSession) return;
+            if (!preset || !activeSession) return;
             setPersonaSwitchLoading(true);
             try {
-              const ext = { ...(chayaSession.ext || {}), currentPersonaId: preset.id };
-              await updateRoleProfile('agent_chaya', { system_prompt: preset.system_prompt, ext });
+              const ext = { ...(activeSession.ext || {}), currentPersonaId: preset.id };
+              await updateRoleProfile(activeSession.session_id, { system_prompt: preset.system_prompt, ext });
               setCurrentSystemPrompt(preset.system_prompt);
-              const fresh = await getSession('agent_chaya');
+              const fresh = await getSession(activeSession.session_id);
               setCurrentSessionMeta(fresh);
               emitSessionsChanged();
             } catch (e) {
@@ -7001,11 +6997,16 @@ const Workflow: React.FC<WorkflowProps> = ({
               const isCurrent = currentPersonaId === preset.id;
               await updateRoleProfile('agent_chaya', {
                 ext,
-                ...(isCurrent ? { system_prompt: preset.system_prompt } : {}),
                 reason: 'persona_edit_in_dialog',
               });
-              if (isCurrent) setCurrentSystemPrompt(preset.system_prompt);
-              const fresh = await getSession('agent_chaya');
+              if (isCurrent && activeSession) {
+                await updateRoleProfile(activeSession.session_id, {
+                  system_prompt: preset.system_prompt,
+                  reason: 'persona_edit_apply_to_active_agent',
+                });
+                setCurrentSystemPrompt(preset.system_prompt);
+              }
+              const fresh = await getSession(activeSession?.session_id || 'agent_chaya');
               setCurrentSessionMeta(fresh);
               emitSessionsChanged();
               toast({ title: '人设已保存，Chaya 已更新', variant: 'success' });

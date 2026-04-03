@@ -1,0 +1,205 @@
+================================================================================
+SKILL SELECTOR COMPONENT - VISUAL LAYOUT & STRUCTURE
+================================================================================
+
+INPUT CONTAINER (Parent - Position: relative)
+┌────────────────────────────────────────────────────┐
+│                                                    │
+│  [Composer Area - workflow-composer-layout]        │
+│  ┌──────────────────────────────────────────────┐  │
+│  │ Toolbar: [选择 Skill] [附件] [人设] [模型]    │  │
+│  └──────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────┐  │
+│  │ Input Textarea (contenteditable area)        │  │
+│  │ Shows here when typing "/" or clicking btn   │  │
+│  │                                              │  │
+│  │                                              │  │
+│  └──────────────────────────────────────────────┘  │
+│  
+│  SKILL SELECTOR POPOVER OVERLAY
+│  ┌──────────────────────────────────────────────┐  ← Position: absolute
+│  │ 选择要激活的 Skill           [z-index: 190] │      bottom-full
+│  │ 选中的Skill会在本轮对话中启用，并在消息中打标│      left-0
+│  ├──────────────────────────────────────────────┤      mb-1
+│  │ ◉ Skill Pack 1 (name)                     ✓ │
+│  │   Brief description/summary                  │
+│  ├──────────────────────────────────────────────┤
+│  │ ○ Skill Pack 2 (name)                        │  ← isCursor: hover
+│  │   Brief description/summary                  │     (bg-gray-100)
+│  ├──────────────────────────────────────────────┤
+│  │ ○ Skill Pack 3 (name)                        │
+│  │   Brief description/summary                  │
+│  └──────────────────────────────────────────────┘
+│     ^
+│     └─ Appears ABOVE input (bottom-full positions it)
+│
+└────────────────────────────────────────────────────┘
+
+
+TRIGGER FLOW DIAGRAM
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Method 1: BUTTON TRIGGER
+─────────────────────────
+User clicks "选择 Skill" button (Line 5626)
+         ↓
+setShowSkillSelector(true)
+setSkillSelectorIndex(0)
+setSkillTriggeredBySlash(false)
+         ↓
+Popover renders at absolute bottom-full position
+
+
+Method 2: SLASH TRIGGER (Line 4907)
+──────────────────────────────────
+User types "/" in textarea
+         ↓
+handleKeyDownWithSlash fires (if !showAtSelector)
+         ↓
+setShowSkillSelector(true)
+setSkillTriggeredBySlash(true)
+setSkillSelectorIndex(0)
+         ↓
+Popover renders with special slash handling
+         ↓
+User presses:
+  ├─ Enter    → Selects skill, removes "/" from input
+  ├─ Backspace → Closes, removes "/" from input
+  └─ Space     → Closes, keeps "/" in input
+
+
+KEYBOARD NAVIGATION STATE MACHINE
+──────────────────────────────────
+while showSkillSelector && allSkillPacks.length > 0:
+  ├─ ArrowDown  → skillSelectorIndex = (current + 1) % length
+  ├─ ArrowUp    → skillSelectorIndex = (current - 1 < 0) ? length - 1 : current - 1
+  └─ Enter      → Select item at skillSelectorIndex
+                 → setShowSkillSelector(false)
+                 → Update selectedComponents
+
+
+RENDERING CONDITION TREE
+────────────────────────
+showSkillSelector === true
+    ├─ YES → Render popover div (absolute bottom-full left-0)
+    │        ├─ Header section (h3 + description)
+    │        └─ Content section
+    │           ├─ IF allSkillPacks.length === 0
+    │           │  └─ Show "暂无技能包"
+    │           └─ ELSE
+    │              └─ Map and render buttons for each skill
+    │                 ├─ IF selectedSkillPackIds.has(skill_id)
+    │                 │  └─ bg-emerald-500/10, border-l-2 emerald-500, ✓ icon
+    │                 ├─ ELSE IF skillSelectorIndex === index
+    │                 │  └─ bg-gray-100 (dark: bg-gray-700)
+    │                 └─ ELSE
+    │                    └─ hover:bg-gray-100 on hover
+    │
+    └─ NO → Don't render (hidden)
+
+
+CSS POSITIONING DETAILS
+───────────────────────
+Container: div.absolute.bottom-full.left-0.mb-1
+  ├─ absolute          = Absolute positioning context
+  ├─ bottom-full       = bottom: 100% (positions above parent)
+  ├─ left-0            = left: 0 (aligns with left edge)
+  ├─ mb-1              = margin-bottom: 0.25rem (4px gap)
+  ├─ z-[190]           = z-index: 190 (layer depth)
+  ├─ rounded-lg        = border-radius: 0.5rem
+  ├─ shadow-lg         = box-shadow (elevated appearance)
+  ├─ overflow-y-auto   = Vertical scroll if needed
+  └─ bg-white dark:bg-[#2d2d2d]
+
+Inline Styles:
+  ├─ minWidth:   '220px'  = Minimum width threshold
+  ├─ maxWidth:   '320px'  = Maximum width threshold
+  └─ maxHeight:  '256px'  = Scrollable if taller
+
+
+HEADER STYLING (Lines 6092-6099)
+─────────────────────────────────
+div.p-2.border-b.border-gray-200.dark:border-[#404040]
+  ├─ p-2 = padding: 0.5rem
+  └─ border-b = border-bottom separator
+      ├─ Title: text-xs font-semibold (small, bold)
+      └─ Desc:  text-[11px] text-gray-500 (even smaller, gray)
+
+
+ITEM BUTTON STYLING (Lines 6133-6139)
+──────────────────────────────────────
+BASE: w-full px-3 py-2 flex items-center justify-between text-left text-sm
+
+STATE VARIATIONS:
+  ├─ ACTIVE (selectedSkillPackIds.has(id))
+  │   └─ bg-emerald-500/10 border-l-2 border-emerald-500 text-emerald-500
+  │       (Light green bg, left border accent, green text)
+  │
+  ├─ CURSOR (isCursor = index === skillSelectorIndex)
+  │   └─ bg-gray-100 dark:bg-gray-700
+  │       text-gray-900 dark:text-[#f5f5f5]
+  │       (Light hover state for keyboard nav)
+  │
+  └─ DEFAULT
+      └─ hover:bg-gray-100 dark:hover:bg-gray-700
+          text-gray-900 dark:text-[#f5f5f5]
+
+
+ITEM CONTENT LAYOUT (Lines 6141-6149)
+──────────────────────────────────────
+<button>
+  ├─ <div class="flex flex-col min-w-0">  (Left side content)
+  │   ├─ <span class="truncate">{sp.name}</span>
+  │   │   (Skill name, single line, ellipsis if long)
+  │   └─ {sp.summary && (
+  │       <span class="mt-0.5 text-[11px] ...">{sp.summary}</span>
+  │       (Optional summary below name, smaller, gray)
+  │   )}
+  │
+  └─ {active && <Check className="w-3 h-3 flex-shrink-0" />}
+      (Checkmark icon on right, only when selected)
+
+
+Z-INDEX LAYER COMPARISON
+────────────────────────
+z-[200] ▔▔▔▔▔▔▔▔▔▔ @ 符号选择器 (Top layer - higher priority)
+        │         └─ Gets focus over Skill Selector
+        │
+z-[190] ▄▄▄▄▄▄▄▄▄▄ Skill 浮动选择器 (Below @ selector)
+        │
+        └─ Positioned below other UI elements
+
+
+STATE MACHINE DIAGRAM
+─────────────────────
+    [CLOSED]
+       ↑ ↓
+  showSkillSelector === false
+       
+    [OPEN]
+       ↑ ↓
+  showSkillSelector === true
+       │
+       ├─ skillSelectorIndex: 0 to allSkillPacks.length-1
+       ├─ skillTriggeredBySlash: true | false
+       │
+       └─ User can:
+          ├─ Click item → Update selectedComponents → Close
+          ├─ Press Enter → Same as click
+          ├─ Press Escape → Close (from handleKeyDown)
+          ├─ Click outside → Close
+          └─ Type "/" cleanup → Close if backspace/space
+
+
+PARENT POSITIONING CONTEXT
+──────────────────────────
+The skill selector needs a relative-positioned parent.
+Current placement (Line 6074) is within:
+  div.workflow-composer-layout
+    └─ div with input (relative positioning implied)
+
+This provides the positioning context for:
+  absolute positioning to work
+  bottom-full to position above
+  left-0 to align with parent
+

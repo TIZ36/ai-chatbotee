@@ -14,6 +14,8 @@ export interface DiscordStatus {
   bound_channels: number;
   running?: boolean;
   error?: string;
+  configured?: boolean;
+  owner_agent_id?: string | null;
   /** 上次启动失败原因（如 Token 无效），由后端在状态接口返回 */
   last_error?: string;
 }
@@ -24,6 +26,7 @@ export interface DiscordChannelBinding {
   guild_name: string;
   channel_name: string;
   session_id: string;
+  linked_agent_id?: string;
   enabled: boolean;
   trigger_mode: 'mention' | 'all';
   config_override?: {
@@ -36,8 +39,11 @@ export interface DiscordChannelBinding {
   last_message_at?: string | null;
 }
 
-export async function getDiscordStatus(): Promise<DiscordStatus> {
-  const res = await fetch(API_BASE + '/status');
+export async function getDiscordStatus(agentId?: string): Promise<DiscordStatus> {
+  const query = new URLSearchParams();
+  if (agentId) query.set('agent_id', agentId);
+  const url = query.toString() ? `${API_BASE}/status?${query.toString()}` : `${API_BASE}/status`;
+  const res = await fetch(url);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err?.error || res.statusText || '获取状态失败');
@@ -45,8 +51,10 @@ export async function getDiscordStatus(): Promise<DiscordStatus> {
   return res.json();
 }
 
-export async function getDiscordChannels(enabledOnly = false): Promise<DiscordChannelBinding[]> {
-  const url = `${API_BASE}/channels?enabled_only=${enabledOnly}`;
+export async function getDiscordChannels(enabledOnly = false, linkedAgentId?: string): Promise<DiscordChannelBinding[]> {
+  const query = new URLSearchParams({ enabled_only: String(enabledOnly) });
+  if (linkedAgentId) query.set('agent_id', linkedAgentId);
+  const url = `${API_BASE}/channels?${query.toString()}`;
   const res = await fetch(url);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -56,11 +64,14 @@ export async function getDiscordChannels(enabledOnly = false): Promise<DiscordCh
   return data.channels || [];
 }
 
-export async function startDiscordBot(botToken?: string): Promise<{ ok: boolean; message?: string; error?: string }> {
+export async function startDiscordBot(botToken?: string, agentId?: string): Promise<{ ok: boolean; message?: string; error?: string }> {
+  const payload: Record<string, string> = {};
+  if (botToken) payload.bot_token = botToken;
+  if (agentId) payload.agent_id = agentId;
   const res = await fetch(API_BASE + '/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(botToken ? { bot_token: botToken } : {}),
+    body: JSON.stringify(payload),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -83,6 +94,7 @@ export async function updateDiscordChannel(
   updates: {
     trigger_mode?: 'mention' | 'all';
     enabled?: boolean;
+    linked_agent_id?: string;
     config_override?: { system_prompt?: string; llm_config_id?: string } | null;
     channel_name?: string;
     guild_name?: string;

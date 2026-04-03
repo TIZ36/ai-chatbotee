@@ -1,6 +1,6 @@
 """
 Discord 频道绑定数据模型
-每个 Discord 频道 → 一个专属 Chaya Session（独立 Actor + 独立消息历史）
+每个 Discord 频道绑定到既有 Agent（linked_agent_id），共享该 Agent 会话与消息历史。
 """
 
 from dataclasses import dataclass, field
@@ -23,6 +23,7 @@ class DiscordChannel:
     guild_name: str = ""
     channel_name: str = ""
     session_id: str = ""
+    linked_agent_id: str = "agent_chaya"
     enabled: bool = True
     trigger_mode: str = "mention"  # mention | all
     config_override: Optional[Dict[str, Any]] = field(default=None)
@@ -43,6 +44,7 @@ class DiscordChannel:
             guild_name=row.get("guild_name") or "",
             channel_name=row.get("channel_name") or "",
             session_id=row["session_id"],
+            linked_agent_id=row.get("linked_agent_id") or "agent_chaya",
             enabled=bool(row.get("enabled", True)),
             trigger_mode=row.get("trigger_mode") or "mention",
             config_override=config,
@@ -57,6 +59,7 @@ class DiscordChannel:
             "guild_name": self.guild_name,
             "channel_name": self.channel_name,
             "session_id": self.session_id,
+            "linked_agent_id": self.linked_agent_id,
             "enabled": self.enabled,
             "trigger_mode": self.trigger_mode,
             "config_override": self.config_override,
@@ -86,12 +89,16 @@ class DiscordChannelRepository:
     def find_by_session_id(self, session_id: str) -> Optional[DiscordChannel]:
         return self._find_one("session_id", session_id)
 
+    def find_by_linked_agent_id(self, linked_agent_id: str) -> Optional[DiscordChannel]:
+        return self._find_one("linked_agent_id", linked_agent_id)
+
     def list_all(self, enabled_only: bool = False) -> List[DiscordChannel]:
         conn = self._get_conn()
         if not conn:
             return []
         try:
             import pymysql
+
             cur = conn.cursor(pymysql.cursors.DictCursor)
             sql = "SELECT * FROM discord_channels"
             if enabled_only:
@@ -107,6 +114,31 @@ class DiscordChannelRepository:
             self._safe_close(conn)
             return []
 
+    def list_by_agent_id(
+        self, agent_id: str, enabled_only: bool = False
+    ) -> List[DiscordChannel]:
+        conn = self._get_conn()
+        if not conn:
+            return []
+        try:
+            import pymysql
+
+            cur = conn.cursor(pymysql.cursors.DictCursor)
+            sql = "SELECT * FROM discord_channels WHERE linked_agent_id = %s"
+            params = [agent_id]
+            if enabled_only:
+                sql += " AND enabled = 1"
+            sql += " ORDER BY updated_at DESC"
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+            cur.close()
+            conn.close()
+            return [DiscordChannel.from_db_row(r) for r in rows]
+        except Exception as e:
+            print(f"{_TAG} list_by_agent_id error: {e}")
+            self._safe_close(conn)
+            return []
+
     # ── 写 ──
 
     def save(self, dc: DiscordChannel) -> bool:
@@ -119,21 +151,28 @@ class DiscordChannelRepository:
                 """
                 INSERT INTO discord_channels
                   (channel_id, guild_id, guild_name, channel_name,
-                   session_id, enabled, trigger_mode, config_override)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                   session_id, linked_agent_id, enabled, trigger_mode, config_override)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                   guild_id       = VALUES(guild_id),
                   guild_name     = VALUES(guild_name),
                   channel_name   = VALUES(channel_name),
                   session_id     = VALUES(session_id),
+                  linked_agent_id= VALUES(linked_agent_id),
                   enabled        = VALUES(enabled),
                   trigger_mode   = VALUES(trigger_mode),
                   config_override= VALUES(config_override),
                   updated_at     = CURRENT_TIMESTAMP
                 """,
                 (
-                    dc.channel_id, dc.guild_id, dc.guild_name, dc.channel_name,
-                    dc.session_id, 1 if dc.enabled else 0, dc.trigger_mode,
+                    dc.channel_id,
+                    dc.guild_id,
+                    dc.guild_name,
+                    dc.channel_name,
+                    dc.session_id,
+                    dc.linked_agent_id,
+                    1 if dc.enabled else 0,
+                    dc.trigger_mode,
                     json.dumps(dc.config_override) if dc.config_override else None,
                 ),
             )
@@ -147,8 +186,15 @@ class DiscordChannelRepository:
             return False
 
     def update(self, channel_id: str, **kwargs) -> bool:
-        """部分更新。支持字段: enabled, trigger_mode, config_override, channel_name, guild_name"""
-        _allowed = {"enabled", "trigger_mode", "config_override", "channel_name", "guild_name"}
+        """部分更新。支持字段: enabled, trigger_mode, config_override, channel_name, guild_name, linked_agent_id"""
+        _allowed = {
+            "enabled",
+            "trigger_mode",
+            "config_override",
+            "channel_name",
+            "guild_name",
+            "linked_agent_id",
+        }
         sets, params = [], []
         for k, v in kwargs.items():
             if k not in _allowed:
@@ -159,6 +205,9 @@ class DiscordChannelRepository:
             elif k == "enabled":
                 sets.append("enabled = %s")
                 params.append(1 if v else 0)
+            elif k == "linked_agent_id":
+                sets.append("linked_agent_id = %s")
+                params.append(v)
             else:
                 sets.append(f"`{k}` = %s")
                 params.append(v)
@@ -192,7 +241,9 @@ class DiscordChannelRepository:
             return False
         try:
             cur = conn.cursor()
-            cur.execute("DELETE FROM discord_channels WHERE channel_id = %s", (channel_id,))
+            cur.execute(
+                "DELETE FROM discord_channels WHERE channel_id = %s", (channel_id,)
+            )
             conn.commit()
             affected = cur.rowcount
             cur.close()
@@ -211,8 +262,11 @@ class DiscordChannelRepository:
             return None
         try:
             import pymysql
+
             cur = conn.cursor(pymysql.cursors.DictCursor)
-            cur.execute(f"SELECT * FROM discord_channels WHERE `{column}` = %s", (value,))
+            cur.execute(
+                f"SELECT * FROM discord_channels WHERE `{column}` = %s", (value,)
+            )
             row = cur.fetchone()
             cur.close()
             conn.close()
@@ -245,8 +299,11 @@ class DiscordAppConfigRepository:
             return None
         try:
             import pymysql
+
             cur = conn.cursor(pymysql.cursors.DictCursor)
-            cur.execute("SELECT default_llm_config_id FROM discord_app_config WHERE id = 1")
+            cur.execute(
+                "SELECT default_llm_config_id FROM discord_app_config WHERE id = 1"
+            )
             row = cur.fetchone()
             cur.close()
             conn.close()
@@ -294,7 +351,7 @@ def backfill_discord_sessions_default_llm(get_connection) -> int:
         cur.execute(
             """
             UPDATE sessions s
-            INNER JOIN discord_channels d ON s.session_id = d.session_id
+            INNER JOIN discord_channels d ON s.session_id = d.linked_agent_id
             SET s.llm_config_id = %s, s.updated_at = CURRENT_TIMESTAMP
             WHERE (s.llm_config_id IS NULL OR s.llm_config_id = '')
             """,
@@ -305,7 +362,9 @@ def backfill_discord_sessions_default_llm(get_connection) -> int:
         cur.close()
         conn.close()
         if n:
-            print(f"{_TAG} 启动回填：已为 {n} 个历史 Discord 会话应用默认模型: {default}")
+            print(
+                f"{_TAG} 启动回填：已为 {n} 个历史 Discord 会话应用默认模型: {default}"
+            )
         return n
     except Exception as e:
         print(f"{_TAG} backfill_discord_sessions_default_llm error: {e}")
@@ -331,87 +390,30 @@ def ensure_channel_session(
     default_llm_config_id: Optional[str] = None,
     session_id_prefix: str = "dc",
     chaya_session_id: str = "agent_chaya",
+    linked_agent_id: str = "agent_chaya",
 ) -> Optional[DiscordChannel]:
     """
-    确保 Discord 频道有专属 Chaya Session。
+    确保 Discord 频道有绑定记录，并绑定到已有 Agent。
 
-    首次触发时：
-      1. 生成 session_id = dc_{guild_id}_{channel_id}
-      2. 从 agent_chaya 克隆 system_prompt + llm_config_id + avatar
-      3. 若有 config_override，覆盖对应字段
-      4. 创建 Session（type=agent）并写入 discord_channels
+    注意：
+      - 不再为频道创建专属 session。
+      - Actor 会直接使用 linked_agent_id 对应的现有会话。
+      - session_id 字段仅保留为绑定记录标识（兼容历史字段）。
     """
     repo = DiscordChannelRepository(get_connection)
 
-    # 已存在：若该 session 未配置 LLM，用频道覆盖或应用默认补齐，避免 Actor 报「未配置默认LLM模型」
+    # 已存在：直接返回
     existing = repo.find_by_channel_id(channel_id)
     if existing:
-        from models.session import SessionRepository
-
-        session_repo = SessionRepository(get_connection)
-        session = session_repo.find_by_id(existing.session_id) if existing.session_id else None
-        if session:
-            current = session.llm_config_id
-            need_repair = not current or (isinstance(current, str) and not current.strip())
-            if need_repair:
-                default_llm = None
-                if existing.config_override:
-                    default_llm = (existing.config_override.get("llm_config_id") or "").strip() or None
-                if not default_llm:
-                    default_llm = DiscordAppConfigRepository(get_connection).get_default_llm_config_id()
-                if default_llm:
-                    session.llm_config_id = default_llm
-                    if session_repo.save(session):
-                        print(f"{_TAG} 已为历史会话 {existing.session_id} 补齐默认模型: {default_llm}")
         return existing
 
-    # ── 生成 session_id ──
-    session_id = f"{session_id_prefix}_{guild_id}_{channel_id}"
-    if len(session_id) > 95:  # VARCHAR(100) 留余量
+    # ── 生成绑定记录 ID（非会话 ID） ──
+    binding_session_id = f"dcbind_{guild_id}_{channel_id}"
+    if len(binding_session_id) > 95:  # VARCHAR(100) 留余量
         import hashlib
+
         h = hashlib.md5(f"{guild_id}_{channel_id}".encode()).hexdigest()[:16]
-        session_id = f"{session_id_prefix}_{h}"
-
-    # ── 从 agent_chaya 克隆配置 ──
-    from models.session import Session, SessionRepository
-
-    session_repo = SessionRepository(get_connection)
-    chaya = session_repo.find_by_id(chaya_session_id)
-
-    system_prompt = chaya.system_prompt if chaya else None
-    llm_config_id = default_llm_config_id or (chaya.llm_config_id if chaya else None)
-    avatar = chaya.avatar if chaya else None
-
-    # 应用频道级覆盖
-    if config_override:
-        system_prompt = config_override.get("system_prompt", system_prompt)
-        llm_config_id = config_override.get("llm_config_id", llm_config_id)
-
-    # 兜底默认 prompt
-    if not system_prompt:
-        system_prompt = "你是 Chaya，一个友善的 AI 助手。请使用中文回复。"
-
-    # ── 创建 Session ──
-    display_name = f"Discord #{channel_name}" if channel_name else f"Discord {channel_id}"
-    new_session = Session(
-        session_id=session_id,
-        title=display_name,
-        name=display_name,
-        llm_config_id=llm_config_id,
-        session_type="agent",
-        owner_id=f"discord:{guild_id}",
-        avatar=avatar,
-        system_prompt=system_prompt,
-        ext={
-            "source": "discord",
-            "discord_channel_id": channel_id,
-            "discord_guild_id": guild_id,
-        },
-        creator_ip="discord",
-    )
-    if not session_repo.save(new_session):
-        print(f"{_TAG} 创建 Session 失败: {session_id}")
-        return None
+        binding_session_id = f"dcbind_{h}"
 
     # ── 写入绑定 ──
     dc = DiscordChannel(
@@ -419,7 +421,8 @@ def ensure_channel_session(
         guild_id=guild_id,
         guild_name=guild_name,
         channel_name=channel_name,
-        session_id=session_id,
+        session_id=binding_session_id,
+        linked_agent_id=linked_agent_id or "agent_chaya",
         enabled=True,
         trigger_mode=default_trigger_mode,
         config_override=config_override,
@@ -428,5 +431,7 @@ def ensure_channel_session(
         print(f"{_TAG} 保存频道绑定失败: {channel_id}")
         return None
 
-    print(f"{_TAG} ✓ 新建频道绑定 #{channel_name or channel_id} → {session_id}")
+    print(
+        f"{_TAG} ✓ 新建频道绑定 #{channel_name or channel_id} → agent:{dc.linked_agent_id}"
+    )
     return dc
